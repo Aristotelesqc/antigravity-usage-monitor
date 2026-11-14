@@ -1,0 +1,363 @@
+/*
+ * 模块化偏好设置三栏样式表 (views-settings.css).
+ * 包含：
+ * 1. 顶部常规 / 结构 / 其他三栏切换导航条 (.settings-view-root, .settings-subnav-bar)
+ * 2. 主题强调色色卡选择器 (.theme-color-picker, .theme-host-chip, .theme-swatch-btn)
+ * 3. 结构页手风琴折叠面板 (.collapsible-section, .collapsible-trigger, .collapsible-body)
+ * 4. 通用 + / - / ↑ / ↓ 自添加排序列表 (.editable-slot-list, .editable-slot-row, .slot-add-btn)
+ * 5. 其他页维护操作行与二次确认危险态按钮 (.settings-action-row, .btn-danger-confirm)
+ */
+
+.settings-view-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow: hidden;
+}
+
+.settings-subnav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 4px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.settings-subnav-bar .segmented {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+}
+
+.settings-subnav-bar .seg-btn {
+  height: 24px;
+  font-size: var(--fs-base-sm);
+  font-weight: 500;
+}
+
+.settings-tab-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-bottom: 2px;
+}
+
+.settings-hint-text {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* --- 主题色色卡选择器 (ThemeColorPicker) --- */
+.theme-color-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.theme-host-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-instant) var(--ease-fast),
+    color var(--dur-instant) var(--ease-fast),
+    border-color var(--dur-instant) var(--ease-fast);
+}
+
+.theme-host-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.theme-host-chip.is-active {
+  color: var(--accent-primary);
+  background: var(--accent-primary-soft);
+  border-color: var(--accent-primary-border);
+  font-weight: 600;
+}
+
+.theme-swatch-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.theme-swatch-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: 1.5px solid color-mix(in srgb, var(--text-primary) 18%, transparent);
+  background: var(--swatch-color, var(--accent-primary));
+  color: #ffffff;
+  cursor: pointer;
+  transition:
+    transform var(--dur-instant) var(--ease-fast),
+    box-shadow var(--dur-instant) var(--ease-fast),
+    border-color var(--dur-instant) var(--ease-fast);
+}
+
+.theme-swatch-btn:hover {
+  transform: scale(1.08);
+}
+
+.theme-swatch-btn.is-active {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--swatch-color, var(--accent-primary)) 32%, transparent);
+}
+
+.theme-swatch-btn .svg-icon {
+  stroke-width: 2.5;
+}
+
+/* --- 手风琴折叠面板 (CollapsibleSection) --- */
+.collapsible-section {
+  gap: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.collapsible-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  min-height: 36px;
+}
+
+.collapsible-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collapsible-trigger:hover {
+  color: var(--accent-primary);
+}
+
+.collapsible-chevron {
+  color: var(--text-secondary);
+  transition: transform var(--dur-fast) var(--ease-fast);
+}
+
+.collapsible-section.is-expanded .collapsible-chevron {
+  transform: rotate(90deg);
+}
+
+.collapsible-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsible-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.collapsible-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+
+.collapsible-status {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.settings-divider {
+  height: 1px;
+  width: 100%;
+  background: var(--border-hairline);
+  margin: 2px 0;
+}
+
+/* --- 通用可增删排序槽位列表 (EditableSlotList) --- */
+.editable-slot-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.editable-slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.editable-slot-empty {
+  padding: 8px 10px;
+  font-size: var(--fs-md);
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border-hairline);
+  border-radius: var(--radius-xs);
+  text-align: center;
+}
+
+.editable-slot-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--surface-panel);
+  transition: border-color var(--dur-instant) var(--ease-fast);
+}
+
+.editable-slot-row:focus-within,
+.editable-slot-row:has(.is-open) {
+  z-index: 35;
+  border-color: var(--border-strong);
+}
+
+.editable-slot-row .select-menu {
+  max-height: 216px;
+}
+
+.slot-remove-btn {
+  color: var(--text-secondary);
+}
+
+.slot-remove-btn:hover:not(:disabled) {
+  color: var(--metric-danger);
+  background: color-mix(in srgb, var(--metric-danger) 10%, transparent);
+}
+
+.editable-slot-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 1px;
+}
+
+.slot-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  font-size: var(--fs-md);
+  font-weight: 500;
+  color: var(--accent-primary);
+  background: var(--accent-primary-soft);
+  border: 1px dashed var(--accent-primary-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-instant) var(--ease-fast),
+    opacity var(--dur-instant) var(--ease-fast);
+}
+
+.slot-add-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+.slot-add-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* --- 其他页：维护操作行 --- */
+.settings-action-block {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: 2px;
+}
+
+.settings-action-block + .settings-action-block {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-hairline);
+}
+
+.settings-action-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-action-title {
+  font-size: var(--fs-base-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-action-desc {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.settings-context-model .select-option-meta {
+  max-width: 62%;
+  text-align: right;
+  white-space: normal;
+}
+
+.btn-danger-confirm {
+  color: var(--metric-danger) !important;
+  border-color: color-mix(in srgb, var(--metric-danger) 55%, var(--border-hairline)) !important;
+  background: color-mix(in srgb, var(--metric-danger) 11%, var(--surface-panel)) !important;
+  font-weight: 600;
+}

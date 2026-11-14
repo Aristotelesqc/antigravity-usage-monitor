@@ -260,24 +260,63 @@ export function computePublicationFit(
 
   // n >= 6：Cleveland 高斯局部加权一阶线性回归（LOESS）+ 精确帽子矩阵杠杆度 95% CI 置信带
   const q = Math.max(5, Math.min(n, Math.ceil(span * n)));
-  const distBuf = new Float64Array(n);
   const wBuf = new Float64Array(n);
+  const sortedXs = q <= n && xs.slice(0, n).every(
+    (x, i) => Number.isFinite(x) && (i === 0 || xs[i - 1] <= x)
+  );
+
+  function loessBandwidth(x0) {
+    // 有序 x 上的 q 个最近样本可取连续区间；二分比较两端，避免每个拟合点都排序。
+    let left = 0;
+    let right = n - q;
+    while (left < right) {
+      const mid = (left + right) >>> 1;
+      if (x0 - xs[mid] > xs[mid + q] - x0) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+    return Math.max(Math.abs(xs[left] - x0), Math.abs(xs[left + q - 1] - x0));
+  }
 
   function evalLoessPoint(x0, diagIdx = -1) {
-    for (let j = 0; j < n; j++) {
-      distBuf[j] = Math.abs(xs[j] - x0);
-    }
-    const sortedDists = Array.from(distBuf).sort((a, b) => a - b);
-    let h = sortedDists[q - 1];
-    if (h <= 1e-9) {
-      h = Math.max(sortedDists[n - 1], xSpan * 0.05, 1e-6);
+    let h;
+    if (sortedXs) {
+      h = loessBandwidth(x0);
+      if (h <= 1e-9) {
+        h = Math.max(Math.abs(xs[0] - x0), Math.abs(xs[n - 1] - x0), xSpan * 0.05, 1e-6);
+      }
+    } else {
+      const sortedDists = Array.from({ length: n }, (_, j) => Math.abs(xs[j] - x0)).sort((a, b) => a - b);
+      h = sortedDists[q - 1];
+      if (h <= 1e-9) {
+        h = Math.max(sortedDists[n - 1], xSpan * 0.05, 1e-6);
+      }
     }
     const maxDist = h * 1.0001;
+    let start = 0;
+    let end = n;
+    if (sortedXs) {
+      // 三次权重的支持区间之外权重为零，保留区间内样本原来的累加顺序。
+      let right = n;
+      while (start < right) {
+        const mid = (start + right) >>> 1;
+        if (x0 - xs[mid] >= maxDist) start = mid + 1;
+        else right = mid;
+      }
+      let left = start;
+      while (left < end) {
+        const mid = (left + end) >>> 1;
+        if (xs[mid] - x0 < maxDist) left = mid + 1;
+        else end = mid;
+      }
+    }
 
     let sw = 0;
     let swx = 0;
-    for (let j = 0; j < n; j++) {
-      const u = distBuf[j] / maxDist;
+    for (let j = start; j < end; j++) {
+      const u = Math.abs(xs[j] - x0) / maxDist;
       const w = u >= 1 ? 0 : (1 - u * u * u) ** 3;
       wBuf[j] = w;
       sw += w;
@@ -291,7 +330,7 @@ export function computePublicationFit(
 
     const mx = swx / sw;
     let sxxW = 0;
-    for (let j = 0; j < n; j++) {
+    for (let j = start; j < end; j++) {
       const w = wBuf[j];
       if (w <= 0) continue;
       const dx = xs[j] - mx;
@@ -304,7 +343,7 @@ export function computePublicationFit(
     let leverageNormSq = 0;
     let diagHat = 0;
 
-    for (let j = 0; j < n; j++) {
+    for (let j = start; j < end; j++) {
       const w = wBuf[j];
       if (w <= 0) continue;
       const lj = w / sw + (useSlope ? (w * (xs[j] - mx) * dx0) / sxxW : 0);

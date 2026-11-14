@@ -72,6 +72,20 @@ test('unfinished, missing-completion and reversed-time requests cannot fabricate
   assert.equal(parse({total:0}).totalTokPerSec,null);
   assert.equal(parse({status:'CORTEX_STEP_STATUS_GENERATING'}).totalTokPerSec,null);
 });
+test('cleared steps with a recorded generation end retain their original request speed',()=>{
+  const {s,gm}=sample({status:'CORTEX_STEP_STATUS_CLEARED'});
+  s.metadata.completedAt='2026-01-01T00:04:00Z';
+  const [cleared]=extractModelSteps([s],[gm]);
+  assert.equal(cleared.totalDurationSec,12);
+  assert.equal(cleared.totalTokPerSec,1100/12);
+  assert.equal(cleared.isComplete,true);
+
+  for(const status of ['CORTEX_STEP_STATUS_CANCELED','CORTEX_STEP_STATUS_ERROR','CORTEX_STEP_STATUS_GENERATING']){
+    assert.equal(extractModelSteps([{...s,status}],[gm])[0].totalTokPerSec,null);
+  }
+  delete s.metadata.finishedGeneratingAt;
+  assert.equal(extractModelSteps([s],[gm])[0].totalTokPerSec,null);
+});
 test('zero output is a real zero; malformed or missing output counts cannot produce rates',()=>{
   const zero=parse({output:0,response:0,thinking:0});
   assert.equal(zero.totalTokPerSec,0);assert.equal(zero.responseTokens,0);

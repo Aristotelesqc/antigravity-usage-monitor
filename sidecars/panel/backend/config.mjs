@@ -13,6 +13,75 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inferCompactionStepModels, normalizeCachedStep } from '../speed-metrics.mjs';
+import {
+  DEFAULT_HOVER_MODULES,
+  DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_OVERVIEW_MODULES,
+  DEFAULT_SETTINGS_SCHEMA,
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_TOPBAR_SLOTS,
+  FONT_SCALE_KEYS,
+  MAX_TOPBAR_SLOTS,
+  MIN_TOPBAR_SLOTS,
+  ORCHESTRATOR_ID_MODES,
+  OVERVIEW_METRIC_KEYS,
+  OVERVIEW_MODULE_KEYS,
+  PLUGIN_UPDATE_MODES,
+  STEP_TABLE_COLUMN_KEYS,
+  SUPPORTED_LANGUAGES,
+  THEME_ACCENT_KEYS,
+  TOPBAR_SLOT_KEYS,
+  WINDOW_MOUNT_MODES,
+  createDefaultSettingsObject,
+  normalizeFontScale,
+  normalizeFullSettings,
+  normalizeHoverModules,
+  normalizeLanguageSetting,
+  normalizeOrchestratorIdMode,
+  normalizeOverviewMetrics,
+  normalizeOverviewModules,
+  normalizePluginUpdateMode,
+  normalizeStepTableColumns,
+  normalizeThemeAccent,
+  normalizeTopbarCapsuleSlots,
+  normalizeWeeklyLimitMode,
+  normalizeWindowMountMode,
+} from './settings-schema.mjs';
+
+export {
+  DEFAULT_HOVER_MODULES,
+  DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_OVERVIEW_MODULES,
+  DEFAULT_SETTINGS_SCHEMA,
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_TOPBAR_SLOTS,
+  FONT_SCALE_KEYS,
+  MAX_TOPBAR_SLOTS,
+  MIN_TOPBAR_SLOTS,
+  ORCHESTRATOR_ID_MODES,
+  OVERVIEW_METRIC_KEYS,
+  OVERVIEW_MODULE_KEYS,
+  PLUGIN_UPDATE_MODES,
+  STEP_TABLE_COLUMN_KEYS,
+  SUPPORTED_LANGUAGES,
+  THEME_ACCENT_KEYS,
+  TOPBAR_SLOT_KEYS,
+  WINDOW_MOUNT_MODES,
+  createDefaultSettingsObject,
+  normalizeFontScale,
+  normalizeFullSettings,
+  normalizeHoverModules,
+  normalizeLanguageSetting,
+  normalizeOrchestratorIdMode,
+  normalizeOverviewMetrics,
+  normalizeOverviewModules,
+  normalizePluginUpdateMode,
+  normalizeStepTableColumns,
+  normalizeThemeAccent,
+  normalizeTopbarCapsuleSlots,
+  normalizeWeeklyLimitMode,
+  normalizeWindowMountMode,
+} from './settings-schema.mjs';
 
 /**
  * 自适应解析 `sidecars/panel` 目录路径：
@@ -115,107 +184,6 @@ export const DEFAULT_ARCHIVE_FALLBACK_URL =
 export const CLOUD_SYNC_TTL_MS = 6 * 3600 * 1000;
 export const CLOUD_SYNC_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 
-/**
- * 顶栏右侧精简胶囊三槽位允许配置的指标枚举与默认顺序。
- */
-export const TOPBAR_SLOT_KEYS = Object.freeze([
-  'context',
-  'tps',
-  'ttft',
-  'cost',
-  'quota_auto',
-  'gemini_5h',
-  'gemini_weekly',
-  'claude_5h',
-  'claude_weekly',
-  'none',
-]);
-
-export const DEFAULT_TOPBAR_SLOTS = Object.freeze(['context', 'tps', 'quota_auto']);
-
-export const PLUGIN_UPDATE_MODES = Object.freeze(['off', 'manual', 'auto']);
-
-export const ORCHESTRATOR_ID_MODES = Object.freeze(['compact', 'full']);
-
-export const WINDOW_MOUNT_MODES = Object.freeze(['dual', 'composer', 'sidebar']);
-
-/**
- * 归一化面板挂载方式枚举（`'dual'` 顶部栏+侧边栏 | `'composer'` 输入框+侧边栏 | `'sidebar'` 仅侧边栏），
- * 兼容历史 `enableWindowOverlay` 布尔开关，默认 `'dual'`。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyEnableOverlay]
- * @returns {'dual'|'composer'|'sidebar'}
- */
-export function normalizeWindowMountMode(mode, legacyEnableOverlay) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'composer' || m === 'input') return 'composer';
-  if (m === 'sidebar' || m === 'sidebar_only' || m === 'off') return 'sidebar';
-  if (m === 'dual' || m === 'topbar') return 'dual';
-  if (legacyEnableOverlay === false) return 'sidebar';
-  return 'dual';
-}
-
-/**
- * 归一化 Orchestrator 系列模型 ID 显示风格（`'compact'` 精简代号 vs `'full'` 完整模型 ID，默认 `'compact'`）。
- *
- * @param {unknown} mode
- * @returns {'compact'|'full'}
- */
-export function normalizeOrchestratorIdMode(mode) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  return m === 'full' ? 'full' : 'compact';
-}
-
-/**
- * 归一化插件更新策略枚举（兼容历史 `autoUpdatePlugin` 布尔开关，默认 `'manual'`）。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyAutoUpdate]
- * @returns {'off'|'manual'|'auto'}
- */
-export function normalizePluginUpdateMode(mode, legacyAutoUpdate) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'off' || m === 'manual' || m === 'auto') return m;
-  if (legacyAutoUpdate === true) return 'auto';
-  return 'manual';
-}
-
-/**
- * 归一化顶栏三槽位配置数组，兜底非法枚举值并保证至少保留一个可见槽位。
- *
- * @param {unknown} raw
- * @returns {[string, string, string]}
- */
-export function normalizeTopbarCapsuleSlots(raw) {
-  const arr = Array.isArray(raw) ? raw : [];
-  const slots = [0, 1, 2].map((idx) => {
-    const val = String(arr[idx] ?? '').trim();
-    return TOPBAR_SLOT_KEYS.includes(val) ? val : DEFAULT_TOPBAR_SLOTS[idx];
-  });
-  if (slots.every((s) => s === 'none')) {
-    slots[0] = 'context';
-  }
-  return /** @type {[string, string, string]} */ (slots);
-}
-
-/**
- * 用户可配置项的默认值。
- */
-const DEFAULT_SETTINGS = {
-  weeklyTokenBudget: 150000000, // 自定义每周 Token 预算默认值 (150M，保留底层兼容)
-  weeklyCostBudget: 100,        // 自定义每周美元费用预算默认值 ($100，保留底层兼容)
-  weeklyLimitMode: 'official',  // 'official' | 'custom_tokens' | 'custom_cost'
-  showUpstreamModel: false,     // 是否显示上游真实 responseModel 名称
-  orchestratorIdMode: 'compact', // 'compact' | 'full'（Orchestrator 系列显示精简 ID 或完整 ID）
-  pluginUpdateMode: 'manual',   // 'off' | 'manual' | 'auto'（默认仅提示新版本，手动更新）
-  autoUpdatePlugin: false,      // 派生自 pluginUpdateMode === 'auto'，保留底层兼容
-  windowMountMode: 'dual',      // 'dual' | 'composer' | 'sidebar'（顶部栏 / 输入框 Auto 左侧 / 仅侧边栏）
-  enableWindowOverlay: true,    // 派生自 windowMountMode !== 'sidebar'，控制主窗口 CDP 注入启停
-  showTopbarMultiSession: true, // 是否在顶栏左侧显示实时运行会话入口
-  topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS], // 顶栏右侧胶囊三槽位指标与顺序
-};
-
 /** 历史轨迹缓存 Schema 版本号，升级时触发旧缓存字段迁移校验。 */
 export const CACHE_SCHEMA_VERSION = 'v10-model-identity';
 
@@ -266,59 +234,10 @@ export function saveJson(filePath, data) {
 }
 
 /**
- * 归一化每周额度统计模式枚举（兼容历史简写 `'tokens'` / `'cost'` 与标准枚举 `'custom_tokens'` / `'custom_cost'`）。
- *
- * @param {unknown} mode
- * @returns {'official'|'custom_tokens'|'custom_cost'}
- */
-export function normalizeWeeklyLimitMode(mode) {
-  const m = String(mode || '').trim().toLowerCase();
-  if (m === 'custom_tokens' || m === 'tokens') return 'custom_tokens';
-  if (m === 'custom_cost' || m === 'cost') return 'custom_cost';
-  return 'official';
-}
-
-function sanitizeSettingNumber(val, fallback) {
-  const num = Number(val);
-  return Number.isFinite(num) && num > 0 ? num : fallback;
-}
-
-/**
- * 读取用户设置并与默认设置合并，同时剔除已废弃的历史字段并兜底非法数值。
- *
- * @returns {typeof DEFAULT_SETTINGS}
+ * 读取用户设置并通过统一 Schema 归一化合并默认值，自动迁移旧版字段。
  */
 export function loadSettings() {
-  const raw = loadJson(SETTINGS_FILE, {});
-  const safeRaw = isPlainObject(raw) ? raw : {};
-  const merged = { ...DEFAULT_SETTINGS, ...safeRaw };
-  const pluginUpdateMode = normalizePluginUpdateMode(
-    safeRaw.pluginUpdateMode,
-    safeRaw.autoUpdatePlugin
-  );
-  const windowMountMode = normalizeWindowMountMode(
-    safeRaw.windowMountMode,
-    safeRaw.enableWindowOverlay
-  );
-  return {
-    weeklyTokenBudget: sanitizeSettingNumber(
-      safeRaw.weeklyTokenBudget ?? safeRaw.weeklyTokenLimit ?? merged.weeklyTokenBudget,
-      DEFAULT_SETTINGS.weeklyTokenBudget
-    ),
-    weeklyCostBudget: sanitizeSettingNumber(
-      merged.weeklyCostBudget,
-      DEFAULT_SETTINGS.weeklyCostBudget
-    ),
-    weeklyLimitMode: normalizeWeeklyLimitMode(merged.weeklyLimitMode),
-    showUpstreamModel: merged.showUpstreamModel === true,
-    orchestratorIdMode: normalizeOrchestratorIdMode(merged.orchestratorIdMode),
-    pluginUpdateMode,
-    autoUpdatePlugin: pluginUpdateMode === 'auto',
-    windowMountMode,
-    enableWindowOverlay: windowMountMode !== 'sidebar',
-    showTopbarMultiSession: merged.showTopbarMultiSession !== false,
-    topbarCapsuleSlots: normalizeTopbarCapsuleSlots(safeRaw.topbarCapsuleSlots),
-  };
+  return normalizeFullSettings(loadJson(SETTINGS_FILE, {}));
 }
 
 /**
@@ -474,3 +393,23 @@ export const pluginUpdateState = {
   lastError: null,
   inFlight: null,
 };
+
+/**
+ * 清空内存态轨迹缓存、外部深层统计 Memo 与配额摘要短期缓存，并将磁盘缓存重置为空对象。
+ *
+ * @returns {boolean} 是否成功写回空白缓存文件
+ */
+export function clearRuntimeCaches() {
+  for (const key of Object.keys(trajectoryCache)) {
+    delete trajectoryCache[key];
+  }
+  cacheState.needsSave = false;
+  externalDeepStatsMemo.sig = '';
+  externalDeepStatsMemo.convos.clear();
+  quotaSummaryCache.ts = 0;
+  quotaSummaryCache.lastAttemptTs = 0;
+  quotaSummaryCache.accountName = '';
+  quotaSummaryCache.data = null;
+  quotaSummaryCache.error = null;
+  return saveJson(CACHE_FILE, {});
+}

@@ -14,6 +14,8 @@ const DEFAULT_BUNDLED_CATALOG = {
 };
 
 const BACKEND_MODULE_FILES = [
+  '../backend/context-windows.mjs',
+  '../backend/settings-schema.mjs',
   '../backend/config.mjs',
   '../backend/ls-discovery.mjs',
   '../backend/pricing-catalog.mjs',
@@ -47,6 +49,7 @@ export function backendHarness({
   trajectories={},
   summaries={},
   userStatus={},
+  availableModels={},
   quotaSummary={groups:[]},
   localCatalog=DEFAULT_BUNDLED_CATALOG,
   remoteCatalog=null,
@@ -61,7 +64,7 @@ export function backendHarness({
   const mainUrl = pluginRootPath ? `file://${pluginRootPath}/sidecars/panel/main.mjs` : 'file:///test/sidecars/panel/main.mjs';
   const mainPath = pluginRootPath ? `${pluginRootPath}/sidecars/panel/main.mjs` : '/test/sidecars/panel/main.mjs';
   const source = stripEsmSyntax(sourceText ?? loadCombinedBackendSource(), mainUrl);
-  const state={calls:[],errors:[],saves:[],trajectories,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,deepStats,deepStatsMtimeMs:1};
+  const state={calls:[],errors:[],saves:[],settings,trajectories,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,deepStats,deepStatsMtimeMs:1};
   const ctx={
     ...metricsImplementation, URL, AbortSignal, Buffer,
     process:{platform:'win32',env:{ANTIGRAVITY_EXECUTABLE_DATA_DIR:'/test-data',ANTIGRAVITY_LS_ADDRESS:'test.invalid',ANTIGRAVITY_CSRF_TOKEN:'test'}},
@@ -109,7 +112,7 @@ export function backendHarness({
         const lines = m && state.transcripts?.[m[1]];
         return Array.isArray(lines) ? lines.map(x => JSON.stringify(x)).join('\n') : String(lines || '');
       }
-      if (norm.endsWith('settings.json')) return JSON.stringify(settings);
+      if (norm.endsWith('settings.json')) return JSON.stringify(state.settings);
       if (norm.endsWith('/antigravity/brain/.deep_stats_cache.json')) return JSON.stringify(state.deepStats);
       if (norm.endsWith('pricing-catalog.json')) return JSON.stringify(state.localCatalog);
       if (norm.endsWith('remote_pricing_cache.json')) return JSON.stringify(state.remoteCatalog);
@@ -120,6 +123,9 @@ export function backendHarness({
       const norm = String(p).replace(/\\/g, '/');
       const parsed = typeof s === 'string' ? JSON.parse(s) : s;
       state.saves.push({path:p,data:parsed});
+      if (norm.endsWith('settings.json')) {
+        state.settings = parsed;
+      }
       if (norm.endsWith('remote_pricing_cache.json')) {
         state.remoteCatalog = parsed;
       }
@@ -142,10 +148,10 @@ export function backendHarness({
         if(qs instanceof Error) throw qs;
         return {ok:true,json:async()=>({response:qs})};
       }
-      const data={GetUserStatus:{userStatus:state.userStatus},GetAllCascadeTrajectories:{trajectorySummaries:summaries}}[method];
+      const data={GetUserStatus:{userStatus:state.userStatus},GetAvailableModels:{response:{models:availableModels}},GetAllCascadeTrajectories:{trajectorySummaries:summaries}}[method];
       return {ok:true,json:async()=>data};
     },
   };
-  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,loadSettings,executeSettingsAction};',ctx);
+  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns};',ctx);
   return {...ctx.api,state};
 }

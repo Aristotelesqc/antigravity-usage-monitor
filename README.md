@@ -52,6 +52,7 @@ The dashboard is organized into four tabs, with a top header to switch conversat
   - **Mount Mode**: Dual-mount (Top Bar + Sidebar) or Sidebar only.
   - **Top-Bar Customization**: Independently toggle the live running-sessions indicator, and customize the content and left-to-right order of the three metric slots in the capsule.
   - **Model Name Format**: Compact short alias (e.g. `argon-4-high`) or raw upstream model ID (e.g. `gemini-3.8-flash-n`), plus an independent Orchestrator series ID selector (`orchestrator-argon` / `worker-agy-hydrogen` compact mode by default, or full annotated IDs).
+  - **Per-model context windows**: In **Other → Model Context Settings**, choose a shared limit for all thinking levels of a model or select **Follow host settings**. The model list shows the saved limit and the most recent value reported by the host. At startup, the App / IDE window bridge reads the latest model catalog and reapplies saved limits to future messages. The CLI uses `AGY_CLI_AUTO_COMPACT_OVERRIDE`.
   - **Version Updates & Pricing Sync**: Dynamically sync [`pricing-catalog.json`](pricing-catalog.json) from GitHub, with three update modes: *Notify only, manual update* (default), *Auto update*, and *Off*.
 
 ## Model Identification & Cost Accounting

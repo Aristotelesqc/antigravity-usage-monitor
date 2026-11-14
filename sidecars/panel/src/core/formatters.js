@@ -3,6 +3,13 @@
  * USD estimates, countdown timers, and custom datetime displays.
  */
 
+import { isEnglishLocale, t } from '../i18n/index.js';
+
+const EN_MONTH_SHORT = Object.freeze([
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]);
+
 export function formatMetric(value, unit = '') {
   return Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : '—';
 }
@@ -34,6 +41,14 @@ export function formatCnyApprox(usdAmount, rate = 7.2) {
 export function formatDateSpanBadge(startMs, endMs) {
   const s = startMs && Number.isFinite(startMs) ? new Date(startMs) : new Date();
   const e = endMs && Number.isFinite(endMs) ? new Date(endMs) : new Date();
+  if (isEnglishLocale()) {
+    const sMon = EN_MONTH_SHORT[s.getMonth()] || '';
+    const eMon = EN_MONTH_SHORT[e.getMonth()] || '';
+    if (s.getFullYear() !== e.getFullYear()) {
+      return `${sMon} ${s.getDate()}, ${s.getFullYear()} ~ ${eMon} ${e.getDate()}, ${e.getFullYear()}`;
+    }
+    return `${sMon} ${s.getDate()} ~ ${eMon} ${e.getDate()}`;
+  }
   if (s.getFullYear() !== e.getFullYear()) {
     return `${s.getFullYear()}年${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getFullYear()}年${e.getMonth() + 1}月${e.getDate()}日`;
   }
@@ -41,7 +56,7 @@ export function formatDateSpanBadge(startMs, endMs) {
 }
 
 export function formatUsd(amount, { precise = false } = {}) {
-  if (amount == null || !Number.isFinite(Number(amount))) return '待定';
+  if (amount == null || !Number.isFinite(Number(amount))) return t('fmt.pending');
   const val = Number(amount || 0);
   if (precise) {
     if (val > 0 && val < 0.001) return '<$0.001';
@@ -50,42 +65,46 @@ export function formatUsd(amount, { precise = false } = {}) {
   return `$${val.toFixed(2)}`;
 }
 
+const SPEED_REASON_LABELS = {
+  __proto__: null,
+  incomplete_or_invalid_timing: 'fmt.speedIncomplete',
+  invalid_output_tokens: 'fmt.speedInvalidOutput',
+  inconsistent_timing: 'fmt.speedInconsistent',
+  short_timing: 'fmt.speedShort',
+  legacy_cache: 'fmt.speedLegacy',
+};
+
 export function speedReasonText(reason) {
-  return ({
-    incomplete_or_invalid_timing: '生成未完成',
-    invalid_output_tokens: '无有效输出',
-    inconsistent_timing: '耗时数据异常',
-    short_timing: '耗时过短 (<0.5s)',
-    legacy_cache: '旧版缓存记录',
-  })[reason] || '';
+  const label = SPEED_REASON_LABELS[reason];
+  return label ? t(label) : '';
 }
 
 export function sampleSummary(summary) {
   const valid = summary?.sampleCount || 0;
   const excluded = summary?.excludedCount || 0;
-  return `${valid}/${valid + excluded} 步`;
+  return t('fmt.sampleSteps', { valid, total: valid + excluded });
 }
 
 export function formatCountdown(isoTime, nowMs = Date.now()) {
-  if (!isoTime) return '未知重置时间';
+  if (!isoTime) return t('fmt.resetUnknown');
   const targetMs = Date.parse(isoTime);
-  if (!Number.isFinite(targetMs) || targetMs <= 0) return '未知重置时间';
+  if (!Number.isFinite(targetMs) || targetMs <= 0) return t('fmt.resetUnknown');
   const diffMs = targetMs - nowMs;
-  if (diffMs <= 0) return '即将重置';
-  if (diffMs < 60_000) return '<1分钟后重置';
+  if (diffMs <= 0) return t('fmt.resetSoon');
+  if (diffMs < 60_000) return t('fmt.resetUnder1m');
 
   const totalMinutes = Math.floor(diffMs / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
   const minutes = totalMinutes % 60;
 
-  if (days > 0) return `${days}天 ${hours}小时后重置`;
-  if (hours > 0) return `${hours}小时 ${minutes}分后重置`;
-  return `${minutes}分钟后重置`;
+  if (days > 0) return t('fmt.resetDaysHours', { d: days, h: hours });
+  if (hours > 0) return t('fmt.resetHoursMins', { h: hours, m: minutes });
+  return t('fmt.resetMins', { m: minutes });
 }
 
 export function formatCompactDateTime(ms) {
-  if (!ms || !Number.isFinite(ms)) return '选择时间';
+  if (!ms || !Number.isFinite(ms)) return t('fmt.selectTime');
   const d = new Date(ms);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -135,7 +154,7 @@ export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
     typeof settings === 'object' && settings ? settings.orchestratorIdMode : 'compact'
   );
   const preferLabelInShort = Boolean(options?.preferLabelInShort);
-  const fallback = options?.fallback ?? '模型未知';
+  const fallback = options?.fallback ?? t('fmt.unknownModel');
 
   if (!target || typeof target !== 'object') {
     return { text: fallback, title: fallback, isOrchestratorSeries: false };

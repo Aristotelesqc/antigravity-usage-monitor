@@ -15,7 +15,7 @@
 }
 
 .cons-badge {
-  font-size: 11px;
+  font-size: var(--fs-md);
   font-weight: 500;
   padding: 0;
   background: transparent;
@@ -98,21 +98,21 @@
 }
 
 .cons-hero-num {
-  font-size: 17px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
 }
 
 .cons-hero-cost {
-  font-size: 17px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   color: var(--accent-primary);
   letter-spacing: -0.02em;
 }
 
 .cons-hero-cache {
-  font-size: 17px;
+  font-size: var(--fs-hero);
   font-weight: 700;
   color: var(--ctx-cached);
   letter-spacing: -0.02em;
@@ -132,7 +132,7 @@
 }
 
 .cons-sub-label {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -140,7 +140,7 @@
 }
 
 .cons-mid-num {
-  font-size: 14.5px;
+  font-size: var(--fs-lg);
   font-weight: 700;
   line-height: 1.25;
   color: var(--text-primary);
@@ -168,7 +168,7 @@
   align-items: center;
   height: 20px;
   line-height: 20px;
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -187,7 +187,7 @@
   height: 20px;
   line-height: 1;
   padding: 0 6px;
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--metric-ok);
   background: color-mix(in srgb, var(--metric-ok) 11%, transparent);
@@ -201,7 +201,7 @@
   align-items: center;
   height: 20px;
   line-height: 1;
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-secondary);
 }
@@ -211,7 +211,7 @@
   align-items: center;
   height: 20px;
   line-height: 1;
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -611,7 +611,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 10px;
-  font-size: 11px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
 }
 
@@ -712,6 +712,6 @@
   justify-content: center;
   gap: var(--space-4);
   padding-top: var(--space-2);
-  font-size: 11px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
 }

@@ -12,6 +12,21 @@ import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
 
 const QUOTA_CACHE_TTL_MS = 10_000;
 const QUOTA_RETRY_COOLDOWN_MS = 5_000;
+let contextModelCatalog = null;
+
+export function getContextModelCatalog() {
+  const { baseUrl, csrfToken } = lsRuntimeEndpoint;
+  if (!contextModelCatalog || contextModelCatalog.baseUrl !== baseUrl || contextModelCatalog.csrfToken !== csrfToken ||
+      Date.now() >= contextModelCatalog.expiresAt) {
+    contextModelCatalog = {
+      baseUrl,
+      csrfToken,
+      expiresAt: Date.now() + 30000,
+      promise: callLsRpc('GetAvailableModels', {}, 1500).then((data) => data?.response?.models).catch(() => null),
+    };
+  }
+  return contextModelCatalog.promise;
+}
 
 async function postLsRpcOnce(baseUrl, csrfToken, method, body, timeoutMs) {
   return fetch(`${baseUrl}/exa.language_server_pb.LanguageServerService/${method}`, {

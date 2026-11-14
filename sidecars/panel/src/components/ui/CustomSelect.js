@@ -13,6 +13,7 @@ import {
   patchKeyedList,
   patchText,
 } from '../../core/domPatch.js';
+import { isEnglishLocale, t } from '../../i18n/index.js';
 import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 
 function normalizeMultiSelection(rawValue, options = [], allValue = '') {
@@ -120,6 +121,7 @@ export const CustomSelect = defineComponent({
 
     function chooseOption(option) {
       if (!option) return;
+      if (option.disabled && !getSelectedSet().has(option.value)) return;
       const { multiple, options = [], allValue = '', collapseAll = false } = getProps();
       if (!multiple) {
         const prevVal = getProps().modelValue;
@@ -203,7 +205,7 @@ export const CustomSelect = defineComponent({
       patchKeyedList(menuEl, options, {
         keyFn: (opt) => opt.value,
         sigFn: (opt, idx) =>
-          `${multiple}::${opt.value}::${opt.label}::${opt.meta || ''}::${selSet.has(opt.value)}::${idx === focusedIndex}`,
+          `${multiple}::${opt.value}::${opt.label}::${opt.meta || ''}::${Boolean(opt.disabled)}::${selSet.has(opt.value)}::${idx === focusedIndex}`,
         createRow: (opt) => {
           const checkboxIcon = createSvgIcon('check', { size: 10 });
           const checkboxBox = h('span', { className: 'select-checkbox', hidden: true }, [
@@ -233,6 +235,7 @@ export const CustomSelect = defineComponent({
           const isMulti = Boolean(getProps().multiple);
           const selected = selSet.has(opt.value);
           const focused = idx === focusedIndex;
+          const isDisabled = Boolean(opt.disabled && !selected);
           patchAttr(refs.checkboxBox, 'hidden', !isMulti);
           patchClasses(refs.checkboxBox, { 'is-checked': selected });
           patchAttr(refs.checkboxIcon, 'hidden', !selected);
@@ -243,7 +246,10 @@ export const CustomSelect = defineComponent({
           patchClasses(el, {
             'is-selected': selected,
             'is-focused': focused,
+            'is-disabled': isDisabled,
           });
+          patchAttr(el, 'disabled', isDisabled);
+          patchAttr(el, 'aria-disabled', isDisabled ? 'true' : null);
           patchAttr(el, 'aria-selected', selected ? 'true' : 'false');
           patchAttr(el, 'data-value', opt.value);
         },
@@ -254,11 +260,11 @@ export const CustomSelect = defineComponent({
       const {
         options = [],
         modelValue,
-        placeholder = '请选择',
+        placeholder = t('fmt.selectPlaceholder'),
         icon,
         multiple = false,
         allValue = '',
-        multiUnit = '项',
+        multiUnit = isEnglishLocale() ? 'items' : '项',
       } = getProps();
       patchClasses(rootEl, { 'is-multi': Boolean(multiple) });
       patchAttr(leadIcon, 'hidden', !icon);
@@ -281,8 +287,11 @@ export const CustomSelect = defineComponent({
           titleText = labelText;
         } else {
           const names = vals.map((v) => options.find((o) => String(o.value) === v)?.label || v);
-          labelText = `已选 ${vals.length} ${multiUnit}`;
-          titleText = `已选 (${vals.length})：${names.join('、')}`;
+          labelText = t('fmt.selectedCount', { count: vals.length, unit: multiUnit });
+          titleText = t('fmt.selectedListTitle', {
+            count: vals.length,
+            names: names.join(isEnglishLocale() ? ', ' : '、'),
+          });
         }
       } else {
         const matchedOpt = options.find((o) => o.value === modelValue);

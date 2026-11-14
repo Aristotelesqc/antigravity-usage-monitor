@@ -22,11 +22,14 @@ import {
   normalizeWindowMountMode,
   saveJson,
 } from './config.mjs';
+import { createContextWindowSyncExpression } from './context-windows.mjs';
 
 const BRIDGE_MAX_BODY_BYTES = 64 * 1024;
 const ALLOWED_BRIDGE_PATHS = new Set([
   '/api/telemetry',
   '/api/settings',
+  '/api/settings/reset',
+  '/api/context-window',
   '/api/cloud-sync',
   '/api/plugin-update',
 ]);
@@ -705,6 +708,8 @@ export function createWindowBridgeController(options) {
   let hadInjectedChatFrames = false;
   let cdpFallbackActive = false;
   let ideArgvProvisioned = false;
+  let hadContextWindows = false;
+  let contextWindowBootId = `${process.pid}:${Date.now()}`;
   let nodeDepsPromise = null;
   const allowedDynamicOrigins = new Set();
 
@@ -1099,14 +1104,16 @@ export function createWindowBridgeController(options) {
       curSettings.enableWindowOverlay
     );
     const enabled = Boolean(curSettings.enableWindowOverlay !== false && mountMode !== 'sidebar');
-    if (enabled && autoConfigureIdeArgv && !ideArgvProvisioned) {
+    const contextWindows = curSettings.modelContextWindows || {};
+    const hasContextWindows = Object.keys(contextWindows).length > 0;
+    if ((enabled || hasContextWindows) && autoConfigureIdeArgv && !ideArgvProvisioned) {
       const prov = ensureIdeRemoteDebuggingArgv({ env, homeDir, enabled: true });
       if (prov.updated || prov.alreadyConfigured || prov.reason === 'ide_dir_missing') {
         ideArgvProvisioned = true;
       }
     }
 
-    if (enabled && leaseFilePath && !forceReinject) {
+    if ((enabled || hasContextWindows) && leaseFilePath && !forceReinject) {
       const lease = loadJson(leaseFilePath, null);
       const leasePid = Number(lease?.pid || 0);
       const leaseAgeMs = Date.now() - Number(lease?.updatedAtMs || 0);
@@ -1139,6 +1146,16 @@ export function createWindowBridgeController(options) {
     }
     if (!targets.length) {
       return { ok: true, enabled, reason: 'no_targets', injected: 0 };
+    }
+
+    if (hasContextWindows || hadContextWindows) {
+      const chatUrls = [
+        ...targets.filter((target) => !target.isIdeWorkbench).map((target) => target.webSocketDebuggerUrl),
+        ...collectAllChatDebuggerUrls(targets),
+      ];
+      const expression = createContextWindowSyncExpression(contextWindows, contextWindowBootId);
+      await Promise.allSettled([...new Set(chatUrls)].map((url) => evaluateOnTarget(url, expression)));
+      hadContextWindows = hasContextWindows;
     }
 
     const disposeExpr = `(() => {
@@ -1437,6 +1454,7 @@ export function createWindowBridgeController(options) {
 
   function start() {
     stopped = false;
+    contextWindowBootId = `${process.pid}:${Date.now()}`;
     if (initialTimer) clearTimeout(initialTimer);
     if (pollTimer) clearTimeout(pollTimer);
 
@@ -1460,7 +1478,7 @@ export function createWindowBridgeController(options) {
       clearTimeout(pollTimer);
       pollTimer = null;
     }
-    if (disposeWindows && (hadInjectedTargets || hadInjectedChatFrames)) {
+    if (disposeWindows && (hadInjectedTargets || hadInjectedChatFrames || hadContextWindows)) {
       const prevStopped = stopped;
       stopped = false;
       try {
@@ -1469,7 +1487,7 @@ export function createWindowBridgeController(options) {
           const { targets } = await collectAllMainWindowTargets(cdpPorts).catch(() => ({
             targets: [],
           }));
-          const disposeExpr = `(() => { try { window.__AGUsageMonitorOverlay?.dispose?.(); delete window.__AGUsageMonitorOverlay; delete window.__AGUsageMonitorBridge; return true; } catch { return false; } })()`;
+          const disposeExpr = `(() => { try { window.__AGUsageMonitorContextWindows?.dispose?.(); window.__AGUsageMonitorOverlay?.dispose?.(); delete window.__AGUsageMonitorOverlay; delete window.__AGUsageMonitorBridge; return true; } catch { return false; } })()`;
           const allUrls = [
             ...targets.map((t) => String(t.webSocketDebuggerUrl || '')).filter(Boolean),
             ...collectAllChatDebuggerUrls(targets),
@@ -1485,6 +1503,7 @@ export function createWindowBridgeController(options) {
     stopped = true;
     hadInjectedTargets = false;
     hadInjectedChatFrames = false;
+    hadContextWindows = false;
     if (server) {
       const srv = server;
       server = null;
@@ -1540,4 +1559,8 @@ export function startDefaultWindowBridge(options) {
 export function notifyWindowOverlaySetting(enabled) {
   if (!defaultBridgeController) return Promise.resolve({ ok: false });
   return defaultBridgeController.notifySettingChanged(enabled);
+}
+
+export function notifyModelContextWindowsChanged() {
+  return defaultBridgeController?.syncAllWindows().catch(() => {});
 }

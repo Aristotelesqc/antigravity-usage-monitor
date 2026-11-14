@@ -31,7 +31,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
   flex: 1;
@@ -47,7 +47,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   color: var(--text-secondary);
   flex-shrink: 0;
   white-space: nowrap;
@@ -69,7 +69,7 @@
 }
 
 .quota-win-title {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
@@ -79,7 +79,7 @@
 .quota-win-usage {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   font-weight: 400;
   color: var(--text-muted);
   white-space: nowrap;
@@ -89,7 +89,7 @@
 }
 
 .quota-win-meta {
-  font-size: 11px;
+  font-size: var(--fs-md);
   flex-shrink: 0;
 }
 
@@ -130,7 +130,7 @@
 }
 
 .live-task-title {
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 600;
   line-height: 1.45;
   color: var(--text-primary);
@@ -158,7 +158,7 @@
   gap: 3px;
   height: 18px;
   padding: 0 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-secondary);
   background: var(--surface-panel);
@@ -208,7 +208,7 @@
 }
 
 .live-activity-phase {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -216,7 +216,7 @@
 }
 
 .live-activity-progress {
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--accent-primary);
   background: var(--accent-primary-soft);
@@ -227,13 +227,13 @@
 }
 
 .live-activity-sep {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .live-activity-detail {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -243,7 +243,7 @@
 }
 
 .live-activity-elapsed {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   font-weight: 500;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -270,7 +270,7 @@
   gap: 10px;
   min-height: 22px;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   line-height: 1.45;
 }
 
@@ -306,7 +306,7 @@
 }
 
 .live-sub-elapsed {
-  font-size: 11px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
   white-space: nowrap;
   min-width: 28px;
@@ -316,7 +316,7 @@
 
 .telemetry-matrix {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(var(--matrix-cols, 4), minmax(0, 1fr));
   flex-shrink: 0;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
@@ -338,12 +338,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
 }
 
 .cell-value {
-  font-size: 14.5px;
+  font-size: var(--fs-lg);
   font-weight: 700;
   color: var(--text-primary);
   white-space: nowrap;
@@ -360,7 +360,7 @@
 }
 
 .cell-sub {
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -457,7 +457,7 @@
   padding: 2px 0 0 0;
   background: transparent;
   border: none;
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
 }
 
 .legend-item {
@@ -527,7 +527,7 @@
   border: 1px solid var(--border-hairline);
   background: var(--surface-panel);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-md);
   border-radius: var(--radius-xs);
   cursor: pointer;
   white-space: nowrap;
@@ -573,7 +573,7 @@
   align-items: center;
   gap: 3px;
   padding: 1px 5px;
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   line-height: 1.25;
   border-radius: var(--radius-xs);
@@ -616,8 +616,8 @@
 }
 
 @media (max-width: 390px) {
-  .telemetry-matrix {
-    grid-template-columns: repeat(2, 1fr);
+  .telemetry-matrix:not([data-cols="1"]):not([data-cols="2"]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .dual-grid {
     grid-template-columns: 1fr;

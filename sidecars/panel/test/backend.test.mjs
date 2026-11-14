@@ -616,6 +616,38 @@ test('trendSeries preserves 1-day-per-slot granularity for >90 day spans and rec
   assert.equal(steps[1].responseTokens, 280);
 });
 
+test('cached incomplete timing is refreshed once without invalidating completed historical steps', async () => {
+  const time = '2026-01-01T00:00:12Z';
+  const summary = { stepCount: 1, lastModifiedTime: time, status: 'IDLE' };
+  const incompleteStep = {
+    ...structuredClone(raw.trajectory.steps[0]),
+    status: 'CORTEX_STEP_STATUS_CLEARED',
+  };
+  const { extractModelSteps } = await import('../speed-metrics.mjs');
+  const [completed] = extractModelSteps(raw.trajectory.steps, raw.trajectory.generatorMetadata);
+  const [incomplete] = extractModelSteps([{ ...incompleteStep, status: 'CORTEX_STEP_STATUS_GENERATING' }]);
+  const cacheEntry = (step) => ({
+    signature: `v10-model-identity:1:${time}`,
+    steps: [step],
+    contextLimitTelemetry: true,
+    subagentRefs: [],
+  });
+  const h = backendHarness({
+    cache: { repaired: cacheEntry(incomplete), stable: cacheEntry(completed) },
+    summaries: { repaired: summary, stable: summary },
+    trajectories: { repaired: { trajectory: { ...raw.trajectory, steps: [incompleteStep] } } },
+  });
+
+  for (let i = 0; i < 2; i++) {
+    const result = await h.buildTelemetryPayloadInternal('repaired');
+    assert.equal(result.activeConversation.latestTokPerSec, Math.round(completed.totalTokPerSec * 10) / 10);
+  }
+  assert.deepEqual(
+    h.state.calls.filter((c) => c.method === 'GetCascadeTrajectory').map((c) => c.body.cascadeId),
+    ['repaired']
+  );
+});
+
 test('modelBreakdown exposes avgTtftSec, cacheHitPct, and subagent scoped breakdowns + fit math helpers', async () => {
   const {
     computeLinearFit,
@@ -767,4 +799,91 @@ test('modelBreakdown exposes avgTtftSec, cacheHitPct, and subagent scoped breakd
 
   const aggMb = payload.activeConversation.aggregated.modelBreakdown;
   assert.equal(aggMb.length, 2);
+});
+
+test('preferences schema defaults match pre-refactor UI, migrate legacy none slots, and support reset & cache rebuild', async () => {
+  // 1. Default schema matches pre-refactor out-of-box UI 100%
+  const hDefault = backendHarness({});
+  const def = hDefault.loadSettings();
+  assert.equal(def.language, 'zh-CN');
+  assert.equal(def.themeAccent, 'host');
+  assert.equal(def.fontScale, 'md');
+  assert.equal(def.pluginUpdateMode, 'manual');
+  assert.equal(def.windowMountMode, 'dual');
+  assert.equal(def.enableWindowOverlay, true);
+  assert.equal(def.showTopbarMultiSession, true);
+  assert.deepEqual([...def.topbarCapsuleSlots], ['context', 'tps', 'quota_auto']);
+  assert.deepEqual([...def.hoverModules], ['metrics', 'context', 'quotas']);
+  assert.deepEqual([...def.overviewModules], ['metrics', 'context', 'quotas', 'live_tasks']);
+  assert.deepEqual([...def.overviewMetrics], ['tps', 'ttft', 'avg_tps', 'step_cost']);
+  assert.deepEqual([...def.stepTableColumns], ['step', 'model', 'tps', 'ttft', 'tokens_combo', 'cache', 'cost']);
+  assert.deepEqual({ ...def.modelContextWindows }, {});
+
+  // 2. Legacy 3-slot ['context', 'none', 'quota_auto'] migrates cleanly to 2-item ['context', 'quota_auto']
+  assert.deepEqual(
+    [...hDefault.normalizeTopbarCapsuleSlots(['context', 'none', 'quota_auto'])],
+    ['context', 'quota_auto']
+  );
+  // Up to 5 unique items supported, duplicates stripped, empty falls back to ['context']
+  assert.deepEqual(
+    [...hDefault.normalizeTopbarCapsuleSlots(['tps', 'ttft', 'cost', 'cache_hit', 'session_tokens', 'gemini_5h'])],
+    ['tps', 'ttft', 'cost', 'cache_hit', 'session_tokens']
+  );
+  assert.deepEqual([...hDefault.normalizeTopbarCapsuleSlots(['none', 'none', 'none'])], ['context']);
+
+  // 3. Hover modules allow 0 items (explicit []), overviewModules & overviewMetrics require >= 1, stepTableColumns require >= 2
+  assert.deepEqual([...hDefault.normalizeHoverModules([])], []);
+  assert.deepEqual([...hDefault.normalizeOverviewModules([])], ['metrics']);
+  assert.deepEqual([...hDefault.normalizeOverviewMetrics([])], ['tps']);
+  assert.deepEqual([...hDefault.normalizeStepTableColumns(['cost'])], ['cost', 'step']);
+
+  // 4. Updating preferences must not apply legacy global limits or bulk model updates
+  const saveRes = hDefault.executeSettingsAction({
+    language: 'en-US',
+    themeAccent: 'emerald',
+    fontScale: 'lg',
+    topbarCapsuleSlots: ['context', 'tps', 'ttft', 'cost'],
+    hoverModules: ['metrics', 'context'],
+    overviewModules: ['quotas', 'metrics'],
+    overviewMetrics: ['avg_tps', 'cache_hit'],
+    stepTableColumns: ['step', 'time', 'model', 'duration', 'input_tokens', 'output_tokens', 'cost'],
+    contextLimitOverrideTokens: 128000,
+    modelContextWindows: { MODEL_PLACEHOLDER_M418: '900K' },
+  });
+  assert.equal(saveRes.ok, true);
+  assert.equal(saveRes.updated.language, 'en-US');
+  assert.equal(saveRes.updated.themeAccent, 'emerald');
+  assert.equal(saveRes.updated.fontScale, 'lg');
+  assert.equal(saveRes.updated.topbarCapsuleSlots.length, 4);
+  assert.deepEqual([...saveRes.updated.hoverModules], ['metrics', 'context']);
+  assert.deepEqual([...saveRes.updated.overviewModules], ['quotas', 'metrics']);
+  assert.deepEqual([...saveRes.updated.overviewMetrics], ['avg_tps', 'cache_hit']);
+  assert.equal(saveRes.updated.contextLimitOverrideTokens, undefined);
+  assert.deepEqual({ ...saveRes.updated.modelContextWindows }, {});
+
+  const hWithSteps = backendHarness({
+    settings: {
+      contextLimitOverrideTokens: 128000,
+      modelContextWindows: { MODEL_PLACEHOLDER_M418: '900K' },
+    },
+    cache: { c1: old },
+    trajectories: { c1: raw },
+    summaries: { c1: { stepCount: 1, lastModifiedTime: '2026-01-01T00:00:10Z', status: 'IDLE' } },
+  });
+  const telemetry = await hWithSteps.buildTelemetryPayloadInternal('c1');
+  assert.equal(telemetry.activeConversation.context.compactionLimitTokens, 256000);
+  assert.equal(telemetry.activeConversation.context.limitTokens, 256000);
+
+  // 5. executeRebuildCacheAction clears trajectoryCache & writes empty cache object
+  const rebuildRes = hWithSteps.executeRebuildCacheAction();
+  assert.equal(rebuildRes.ok, true);
+  const lastCacheSave = hWithSteps.state.saves[hWithSteps.state.saves.length - 1];
+  assert.deepEqual(JSON.parse(JSON.stringify(lastCacheSave.data)), {});
+
+  // 6. executeResetSettingsAction restores full defaults cleanly
+  const resetRes = hDefault.executeResetSettingsAction();
+  assert.equal(resetRes.ok, true);
+  assert.equal(resetRes.updated.language, 'zh-CN');
+  assert.equal(resetRes.updated.themeAccent, 'host');
+  assert.deepEqual([...resetRes.updated.topbarCapsuleSlots], ['context', 'tps', 'quota_auto']);
 });

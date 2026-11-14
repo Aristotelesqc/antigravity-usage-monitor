@@ -20,8 +20,9 @@ import {
   formatUpstreamModelId,
   isArgonModelIdentifier,
   isCarbonModelIdentifier,
-  resolveModelInfo,
 } from './model-pricing.mjs';
+
+/** @typedef {ReturnType<import('./model-pricing.mjs').createStepModelResolver>} StepModelResolver */
 
 function safeTok(val) {
   const n = Number(val);
@@ -186,7 +187,7 @@ function createUsageBucket() {
  *
  * @param {ReturnType<typeof createUsageBucket>} bucket
  * @param {object} st 步骤对象
- * @param {ReturnType<typeof resolveModelInfo>} mInfo 模型信息
+ * @param {ReturnType<ReturnType<typeof createStepModelResolver>>} mInfo 模型信息
  * @param {number|null} stepCost 单步美元成本（未知时为 `null`）
  * @param {string} cascadeId 会话标识
  */
@@ -368,20 +369,14 @@ function finalizeModelBreakdownMap(perModelStats) {
  * 针对给定步骤数组构建按模型聚合的统计列表（供单代理、主+子汇总及全局时间范围复用）。
  *
  * @param {object[]} [steps=[]]
- * @param {Map<string, object>} [dynamicModelMap=new Map()]
+ * @param {StepModelResolver} resolveStepModel
  * @returns {object[]}
  */
-export function buildScopedModelBreakdown(steps = [], dynamicModelMap = new Map()) {
+export function buildScopedModelBreakdown(steps, resolveStepModel) {
   const perModelStats = new Map();
   for (const st of steps) {
     if (!st || typeof st !== 'object') continue;
-    const mInfo = resolveModelInfo(
-      st.modelKey,
-      dynamicModelMap,
-      st.apiProvider,
-      st.modelDisplayName,
-      st.responseModel
-    );
+    const mInfo = resolveStepModel(st);
     const stepCost = computeStepCost(st, mInfo.pricing);
     accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost);
   }
@@ -397,7 +392,7 @@ export function buildScopedModelBreakdown(steps = [], dynamicModelMap = new Map(
  *   currentAccountName?: string,
  *   activeCascadeId?: string|null,
  *   activeFamilyCascadeIds?: Set<string>|null,
- *   dynamicModelMap?: Map<string, object>
+ *   resolveStepModel: StepModelResolver
  * }} params
  */
 export function aggregateMultiWindowUsage({
@@ -406,9 +401,9 @@ export function aggregateMultiWindowUsage({
   currentAccountName = '',
   activeCascadeId = null,
   activeFamilyCascadeIds = null,
-  dynamicModelMap = new Map(),
+  resolveStepModel,
   quotaPoolsMap = null,
-} = {}) {
+}) {
   const rawFamilyIds =
     activeFamilyCascadeIds instanceof Set
       ? Array.from(activeFamilyCascadeIds)
@@ -565,13 +560,7 @@ export function aggregateMultiWindowUsage({
 
     for (const st of entry.steps || []) {
       if (!st || typeof st !== 'object') continue;
-      const mInfo = resolveModelInfo(
-        st.modelKey,
-        dynamicModelMap,
-        st.apiProvider,
-        st.modelDisplayName,
-        st.responseModel
-      );
+      const mInfo = resolveStepModel(st);
       const inTok = safeTok(st.inputTokens);
       const cacheTok = safeTok(st.cacheReadTokens);
       const outTok = safeTok(st.outputTokens);

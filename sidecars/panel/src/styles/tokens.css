@@ -42,16 +42,30 @@
   );
   --border-strong: color-mix(in srgb, var(--border-hairline) 72%, var(--text-primary) 28%);
 
-  /* Typography Hierarchy */
+  /* Typography Hierarchy & Scalable Font Tokens */
+  --ui-font-scale: 1;
+  --fs-2xs: calc(9.5px * var(--ui-font-scale, 1));
+  --fs-xs: calc(10px * var(--ui-font-scale, 1));
+  --fs-sm: calc(10.5px * var(--ui-font-scale, 1));
+  --fs-md: calc(11px * var(--ui-font-scale, 1));
+  --fs-base-sm: calc(11.5px * var(--ui-font-scale, 1));
+  --fs-base: calc(12px * var(--ui-font-scale, 1));
+  --fs-body: calc(12.5px * var(--ui-font-scale, 1));
+  --fs-lg: calc(14.5px * var(--ui-font-scale, 1));
+  --fs-hero: calc(17px * var(--ui-font-scale, 1));
+
   --text-primary: var(--foreground, var(--vscode-foreground, var(--vscode-editor-foreground, hsl(215 22% 15%))));
   --text-secondary: var(--muted-foreground, var(--vscode-descriptionForeground, hsl(215 12% 44%)));
   --text-muted: color-mix(in srgb, var(--text-secondary) 74%, var(--surface-panel) 26%);
-  --text-inverse: var(--surface-panel);
+  --text-inverse: var(--user-accent-contrast, var(--surface-panel));
 
   /* Semantic Telemetry Accents */
   --accent-primary: var(
-    --primary,
-    var(--vscode-textLink-foreground, var(--vscode-button-background, hsl(217 82% 51%)))
+    --user-accent-primary,
+    var(
+      --primary,
+      var(--vscode-textLink-foreground, var(--vscode-button-background, hsl(217 82% 51%)))
+    )
   );
   --accent-primary-soft: color-mix(in srgb, var(--accent-primary) 13%, transparent);
   --accent-primary-border: color-mix(in srgb, var(--accent-primary) 38%, var(--border-hairline));

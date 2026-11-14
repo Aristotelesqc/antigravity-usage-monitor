@@ -26,6 +26,7 @@ import {
   mergeModelsByDisplayName,
   normalizeOrchestratorIdDisplayMode,
 } from '../core/formatters.js';
+import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
 import { fetchTelemetry, telemetryStore } from '../store/telemetryStore.js';
 import { uiStore } from '../store/uiStore.js';
@@ -39,15 +40,17 @@ import { createFourSegmentBar } from '../components/ui/FourSegmentBar.js';
 import { SegmentedControl } from '../components/ui/SegmentedControl.js';
 
 /** 消耗统计顶栏支持的时间范围预设项 */
-const TIME_RANGE_OPTIONS = [
-  { value: 'today', label: '今天' },
-  { value: '24h', label: '1天' },
-  { value: '7d', label: '7天' },
-  { value: '14d', label: '14天' },
-  { value: '30d', label: '30天' },
-  { value: 'all', label: '全部' },
-  { value: 'custom', label: '自定义' },
-];
+function getConsumptionTimeRangeOptions() {
+  return [
+    { value: 'today', label: t('cons.rangeToday') },
+    { value: '24h', label: t('cons.range24h') },
+    { value: '7d', label: t('cons.range7d') },
+    { value: '14d', label: t('cons.range14d') },
+    { value: '30d', label: t('cons.range30d') },
+    { value: 'all', label: t('cons.rangeAll') },
+    { value: 'custom', label: t('cons.rangeCustom') },
+  ];
+}
 
 export const ConsumptionView = defineComponent({
   name: 'ConsumptionView',
@@ -58,9 +61,9 @@ export const ConsumptionView = defineComponent({
     let hasUncommittedCustomDraft = false;
 
     const timeFilterSwitch = SegmentedControl({
-      ariaLabel: '消耗统计时间范围',
+      ariaLabel: t('cons.rangeAria'),
       modelValue: telemetryStore.getState().selectedTimeRange,
-      options: TIME_RANGE_OPTIONS,
+      options: getConsumptionTimeRangeOptions(),
       onUpdateModelValue: (nextRange) => {
         if (nextRange === 'custom') {
           const st = telemetryStore.getState();
@@ -95,6 +98,7 @@ export const ConsumptionView = defineComponent({
       },
     });
 
+    const applyCustomBtnLabel = h('span', { text: t('cons.applyFilter') });
     const applyCustomBtn = h(
       'button',
       {
@@ -119,9 +123,10 @@ export const ConsumptionView = defineComponent({
           fetchTelemetry({ force: true });
         },
       },
-      [createSvgIcon('check', { size: 12 }), h('span', { text: '筛选' })]
+      [createSvgIcon('check', { size: 12 }), applyCustomBtnLabel]
     );
 
+    const rangeToSpan = h('span', { className: 'text-muted', text: t('cons.rangeTo') });
     const customRangeBar = h(
       'div',
       {
@@ -131,7 +136,7 @@ export const ConsumptionView = defineComponent({
       },
       [
         startPicker.el,
-        h('span', { className: 'text-muted', text: '至' }),
+        rangeToSpan,
         endPicker.el,
         applyCustomBtn,
       ]
@@ -140,31 +145,38 @@ export const ConsumptionView = defineComponent({
     // --- Section 1: 用量概览矩阵 (上层 3 列核心总量 + 下层 3 列新输入/缓存读取/输出拆分 + 底部 4 段比例条) ---
     const dateSpanBadge = h('span', { className: 'cons-badge text-mono', text: '-- ~ --' });
     const heroTotalTokens = h('strong', { className: 'cons-hero-num text-mono', text: '0' });
-    const heroTotalCalls = h('span', { className: 'text-muted text-mono', style: 'font-size: 11px;', text: '0 次' });
+    const heroTotalCalls = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.callsCount', { calls: 0 }) });
     const heroCostUsd = h('strong', { className: 'cons-hero-cost text-mono', text: '$0.00' });
-    const heroCostCny = h('span', { className: 'text-muted text-mono', style: 'font-size: 11px;', text: '≈ ¥0' });
+    const heroCostCny = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: '≈ ¥0' });
 
     const cacheHitPctEl = h('strong', { className: 'cons-hero-cache text-mono', text: '0%' });
-    const cacheTokensEl = h('span', { className: 'text-muted text-mono', style: 'font-size: 11px;', text: '命中 0' });
+    const cacheTokensEl = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.cacheHitTokens', { tokens: 0 }) });
 
-    const inputSharePct = h('span', { className: 'text-mono', style: 'color: var(--ctx-input); font-weight: 600; font-size: 11.5px;', text: '0%' });
+    const inputSharePct = h('span', { className: 'text-mono', style: 'color: var(--ctx-input); font-weight: 600; font-size: var(--fs-base-sm);', text: '0%' });
     const inputMainTokens = h('strong', { className: 'cons-mid-num text-mono', text: '0' });
-    const inputSubText = h('span', { className: 'text-muted text-mono', style: 'font-size: 11px;', text: '未命中缓存输入' });
+    const inputSubText = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.uncachedInput') });
 
-    const cacheSharePct = h('span', { className: 'text-mono', style: 'color: var(--ctx-cached); font-weight: 600; font-size: 11.5px;', text: '0%' });
+    const cacheSharePct = h('span', { className: 'text-mono', style: 'color: var(--ctx-cached); font-weight: 600; font-size: var(--fs-base-sm);', text: '0%' });
     const cacheMainTokens = h('strong', { className: 'cons-mid-num text-mono', text: '0' });
-    const cacheSubText = h('span', { className: 'text-muted text-mono', style: 'font-size: 11px;', text: '节省 $0.00' });
+    const cacheSubText = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.savedCost', { cost: '$0.00' }) });
 
-    const outputSharePct = h('span', { className: 'text-mono', style: 'color: var(--ctx-output); font-weight: 600; font-size: 11.5px;', text: '0%' });
+    const outputSharePct = h('span', { className: 'text-mono', style: 'color: var(--ctx-output); font-weight: 600; font-size: var(--fs-base-sm);', text: '0%' });
     const outputMainTokens = h('strong', { className: 'cons-mid-num text-mono', text: '0' });
-    const outputSubText = h('span', { className: 'text-muted text-mono', style: 'font-size: 11px;', text: '回复 0 · 思考 0' });
+    const outputSubText = h('span', { className: 'text-muted text-mono', style: 'font-size: var(--fs-md);', text: t('cons.replyAndThink', { resp: 0, think: 0 }) });
 
     const overviewSegBar = createFourSegmentBar();
+    const overviewTitleSpan = h('span', { text: t('cons.overviewTitle') });
+    const totalTokensLabel = h('span', { className: 'text-muted', style: 'font-size: var(--fs-md);', text: t('cons.totalTokens') });
+    const estCostLabel = h('span', { className: 'text-muted', style: 'font-size: var(--fs-md);', text: t('cons.estCost') });
+    const cacheHitRateLabel = h('span', { text: t('cons.cacheHitRate') });
+    const newInputLabel = h('span', { text: t('cons.newInput') });
+    const cacheReadLabel = h('span', { text: t('cons.cacheRead') });
+    const outputUsageLabel = h('span', { text: t('cons.outputUsage') });
 
     const overviewPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header cons-overview-head' }, [
         h('span', { className: 'panel-title' }, [
-          h('span', { text: '用量总览' }),
+          overviewTitleSpan,
           dateSpanBadge,
         ]),
         timeFilterSwitch.el,
@@ -173,17 +185,17 @@ export const ConsumptionView = defineComponent({
       h('div', { className: 'cons-box cons-unified-matrix' }, [
         h('div', { className: 'cons-split-3' }, [
           h('div', { className: 'cons-col' }, [
-            h('span', { className: 'text-muted', style: 'font-size: 11px;', text: '总 Token' }),
+            totalTokensLabel,
             h('div', { className: 'cons-baseline' }, [heroTotalTokens, heroTotalCalls]),
           ]),
           h('div', { className: 'cons-col is-bordered-col' }, [
-            h('span', { className: 'text-muted', style: 'font-size: 11px;', text: '预估费用' }),
+            estCostLabel,
             h('div', { className: 'cons-baseline' }, [heroCostUsd, heroCostCny]),
           ]),
           h('div', { className: 'cons-col is-bordered-col' }, [
-            h('span', { className: 'legend-left', style: 'font-size: 11px;' }, [
+            h('span', { className: 'legend-left', style: 'font-size: var(--fs-md);' }, [
               h('span', { className: 'dot-swatch seg-cached' }),
-              h('span', { text: '缓存命中率' }),
+              cacheHitRateLabel,
             ]),
             h('div', { className: 'cons-baseline' }, [cacheHitPctEl, cacheTokensEl]),
           ]),
@@ -193,7 +205,7 @@ export const ConsumptionView = defineComponent({
             h('div', { className: 'cons-sub-head' }, [
               h('span', { className: 'legend-left cons-sub-label' }, [
                 h('span', { className: 'dot-swatch seg-input' }),
-                h('span', { text: '新输入' }),
+                newInputLabel,
               ]),
               inputSharePct,
             ]),
@@ -204,7 +216,7 @@ export const ConsumptionView = defineComponent({
             h('div', { className: 'cons-sub-head' }, [
               h('span', { className: 'legend-left cons-sub-label' }, [
                 h('span', { className: 'dot-swatch seg-cached' }),
-                h('span', { text: '缓存读取' }),
+                cacheReadLabel,
               ]),
               cacheSharePct,
             ]),
@@ -215,7 +227,7 @@ export const ConsumptionView = defineComponent({
             h('div', { className: 'cons-sub-head' }, [
               h('span', { className: 'legend-left cons-sub-label' }, [
                 h('span', { className: 'dot-swatch seg-output' }),
-                h('span', { text: '输出用量' }),
+                outputUsageLabel,
               ]),
               outputSharePct,
             ]),
@@ -228,18 +240,19 @@ export const ConsumptionView = defineComponent({
     ]);
 
     // --- Section 2: 历史趋势 (交互式 SVG 平滑曲线图 + 悬停精确日期/小时浮层 + 多刻度时间轴) ---
-    const trendRangeBadge = h('span', { className: 'cons-badge', text: '全部时间' });
+    const trendTitleSpan = h('span', { text: t('cons.trendTitle') });
+    const trendRangeBadge = h('span', { className: 'cons-badge', text: t('cons.allTime') });
     const trendGranularityHint = h('span', {
       className: 'text-muted text-mono',
-      style: 'font-size: 10.5px;',
-      text: '按小时 · 悬停查看明细',
+      style: 'font-size: var(--fs-sm);',
+      text: t('cons.trendPointsHintHourly', { points: 0 }),
     });
     const trendChart = createTrendAreaChart();
 
     const trendPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
         h('span', { className: 'panel-title' }, [
-          h('span', { text: '用量趋势' }),
+          trendTitleSpan,
           trendRangeBadge,
         ]),
         trendGranularityHint,
@@ -248,24 +261,27 @@ export const ConsumptionView = defineComponent({
     ]);
 
     // --- Section 3: 模型排行列表 ---
+    const modelsTitleSpan = h('span', { className: 'panel-title', text: t('cons.topModels') });
     const modelsListEl = h('div', { className: 'cons-item-list' });
     const modelsPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
-        h('span', { className: 'panel-title', text: '模型排行' }),
+        modelsTitleSpan,
       ]),
       modelsListEl,
     ]);
 
     // --- Section 4: 客户端来源列表 ---
+    const sourcesTitleSpan = h('span', { className: 'panel-title', text: t('cons.clientSources') });
     const sourcesListEl = h('div', { className: 'cons-item-list' });
     const sourcesPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
-        h('span', { className: 'panel-title', text: '客户端来源' }),
+        sourcesTitleSpan,
       ]),
       sourcesListEl,
     ]);
 
     // --- Section 5: 按月细分 (12 个月垂直 4 段堆叠柱状图) ---
+    const monthlyTitleSpan = h('span', { className: 'panel-title', text: t('cons.monthlyTitle') });
     const monthlyYearBadge = h('span', { className: 'cons-badge text-mono', text: '2026' });
     const monthlyCols = Array.from({ length: 12 }, (_, idx) => {
       const costText = h('span', { className: 'month-cost text-mono', text: '' });
@@ -280,7 +296,7 @@ export const ConsumptionView = defineComponent({
         barIn,
       ]);
       const zeroDot = h('span', { className: 'month-zero-dot' });
-      const monthLabel = h('span', { className: 'month-label', text: `${idx + 1}月` });
+      const monthLabel = h('span', { className: 'month-label', text: t('cons.monthLabel', { m: idx + 1 }) });
       const tokText = h('span', { className: 'month-tok text-mono', text: '' });
 
       const colEl = h('div', { className: 'month-col' }, [
@@ -303,9 +319,14 @@ export const ConsumptionView = defineComponent({
       };
     });
 
+    const legInputSpan = h('span', { text: t('cons.legInput') });
+    const legCacheSpan = h('span', { text: t('cons.legCache') });
+    const legOutputSpan = h('span', { text: t('cons.legOutput') });
+    const legThinkingSpan = h('span', { text: t('cons.legThinking') });
+
     const monthlyPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
-        h('span', { className: 'panel-title', text: '月度统计' }),
+        monthlyTitleSpan,
         monthlyYearBadge,
       ]),
       h(
@@ -316,19 +337,19 @@ export const ConsumptionView = defineComponent({
       h('div', { className: 'monthly-legend' }, [
         h('span', { className: 'legend-left' }, [
           h('span', { className: 'dot-swatch seg-input' }),
-          h('span', { text: '输入' }),
+          legInputSpan,
         ]),
         h('span', { className: 'legend-left' }, [
           h('span', { className: 'dot-swatch seg-cached' }),
-          h('span', { text: '缓存' }),
+          legCacheSpan,
         ]),
         h('span', { className: 'legend-left' }, [
           h('span', { className: 'dot-swatch seg-output' }),
-          h('span', { text: '输出' }),
+          legOutputSpan,
         ]),
         h('span', { className: 'legend-left' }, [
           h('span', { className: 'dot-swatch seg-thinking' }),
-          h('span', { text: '思考' }),
+          legThinkingSpan,
         ]),
       ]),
     ]);
@@ -362,6 +383,12 @@ export const ConsumptionView = defineComponent({
       const costEl = h('strong', { className: 'cons-row-cost text-mono' });
       const segBar = createFourSegmentBar();
 
+      const inLbl = h('span', { text: t('cons.footInput') });
+      const cacheLbl = h('span', { text: t('cons.footCache') });
+      const outLbl = h('span', { text: t('cons.footOutput') });
+      const thinkLbl = h('span', { text: t('cons.footThinking') });
+      const callsLbl = h('span', { text: t('cons.footCalls') });
+
       const inVal = h('strong', { className: 'text-mono' });
       const cacheVal = h('strong', { className: 'text-mono' });
       const outVal = h('strong', { className: 'text-mono' });
@@ -381,26 +408,26 @@ export const ConsumptionView = defineComponent({
         h('div', { className: 'cons-item-foot' }, [
           h('span', { className: 'legend-left' }, [
             h('span', { className: 'dot-swatch seg-input' }),
-            h('span', { text: '输入 ' }),
+            inLbl,
             inVal,
           ]),
           h('span', { className: 'legend-left' }, [
             h('span', { className: 'dot-swatch seg-cached' }),
-            h('span', { text: '缓存 ' }),
+            cacheLbl,
             cacheVal,
           ]),
           h('span', { className: 'legend-left' }, [
             h('span', { className: 'dot-swatch seg-output' }),
-            h('span', { text: '输出 ' }),
+            outLbl,
             outVal,
           ]),
           h('span', { className: 'legend-left' }, [
             h('span', { className: 'dot-swatch seg-thinking' }),
-            h('span', { text: '思考 ' }),
+            thinkLbl,
             thinkVal,
           ]),
           h('span', { className: 'legend-left' }, [
-            h('span', { text: '调用 ' }),
+            callsLbl,
             callsVal,
           ]),
         ]),
@@ -408,7 +435,23 @@ export const ConsumptionView = defineComponent({
 
       return {
         el: rowEl,
-        refs: { nameEl, pctBadge, totalTokEl, costEl, segBar, inVal, cacheVal, outVal, thinkVal, callsVal },
+        refs: {
+          nameEl,
+          pctBadge,
+          totalTokEl,
+          costEl,
+          segBar,
+          inLbl,
+          cacheLbl,
+          outLbl,
+          thinkLbl,
+          callsLbl,
+          inVal,
+          cacheVal,
+          outVal,
+          thinkVal,
+          callsVal,
+        },
       };
     }
 
@@ -416,6 +459,11 @@ export const ConsumptionView = defineComponent({
      * 增量更新热门模型或数据来源单行的指标文本与 4 段比例条宽度。
      */
     function updateBreakdownItemRow(refs, item, grandTotalTokens, showTokensInHeader = true) {
+      patchText(refs.inLbl, t('cons.footInput'));
+      patchText(refs.cacheLbl, t('cons.footCache'));
+      patchText(refs.outLbl, t('cons.footOutput'));
+      patchText(refs.thinkLbl, t('cons.footThinking'));
+      patchText(refs.callsLbl, t('cons.footCalls'));
       const displayLabel = item.label || item.name || item.shortName || '—';
       patchText(refs.nameEl, displayLabel);
       patchAttr(refs.nameEl, 'title', item.title || displayLabel);
@@ -492,12 +540,12 @@ export const ConsumptionView = defineComponent({
       const savedCostUsd = Number(acct.savedCostUsd || 0);
 
       patchText(heroTotalTokens, formatTokensPrecise(totalTokens));
-      patchText(heroTotalCalls, `${acct.calls || 0} 次`);
+      patchText(heroTotalCalls, t('cons.callsCount', { calls: acct.calls || 0 }));
       patchText(heroCostUsd, formatUsd(costUsd));
       patchText(heroCostCny, formatCnyApprox(costUsd));
 
       patchText(cacheHitPctEl, `${Number(acct.cacheHitPct ?? 0).toFixed(1)}%`);
-      patchText(cacheTokensEl, `命中 ${formatTokensPrecise(cacheTokens)}`);
+      patchText(cacheTokensEl, t('cons.cacheHitTokens', { tokens: formatTokensPrecise(cacheTokens) }));
 
       let inPct = 0;
       let cachePct = 0;
@@ -523,20 +571,25 @@ export const ConsumptionView = defineComponent({
 
       patchText(inputSharePct, `${inPct}%`);
       patchText(inputMainTokens, formatTokensPrecise(inputTokens));
-      patchText(inputSubText, '未命中缓存输入');
+      patchText(inputSubText, t('cons.uncachedInput'));
 
       patchText(cacheSharePct, `${cachePct}%`);
       patchText(cacheMainTokens, formatTokensPrecise(cacheTokens));
       patchText(
         cacheSubText,
-        `节省 ${formatUsd(savedCostUsd, { precise: savedCostUsd > 0 && savedCostUsd < 0.01 })}`
+        t('cons.savedCost', {
+          cost: formatUsd(savedCostUsd, { precise: savedCostUsd > 0 && savedCostUsd < 0.01 }),
+        })
       );
 
       patchText(outputSharePct, `${outPct}%`);
       patchText(outputMainTokens, formatTokensPrecise(outputTokens));
       patchText(
         outputSubText,
-        `回复 ${formatTokensPrecise(responseTokens)} · 思考 ${formatTokensPrecise(thinkingTokens)}`
+        t('cons.replyAndThink', {
+          resp: formatTokensPrecise(responseTokens),
+          think: formatTokensPrecise(thinkingTokens),
+        })
       );
 
       overviewSegBar.update({
@@ -547,7 +600,11 @@ export const ConsumptionView = defineComponent({
       });
 
       // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与粒度提示
-      patchText(trendRangeBadge, preset?.label || rangeInfo.label || '全部时间');
+      const rangeBadgeText = isEnglishLocale()
+        ? getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
+          t('cons.allTime')
+        : preset?.label || rangeInfo.label || t('cons.allTime');
+      patchText(trendRangeBadge, rangeBadgeText);
       const trendSeries = cons.trendSeries || [];
       const isHourlyTrend =
         trendSeries[0]?.granularity === 'hour' ||
@@ -556,12 +613,15 @@ export const ConsumptionView = defineComponent({
       patchText(
         trendGranularityHint,
         isHeatmapTrend
-          ? `按日 (${trendSeries.length}天) · 悬停查看`
-          : `${isHourlyTrend ? '按小时' : '按日'} (${trendSeries.length || 0}点) · 悬停查看`
+          ? t('cons.trendHeatmapHint', { days: trendSeries.length })
+          : isHourlyTrend
+            ? t('cons.trendPointsHintHourly', { points: trendSeries.length || 0 })
+            : t('cons.trendPointsHintDaily', { points: trendSeries.length || 0 })
       );
       trendChart.update(trendSeries);
 
       // 3. 同步热门模型列表（按最终展示名称去重归并后按总 Token 数降序排列并执行键值增量对账）
+      const localeSig = i18nStore.getState().locale;
       const displaySettings = {
         showUpstreamModel: Boolean(slice.showUpstreamModel),
         orchestratorIdMode: slice.orchestratorIdMode,
@@ -574,7 +634,7 @@ export const ConsumptionView = defineComponent({
       patchKeyedList(modelsListEl, models, {
         keyFn: (m) => m.displayText || m.label || m.shortName,
         sigFn: (m) =>
-          `${m.displayText}:${m.displayTitle}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`,
+          `${localeSig}:${m.displayText}:${m.displayTitle}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`,
         createRow: createBreakdownItemRow,
         updateRow: (refs, m) =>
           updateBreakdownItemRow(
@@ -590,7 +650,7 @@ export const ConsumptionView = defineComponent({
       const sourcesTotalTok = sources.reduce((s, x) => s + Number(x.totalTokens || 0), 0);
       patchKeyedList(sourcesListEl, sources, {
         keyFn: (s) => s.name,
-        sigFn: (s) => `${s.name}:${s.totalTokens}:${s.costUsd}:${s.unpricedCalls}:${s.calls}:${sourcesTotalTok}`,
+        sigFn: (s) => `${localeSig}:${s.name}:${s.totalTokens}:${s.costUsd}:${s.unpricedCalls}:${s.calls}:${sourcesTotalTok}`,
         createRow: createBreakdownItemRow,
         updateRow: (refs, s) => updateBreakdownItemRow(refs, s, sourcesTotalTok, true),
       });
@@ -679,9 +739,50 @@ export const ConsumptionView = defineComponent({
       }
     );
 
+    function syncStaticLocaleLabels() {
+      timeFilterSwitch.setProps({
+        ariaLabel: t('cons.rangeAria'),
+        options: getConsumptionTimeRangeOptions(),
+      });
+      patchText(applyCustomBtnLabel, t('cons.applyFilter'));
+      patchText(rangeToSpan, t('cons.rangeTo'));
+      patchText(overviewTitleSpan, t('cons.overviewTitle'));
+      patchText(totalTokensLabel, t('cons.totalTokens'));
+      patchText(estCostLabel, t('cons.estCost'));
+      patchText(cacheHitRateLabel, t('cons.cacheHitRate'));
+      patchText(newInputLabel, t('cons.newInput'));
+      patchText(cacheReadLabel, t('cons.cacheRead'));
+      patchText(outputUsageLabel, t('cons.outputUsage'));
+      patchText(trendTitleSpan, t('cons.trendTitle'));
+      patchText(modelsTitleSpan, t('cons.topModels'));
+      patchText(sourcesTitleSpan, t('cons.clientSources'));
+      patchText(monthlyTitleSpan, t('cons.monthlyTitle'));
+      for (let i = 0; i < 12; i++) {
+        patchText(monthlyCols[i].monthLabel, t('cons.monthLabel', { m: i + 1 }));
+      }
+      patchText(legInputSpan, t('cons.legInput'));
+      patchText(legCacheSpan, t('cons.legCache'));
+      patchText(legOutputSpan, t('cons.legOutput'));
+      patchText(legThinkingSpan, t('cons.legThinking'));
+    }
+
+    const unsubI18n = i18nStore.subscribe(
+      (st) => st.locale,
+      () => {
+        syncStaticLocaleLabels();
+        if (uiStore.getState().activeView === 'consumption' && latestSlice) {
+          isDirty = false;
+          renderConsumptionData(latestSlice);
+        } else {
+          isDirty = true;
+        }
+      }
+    );
+
     onCleanup(() => {
       unsub();
       unsubView();
+      unsubI18n();
       trendChart.destroy?.();
       timeFilterSwitch.destroy();
       startPicker.destroy();

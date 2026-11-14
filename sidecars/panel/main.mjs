@@ -15,7 +15,10 @@ import { Response, SidecarApp } from 'sidecar_sdk';
 import {
   bootWindowBridgeRuntime,
   executeCloudSyncAction,
+  executeModelContextWindowAction,
   executePluginUpdateAction,
+  executeRebuildCacheAction,
+  executeResetSettingsAction,
   executeSettingsAction,
   executeTelemetryAction,
   isLocalHostRequest,
@@ -96,6 +99,54 @@ app.api('/api/settings', (data, req) => {
     });
   }
   return out.updated;
+});
+
+app.api('/api/context-window', async (data, req) => {
+  if (!isLocalHostRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
+      status: 403,
+      contentType: 'application/json',
+    });
+  }
+  const out = await executeModelContextWindowAction(data);
+  return new Response(out.body, {
+    status: out.status,
+    contentType: out.contentType,
+    headers: out.headers,
+  });
+});
+
+app.api('/api/settings/reset', (_data, req) => {
+  if (!isLocalHostRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
+      status: 403,
+      contentType: 'application/json',
+    });
+  }
+  const out = executeResetSettingsAction();
+  if (!out.ok) {
+    return new Response(out.body, {
+      status: out.status,
+      contentType: out.contentType,
+      headers: out.headers,
+    });
+  }
+  return out.updated;
+});
+
+app.api('/api/cache/rebuild', (_data, req) => {
+  if (!isLocalHostRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
+      status: 403,
+      contentType: 'application/json',
+    });
+  }
+  const out = executeRebuildCacheAction();
+  return new Response(out.body, {
+    status: out.status,
+    contentType: out.contentType,
+    headers: out.headers,
+  });
 });
 
 app.api('/api/cloud-sync', async (_data, req) => {

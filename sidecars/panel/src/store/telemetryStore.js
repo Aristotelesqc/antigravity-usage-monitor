@@ -5,6 +5,8 @@
 
 import { createReactiveStore } from '../core/reactive.js';
 import { callSidecarApi, isWindowOverlayMode } from '../core/httpClient.js';
+import { isEnglishLocale, normalizeI18nLanguage, t } from '../i18n/index.js';
+import { normalizeClientFontScale, normalizeClientThemeAccent } from '../core/appearance.js';
 
 const CASCADE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -106,33 +108,179 @@ export const CLIENT_TOPBAR_SLOT_KEYS = Object.freeze([
   'context',
   'tps',
   'ttft',
+  'avg_tps',
   'cost',
+  'session_cost',
+  'cache_hit',
+  'session_tokens',
   'quota_auto',
   'gemini_5h',
   'gemini_weekly',
   'claude_5h',
   'claude_weekly',
-  'none',
 ]);
 
 export const DEFAULT_CLIENT_TOPBAR_SLOTS = Object.freeze(['context', 'tps', 'quota_auto']);
 
+export const CLIENT_OVERVIEW_MODULE_KEYS = Object.freeze([
+  'metrics',
+  'context',
+  'quotas',
+  'live_tasks',
+]);
+
+export const DEFAULT_CLIENT_OVERVIEW_MODULES = Object.freeze([
+  'metrics',
+  'context',
+  'quotas',
+  'live_tasks',
+]);
+
+export const DEFAULT_CLIENT_HOVER_MODULES = Object.freeze(['metrics', 'context', 'quotas']);
+
+export const CLIENT_OVERVIEW_METRIC_KEYS = Object.freeze([
+  'tps',
+  'ttft',
+  'avg_tps',
+  'step_cost',
+  'session_cost',
+  'cache_hit',
+  'session_tokens',
+  'context_usage',
+  'quota_tightest',
+]);
+
+export const DEFAULT_CLIENT_OVERVIEW_METRICS = Object.freeze([
+  'tps',
+  'ttft',
+  'avg_tps',
+  'step_cost',
+]);
+
+export const CLIENT_STEP_COLUMN_KEYS = Object.freeze([
+  'step',
+  'time',
+  'model',
+  'tps',
+  'ttft',
+  'duration',
+  'tokens_combo',
+  'input_tokens',
+  'cache_tokens',
+  'output_tokens',
+  'cache',
+  'cost',
+]);
+
+export const DEFAULT_CLIENT_STEP_COLUMNS = Object.freeze([
+  'step',
+  'model',
+  'tps',
+  'ttft',
+  'tokens_combo',
+  'cache',
+  'cost',
+]);
+
+function normalizeClientOrderedList(raw, { allowedKeys, defaultItems, minLen, maxLen }) {
+  if (!Array.isArray(raw)) {
+    return [...defaultItems];
+  }
+  const allowedSet = new Set(allowedKeys);
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const key = String(item ?? '').trim();
+    if (!key || key === 'none' || !allowedSet.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+    if (out.length >= maxLen) break;
+  }
+  if (out.length < minLen) {
+    for (const fallbackKey of [...defaultItems, ...allowedKeys]) {
+      if (!seen.has(fallbackKey) && allowedSet.has(fallbackKey)) {
+        seen.add(fallbackKey);
+        out.push(fallbackKey);
+        if (out.length >= minLen) break;
+      }
+    }
+  }
+  return out;
+}
+
 /**
- * 归一化前端顶栏胶囊三槽位配置数组，非法项回退默认值，且禁止三项同时为 `none`。
+ * 归一化前端顶栏胶囊动态槽位配置数组（支持 1..5 项不重复指标，兼容迁移旧版 `'none'` 占位）。
  *
  * @param {unknown} raw
- * @returns {[string, string, string]}
+ * @returns {string[]}
  */
 export function normalizeClientTopbarSlots(raw) {
-  const arr = Array.isArray(raw) ? raw : [];
-  const slots = [0, 1, 2].map((idx) => {
-    const val = String(arr[idx] ?? '').trim();
-    return CLIENT_TOPBAR_SLOT_KEYS.includes(val) ? val : DEFAULT_CLIENT_TOPBAR_SLOTS[idx];
+  return normalizeClientOrderedList(raw, {
+    allowedKeys: CLIENT_TOPBAR_SLOT_KEYS,
+    defaultItems: DEFAULT_CLIENT_TOPBAR_SLOTS,
+    minLen: 1,
+    maxLen: 5,
   });
-  if (slots.every((s) => s === 'none')) {
-    slots[0] = 'context';
-  }
-  return slots;
+}
+
+/**
+ * 归一化鼠标悬浮速览窗展示模块列表（支持 0..4 项，`0` 项代表关闭悬浮窗）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeClientHoverModules(raw) {
+  return normalizeClientOrderedList(raw, {
+    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
+    defaultItems: DEFAULT_CLIENT_HOVER_MODULES,
+    minLen: 0,
+    maxLen: 4,
+  });
+}
+
+/**
+ * 归一化实时监控视图展示模块列表（支持 1..4 项）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeClientOverviewModules(raw) {
+  return normalizeClientOrderedList(raw, {
+    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
+    defaultItems: DEFAULT_CLIENT_OVERVIEW_MODULES,
+    minLen: 1,
+    maxLen: 4,
+  });
+}
+
+/**
+ * 归一化实时监控第一行指标矩阵配置（支持 1..4 项）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeClientOverviewMetrics(raw) {
+  return normalizeClientOrderedList(raw, {
+    allowedKeys: CLIENT_OVERVIEW_METRIC_KEYS,
+    defaultItems: DEFAULT_CLIENT_OVERVIEW_METRICS,
+    minLen: 1,
+    maxLen: 4,
+  });
+}
+
+/**
+ * 归一化调用明细「按步查看」显示列配置（支持 2..12 列）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+export function normalizeClientStepColumns(raw) {
+  return normalizeClientOrderedList(raw, {
+    allowedKeys: CLIENT_STEP_COLUMN_KEYS,
+    defaultItems: DEFAULT_CLIENT_STEP_COLUMNS,
+    minLen: 2,
+    maxLen: 12,
+  });
 }
 
 /**
@@ -173,58 +321,73 @@ function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
   if (prev === next) return true;
 
-  // 1. 比对系统设置项（模型显示策略、Orchestrator ID 显示风格、周预算模式与额度、插件更新策略、双栖与顶栏槽位配置）
+  const sameArr = (a, b) => {
+    if (a === b) return true;
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  };
+  const normMount = (mode, legacyEnableOverlay) => {
+    const m = String(mode ?? '').trim().toLowerCase();
+    if (m === 'composer' || m === 'input') return 'composer';
+    if (m === 'sidebar' || m === 'off') return 'sidebar';
+    if (m === 'dual' || m === 'topbar') return 'dual';
+    if (legacyEnableOverlay === false) return 'sidebar';
+    return 'dual';
+  };
+
+  // 1. 比对系统设置项（外观语言/主题/字号、模型显示策略、更新策略、挂载与结构布局配置）
   const pAct = prev.activeConversation;
   const nAct = next.activeConversation;
-  if (prev.settings?.showUpstreamModel !== next.settings?.showUpstreamModel) return false;
-  const prevOrchIdMode = String(prev.settings?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-  const nextOrchIdMode = String(next.settings?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-  if (prevOrchIdMode !== nextOrchIdMode) {
-    return false;
-  }
-  if (prev.settings?.weeklyLimitMode !== next.settings?.weeklyLimitMode) return false;
-  if (prev.settings?.weeklyTokenBudget !== next.settings?.weeklyTokenBudget) return false;
-  if (prev.settings?.weeklyCostBudget !== next.settings?.weeklyCostBudget) return false;
-  if ((prev.settings?.pluginUpdateMode ?? '') !== (next.settings?.pluginUpdateMode ?? '')) return false;
-  if (prev.settings?.autoUpdatePlugin !== next.settings?.autoUpdatePlugin) return false;
-  const rawPrevMount = String(prev.settings?.windowMountMode ?? '').trim().toLowerCase();
-  const prevMountMode =
-    rawPrevMount === 'composer' || rawPrevMount === 'input'
-      ? 'composer'
-      : rawPrevMount === 'sidebar' || rawPrevMount === 'off'
-        ? 'sidebar'
-        : rawPrevMount === 'dual' || rawPrevMount === 'topbar'
-          ? 'dual'
-          : prev.settings?.enableWindowOverlay === false
-            ? 'sidebar'
-            : 'dual';
-  const rawNextMount = String(next.settings?.windowMountMode ?? '').trim().toLowerCase();
-  const nextMountMode =
-    rawNextMount === 'composer' || rawNextMount === 'input'
-      ? 'composer'
-      : rawNextMount === 'sidebar' || rawNextMount === 'off'
-        ? 'sidebar'
-        : rawNextMount === 'dual' || rawNextMount === 'topbar'
-          ? 'dual'
-          : next.settings?.enableWindowOverlay === false
-            ? 'sidebar'
-            : 'dual';
-  if (prevMountMode !== nextMountMode) return false;
-  if (prev.settings?.enableWindowOverlay !== next.settings?.enableWindowOverlay) return false;
-  if ((prev.settings?.showTopbarMultiSession !== false) !== (next.settings?.showTopbarMultiSession !== false)) {
-    return false;
-  }
-  const pTopSlots = prev.settings?.topbarCapsuleSlots;
-  const nTopSlots = next.settings?.topbarCapsuleSlots;
+  const pSet = prev.settings;
+  const nSet = next.settings;
+
+  if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
+  if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
+  if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
   if (
-    (pTopSlots?.[0] ?? 'context') !== (nTopSlots?.[0] ?? 'context') ||
-    (pTopSlots?.[1] ?? 'tps') !== (nTopSlots?.[1] ?? 'tps') ||
-    (pTopSlots?.[2] ?? 'quota_auto') !== (nTopSlots?.[2] ?? 'quota_auto')
+    JSON.stringify(pSet?.modelContextWindows) !== JSON.stringify(nSet?.modelContextWindows) ||
+    JSON.stringify(prev.contextWindowModels) !== JSON.stringify(next.contextWindowModels)
   ) {
     return false;
   }
+  if (pSet?.showUpstreamModel !== nSet?.showUpstreamModel) return false;
+  const prevOrchIdMode =
+    String(pSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
+      ? 'full'
+      : 'compact';
+  const nextOrchIdMode =
+    String(nSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
+      ? 'full'
+      : 'compact';
+  if (prevOrchIdMode !== nextOrchIdMode) {
+    return false;
+  }
+  if (pSet?.weeklyLimitMode !== nSet?.weeklyLimitMode) return false;
+  if (pSet?.weeklyTokenBudget !== nSet?.weeklyTokenBudget) return false;
+  if (pSet?.weeklyCostBudget !== nSet?.weeklyCostBudget) return false;
+  if ((pSet?.pluginUpdateMode ?? '') !== (nSet?.pluginUpdateMode ?? '')) return false;
+  if (pSet?.autoUpdatePlugin !== nSet?.autoUpdatePlugin) return false;
+  if (
+    normMount(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
+    normMount(nSet?.windowMountMode, nSet?.enableWindowOverlay)
+  ) {
+    return false;
+  }
+  if (pSet?.enableWindowOverlay !== nSet?.enableWindowOverlay) return false;
+  if ((pSet?.showTopbarMultiSession !== false) !== (nSet?.showTopbarMultiSession !== false)) {
+    return false;
+  }
+  if (!sameArr(pSet?.topbarCapsuleSlots, nSet?.topbarCapsuleSlots)) return false;
+  if (!sameArr(pSet?.hoverModules, nSet?.hoverModules)) return false;
+  if (!sameArr(pSet?.overviewModules, nSet?.overviewModules)) return false;
+  if (!sameArr(pSet?.overviewMetrics, nSet?.overviewMetrics)) return false;
+  if (!sameArr(pSet?.stepTableColumns, nSet?.stepTableColumns)) return false;
 
-  // 2. 比对云端状态（插件当前/最新版本、安装模式、价格表版本与模型数量、同步/更新执行状态及错误信息）
+  // 2. 比对云端状态
   const pCloud = prev.cloudStatus;
   const nCloud = next.cloudStatus;
   if (
@@ -245,12 +408,20 @@ function isEquivalentTelemetry(prev, next) {
     return false;
   }
 
-  // 3. 比对活跃会话的实时测速指标（会话 ID、步数、子代理拓扑、运行状态、TPS、TTFT、当前模型标识与费用）
+  // 3. 比对活跃会话的实时测速指标
   if (pAct?.cascadeId !== nAct?.cascadeId) return false;
   if (pAct?.stepCount !== nAct?.stepCount) return false;
   if (pAct?.subagentCount !== nAct?.subagentCount) return false;
   if (pAct?.totalStepsAllAgents !== nAct?.totalStepsAllAgents) return false;
   if (pAct?.isRunning !== nAct?.isRunning) return false;
+  if (
+    pAct?.inputTokens !== nAct?.inputTokens ||
+    pAct?.cacheReadTokens !== nAct?.cacheReadTokens ||
+    pAct?.outputTokens !== nAct?.outputTokens ||
+    pAct?.totalTokens !== nAct?.totalTokens
+  ) {
+    return false;
+  }
   if (
     pAct?.liveActivity?.signature !== nAct?.liveActivity?.signature ||
     pAct?.liveActivity?.startedAtMs !== nAct?.liveActivity?.startedAtMs
@@ -258,6 +429,14 @@ function isEquivalentTelemetry(prev, next) {
     return false;
   }
   if (pAct?.aggregated?.isRunning !== nAct?.aggregated?.isRunning) return false;
+  if (
+    pAct?.aggregated?.inputTokens !== nAct?.aggregated?.inputTokens ||
+    pAct?.aggregated?.cacheReadTokens !== nAct?.aggregated?.cacheReadTokens ||
+    pAct?.aggregated?.outputTokens !== nAct?.aggregated?.outputTokens ||
+    pAct?.aggregated?.totalTokens !== nAct?.aggregated?.totalTokens
+  ) {
+    return false;
+  }
   if (
     pAct?.aggregated?.liveActivity?.signature !== nAct?.aggregated?.liveActivity?.signature ||
     pAct?.aggregated?.liveActivity?.startedAtMs !== nAct?.aggregated?.liveActivity?.startedAtMs
@@ -349,6 +528,9 @@ function isEquivalentTelemetry(prev, next) {
       const as = naSteps[j];
       if (
         bs?.stepIndex !== as?.stepIndex ||
+        bs?.createdAtMs !== as?.createdAtMs ||
+        bs?.totalDurationSec !== as?.totalDurationSec ||
+        bs?.streamDurationSec !== as?.streamDurationSec ||
         bs?.modelKey !== as?.modelKey ||
         bs?.modelShort !== as?.modelShort ||
         bs?.modelLabel !== as?.modelLabel ||
@@ -393,6 +575,9 @@ function isEquivalentTelemetry(prev, next) {
   for (let i = 0; i < (pAct?.recentSteps?.length || 0); i++) {
     const before = pAct.recentSteps[i], after = nAct.recentSteps[i];
     if (
+      before.createdAtMs !== after.createdAtMs ||
+      before.totalDurationSec !== after.totalDurationSec ||
+      before.streamDurationSec !== after.streamDurationSec ||
       before.modelKey !== after.modelKey ||
       before.modelShort !== after.modelShort ||
       before.modelLabel !== after.modelLabel ||
@@ -502,7 +687,7 @@ function isEquivalentTelemetry(prev, next) {
     }
   }
 
-  // 8. 比对账号订阅档位与动态多配额池（活跃池、周汇总及各配额池的 5h/周限额进度与重置时间）
+  // 8. 比对账号订阅档位与动态多配额池
   if (
     prev.account?.tierName !== next.account?.tierName ||
     prev.account?.planName !== next.account?.planName ||
@@ -725,6 +910,15 @@ export async function fetchTelemetry({ force = false } = {}) {
 
 export async function saveSettingsPatch(patch) {
   const safePatch = patch && typeof patch === 'object' ? { ...patch } : {};
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'language')) {
+    safePatch.language = normalizeI18nLanguage(safePatch.language);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'themeAccent')) {
+    safePatch.themeAccent = normalizeClientThemeAccent(safePatch.themeAccent);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'fontScale')) {
+    safePatch.fontScale = normalizeClientFontScale(safePatch.fontScale);
+  }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
     const mode = safePatch.weeklyLimitMode;
     safePatch.weeklyLimitMode =
@@ -735,6 +929,18 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
     safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'hoverModules')) {
+    safePatch.hoverModules = normalizeClientHoverModules(safePatch.hoverModules);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewModules')) {
+    safePatch.overviewModules = normalizeClientOverviewModules(safePatch.overviewModules);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'overviewMetrics')) {
+    safePatch.overviewMetrics = normalizeClientOverviewMetrics(safePatch.overviewMetrics);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTableColumns')) {
+    safePatch.stepTableColumns = normalizeClientStepColumns(safePatch.stepTableColumns);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
     safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);
@@ -768,6 +974,44 @@ export async function saveSettingsPatch(patch) {
     throw err;
   }
   await fetchTelemetry({ force: true });
+}
+
+export async function saveModelContextWindow(modelId, option) {
+  const result = await callSidecarApi('/api/context-window', {
+    method: 'POST',
+    body: { modelId, option },
+  });
+  const telemetry = telemetryStore.getState().telemetry;
+  if (telemetry?.settings) {
+    telemetryStore.setState({
+      telemetry: {
+        ...telemetry,
+        settings: { ...telemetry.settings, modelContextWindows: result.modelContextWindows },
+      },
+    });
+  }
+  return result.modelContextWindows;
+}
+
+export async function resetAllSettings() {
+  const res = await callSidecarApi('/api/settings/reset', { method: 'POST', body: {} });
+  const prevTelemetry = telemetryStore.getState().telemetry;
+  if (res?.settings && prevTelemetry) {
+    telemetryStore.setState({
+      telemetry: {
+        ...prevTelemetry,
+        settings: { ...res.settings },
+      },
+    });
+  }
+  await fetchTelemetry({ force: true });
+  return res;
+}
+
+export async function rebuildTrajectoryCache() {
+  const res = await callSidecarApi('/api/cache/rebuild', { method: 'POST', body: {} });
+  await fetchTelemetry({ force: true });
+  return res;
 }
 
 export async function triggerCloudSync() {
@@ -849,16 +1093,39 @@ export function getAgentBadgeClass(index = 0, isMain = false) {
 }
 
 /**
+ * 格式化主/子代理的紧凑短徽章文本（中文如 `主` / `子1`，英文如 `Main` / `S1`）。
+ *
+ * @param {object|null|undefined} agent
+ * @returns {string}
+ */
+export function formatAgentBadgeText(agent) {
+  if (!isEnglishLocale()) {
+    if (!agent || agent.isMain) return agent?.badgeText || '主';
+    return agent.badgeText || `子${agent.index || ''}`;
+  }
+  if (!agent || agent.isMain) return t('fmt.mainBadge');
+  return agent.index ? t('fmt.subBadge', { index: agent.index }) : t('fmt.subBadgeShort');
+}
+
+/**
  * 格式化主/子代理的完整显示名称（如 `子代理 #1 · Codebase Researcher`）。
  *
  * @param {object|null|undefined} agent
  * @returns {string}
  */
 export function formatAgentLabel(agent) {
-  if (!agent) return '主代理';
-  if (agent.isMain) return agent.shortLabel || '主代理';
-  const rolePart = agent.role && agent.role !== '子代理' ? ` · ${agent.role}` : '';
-  return `${agent.shortLabel || '子代理'}${rolePart}`;
+  if (!isEnglishLocale()) {
+    if (!agent) return '主代理';
+    if (agent.isMain) return agent.shortLabel || '主代理';
+    const rolePart = agent.role && agent.role !== '子代理' ? ` · ${agent.role}` : '';
+    return `${agent.shortLabel || '子代理'}${rolePart}`;
+  }
+  if (!agent || agent.isMain) return t('fmt.mainAgent');
+  const idx = Number(agent.index || 0);
+  const baseLabel = idx > 0 ? `${t('fmt.subAgent')} #${idx}` : t('fmt.subAgent');
+  const rolePart =
+    agent.role && agent.role !== '子代理' && agent.role !== 'Subagent' ? ` · ${agent.role}` : '';
+  return `${baseLabel}${rolePart}`;
 }
 
 /**

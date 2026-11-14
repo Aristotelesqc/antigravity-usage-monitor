@@ -275,6 +275,29 @@ export function resolveModelInfo(
   };
 }
 
+/** 在单次遥测请求内复用同一模型身份与价格的解析结果。 */
+export function createStepModelResolver(dynamicModelMap) {
+  const models = new Map();
+  return (step) => {
+    const { modelKey, apiProvider = '', modelDisplayName = '', responseModel = '' } = step;
+    if (
+      typeof modelKey !== 'string' ||
+      typeof apiProvider !== 'string' ||
+      typeof modelDisplayName !== 'string' ||
+      typeof responseModel !== 'string'
+    ) {
+      return resolveModelInfo(modelKey, dynamicModelMap, apiProvider, modelDisplayName, responseModel);
+    }
+    const key = JSON.stringify([modelKey, apiProvider, modelDisplayName, responseModel]);
+    let info = models.get(key);
+    if (!info) {
+      info = resolveModelInfo(modelKey, dynamicModelMap, apiProvider, modelDisplayName, responseModel);
+      models.set(key, info);
+    }
+    return info;
+  };
+}
+
 /**
  * 为不透明的 Orchestrator 路由模型 ID 补充底层实际模型代号标注（如 `gemini-pro-orchestrator (carbon-4)`），
  * 普通透明上游模型 ID（如 `gemini-3.8-flash-n`、`gemini-4-hydrogen`）原样返回。

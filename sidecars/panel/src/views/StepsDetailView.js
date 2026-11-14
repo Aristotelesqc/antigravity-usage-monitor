@@ -1,10 +1,8 @@
 /**
  * @fileoverview View 3: StepsDetailView (步骤明细与总汇总分析视图).
  * 提供“按步查看”与“总汇总”双子视图切换：
- * - 单步测速表采用 `patchKeyedList` 实现行级 DOM 增量对账与就地复用，支持多代理与多模型复选过滤；
- * - 总汇总视图在顶部提供当前会话线性走势图（总Token / 上下文 / TPS / 首字 / 费用）与趋势拟合曲线图（TPS / 首字 / 缓存 / 费用），
- *   单模型时自动隐藏模型下拉框，多模型时支持独立多选（趋势拟合勾选多模型时同图绘制多条独立颜色回归曲线对比）；
- * - 底部以极简高密度模型卡片表达各模型总数据，全链路支持主代理 / 子代理多选汇总筛选。
+ * - 单步测速表通过 `stepColumnRegistry.js` 动态渲染用户自选的 2..12 个字段列，并支持行级增量对账；
+ * - 总汇总视图提供会话线性走势图、多模型同图趋势拟合曲线与极简高密度模型总览卡片。
  */
 
 import { defineComponent } from '../core/component.js';
@@ -22,12 +20,16 @@ import {
   mergeModelsByDisplayName,
   normalizeOrchestratorIdDisplayMode,
   resolveModelDisplayInfo,
-  speedReasonText,
 } from '../core/formatters.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
+import { getEffectiveLocale, i18nStore, t } from '../i18n/index.js';
+import {
+  DEFAULT_STEP_COLUMN_KEYS,
+  STEP_COLUMN_REGISTRY,
+} from '../registries/stepColumnRegistry.js';
 import {
   formatAgentLabel,
-  getAgentBadgeClass,
+  normalizeClientStepColumns,
   resolveScopedConversation,
   telemetryStore,
 } from '../store/telemetryStore.js';
@@ -44,9 +46,6 @@ import { CustomSelect } from '../components/ui/CustomSelect.js';
 import { createFourSegmentBar } from '../components/ui/FourSegmentBar.js';
 import { SegmentedControl } from '../components/ui/SegmentedControl.js';
 
-/**
- * 当多选勾选了部分代理子集（>=2 个且非全选）时，动态合并所选代理的步骤列表与模型汇总。
- */
 function mergeSelectedAgentUnits(units) {
   const combinedSteps = [];
   const modelMap = new Map();
@@ -67,7 +66,9 @@ function mergeSelectedAgentUnits(units) {
           shortName: m.shortName || gk,
           rawModel: m.rawModel || '',
           upstreamName: m.upstreamName || m.upstreamModel || '',
-          upstreamSet: new Set(Array.isArray(m.upstreamModels) ? m.upstreamModels.filter(Boolean) : []),
+          upstreamSet: new Set(
+            Array.isArray(m.upstreamModels) ? m.upstreamModels.filter(Boolean) : []
+          ),
           calls: 0,
           inputTokens: 0,
           cacheReadTokens: 0,
@@ -122,7 +123,11 @@ function mergeSelectedAgentUnits(units) {
         acc._speedWeightedSum += Number(m.avgTokPerSec) * w;
         acc._speedWeight += w;
       }
-      if (m.avgTtftSec != null && Number.isFinite(Number(m.avgTtftSec)) && Number(m.avgTtftSec) >= 0) {
+      if (
+        m.avgTtftSec != null &&
+        Number.isFinite(Number(m.avgTtftSec)) &&
+        Number(m.avgTtftSec) >= 0
+      ) {
         const w = Math.max(1, calls || 1);
         acc._ttftWeightedSum += Number(m.avgTtftSec) * w;
         acc._ttftWeight += w;
@@ -167,6 +172,25 @@ function mergeSelectedAgentUnits(units) {
   return { steps: combinedSteps, models: mergedModels };
 }
 
+function getLineMetricSwitchOptions() {
+  return [
+    { value: 'totalTokens', label: t('steps.metricTotalTokens') },
+    { value: 'context', label: t('steps.metricContext') },
+    { value: 'tps', label: t('steps.metricTps') },
+    { value: 'ttft', label: t('steps.metricTtft') },
+    { value: 'cost', label: t('steps.metricCost') },
+  ];
+}
+
+function getFitMetricSwitchOptions() {
+  return [
+    { value: 'tps', label: t('steps.metricTps') },
+    { value: 'ttft', label: t('steps.metricTtft') },
+    { value: 'cache', label: t('steps.metricCache') },
+    { value: 'cost', label: t('steps.metricCost') },
+  ];
+}
+
 export const StepsDetailView = defineComponent({
   name: 'StepsDetailView',
   setup({ onCleanup }) {
@@ -191,17 +215,16 @@ export const StepsDetailView = defineComponent({
       }
     }
 
-    // 明细面板标题栏内嵌代理多选筛选下拉框（单选时与顶栏代理切换条双向同步，支持多代理组合筛选）
     const inlineScopeSelect = CustomSelect({
       multiple: true,
       allValue: 'all',
       collapseAll: true,
-      multiUnit: '代理',
+      multiUnit: t('steps.unitAgent'),
       modelValue: selectedAgentScopes,
       icon: 'layers',
-      placeholder: '全部汇总',
+      placeholder: t('steps.allAgents'),
       className: 'steps-inline-scope-select',
-      options: [{ value: 'all', label: '全部汇总' }],
+      options: [{ value: 'all', label: t('steps.allAgents') }],
       onUpdateModelValue: (nextScopes) => {
         if (!Array.isArray(nextScopes) || nextScopes.length === 0) return;
         applyAgentScopesSelection(nextScopes);
@@ -209,16 +232,15 @@ export const StepsDetailView = defineComponent({
     });
     inlineScopeSelect.el.setAttribute('hidden', '');
 
-    // “按步查看”标题栏内嵌模型多选筛选下拉框（仅在多模型且处于“按步查看”时展示）
     const stepsModelSelect = CustomSelect({
       multiple: true,
       allValue: '__all__',
       collapseAll: false,
-      multiUnit: '模型',
+      multiUnit: t('steps.unitModel'),
       modelValue: selectedTableModels,
-      placeholder: '全部模型',
+      placeholder: t('steps.allModels'),
       className: 'steps-inline-model-select',
-      options: [{ value: '__all__', label: '全部模型' }],
+      options: [{ value: '__all__', label: t('steps.allModels') }],
       onUpdateModelValue: (nextModels) => {
         if (!Array.isArray(nextModels) || nextModels.length === 0) return;
         selectedTableModels = nextModels;
@@ -227,34 +249,42 @@ export const StepsDetailView = defineComponent({
     });
     stepsModelSelect.el.setAttribute('hidden', '');
 
-    // 顶部子表分段切换器：在“按步查看”与“总汇总”之间切换
     const subTabSwitch = SegmentedControl({
-      ariaLabel: '明细表视图切换',
+      ariaLabel: t('steps.title'),
       modelValue: uiStore.getState().stepsSubTab,
       options: [
-        { value: 'steps', label: '按步查看 (0)' },
-        { value: 'models', label: '总汇总' },
+        { value: 'steps', label: t('steps.tabSteps', { count: 0 }) },
+        { value: 'models', label: t('steps.tabModels') },
       ],
       onUpdateModelValue: (nextTab) => {
         uiStore.setState({ stepsSubTab: nextTab });
       },
     });
 
-    // --- 子视图 1：单步明细表（步序、模型、吞吐速度、首字延迟、上下文/思考/正文、缓存命中率、单步费用） ---
+    // --- 子视图 1：单步明细表（动态表头与行内列插槽由 `stepColumnRegistry.js` 驱动） ---
+    const stepsTheadRow = h('tr');
     const stepsTbody = h('tbody');
-    const stepsTablePane = h('div', { className: 'table-viewport' }, [
+
+    function syncTableHeaderColumns(colKeys) {
+      const locale = getEffectiveLocale();
+      patchKeyedList(stepsTheadRow, colKeys, {
+        keyFn: (colKey) => colKey,
+        sigFn: (colKey) => `${locale}:${colKey}:${STEP_COLUMN_REGISTRY[colKey].thLabel()}`,
+        createRow: (colKey) => {
+          const th = h('th', { text: STEP_COLUMN_REGISTRY[colKey].thLabel() });
+          return { el: th, refs: { th } };
+        },
+        updateRow: (refs, colKey) => {
+          patchText(refs.th, STEP_COLUMN_REGISTRY[colKey].thLabel());
+        },
+      });
+    }
+
+    syncTableHeaderColumns(DEFAULT_STEP_COLUMN_KEYS);
+
+    const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [
       h('table', { className: 'data-table' }, [
-        h('thead', {}, [
-          h('tr', {}, [
-            h('th', { text: '步序' }),
-            h('th', { text: '模型' }),
-            h('th', { text: '速度' }),
-            h('th', { text: '首字' }),
-            h('th', { text: '上下文 / 思考 / 正文' }),
-            h('th', { text: '缓存' }),
-            h('th', { text: '费用' }),
-          ]),
-        ]),
+        h('thead', {}, [stepsTheadRow]),
         stepsTbody,
       ]),
     ]);
@@ -263,26 +293,29 @@ export const StepsDetailView = defineComponent({
       className: 'table-scroll-host',
     });
 
-    // --- 子视图 2：总汇总分析面板（顶部会话线性图 + 顶部趋势拟合图 + 底部极简模型总览） ---
+    // --- 子视图 2：总汇总分析面板 ---
     let selectedLineMetric = 'totalTokens';
     let selectedFitMetric = 'tps';
 
-    // 拟合模型锁定状态机：进入“总汇总”时默认锚定当前调用模型，停留在视图内期间绝不随轮询跳变
     let fitLockedCascadeId = null;
     let fitLockedModelKeys = [];
     let fitPinnedWhileVisible = false;
     let fitUserPicked = false;
 
-    const lineSummaryBadge = h('span', { className: 'cons-badge text-mono', text: '0 步' });
+    const lineTitleEl = h('span', { className: 'sstep-card-title', text: t('steps.lineTitle') });
+    const lineSummaryBadge = h('span', {
+      className: 'cons-badge text-mono',
+      text: t('header.convMetaSteps', { count: 0 }),
+    });
     const lineModelSelect = CustomSelect({
       multiple: true,
       allValue: '__all__',
       collapseAll: false,
-      multiUnit: '模型',
+      multiUnit: t('steps.unitModel'),
       modelValue: selectedLineModels,
-      placeholder: '全部模型',
+      placeholder: t('steps.allModels'),
       className: 'sstep-fit-model-select sstep-line-model-select',
-      options: [{ value: '__all__', label: '全部模型' }],
+      options: [{ value: '__all__', label: t('steps.allModels') }],
       onUpdateModelValue: (nextModels) => {
         if (!Array.isArray(nextModels) || nextModels.length === 0) return;
         selectedLineModels = nextModels;
@@ -292,15 +325,9 @@ export const StepsDetailView = defineComponent({
     lineModelSelect.el.setAttribute('hidden', '');
 
     const lineMetricSwitch = SegmentedControl({
-      ariaLabel: '会话线性图指标切换',
+      ariaLabel: t('steps.lineTitle'),
       modelValue: selectedLineMetric,
-      options: [
-        { value: 'totalTokens', label: '总Token' },
-        { value: 'context', label: '上下文' },
-        { value: 'tps', label: 'TPS' },
-        { value: 'ttft', label: '首字' },
-        { value: 'cost', label: '费用' },
-      ],
+      options: getLineMetricSwitchOptions(),
       onUpdateModelValue: (nextMetric) => {
         selectedLineMetric = nextMetric;
         if (latestSlice) renderStepsData(latestSlice);
@@ -309,10 +336,7 @@ export const StepsDetailView = defineComponent({
     const sessionLineChart = createSessionLineChart();
     const sessionLineCard = h('div', { className: 'sstep-card sstep-line-card' }, [
       h('div', { className: 'sstep-card-head' }, [
-        h('div', { className: 'sstep-card-title-group' }, [
-          h('span', { className: 'sstep-card-title', text: '会话走势' }),
-          lineSummaryBadge,
-        ]),
+        h('div', { className: 'sstep-card-title-group' }, [lineTitleEl, lineSummaryBadge]),
         h('div', { className: 'sstep-fit-controls' }, [
           lineModelSelect.el,
           lineMetricSwitch.el,
@@ -321,16 +345,20 @@ export const StepsDetailView = defineComponent({
       sessionLineChart.el,
     ]);
 
-    const fitSummaryBadge = h('span', { className: 'cons-badge text-mono', text: '0 样本' });
+    const fitTitleEl = h('span', { className: 'sstep-card-title', text: t('steps.fitTitle') });
+    const fitSummaryBadge = h('span', {
+      className: 'cons-badge text-mono',
+      text: t('header.convMetaSteps', { count: 0 }),
+    });
     const fitModelSelect = CustomSelect({
       multiple: true,
       allValue: '__all__',
       collapseAll: false,
-      multiUnit: '模型',
+      multiUnit: t('steps.unitModel'),
       modelValue: ['__all__'],
-      placeholder: '选择模型',
+      placeholder: t('steps.selectModel'),
       className: 'sstep-fit-model-select',
-      options: [{ value: '__all__', label: '全部模型' }],
+      options: [{ value: '__all__', label: t('steps.allModels') }],
       onUpdateModelValue: (nextModelKeys) => {
         if (!Array.isArray(nextModelKeys) || nextModelKeys.length === 0) return;
         fitLockedModelKeys = nextModelKeys;
@@ -342,14 +370,9 @@ export const StepsDetailView = defineComponent({
     fitModelSelect.el.setAttribute('hidden', '');
 
     const fitMetricSwitch = SegmentedControl({
-      ariaLabel: '趋势拟合指标切换',
+      ariaLabel: t('steps.fitTitle'),
       modelValue: selectedFitMetric,
-      options: [
-        { value: 'tps', label: 'TPS' },
-        { value: 'ttft', label: '首字' },
-        { value: 'cache', label: '缓存' },
-        { value: 'cost', label: '费用' },
-      ],
+      options: getFitMetricSwitchOptions(),
       onUpdateModelValue: (nextMetric) => {
         selectedFitMetric = nextMetric;
         if (latestSlice) renderStepsData(latestSlice);
@@ -358,29 +381,27 @@ export const StepsDetailView = defineComponent({
     const modelFitChart = createModelFitChart();
     const modelFitCard = h('div', { className: 'sstep-card sstep-fit-card' }, [
       h('div', { className: 'sstep-card-head' }, [
-        h('div', { className: 'sstep-card-title-group' }, [
-          h('span', { className: 'sstep-card-title', text: '趋势拟合' }),
-          fitSummaryBadge,
-        ]),
-        h('div', { className: 'sstep-fit-controls' }, [
-          fitModelSelect.el,
-          fitMetricSwitch.el,
-        ]),
+        h('div', { className: 'sstep-card-title-group' }, [fitTitleEl, fitSummaryBadge]),
+        h('div', { className: 'sstep-fit-controls' }, [fitModelSelect.el, fitMetricSwitch.el]),
       ]),
       modelFitChart.el,
     ]);
 
-    const modelsSummaryMeta = h('span', { className: 'cons-badge text-mono', text: '0 次' });
+    const modelsSectionTitleEl = h('span', {
+      className: 'sstep-card-title',
+      text: t('steps.modelsTitle'),
+    });
+    const modelsSummaryMeta = h('span', {
+      className: 'cons-badge text-mono',
+      text: t('cons.callsCount', { calls: 0 }),
+    });
     const modelsEmptyEl = h('div', {
       className: 'smodel-empty text-muted',
-      text: '当前范围暂无模型调用记录',
+      text: t('steps.modelsEmpty'),
     });
     const modelsListEl = h('div', { className: 'smodel-list' });
     const modelsSummarySection = h('div', { className: 'smodel-section' }, [
-      h('div', { className: 'smodel-section-head' }, [
-        h('span', { className: 'sstep-card-title', text: '模型总览' }),
-        modelsSummaryMeta,
-      ]),
+      h('div', { className: 'smodel-section-head' }, [modelsSectionTitleEl, modelsSummaryMeta]),
       modelsEmptyEl,
       modelsListEl,
     ]);
@@ -396,6 +417,7 @@ export const StepsDetailView = defineComponent({
     });
     modelsScroll.el.setAttribute('hidden', '');
 
+    const panelTitleTextEl = h('span', { text: t('steps.title') });
     const panelEl = h(
       'section',
       {
@@ -406,7 +428,7 @@ export const StepsDetailView = defineComponent({
         h('div', { className: 'panel-header steps-panel-header' }, [
           h('span', { className: 'panel-title steps-panel-title' }, [
             createSvgIcon('table', { size: 13 }),
-            h('span', { text: '调用记录' }),
+            panelTitleTextEl,
           ]),
           h('div', { className: 'steps-header-controls' }, [
             inlineScopeSelect.el,
@@ -424,15 +446,17 @@ export const StepsDetailView = defineComponent({
     let latestSlice = null;
     let isDirty = false;
 
-    /**
-     * 解析当前会话/代理作用域下的默认活跃调用模型分组键。
-     */
     function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
       const activeCand = getStepModelGroupKey({
         modelLabel: scopedConv?.activeModelLabel,
         modelShort: scopedConv?.activeModelShort,
       });
-      if (activeCand && activeCand !== '模型未知' && availableModelKeys.has(activeCand)) {
+      if (
+        activeCand &&
+        activeCand !== '模型未知' &&
+        activeCand !== t('fmt.unknownModel') &&
+        availableModelKeys.has(activeCand)
+      ) {
         return activeCand;
       }
       for (let i = chronoSteps.length - 1; i >= 0; i--) {
@@ -452,9 +476,6 @@ export const StepsDetailView = defineComponent({
       return '__all__';
     }
 
-    /**
-     * 归一化模型多选列表（支持同时勾选 2..N 个具体模型以独立分色对比，仅在明确点击“全部模型”或无有效项时回到 `['__all__']`）。
-     */
     function normalizeMultiModelSelection(rawSelection, availableModelKeys) {
       if (availableModelKeys.size <= 1) return ['__all__'];
       const arr = Array.isArray(rawSelection) ? rawSelection : [];
@@ -464,12 +485,102 @@ export const StepsDetailView = defineComponent({
       return valid;
     }
 
-    /**
-     * 对单步测速表、顶部会话走势图、顶部趋势拟合图及底部极简模型列表执行增量更新。
-     */
+    function refreshStaticLocaleLabels() {
+      patchText(panelTitleTextEl, t('steps.title'));
+      patchText(lineTitleEl, t('steps.lineTitle'));
+      patchText(fitTitleEl, t('steps.fitTitle'));
+      patchText(modelsSectionTitleEl, t('steps.modelsTitle'));
+      patchText(modelsEmptyEl, t('steps.modelsEmpty'));
+      lineMetricSwitch.setProps({
+        modelValue: selectedLineMetric,
+        options: getLineMetricSwitchOptions(),
+      });
+      fitMetricSwitch.setProps({
+        modelValue: selectedFitMetric,
+        options: getFitMetricSwitchOptions(),
+      });
+      const colKeys = normalizeClientStepColumns(latestSlice?.stepTableColumns);
+      syncTableHeaderColumns(colKeys);
+      if (!latestSlice) {
+        subTabSwitch.setProps({
+          modelValue: uiStore.getState().stepsSubTab,
+          options: [
+            { value: 'steps', label: t('steps.tabSteps', { count: 0 }) },
+            { value: 'models', label: t('steps.tabModels') },
+          ],
+        });
+      }
+    }
+
+    function renderStepTable(tableSteps, cascadeId, colKeys, locale, {
+      effectiveScopes,
+      hasSubagents,
+      displaySettings,
+    }) {
+      const colOrderSig = colKeys.join(',');
+      const wantedSet = new Set(colKeys);
+      syncTableHeaderColumns(colKeys);
+
+      const cellCtx = {
+        hasSubagents,
+        effectiveScopes,
+        scopeSigKey: effectiveScopes.join(','),
+        displaySettings,
+        onSelectAgentScopes: applyAgentScopesSelection,
+      };
+
+      patchKeyedList(stepsTbody, tableSteps, {
+        keyFn: (st) => `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
+        sigFn: (st) => {
+          const parts = colKeys
+            .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
+            .join('|');
+          return `${locale}:${colOrderSig}:${parts}`;
+        },
+        createRow: () => {
+          const tr = h('tr');
+          return {
+            el: tr,
+            refs: {
+              cellMap: new Map(),
+              colOrderSig: '',
+            },
+          };
+        },
+        updateRow: (refs, st, _idx, tr) => {
+          if (refs.colOrderSig !== colOrderSig) {
+            for (const [oldColKey, entry] of refs.cellMap) {
+              if (!wantedSet.has(oldColKey)) {
+                tr.removeChild(entry.td);
+                refs.cellMap.delete(oldColKey);
+              }
+            }
+
+            for (const [i, colKey] of colKeys.entries()) {
+              if (!refs.cellMap.has(colKey)) {
+                refs.cellMap.set(colKey, STEP_COLUMN_REGISTRY[colKey].createCell());
+              }
+              const targetTd = refs.cellMap.get(colKey).td;
+              const currentTd = tr.children[i] || null;
+              if (currentTd !== targetTd) {
+                tr.insertBefore(targetTd, currentTd);
+              }
+            }
+            refs.colOrderSig = colOrderSig;
+          }
+
+          for (const colKey of colKeys) {
+            const cellEntry = refs.cellMap.get(colKey);
+            STEP_COLUMN_REGISTRY[colKey].updateCell(cellEntry.refs, st, cellCtx);
+          }
+        },
+      });
+    }
+
     function renderStepsData(slice) {
       if (!slice) return;
       const uiSt = uiStore.getState();
+      const locale = getEffectiveLocale();
 
       const currentCid = String(slice.cascadeId || slice.activeConversation?.cascadeId || '');
       if (currentCid !== fitLockedCascadeId) {
@@ -516,23 +627,25 @@ export const StepsDetailView = defineComponent({
         const scopeOpts = [
           {
             value: 'all',
-            label: '全部汇总',
-            meta: `${aggregated?.stepCount ?? 0}步`,
+            label: t('steps.allAgents'),
+            meta: t('header.convMetaSteps', { count: aggregated?.stepCount ?? 0 }),
           },
           {
             value: 'main',
-            label: '主代理',
-            meta: `${mainAgent?.stepCount ?? 0}步`,
+            label: t('fmt.mainAgent'),
+            meta: t('header.convMetaSteps', { count: mainAgent?.stepCount ?? 0 }),
           },
           ...subagents.map((s) => ({
             value: s.agentId,
             label: formatAgentLabel(s),
-            meta: `${s.stepCount || 0}步`,
+            meta: t('header.convMetaSteps', { count: s.stepCount || 0 }),
           })),
         ];
         inlineScopeSelect.setProps({
           modelValue: effectiveScopes,
           options: scopeOpts,
+          placeholder: t('steps.allAgents'),
+          multiUnit: t('steps.unitAgent'),
         });
 
         if (effectiveScopes[0] === 'all') {
@@ -573,8 +686,8 @@ export const StepsDetailView = defineComponent({
         orchestratorIdMode: slice.orchestratorIdMode,
       };
 
-      // 提取当前代理作用域下的时间升序步骤与全量可选模型列表
       const showAgentPrefix = isMergedMultiAgents;
+      const showModels = uiSt.stepsSubTab === 'models';
       const chronoSteps = toChronologicalSteps(steps, isMergedMultiAgents);
 
       const stepTtftFallbackMap = new Map();
@@ -584,13 +697,13 @@ export const StepsDetailView = defineComponent({
         if (!stepModelOptionMap.has(gk)) {
           const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
           stepModelOptionMap.set(gk, {
-            label: disp.text.replace(/·压缩\s*$/u, '').trim() || gk,
+            label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
             calls: 0,
           });
         }
         stepModelOptionMap.get(gk).calls += 1;
 
-        if (!st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
+        if (showModels && !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
           const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
           prev.sum += Number(st.ttftSec);
           prev.count += 1;
@@ -615,8 +728,8 @@ export const StepsDetailView = defineComponent({
         });
         perModelOptions.push({
           value: gk,
-          label: disp.text.replace(/·压缩\s*$/u, '').trim() || gk,
-          meta: `${Number(m.calls || 0)}步`,
+          label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
+          meta: t('header.convMetaSteps', { count: Number(m.calls || 0) }),
         });
       }
       for (const [gk, info] of stepModelOptionMap.entries()) {
@@ -629,7 +742,7 @@ export const StepsDetailView = defineComponent({
           perModelOptions.push({
             value: gk,
             label: info.label,
-            meta: `${info.calls}步`,
+            meta: t('header.convMetaSteps', { count: info.calls }),
           });
         }
       }
@@ -638,13 +751,13 @@ export const StepsDetailView = defineComponent({
       const modelSelectOptions = [
         {
           value: '__all__',
-          label: '全部模型',
-          meta: `${chronoSteps.length}步`,
+          label: t('steps.allModels'),
+          meta: t('header.convMetaSteps', { count: steps.length }),
         },
         ...perModelOptions,
       ];
 
-      // 1. “按步查看”模型多选过滤与表格增量对账
+      // 1. “按步查看”动态列头同步与表格行级增量对账
       selectedTableModels = normalizeMultiModelSelection(
         selectedTableModels,
         availableModelKeys
@@ -655,6 +768,8 @@ export const StepsDetailView = defineComponent({
         stepsModelSelect.setProps({
           modelValue: selectedTableModels,
           options: modelSelectOptions,
+          placeholder: t('steps.allModels'),
+          multiUnit: t('steps.unitModel'),
         });
         if (!showStepsModelFilter) stepsModelSelect.close();
       } else {
@@ -670,143 +785,64 @@ export const StepsDetailView = defineComponent({
 
       const stepsTabLabel =
         tableSteps.length !== steps.length
-          ? `按步查看 (${tableSteps.length}/${steps.length})`
-          : `按步查看 (${steps.length})`;
+          ? t('steps.tabStepsFiltered', {
+              filtered: tableSteps.length,
+              total: steps.length,
+            })
+          : t('steps.tabSteps', { count: steps.length });
 
       subTabSwitch.setProps({
         options: [
           { value: 'steps', label: stepsTabLabel },
-          { value: 'models', label: '总汇总' },
+          { value: 'models', label: t('steps.tabModels') },
         ],
       });
 
-      const scopeSigKey = effectiveScopes.join(',');
-      patchKeyedList(stepsTbody, tableSteps, {
-        keyFn: (st) => `${st.agentCascadeId || slice.cascadeId || 'conv'}-${st.stepIndex}`,
-        sigFn: (st) => {
-          const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: '—' });
-          const outTok = Math.max(0, Number(st.outputTokens || 0));
-          const thinkTok = Math.max(0, Number(st.thinkingTokens || 0));
-          const respTok =
-            st.responseTokens != null
-              ? Math.max(0, Number(st.responseTokens))
-              : Math.max(0, outTok - thinkTok);
-          return `${hasSubagents}:${scopeSigKey}:${st.agentId || 'main'}:${st.stepIndex}:${disp.text}:${disp.title}:${st.tokPerSec}:${st.ttftSec}:${st.contextTokens}:${outTok}:${thinkTok}:${respTok}:${st.cacheHitPct}:${st.costUsd}:${st.selectedSpeedReason}`;
-        },
-        createRow: () => {
-          const agentBadgeEl = h('span', {
-            className: 'agent-badge is-clickable',
-            hidden: true,
-            style: 'margin-right: 4px;',
-          });
-          const stepNumText = h('span');
-          const tdStep = h('td', {}, [agentBadgeEl, stepNumText]);
+      if (!showModels) {
+        const colKeys = normalizeClientStepColumns(slice.stepTableColumns);
+        renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
+          effectiveScopes,
+          hasSubagents,
+          displaySettings,
+        });
+        stepsScroll.refresh();
+      }
 
-          const tdModel = h('td', {
-            style: 'max-width: 120px; overflow: hidden; text-overflow: ellipsis;',
-          });
-          const speedMain = h('strong', {
-            className: 'cell-value accent-speed',
-            style: 'font-size: 11px;',
-          });
-          const speedReason = h('div', { className: 'text-muted', style: 'font-size: 9.5px;' });
-          const tdSpeed = h('td', {}, [speedMain, speedReason]);
-
-          const tdTtft = h('td');
-          const tdCtx = h('td');
-          const tdCache = h('td', {
-            className: 'cell-value accent-ok',
-            style: 'font-size: 11px;',
-          });
-          const tdCost = h('td', { style: 'font-weight: 600;' });
-
-          const tr = h('tr', {}, [tdStep, tdModel, tdSpeed, tdTtft, tdCtx, tdCache, tdCost]);
-          return {
-            el: tr,
-            refs: {
-              agentBadgeEl,
-              stepNumText,
-              tdModel,
-              speedMain,
-              speedReason,
-              tdTtft,
-              tdCtx,
-              tdCache,
-              tdCost,
-            },
-          };
-        },
-        updateRow: (refs, st) => {
-          patchAttr(refs.agentBadgeEl, 'hidden', !hasSubagents);
-          if (hasSubagents) {
-            const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
-            patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
-            patchText(refs.agentBadgeEl, st.agentBadge || (st.isSubagent ? '子' : '主'));
-            const targetScope = st.agentId || 'main';
-            const isSoleTarget =
-              effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
-            patchAttr(
-              refs.agentBadgeEl,
-              'title',
-              isSoleTarget
-                ? '点击切回全部汇总'
-                : `点击仅过滤查看 ${st.agentLabel || '该代理'}（按住 Ctrl/Shift 可加减多选）`
-            );
-            refs.agentBadgeEl.onclick = (e) => {
-              if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && effectiveScopes[0] !== 'all') {
-                const next = effectiveScopes.includes(targetScope)
-                  ? effectiveScopes.filter((id) => id !== targetScope)
-                  : [...effectiveScopes, targetScope];
-                applyAgentScopesSelection(next.length > 0 ? next : ['all']);
-              } else {
-                applyAgentScopesSelection(isSoleTarget ? ['all'] : [targetScope]);
-              }
-            };
-          }
-          patchText(refs.stepNumText, `#${Number(st.stepIndex)}`);
-          const modelDisplay = resolveModelDisplayInfo(st, displaySettings, { fallback: '—' });
-          patchText(refs.tdModel, modelDisplay.text);
-          patchAttr(refs.tdModel, 'title', modelDisplay.title);
-
-          patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
-          const reason = speedReasonText(st.selectedSpeedReason);
-          patchText(refs.speedReason, reason);
-          patchAttr(refs.speedReason, 'hidden', !reason);
-
-          patchText(refs.tdTtft, formatMetric(st.ttftSec, 's'));
-          const outTok = Math.max(0, Number(st.outputTokens || 0));
-          const thinkTok = Math.max(0, Number(st.thinkingTokens || 0));
-          const respTok =
-            st.responseTokens != null
-              ? Math.max(0, Number(st.responseTokens))
-              : Math.max(0, outTok - thinkTok);
-          patchText(
-            refs.tdCtx,
-            `${formatTokens(st.contextTokens)} / ${formatTokens(thinkTok)} / ${formatTokens(respTok)}`
-          );
-          patchAttr(
-            refs.tdCtx,
-            'title',
-            `上下文 ${Math.round(Number(st.contextTokens || 0))} · 思考 ${Math.round(thinkTok)} · 正文 ${Math.round(respTok)}`
-          );
-          patchText(refs.tdCache, `${Number(st.cacheHitPct ?? 0)}%`);
-
-          const costVal = st.costUsd;
-          patchText(refs.tdCost, formatUsd(costVal, { precise: true }));
-          patchClasses(refs.tdCost, { 'accent-speed': costVal >= 0.15 });
-        },
-      });
-
-      // 2. 顶部“会话走势”多选模型对比与图表更新（单模型时隐藏下拉框）
+      // 2. 顶部“会话走势”更新
       selectedLineModels = normalizeMultiModelSelection(
         selectedLineModels,
         availableModelKeys
       );
+
+      // 3. 顶部“趋势拟合”模型锁定随当前会话与代理范围更新。
+      const defaultActiveModelKey = resolveDefaultActiveModelKey(
+        activeModelSource,
+        chronoSteps,
+        models,
+        availableModelKeys
+      );
+      const sanitizedLocked = fitLockedModelKeys.includes('__all__')
+        ? ['__all__']
+        : Array.from(new Set(fitLockedModelKeys.filter((k) => availableModelKeys.has(k))));
+
+      if (!showModels) {
+        fitPinnedWhileVisible = false;
+      }
+      if ((!fitPinnedWhileVisible && !fitUserPicked) || sanitizedLocked.length === 0) {
+        fitLockedModelKeys = [defaultActiveModelKey];
+      } else {
+        fitLockedModelKeys = sanitizedLocked;
+      }
+      if (!showModels) return;
+      if (availableModelKeys.size > 0) fitPinnedWhileVisible = true;
+
       patchAttr(lineModelSelect.el, 'hidden', !hasMultipleModels);
       if (hasMultipleModels) {
         lineModelSelect.setProps({
           modelValue: selectedLineModels,
           options: modelSelectOptions,
+          placeholder: t('steps.allModels'),
+          multiUnit: t('steps.unitModel'),
         });
       } else {
         lineModelSelect.close();
@@ -823,46 +859,6 @@ export const StepsDetailView = defineComponent({
       });
       patchText(lineSummaryBadge, lineRes.summaryBadge);
 
-      // 3. 顶部“趋势拟合”多选模型对比与锁定状态机更新（单模型时隐藏下拉框）
-      const defaultActiveModelKey = resolveDefaultActiveModelKey(
-        activeModelSource,
-        chronoSteps,
-        models,
-        availableModelKeys
-      );
-
-      const sanitizeFitSelection = (keys) => {
-        if (!Array.isArray(keys) || keys.length === 0) return [];
-        if (keys.includes('__all__')) return ['__all__'];
-        return Array.from(new Set(keys.filter((k) => availableModelKeys.has(k))));
-      };
-
-      const isModelsViewVisible =
-        uiSt.activeView === 'steps' && uiSt.stepsSubTab === 'models';
-      const sanitizedLocked = sanitizeFitSelection(fitLockedModelKeys);
-
-      if (!isModelsViewVisible) {
-        fitPinnedWhileVisible = false;
-        if (!fitUserPicked || sanitizedLocked.length === 0) {
-          fitLockedModelKeys = [defaultActiveModelKey];
-        } else {
-          fitLockedModelKeys = sanitizedLocked;
-        }
-      } else if (!fitPinnedWhileVisible) {
-        if (!fitUserPicked || sanitizedLocked.length === 0) {
-          fitLockedModelKeys = [defaultActiveModelKey];
-        } else {
-          fitLockedModelKeys = sanitizedLocked;
-        }
-        if (availableModelKeys.size > 0) {
-          fitPinnedWhileVisible = true;
-        }
-      } else if (sanitizedLocked.length === 0) {
-        fitLockedModelKeys = [defaultActiveModelKey];
-      } else {
-        fitLockedModelKeys = sanitizedLocked;
-      }
-
       const effectiveFitModelKeys =
         availableModelKeys.size === 0
           ? ['__all__']
@@ -877,6 +873,8 @@ export const StepsDetailView = defineComponent({
         fitModelSelect.setProps({
           modelValue: effectiveFitModelKeys,
           options: modelSelectOptions,
+          placeholder: t('steps.selectModel'),
+          multiUnit: t('steps.unitModel'),
         });
       } else {
         fitModelSelect.close();
@@ -893,7 +891,7 @@ export const StepsDetailView = defineComponent({
       });
       patchText(fitSummaryBadge, fitRes.summaryBadge);
 
-      // 4. 极简模型总览列表增量对账（按最终展示名去重归并，一卡表达调用、Token 4 段占比、均速/首字/缓存与费用）
+      // 4. 极简模型总览列表增量对账
       const displayModels = mergeModelsByDisplayName(models, displaySettings, { fallback: '—' });
       let sumCalls = 0;
       let sumTokens = 0;
@@ -909,13 +907,16 @@ export const StepsDetailView = defineComponent({
       }
 
       if (displayModels.length === 0) {
-        patchText(modelsSummaryMeta, '0 次');
+        patchText(modelsSummaryMeta, t('cons.callsCount', { calls: 0 }));
       } else {
-        const modelCountPart = displayModels.length > 1 ? `${displayModels.length} 模型 · ` : '';
+        const modelCountPart =
+          displayModels.length > 1
+            ? t('steps.modelsSummaryPrefix', { count: displayModels.length })
+            : '';
         const isAllUnpricedSum = sumCalls > 0 && sumUnpriced >= sumCalls && !(sumCost > 0);
         patchText(
           modelsSummaryMeta,
-          `${modelCountPart}${sumCalls} 次 · ${formatTokens(sumTokens)} · ${formatUsd(
+          `${modelCountPart}${t('cons.callsCount', { calls: sumCalls })} · ${formatTokens(sumTokens)} · ${formatUsd(
             isAllUnpricedSum ? null : sumCost,
             {
               precise: sumCost > 0 && sumCost < 0.1,
@@ -946,7 +947,7 @@ export const StepsDetailView = defineComponent({
               : [gk];
           const isActiveFit =
             hasMultipleModels && cardGroupKeys.some((k) => fitActiveKeySet.has(k));
-          return `${m.displayText}:${m.displayTitle}:${m.calls}:${sumCalls}:${displayModels.length}:${m.avgTokPerSec}:${avgTtft}:${m.cacheHitPct}:${m.inputTokens}:${m.cacheReadTokens}:${m.thinkingTokens}:${m.responseTokens}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${isActiveFit}:${hasMultipleModels}`;
+          return `${locale}:${m.displayText}:${m.displayTitle}:${m.calls}:${sumCalls}:${displayModels.length}:${m.avgTokPerSec}:${avgTtft}:${m.cacheHitPct}:${m.inputTokens}:${m.cacheReadTokens}:${m.thinkingTokens}:${m.responseTokens}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${isActiveFit}:${hasMultipleModels}`;
         },
         createRow: () => {
           const nameEl = h('strong', { className: 'smodel-name' });
@@ -977,7 +978,9 @@ export const StepsDetailView = defineComponent({
           const gk = getStepModelGroupKey(m);
           const cardGroupKeys =
             Array.isArray(m.sourceLabels) && m.sourceLabels.length > 0
-              ? Array.from(new Set(m.sourceLabels.map((lbl) => getStepModelGroupKey({ label: lbl }))))
+              ? Array.from(
+                  new Set(m.sourceLabels.map((lbl) => getStepModelGroupKey({ label: lbl })))
+                )
               : [gk];
           const dispText = m.displayText || '—';
           const dispTitle = m.displayTitle || dispText;
@@ -988,7 +991,9 @@ export const StepsDetailView = defineComponent({
           const callSharePct = sumCalls > 0 ? Math.round((calls / sumCalls) * 100) : 0;
           patchText(
             refs.callsPillEl,
-            displayModels.length > 1 ? `${calls}次 · ${callSharePct}%` : `${calls}次`
+            displayModels.length > 1
+              ? t('steps.modelCallsShare', { calls, pct: callSharePct })
+              : t('steps.modelCallsOnly', { calls })
           );
 
           const inTok = Math.max(0, Number(m.inputTokens || 0));
@@ -1033,11 +1038,20 @@ export const StepsDetailView = defineComponent({
 
           patchText(
             refs.perfEl,
-            `均速 ${formatMetric(m.avgTokPerSec, ' tok/s')} · 首字 ${formatMetric(resolvedAvgTtft, 's')} · 缓存 ${resolvedCachePct}%`
+            t('steps.modelPerfFoot', {
+              tps: formatMetric(m.avgTokPerSec, ' tok/s'),
+              ttft: formatMetric(resolvedAvgTtft, 's'),
+              cache: resolvedCachePct,
+            })
           );
           patchText(
             refs.splitEl,
-            `入 ${formatTokens(inTok)} · 缓 ${formatTokens(cacheTok)} · 思 ${formatTokens(thinkTok)} · 正 ${formatTokens(respTok)}`
+            t('steps.modelSplitFoot', {
+              inTok: formatTokens(inTok),
+              cacheTok: formatTokens(cacheTok),
+              thinkTok: formatTokens(thinkTok),
+              respTok: formatTokens(respTok),
+            })
           );
 
           const isActiveFit =
@@ -1049,8 +1063,8 @@ export const StepsDetailView = defineComponent({
             !hasMultipleModels
               ? dispTitle
               : isActiveFit
-                ? `${dispTitle}（已纳入上方趋势拟合，按住 Ctrl/Shift 点击可多选对比）`
-                : `点击在上方拟合图查看 ${dispText}（按住 Ctrl/Shift 点击可多选同图对比）`
+                ? t('steps.fitActiveCardTitle', { title: dispTitle })
+                : t('steps.fitInactiveCardTitle', { text: dispText })
           );
           cardEl.onclick = (e) => {
             if (!hasMultipleModels) return;
@@ -1079,11 +1093,7 @@ export const StepsDetailView = defineComponent({
         },
       });
 
-      if (uiSt.stepsSubTab === 'models') {
-        modelsScroll.refresh();
-      } else {
-        stepsScroll.refresh();
-      }
+      modelsScroll.refresh();
     }
 
     const unsubUi = uiStore.subscribe(
@@ -1108,11 +1118,11 @@ export const StepsDetailView = defineComponent({
         cascadeId: st.telemetry?.activeConversation?.cascadeId,
         recentSteps: st.telemetry?.activeConversation?.recentSteps,
         sessionModelBreakdown: st.telemetry?.activeConversation?.modelBreakdown,
-        modelBreakdown: st.telemetry?.modelBreakdown,
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
         ),
+        stepTableColumns: st.telemetry?.settings?.stepTableColumns,
       }),
       (slice) => {
         latestSlice = slice;
@@ -1157,10 +1167,23 @@ export const StepsDetailView = defineComponent({
       }
     );
 
+    const unsubI18n = i18nStore.subscribe(
+      (st) => st.locale,
+      () => {
+        refreshStaticLocaleLabels();
+        if (uiStore.getState().activeView === 'steps' && latestSlice) {
+          renderStepsData(latestSlice);
+        } else {
+          isDirty = true;
+        }
+      }
+    );
+
     onCleanup(() => {
       unsubUi();
       unsubTelemetry();
       unsubView();
+      unsubI18n();
       sessionLineChart.destroy?.();
       modelFitChart.destroy?.();
       inlineScopeSelect.destroy();
@@ -1177,6 +1200,7 @@ export const StepsDetailView = defineComponent({
     return {
       el: rootEl,
       refs: {
+        stepsTheadRow,
         stepsTbody,
         modelsListEl,
         inlineScopeSelect,

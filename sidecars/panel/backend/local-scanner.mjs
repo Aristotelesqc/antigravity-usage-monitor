@@ -33,9 +33,9 @@ import { formatGenericModelSlug, getBaseModelLabel } from './model-pricing.mjs';
 import { PLACEHOLDER_MAP } from './pricing-catalog.mjs';
 
 /**
- * 扫描本地 `conversations` 目录，返回 `cascadeId -> 最新磁盘修改时间 (mtimeMs)` 映射表。
+ * 扫描本地 `conversations` 目录，按会话归并轨迹文件。
  *
- * @returns {Map<string, number>}
+ * @returns {Map<string, string[]>}
  */
 function discoverLocalConversationFiles() {
   const map = new Map();
@@ -47,20 +47,25 @@ function discoverLocalConversationFiles() {
       );
       if (!m) continue;
       const cascadeId = m[1].toLowerCase();
-      try {
-        const st = statSync(join(CONVERSATIONS_DIR, name));
-        const prevMtime = map.get(cascadeId) || 0;
-        if (st.mtimeMs > prevMtime) {
-          map.set(cascadeId, st.mtimeMs);
-        }
-      } catch {
-        if (!map.has(cascadeId)) map.set(cascadeId, 0);
-      }
+      if (!map.has(cascadeId)) map.set(cascadeId, []);
+      map.get(cascadeId).push(name);
     }
   } catch {
     // 忽略目录读取异常
   }
   return map;
+}
+
+function readConversationMtime(files = []) {
+  let mtimeMs = 0;
+  for (const name of files) {
+    try {
+      mtimeMs = Math.max(mtimeMs, statSync(join(CONVERSATIONS_DIR, name)).mtimeMs);
+    } catch {
+      // 轨迹文件可能在目录枚举后被宿主删除。
+    }
+  }
+  return mtimeMs;
 }
 
 /**
@@ -219,6 +224,7 @@ export function loadExternalDeepStatsCache() {
 
 const MAX_CONCURRENT_RPC = 4;
 const LEGACY_MIGRATION_BATCH_SIZE = 8;
+const stepFieldChecks = new WeakMap();
 const MAX_SUBAGENT_RECONCILE_DEPTH = 4;
 const FAILED_RPC_COOLDOWN_MS = 60_000;
 const ACTIVE_FAILED_RPC_COOLDOWN_MS = 15_000;
@@ -635,7 +641,9 @@ export async function enumerateAndSyncConversations({
     ) {
       continue;
     }
-    const diskMtimeMs = diskConvMap.get(cidLower) || 0;
+    const lastModifiedTime = item?.lastModifiedTime || item?.createdTime || '';
+    const summaryMtimeMs = parseIsoMs(lastModifiedTime);
+    const diskMtimeMs = summaryMtimeMs ? null : readConversationMtime(diskConvMap.get(cidLower));
     const rawMeta = item?.trajectoryMetadata || item?.metadata || {};
     const parentConversationId = String(
       rawMeta.parentConversationId || cached?.parentConversationId || ''
@@ -654,9 +662,8 @@ export async function enumerateAndSyncConversations({
       Boolean(rootConversationId && rootConversationId !== cidLower);
 
     if (item) {
-      const lastModifiedTime = item?.lastModifiedTime || item?.createdTime || '';
       const lastModifiedMs =
-        parseIsoMs(lastModifiedTime) || diskMtimeMs || cached?.lastModifiedMs || 0;
+        summaryMtimeMs || diskMtimeMs || cached?.lastModifiedMs || 0;
       const rawSummaryStepCount = Number(item?.stepCount || 0);
       const modelStepCount = Array.isArray(cached?.steps)
         ? cached.steps.length
@@ -762,18 +769,30 @@ export async function enumerateAndSyncConversations({
     if (!Object.prototype.hasOwnProperty.call(lastCachedStep, 'contextBreakdown')) {
       return true;
     }
-    if (steps.some((s) => !Object.prototype.hasOwnProperty.call(s, 'responseModel'))) {
-      return true;
-    }
+    const { missingResponseModel, missingToolResultsTokens } = readStepFieldChecks(steps);
+    return missingResponseModel || missingToolResultsTokens;
+  }
+
+  function readStepFieldChecks(steps) {
+    const known = stepFieldChecks.get(steps);
+    if (known) return known;
+    let missingToolResultsTokens = false;
     for (let i = steps.length - 1; i >= 0; i--) {
       if (steps[i]?.contextBreakdown) {
-        return !Object.prototype.hasOwnProperty.call(
+        missingToolResultsTokens = !Object.prototype.hasOwnProperty.call(
           steps[i].contextBreakdown,
           'toolResultsTokens'
         );
+        break;
       }
     }
-    return false;
+    const checks = {
+      missingResponseModel: steps.some((s) => !Object.prototype.hasOwnProperty.call(s, 'responseModel')),
+      missingToolResultsTokens,
+      hasIncompleteTiming: steps.some((s) => s.speedReason === 'incomplete_or_invalid_timing'),
+    };
+    stepFieldChecks.set(steps, checks);
+    return checks;
   }
 
   /**
@@ -857,8 +876,11 @@ export async function enumerateAndSyncConversations({
               accountName: prev?.accountName || currentAccountName || '',
               title: conv.title,
               lastModifiedMs: resolvedLastModMs,
-              diskMtimeMs: conv.diskMtimeMs || 0,
+              diskMtimeMs:
+                conv.diskMtimeMs ?? readConversationMtime(diskConvMap.get(conv.cascadeId.toLowerCase())),
               wasRunning: isRunning,
+              contextLimitTelemetry: true,
+              speedClearedTelemetry: true,
               steps,
               subagentRefs,
             };
@@ -879,6 +901,8 @@ export async function enumerateAndSyncConversations({
               !prev ||
               prev.signature !== sig ||
               Boolean(prev.wasRunning) !== isRunning ||
+              !prev.contextLimitTelemetry ||
+              !prev.speedClearedTelemetry ||
               metaChanged ||
               JSON.stringify(prev.steps) !== JSON.stringify(steps);
 
@@ -922,11 +946,18 @@ export async function enumerateAndSyncConversations({
   }
 
   // 阶段 1：拉取常规新增/变更会话，以及摘要列表中尚未提取 subagentRefs 的会话
+  // 旧缓存只补读当前会话的宿主上限，避免重拉全部历史轨迹。
+  const contextTelemetryCascadeId = reqLower || rawConversations[0]?.cascadeId.toLowerCase();
+  const selectedRootId = rawConversations.find(
+    (c) => c.cascadeId.toLowerCase() === contextTelemetryCascadeId
+  )?.rootConversationId || contextTelemetryCascadeId;
+  let remainingTimingRefreshes = LEGACY_MIGRATION_BATCH_SIZE;
   const toFetch = rawConversations.filter((conv) => {
     const sig = buildConvSig(conv);
     if (isFetchInCooldown(conv, sig)) return false;
     const cached = trajectoryCache[conv.cascadeId];
     if (!cached || conv.needsInitialLoad) return true;
+    if (!cached.contextLimitTelemetry && conv.cascadeId.toLowerCase() === contextTelemetryCascadeId) return true;
     const hasCurrentSchema = String(cached.signature || '').startsWith(
       `${CACHE_SCHEMA_VERSION}:`
     );
@@ -937,14 +968,23 @@ export async function enumerateAndSyncConversations({
       if (missingSubagentRefs && conv.cascadeId.toLowerCase() === reqLower) {
         return true;
       }
-      return (
+      if (
         conv.diskMtimeMs > 0 &&
         conv.diskMtimeMs > (cached.diskMtimeMs || cached.lastModifiedMs || 0)
-      );
+      ) return true;
+    } else {
+      const isRunning = conv.status === 'CASCADE_RUN_STATUS_RUNNING';
+      if (missingSubagentRefs || cached.signature !== sig || isRunning || cached.wasRunning) return true;
     }
-    if (missingSubagentRefs) return true;
-    const isRunning = conv.status === 'CASCADE_RUN_STATUS_RUNNING';
-    return cached.signature !== sig || isRunning || Boolean(cached.wasRunning);
+    // 保留已有效的历史测速，按批补读需要确认原始状态与生成结束时间的旧步骤。
+    if (!cached.speedClearedTelemetry && readStepFieldChecks(cached.steps).hasIncompleteTiming) {
+      if (conv.cascadeId.toLowerCase() === selectedRootId || conv.rootConversationId === selectedRootId) return true;
+      if (remainingTimingRefreshes > 0) {
+        remainingTimingRefreshes -= 1;
+        return true;
+      }
+    }
+    return false;
   });
 
   await fetchTrajectoryBatch(toFetch);
@@ -979,7 +1019,7 @@ export async function enumerateAndSyncConversations({
           let subConv = byLowerId.get(subCid);
           const subCached = trajectoryCache[subConv?.cascadeId || canonSubId];
           if (!subConv) {
-            const diskMtimeMs = diskConvMap.get(subCid) || 0;
+            const diskMtimeMs = readConversationMtime(diskConvMap.get(subCid));
             const lastStepMs = subCached?.steps?.[subCached.steps.length - 1]?.createdAtMs || 0;
             const stepCount = Number(subCached?.steps?.length || 0);
             subConv = {

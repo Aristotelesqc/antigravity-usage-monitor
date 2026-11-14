@@ -11,19 +11,27 @@ import { join } from 'node:path';
 import {
   HERE,
   SETTINGS_FILE,
+  clearRuntimeCaches,
   cloudSyncState,
   computeRuntimeCodeVersion,
+  createDefaultSettingsObject,
   isPlainObject,
   loadSettings,
   lsRuntimeEndpoint,
-  normalizeOrchestratorIdMode,
+  normalizeFullSettings,
   normalizePluginUpdateMode,
-  normalizeTopbarCapsuleSlots,
-  normalizeWeeklyLimitMode,
   normalizeWindowMountMode,
   saveJson,
 } from './config.mjs';
+import {
+  getContextWindowModels,
+  getContextWindowGroups,
+  isContextWindowSettingId,
+  isContextWindowOption,
+  resolveContextWindowOption,
+} from './context-windows.mjs';
 import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
+import { callLsRpc, getContextModelCatalog } from './ls-rpc.mjs';
 import {
   performPluginUpdate,
   scheduleSidecarRestart,
@@ -32,6 +40,7 @@ import {
 import { getCloudStatus } from './pricing-catalog.mjs';
 import { buildTelemetryPayload } from './telemetry-builder.mjs';
 import {
+  notifyModelContextWindowsChanged,
   notifyWindowOverlaySetting,
   startDefaultWindowBridge,
 } from './window-bridge.mjs';
@@ -172,7 +181,10 @@ export function executeSettingsAction(data) {
             : 'dual'
           : 'sidebar'
         : normalizeWindowMountMode(current.windowMountMode, current.enableWindowOverlay);
-  const updated = {
+  const updated = normalizeFullSettings({
+    ...current,
+    ...payload,
+    modelContextWindows: current.modelContextWindows,
     weeklyTokenBudget: sanitizePositiveSettingNumber(
       payload.weeklyTokenBudget ?? payload.weeklyTokenLimit,
       current.weeklyTokenBudget
@@ -181,31 +193,9 @@ export function executeSettingsAction(data) {
       payload.weeklyCostBudget,
       current.weeklyCostBudget
     ),
-    weeklyLimitMode:
-      payload.weeklyLimitMode !== undefined
-        ? normalizeWeeklyLimitMode(payload.weeklyLimitMode)
-        : current.weeklyLimitMode,
-    showUpstreamModel:
-      typeof payload.showUpstreamModel === 'boolean'
-        ? payload.showUpstreamModel
-        : Boolean(current.showUpstreamModel),
-    orchestratorIdMode:
-      payload.orchestratorIdMode !== undefined
-        ? normalizeOrchestratorIdMode(payload.orchestratorIdMode)
-        : normalizeOrchestratorIdMode(current.orchestratorIdMode),
     pluginUpdateMode: nextPluginUpdateMode,
-    autoUpdatePlugin: nextPluginUpdateMode === 'auto',
     windowMountMode: nextWindowMountMode,
-    enableWindowOverlay: nextWindowMountMode !== 'sidebar',
-    showTopbarMultiSession:
-      typeof payload.showTopbarMultiSession === 'boolean'
-        ? payload.showTopbarMultiSession
-        : current.showTopbarMultiSession !== false,
-    topbarCapsuleSlots:
-      payload.topbarCapsuleSlots !== undefined
-        ? normalizeTopbarCapsuleSlots(payload.topbarCapsuleSlots)
-        : normalizeTopbarCapsuleSlots(current.topbarCapsuleSlots),
-  };
+  });
   if (!saveJson(SETTINGS_FILE, updated)) {
     return {
       ok: false,
@@ -235,6 +225,98 @@ export function executeSettingsAction(data) {
   };
 }
 
+export async function executeModelContextWindowAction(data) {
+  const { modelId, option } = data || {};
+  const respond = (status, payload) => ({
+    status,
+    contentType: 'application/json',
+    headers: { 'Cache-Control': 'no-store' },
+    body: JSON.stringify(payload),
+  });
+  if (!isContextWindowSettingId(modelId) || (option !== null && !isContextWindowOption(option))) {
+    return respond(400, { error: 'Invalid model context window' });
+  }
+  let group;
+  try {
+    const [{ userStatus }, catalog] = await Promise.all([callLsRpc('GetUserStatus'), getContextModelCatalog()]);
+    const models = getContextWindowModels(userStatus?.cascadeModelConfigData?.clientModelConfigs, catalog);
+    group = getContextWindowGroups(models).find(({ id }) => id === modelId);
+  } catch {
+    if (option !== null || modelId.startsWith('model:')) {
+      return respond(503, { error: 'Unable to verify the host model configuration' });
+    }
+  }
+  if (option !== null && (!group || resolveContextWindowOption(group, option) === null)) {
+    return respond(400, { error: 'This context window is not available for the selected model' });
+  }
+  const current = loadSettings();
+  for (const id of group?.members || []) delete current.modelContextWindows[id];
+  if (option === null) {
+    delete current.modelContextWindows[modelId];
+  } else {
+    current.modelContextWindows[modelId] = option;
+  }
+  if (!saveJson(SETTINGS_FILE, current)) {
+    return respond(500, { error: 'Failed to persist model context window' });
+  }
+  void notifyModelContextWindowsChanged();
+  return respond(200, { modelContextWindows: current.modelContextWindows });
+}
+
+export function executeResetSettingsAction() {
+  const current = loadSettings();
+  const updated = createDefaultSettingsObject();
+  if (!saveJson(SETTINGS_FILE, updated)) {
+    return {
+      ok: false,
+      status: 500,
+      contentType: 'application/json',
+      headers: { 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ ok: false, error: 'Failed to reset settings' }),
+    };
+  }
+  const prevMountMode = normalizeWindowMountMode(
+    current.windowMountMode,
+    current.enableWindowOverlay
+  );
+  if (
+    updated.enableWindowOverlay !== (current.enableWindowOverlay !== false) ||
+    updated.windowMountMode !== prevMountMode
+  ) {
+    void notifyWindowOverlaySetting(updated.enableWindowOverlay);
+  } else if (Object.keys(current.modelContextWindows).length) {
+    void notifyModelContextWindowsChanged();
+  }
+  return {
+    ok: true,
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'Cache-Control': 'no-store' },
+    updated,
+    body: JSON.stringify(updated),
+  };
+}
+
+export function executeRebuildCacheAction() {
+  const ok = clearRuntimeCaches();
+  if (!ok) {
+    return {
+      ok: false,
+      status: 500,
+      contentType: 'application/json',
+      headers: { 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ ok: false, error: 'Failed to clear trajectory cache' }),
+    };
+  }
+  return {
+    ok: true,
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'Cache-Control': 'no-store' },
+    body: JSON.stringify({ ok: true, clearedAt: Date.now() }),
+  };
+}
+
 export async function executeCloudSyncAction() {
   const cloudStatus = await syncCloudCatalog({ force: true });
   return {
@@ -261,6 +343,15 @@ export async function dispatchBridgeApiRequest(pathname, method, data, opts = un
   }
   if (pathname === '/api/settings' && method === 'POST') {
     return executeSettingsAction(data);
+  }
+  if (pathname === '/api/context-window' && method === 'POST') {
+    return executeModelContextWindowAction(data);
+  }
+  if (pathname === '/api/settings/reset' && method === 'POST') {
+    return executeResetSettingsAction();
+  }
+  if (pathname === '/api/cache/rebuild' && method === 'POST') {
+    return executeRebuildCacheAction();
   }
   if (pathname === '/api/cloud-sync' && method === 'POST') {
     return executeCloudSyncAction();
