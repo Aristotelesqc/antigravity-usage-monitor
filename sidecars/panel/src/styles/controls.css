@@ -29,7 +29,8 @@
   border-radius: var(--radius-sm);
 }
 
-.steps-inline-scope-select .select-menu {
+.steps-inline-scope-select .select-menu,
+.steps-inline-model-select .select-menu {
   left: auto;
   right: 0;
   min-width: 220px;
@@ -212,6 +213,10 @@
   flex: 1;
 }
 
+.custom-select[hidden] {
+  display: none !important;
+}
+
 .select-trigger {
   display: flex;
   align-items: center;
@@ -294,6 +299,41 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.select-option-meta {
+  font-size: 11px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
+.select-checkbox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-inverse);
+  flex-shrink: 0;
+  transition:
+    background-color var(--dur-instant) var(--ease-fast),
+    border-color var(--dur-instant) var(--ease-fast);
+}
+
+.select-checkbox[hidden] {
+  display: none !important;
+}
+
+.select-checkbox.is-checked {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.select-checkbox .svg-icon {
+  stroke-width: 2.4;
 }
 
 /* --- 4. 定制步进数字框 (Bespoke Custom Number Input，零原生 <input type="number">) --- */

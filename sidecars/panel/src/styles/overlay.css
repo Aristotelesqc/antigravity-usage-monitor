@@ -32,6 +32,44 @@
   margin-right: 4px;
 }
 
+:host(.wm-capsule-host[data-dock="composer"]) {
+  position: relative;
+  height: 26px;
+  gap: 4px;
+  margin-right: 4px;
+  align-self: center;
+}
+
+:host(.wm-capsule-host[data-dock="composer"][data-composer-push="1"]) {
+  margin-left: auto;
+}
+
+:host(.wm-capsule-host[data-dock="composer"]) .wm-multi-btn,
+:host(.wm-capsule-host[data-dock="composer"]) .wm-capsule-btn {
+  height: 26px;
+  border-radius: var(--radius-pill);
+}
+
+:host(.wm-capsule-host[data-dock="composer"]) .wm-multi-btn {
+  padding: 0 7px;
+}
+
+:host(.wm-capsule-host[data-dock="composer"]) .wm-capsule-btn {
+  padding: 0 8px;
+}
+
+:host(.wm-capsule-host[data-dock="ide-titlebar"]) {
+  position: relative;
+  margin-left: auto;
+  margin-right: 8px;
+  z-index: 2501;
+  --text-primary: var(
+    --vscode-titleBar-activeForeground,
+    var(--foreground, var(--vscode-foreground, hsl(215 22% 15%)))
+  );
+  --text-secondary: color-mix(in srgb, var(--text-primary) 78%, transparent);
+}
+
 :host(.wm-capsule-host[data-dock="fixed"]) {
   position: fixed;
   top: 6px;
@@ -449,11 +487,22 @@
   }
 }
 
+@keyframes wm-popover-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .wm-popover-panel {
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(492px, calc(100vw - 24px));
+  width: min(522px, calc(100vw - 24px));
   height: min(588px, calc(100vh - 54px));
   max-height: calc(100vh - 54px);
   display: flex;
@@ -481,7 +530,7 @@
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(492px, calc(100vw - 24px));
+  width: min(522px, calc(100vw - 24px));
   max-height: calc(100vh - 54px);
   padding: var(--space-3) var(--space-4);
   display: flex;
@@ -505,7 +554,7 @@
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(484px, calc(100vw - 24px));
+  width: min(464px, calc(100vw - 24px));
   max-height: calc(100vh - 54px);
   padding: 14px 16px;
   display: flex;
@@ -524,6 +573,21 @@
   z-index: 2147483002;
   transform-origin: top left;
   animation: wm-popover-in var(--dur-instant) var(--ease-fast);
+}
+
+.wm-popover-panel.is-above {
+  transform-origin: bottom right;
+  animation-name: wm-popover-in-up;
+}
+
+.wm-hover-tip.is-above {
+  transform-origin: bottom right;
+  animation-name: wm-popover-in-up;
+}
+
+.wm-multi-panel.is-above {
+  transform-origin: bottom left;
+  animation-name: wm-popover-in-up;
 }
 
 .wm-popover-panel.is-instant,

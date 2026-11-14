@@ -466,6 +466,7 @@ export function buildBundle() {
     'src/components/ui/ContextSegmentMeter.js',
     'src/components/ui/FourSegmentBar.js',
     'src/components/charts/TrendAreaChart.js',
+    'src/components/charts/SessionStepCharts.js',
     'src/components/layout/TopSessionHeader.js',
     'src/views/LiveOverviewView.js',
     'src/views/ConsumptionView.js',

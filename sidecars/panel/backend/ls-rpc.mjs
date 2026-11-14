@@ -7,13 +7,26 @@
  *    并在缓存过期或强制刷新时穿透 `language_server.exe` 内部 3 分钟陈旧缓存）。
  */
 
-import { CSRF_TOKEN, LS_BASE_URL, quotaSummaryCache } from './config.mjs';
+import { lsRuntimeEndpoint, quotaSummaryCache } from './config.mjs';
+import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
 
 const QUOTA_CACHE_TTL_MS = 10_000;
 const QUOTA_RETRY_COOLDOWN_MS = 5_000;
 
+async function postLsRpcOnce(baseUrl, csrfToken, method, body, timeoutMs) {
+  return fetch(`${baseUrl}/exa.language_server_pb.LanguageServerService/${method}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-codeium-csrf-token': csrfToken || '',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
 /**
- * 调用本地 `LanguageServerService` 的指定 RPC 方法。
+ * 调用本地 `LanguageServerService` 的指定 RPC 方法（支持按需发现与宿主重启重连）。
  *
  * @param {string} method RPC 方法名（如 `'GetUserStatus'`、`'GetCascadeTrajectory'`）
  * @param {object} [body={}] 请求 JSON 载荷
@@ -21,21 +34,62 @@ const QUOTA_RETRY_COOLDOWN_MS = 5_000;
  * @returns {Promise<object>}
  */
 export async function callLsRpc(method, body = {}, timeoutMs = 5000) {
-  if (!LS_BASE_URL) {
+  if (!lsRuntimeEndpoint.baseUrl && lsRuntimeEndpoint.addr !== 'test.invalid') {
+    await ensureLsEndpointDiscovered({ force: false });
+  }
+  if (!lsRuntimeEndpoint.baseUrl) {
     throw new Error('Language Server address (ANTIGRAVITY_LS_ADDRESS) is not configured');
   }
-  const res = await fetch(
-    `${LS_BASE_URL}/exa.language_server_pb.LanguageServerService/${method}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-codeium-csrf-token': CSRF_TOKEN || '',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+
+  const prevAddr = lsRuntimeEndpoint.addr;
+  const prevToken = lsRuntimeEndpoint.csrfToken;
+  let res;
+  try {
+    res = await postLsRpcOnce(
+      lsRuntimeEndpoint.baseUrl,
+      lsRuntimeEndpoint.csrfToken,
+      method,
+      body,
+      timeoutMs
+    );
+  } catch (netErr) {
+    if (lsRuntimeEndpoint.addr !== 'test.invalid') {
+      const refreshed = await ensureLsEndpointDiscovered({ force: true });
+      if (
+        refreshed &&
+        (lsRuntimeEndpoint.addr !== prevAddr || lsRuntimeEndpoint.csrfToken !== prevToken)
+      ) {
+        res = await postLsRpcOnce(
+          lsRuntimeEndpoint.baseUrl,
+          lsRuntimeEndpoint.csrfToken,
+          method,
+          body,
+          timeoutMs
+        );
+      } else {
+        throw netErr;
+      }
+    } else {
+      throw netErr;
     }
-  );
+  }
+
+  if (!res.ok && (res.status === 401 || res.status === 403) && lsRuntimeEndpoint.addr !== 'test.invalid') {
+    const refreshed = await ensureLsEndpointDiscovered({ force: true });
+    if (
+      refreshed &&
+      (lsRuntimeEndpoint.addr !== prevAddr || lsRuntimeEndpoint.csrfToken !== prevToken)
+    ) {
+      res = await postLsRpcOnce(
+        lsRuntimeEndpoint.baseUrl,
+        lsRuntimeEndpoint.csrfToken,
+        method,
+        body,
+        timeoutMs
+      );
+    }
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`RPC ${method} failed (${res.status}): ${text}`);

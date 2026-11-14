@@ -6,8 +6,13 @@
 import { createReactiveStore } from '../core/reactive.js';
 import { callSidecarApi, isWindowOverlayMode } from '../core/httpClient.js';
 
+const CASCADE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * 在主窗口双栖模式下，从宿主页面路径 `/c/<uuid>` 提取当前正在浏览的会话 ID。
+ * 在主窗口双栖模式下，提取当前正在浏览的会话 ID：
+ * 1. 优先解析 Antigravity 2.0 路由路径 `/c/<uuid>`；
+ * 2. 在 Antigravity IDE (`workbench.html`) 无路径路由时，回退读取活跃对话视图
+ *    `[data-testid="conversation-view"][data-cascade-id]` 或侧栏选中项。
  *
  * @returns {string}
  */
@@ -15,7 +20,63 @@ export function extractHostRouteCascadeId() {
   if (typeof window === 'undefined' || !isWindowOverlayMode()) return '';
   const pathname = String(window.location?.pathname || '');
   const m = pathname.match(/^\/c\/([a-f0-9-]{36})(?:\/|$)/i);
-  return m ? m[1] : '';
+  if (m && CASCADE_UUID_RE.test(m[1])) {
+    return m[1];
+  }
+  const extBridgeRouteId = String(window.__AGUsageMonitorBridge?.hostRouteCascadeId || '').trim();
+  if (extBridgeRouteId && CASCADE_UUID_RE.test(extBridgeRouteId)) {
+    return extBridgeRouteId;
+  }
+  try {
+    if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
+      return '';
+    }
+    const selectedRow = document.querySelector(
+      '[data-testid^="conversation-row-"][data-selected="true"][data-cascade-id]'
+    );
+    const selectedRowId = String(selectedRow?.getAttribute?.('data-cascade-id') || '').trim();
+
+    if (typeof document.querySelectorAll === 'function') {
+      const views = document.querySelectorAll('[data-testid="conversation-view"][data-cascade-id]');
+      const visibleIds = [];
+      let focusedId = '';
+      const activeEl = document.activeElement || null;
+      for (const viewEl of views) {
+        const cid = String(viewEl?.getAttribute?.('data-cascade-id') || '').trim();
+        if (!CASCADE_UUID_RE.test(cid)) continue;
+        if (viewEl.hasAttribute?.('hidden')) continue;
+        if (viewEl.getBoundingClientRect) {
+          const r = viewEl.getBoundingClientRect();
+          if (r.width <= 0 && r.height <= 0) continue;
+        }
+        visibleIds.push(cid);
+        if (activeEl && viewEl.contains?.(activeEl)) {
+          focusedId = cid;
+        }
+      }
+      if (focusedId) return focusedId;
+      if (
+        selectedRowId &&
+        CASCADE_UUID_RE.test(selectedRowId) &&
+        visibleIds.some((id) => id.toLowerCase() === selectedRowId.toLowerCase())
+      ) {
+        return selectedRowId;
+      }
+      if (visibleIds.length > 0) return visibleIds[0];
+    }
+
+    const singleView = document.querySelector('[data-testid="conversation-view"][data-cascade-id]');
+    const singleViewId = String(singleView?.getAttribute?.('data-cascade-id') || '').trim();
+    if (CASCADE_UUID_RE.test(singleViewId)) {
+      return singleViewId;
+    }
+    if (CASCADE_UUID_RE.test(selectedRowId)) {
+      return selectedRowId;
+    }
+  } catch {
+    // 忽略宿主 DOM 查询异常
+  }
+  return '';
 }
 
 const initialConversationId =
@@ -88,19 +149,67 @@ export function normalizeClientUpdateMode(mode, legacyAutoUpdate) {
   return 'manual';
 }
 
+export function normalizeClientOrchestratorIdMode(mode) {
+  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+}
+
+/**
+ * 归一化前端面板挂载方式（`'dual'` | `'composer'` | `'sidebar'`），兼容旧版 `enableWindowOverlay` 布尔字段。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyEnableOverlay]
+ * @returns {'dual'|'composer'|'sidebar'}
+ */
+export function normalizeClientWindowMountMode(mode, legacyEnableOverlay) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'composer' || m === 'input') return 'composer';
+  if (m === 'sidebar' || m === 'off') return 'sidebar';
+  if (m === 'dual' || m === 'topbar') return 'dual';
+  if (legacyEnableOverlay === false) return 'sidebar';
+  return 'dual';
+}
+
 function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
   if (prev === next) return true;
 
-  // 1. 比对系统设置项（模型显示策略、周预算模式与额度、插件更新策略、双栖与顶栏槽位配置）
+  // 1. 比对系统设置项（模型显示策略、Orchestrator ID 显示风格、周预算模式与额度、插件更新策略、双栖与顶栏槽位配置）
   const pAct = prev.activeConversation;
   const nAct = next.activeConversation;
   if (prev.settings?.showUpstreamModel !== next.settings?.showUpstreamModel) return false;
+  const prevOrchIdMode = String(prev.settings?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+  const nextOrchIdMode = String(next.settings?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+  if (prevOrchIdMode !== nextOrchIdMode) {
+    return false;
+  }
   if (prev.settings?.weeklyLimitMode !== next.settings?.weeklyLimitMode) return false;
   if (prev.settings?.weeklyTokenBudget !== next.settings?.weeklyTokenBudget) return false;
   if (prev.settings?.weeklyCostBudget !== next.settings?.weeklyCostBudget) return false;
   if ((prev.settings?.pluginUpdateMode ?? '') !== (next.settings?.pluginUpdateMode ?? '')) return false;
   if (prev.settings?.autoUpdatePlugin !== next.settings?.autoUpdatePlugin) return false;
+  const rawPrevMount = String(prev.settings?.windowMountMode ?? '').trim().toLowerCase();
+  const prevMountMode =
+    rawPrevMount === 'composer' || rawPrevMount === 'input'
+      ? 'composer'
+      : rawPrevMount === 'sidebar' || rawPrevMount === 'off'
+        ? 'sidebar'
+        : rawPrevMount === 'dual' || rawPrevMount === 'topbar'
+          ? 'dual'
+          : prev.settings?.enableWindowOverlay === false
+            ? 'sidebar'
+            : 'dual';
+  const rawNextMount = String(next.settings?.windowMountMode ?? '').trim().toLowerCase();
+  const nextMountMode =
+    rawNextMount === 'composer' || rawNextMount === 'input'
+      ? 'composer'
+      : rawNextMount === 'sidebar' || rawNextMount === 'off'
+        ? 'sidebar'
+        : rawNextMount === 'dual' || rawNextMount === 'topbar'
+          ? 'dual'
+          : next.settings?.enableWindowOverlay === false
+            ? 'sidebar'
+            : 'dual';
+  if (prevMountMode !== nextMountMode) return false;
   if (prev.settings?.enableWindowOverlay !== next.settings?.enableWindowOverlay) return false;
   if ((prev.settings?.showTopbarMultiSession !== false) !== (next.settings?.showTopbarMultiSession !== false)) {
     return false;
@@ -250,8 +359,12 @@ function isEquivalentTelemetry(prev, next) {
         bs?.tokPerSec !== as?.tokPerSec ||
         bs?.ttftSec !== as?.ttftSec ||
         bs?.outputTokens !== as?.outputTokens ||
+        bs?.thinkingTokens !== as?.thinkingTokens ||
+        bs?.responseTokens !== as?.responseTokens ||
         bs?.inputTokens !== as?.inputTokens ||
         bs?.cacheReadTokens !== as?.cacheReadTokens ||
+        bs?.contextTokens !== as?.contextTokens ||
+        bs?.cacheHitPct !== as?.cacheHitPct ||
         bs?.selectedSpeedReason !== as?.selectedSpeedReason
       ) {
         return false;
@@ -290,8 +403,12 @@ function isEquivalentTelemetry(prev, next) {
       before.tokPerSec !== after.tokPerSec ||
       before.ttftSec !== after.ttftSec ||
       before.outputTokens !== after.outputTokens ||
+      before.thinkingTokens !== after.thinkingTokens ||
+      before.responseTokens !== after.responseTokens ||
       before.inputTokens !== after.inputTokens ||
       before.cacheReadTokens !== after.cacheReadTokens ||
+      before.contextTokens !== after.contextTokens ||
+      before.cacheHitPct !== after.cacheHitPct ||
       before.selectedSpeedReason !== after.selectedSpeedReason
     ) {
       return false;
@@ -428,7 +545,13 @@ function isEquivalentTelemetry(prev, next) {
       pPools[i]?.resetTime !== nPools[i]?.resetTime ||
       pPools[i]?.weeklyUsedPct !== nPools[i]?.weeklyUsedPct ||
       pPools[i]?.weeklyRemainingPct !== nPools[i]?.weeklyRemainingPct ||
-      pPools[i]?.weeklyResetTime !== nPools[i]?.weeklyResetTime
+      pPools[i]?.weeklyResetTime !== nPools[i]?.weeklyResetTime ||
+      pPools[i]?.cycle5h?.tokens !== nPools[i]?.cycle5h?.tokens ||
+      pPools[i]?.cycle5h?.costUsd !== nPools[i]?.cycle5h?.costUsd ||
+      pPools[i]?.cycle5h?.calls !== nPools[i]?.cycle5h?.calls ||
+      pPools[i]?.cycleWeekly?.tokens !== nPools[i]?.cycleWeekly?.tokens ||
+      pPools[i]?.cycleWeekly?.costUsd !== nPools[i]?.cycleWeekly?.costUsd ||
+      pPools[i]?.cycleWeekly?.calls !== nPools[i]?.cycleWeekly?.calls
     ) {
       return false;
     }
@@ -612,6 +735,20 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
     safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
+    safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'windowMountMode')) {
+    const normMount = normalizeClientWindowMountMode(
+      safePatch.windowMountMode,
+      safePatch.enableWindowOverlay
+    );
+    safePatch.windowMountMode = normMount;
+    safePatch.enableWindowOverlay = normMount !== 'sidebar';
+  } else if (Object.prototype.hasOwnProperty.call(safePatch, 'enableWindowOverlay')) {
+    safePatch.enableWindowOverlay = Boolean(safePatch.enableWindowOverlay);
+    safePatch.windowMountMode = safePatch.enableWindowOverlay ? 'dual' : 'sidebar';
   }
   const prevTelemetry = telemetryStore.getState().telemetry;
   if (prevTelemetry?.settings) {

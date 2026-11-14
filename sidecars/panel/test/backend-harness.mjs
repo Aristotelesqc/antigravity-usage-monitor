@@ -15,6 +15,7 @@ const DEFAULT_BUNDLED_CATALOG = {
 
 const BACKEND_MODULE_FILES = [
   '../backend/config.mjs',
+  '../backend/ls-discovery.mjs',
   '../backend/pricing-catalog.mjs',
   '../backend/plugin-updater.mjs',
   '../backend/ls-rpc.mjs',
@@ -24,6 +25,7 @@ const BACKEND_MODULE_FILES = [
   '../backend/usage-aggregator.mjs',
   '../backend/telemetry-builder.mjs',
   '../backend/window-bridge.mjs',
+  '../backend/api-actions.mjs',
   '../main.mjs',
 ];
 
@@ -144,6 +146,6 @@ export function backendHarness({
       return {ok:true,json:async()=>data};
     },
   };
-  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isCarbonModelIdentifier,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,loadSettings,executeSettingsAction};',ctx);
+  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,loadSettings,executeSettingsAction};',ctx);
   return {...ctx.api,state};
 }

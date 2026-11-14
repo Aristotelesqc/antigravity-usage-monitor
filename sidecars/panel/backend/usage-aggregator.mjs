@@ -7,13 +7,21 @@
  */
 
 import {
+  MEASUREMENT_VERSION,
   accumulateSpeed,
   createSpeedAccumulator,
   finishSpeed,
+  parseIsoMs,
 } from '../speed-metrics.mjs';
 import { roundMetric, trajectoryCache } from './config.mjs';
 import { loadExternalDeepStatsCache } from './local-scanner.mjs';
-import { computeStepCost, resolveModelInfo } from './model-pricing.mjs';
+import {
+  computeStepCost,
+  formatUpstreamModelId,
+  isArgonModelIdentifier,
+  isCarbonModelIdentifier,
+  resolveModelInfo,
+} from './model-pricing.mjs';
 
 function safeTok(val) {
   const n = Number(val);
@@ -260,7 +268,10 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
     perModelStats.set(modelGroupKey, {
       label: modelGroupKey,
       shortName: mInfo.shortName,
-      fallbackModelId: mInfo.modelId && mInfo.modelId !== 'unknown' ? mInfo.modelId : '',
+      fallbackModelId:
+        mInfo.modelId && mInfo.modelId !== 'unknown'
+          ? formatUpstreamModelId(mInfo.modelId, mInfo)
+          : '',
       upstreamModelCounts: new Map(),
       family: mInfo.family,
       calls: 0,
@@ -271,17 +282,32 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
       responseTokens: 0,
       totalTokens: 0,
       costUsd: 0,
+      ttftSumSec: 0,
+      ttftSampleCount: 0,
       speedAccumulator: createSpeedAccumulator(),
     });
   }
   const agg = perModelStats.get(modelGroupKey);
   if (st.responseModel) {
+    const formattedResp = formatUpstreamModelId(st.responseModel, mInfo);
     agg.upstreamModelCounts.set(
-      st.responseModel,
-      (agg.upstreamModelCounts.get(st.responseModel) || 0) + 1
+      formattedResp,
+      (agg.upstreamModelCounts.get(formattedResp) || 0) + 1
     );
   }
   accumulateSpeed(agg.speedAccumulator, st);
+  if (
+    !st.isCompactionStep &&
+    st.measurementVersion === MEASUREMENT_VERSION &&
+    st.isComplete &&
+    Number.isFinite(st.totalDurationSec) &&
+    Number.isFinite(st.nativeTtftSec) &&
+    st.nativeTtftSec >= 0 &&
+    st.nativeTtftSec <= st.totalDurationSec + 0.01
+  ) {
+    agg.ttftSumSec += st.nativeTtftSec;
+    agg.ttftSampleCount += 1;
+  }
 
   agg.calls += 1;
   agg.inputTokens += inTok;
@@ -303,22 +329,39 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
 function finalizeModelBreakdownMap(perModelStats) {
   return Array.from(perModelStats.values())
     .sort((a, b) => b.calls - a.calls || String(a.label).localeCompare(String(b.label)))
-    .map(({ speedAccumulator, upstreamModelCounts, fallbackModelId, ...m }) => {
-      const sortedUpstream = Array.from((upstreamModelCounts || new Map()).entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([name]) => name);
-      const primaryUpstream =
-        sortedUpstream.length > 0 ? sortedUpstream[0] : fallbackModelId || m.shortName || m.label;
-      const finishedSpeed = finishSpeed(speedAccumulator);
-      return {
-        ...m,
-        upstreamName: primaryUpstream,
-        upstreamModels: sortedUpstream,
-        costUsd: +m.costUsd.toFixed(3),
-        avgTokPerSec: roundMetric(finishedSpeed.avgTokPerSec),
-        speedSummary: finishedSpeed,
-      };
-    });
+    .map(
+      ({
+        speedAccumulator,
+        upstreamModelCounts,
+        fallbackModelId,
+        ttftSumSec,
+        ttftSampleCount,
+        ...m
+      }) => {
+        const sortedUpstream = Array.from((upstreamModelCounts || new Map()).entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name]) => name);
+        const primaryUpstream =
+          sortedUpstream.length > 0 ? sortedUpstream[0] : fallbackModelId || m.shortName || m.label;
+        const finishedSpeed = finishSpeed(speedAccumulator);
+        const promptTokens = m.inputTokens + m.cacheReadTokens;
+        const cacheHitPct =
+          promptTokens > 0 ? +((m.cacheReadTokens / promptTokens) * 100).toFixed(1) : 0;
+        const avgTtftSec =
+          ttftSampleCount > 0 ? roundMetric(ttftSumSec / ttftSampleCount) : null;
+        return {
+          ...m,
+          upstreamName: primaryUpstream,
+          upstreamModels: sortedUpstream,
+          costUsd: +m.costUsd.toFixed(6),
+          cacheHitPct,
+          avgTtftSec,
+          ttftSampleCount,
+          avgTokPerSec: roundMetric(finishedSpeed.avgTokPerSec),
+          speedSummary: finishedSpeed,
+        };
+      }
+    );
 }
 
 /**
@@ -364,6 +407,7 @@ export function aggregateMultiWindowUsage({
   activeCascadeId = null,
   activeFamilyCascadeIds = null,
   dynamicModelMap = new Map(),
+  quotaPoolsMap = null,
 } = {}) {
   const rawFamilyIds =
     activeFamilyCascadeIds instanceof Set
@@ -391,6 +435,32 @@ export function aggregateMultiWindowUsage({
     accountBuckets[k] = createUsageBucket();
     sessionBuckets[k] = createUsageBucket();
   }
+
+  // 为每个配额池建立独立的 5h 与周限周期统计桶（按各池自身的 resetTime / weeklyResetTime 截取窗口）
+  const poolCycleBuckets = new Map();
+  if (quotaPoolsMap instanceof Map && quotaPoolsMap.size > 0) {
+    const weekFallbackStartMs = getStartOfCurrentWeekMs(new Date(nowMs));
+    for (const [poolKey, poolObj] of quotaPoolsMap.entries()) {
+      const reset5hMs = parseIsoMs(poolObj?.resetTime) || 0;
+      const start5hMs =
+        reset5hMs > nowMs
+          ? Math.min(nowMs, reset5hMs - 5 * 3600 * 1000)
+          : nowMs - 5 * 3600 * 1000;
+      const resetWkMs = parseIsoMs(poolObj?.weeklyResetTime) || 0;
+      const startWkMs =
+        resetWkMs > nowMs
+          ? Math.min(nowMs, resetWkMs - 7 * 24 * 3600 * 1000)
+          : weekFallbackStartMs;
+      poolCycleBuckets.set(poolKey, {
+        start5hMs,
+        startWkMs,
+        b5h: createUsageBucket(),
+        bWk: createUsageBucket(),
+      });
+    }
+  }
+  const hasDedicatedCarbonPool = poolCycleBuckets.has('Carbon');
+  const hasDedicatedArgonPool = poolCycleBuckets.has('Argon');
   const selectedAccountBucket = createUsageBucket();
   const selectedSessionBucket = createUsageBucket();
   const perModelStats = new Map();
@@ -539,6 +609,43 @@ export function aggregateMultiWindowUsage({
           accumulateStepIntoBucket(accountBuckets[k], st, mInfo, stepCost, cascadeId);
           if (isCurrentConv) {
             accumulateStepIntoBucket(sessionBuckets[k], st, mInfo, stepCost, cascadeId);
+          }
+        }
+      }
+
+      if (poolCycleBuckets.size > 0 && tMs > 0 && tMs <= nowMs) {
+        const stepPoolKey =
+          hasDedicatedCarbonPool &&
+          isCarbonModelIdentifier(
+            st.modelKey,
+            st.responseModel,
+            mInfo.modelId,
+            mInfo.label,
+            st.modelDisplayName
+          )
+            ? 'Carbon'
+            : hasDedicatedArgonPool &&
+                isArgonModelIdentifier(
+                  st.modelKey,
+                  st.responseModel,
+                  mInfo.modelId,
+                  mInfo.label,
+                  st.modelDisplayName
+                )
+              ? 'Argon'
+              : mInfo.family === 'Gemini' && poolCycleBuckets.has('Gemini')
+                ? 'Gemini'
+                : ['Claude', 'GPT', 'Other'].includes(mInfo.family) &&
+                    poolCycleBuckets.has('Claude & GPT')
+                  ? 'Claude & GPT'
+                  : null;
+        const poolBucketEntry = stepPoolKey ? poolCycleBuckets.get(stepPoolKey) : null;
+        if (poolBucketEntry) {
+          if (tMs >= poolBucketEntry.start5hMs) {
+            accumulateStepIntoBucket(poolBucketEntry.b5h, st, mInfo, stepCost, cascadeId);
+          }
+          if (tMs >= poolBucketEntry.startWkMs) {
+            accumulateStepIntoBucket(poolBucketEntry.bWk, st, mInfo, stepCost, cascadeId);
           }
         }
       }
@@ -711,26 +818,24 @@ export function aggregateMultiWindowUsage({
       dayStarts.unshift(prev.getTime());
     }
 
-    const stepDays = dayStarts.length > 60 ? Math.ceil(dayStarts.length / 45) : 1;
-    let bucketIdx = 0;
-    for (let i = 0; i < dayStarts.length; i += stepDays) {
+    const firstYear = new Date(dayStarts[0]).getFullYear();
+    const lastYear = new Date(dayStarts[dayStarts.length - 1]).getFullYear();
+    const showFullYear = firstYear !== lastYear || dayStarts.length > 90;
+
+    for (let i = 0; i < dayStarts.length; i++) {
       const sMs = dayStarts[i];
-      const endDayStartMs = dayStarts[Math.min(dayStarts.length - 1, i + stepDays - 1)];
-      const endCursor = new Date(endDayStartMs);
+      const endCursor = new Date(sMs);
       endCursor.setDate(endCursor.getDate() + 1);
       endCursor.setHours(0, 0, 0, 0);
       const eMs = endCursor.getTime();
 
       const sd = new Date(sMs);
-      const ed = new Date(endDayStartMs);
       const axisLabel = `${sd.getMonth() + 1}/${pad2(sd.getDate())}`;
-      const fullLabel =
-        stepDays === 1
-          ? `${sd.getMonth() + 1}月${sd.getDate()}日 (${WEEKDAY_NAMES[sd.getDay()]})`
-          : `${sd.getMonth() + 1}月${sd.getDate()}日 - ${ed.getMonth() + 1}月${ed.getDate()}日`;
+      const datePrefix = showFullYear ? `${sd.getFullYear()}年` : '';
+      const fullLabel = `${datePrefix}${sd.getMonth() + 1}月${sd.getDate()}日 (${WEEKDAY_NAMES[sd.getDay()]})`;
 
       trendSeries.push({
-        index: bucketIdx++,
+        index: i,
         startMs: sMs,
         endMs: eMs,
         granularity: 'day',
@@ -809,6 +914,44 @@ export function aggregateMultiWindowUsage({
   const weekBucket = finalizedPresets.week.account;
   const modelBreakdown = finalizeModelBreakdownMap(perModelStats);
 
+  const formatCycleSummary = (b) => {
+    const fin = finalizeUsageBucket(b);
+    return {
+      calls: fin.calls,
+      tokens: fin.totalTokens,
+      inputTokens: fin.inputTokens,
+      cacheReadTokens: fin.cacheReadTokens,
+      outputTokens: fin.outputTokens,
+      costUsd: fin.costUsd,
+      unpricedCalls: fin.unpricedCalls,
+    };
+  };
+
+  const poolCycleStats = new Map();
+  let rawPoolsWeeklyCalls = 0;
+  let rawPoolsWeeklyTokens = 0;
+  let rawPoolsWeeklyCostUsd = 0;
+  let rawPoolsWeeklyUnpricedCalls = 0;
+  for (const [poolKey, entry] of poolCycleBuckets.entries()) {
+    poolCycleStats.set(poolKey, {
+      cycle5h: formatCycleSummary(entry.b5h),
+      cycleWeekly: formatCycleSummary(entry.bWk),
+    });
+    rawPoolsWeeklyCalls += entry.bWk.calls;
+    rawPoolsWeeklyTokens += entry.bWk.totalTokens;
+    rawPoolsWeeklyCostUsd += entry.bWk.costUsd;
+    rawPoolsWeeklyUnpricedCalls += entry.bWk.unpricedCalls || 0;
+  }
+  const poolsWeeklySummary =
+    poolCycleBuckets.size > 0
+      ? {
+          calls: rawPoolsWeeklyCalls,
+          tokens: rawPoolsWeeklyTokens,
+          costUsd: +rawPoolsWeeklyCostUsd.toFixed(2),
+          unpricedCalls: rawPoolsWeeklyUnpricedCalls,
+        }
+      : null;
+
   return {
     selectedWindow,
     trendStartMs,
@@ -823,5 +966,7 @@ export function aggregateMultiWindowUsage({
     todayBucket,
     weekBucket,
     modelBreakdown,
+    poolCycleStats,
+    poolsWeeklySummary,
   };
 }

@@ -23,6 +23,7 @@ import {
   formatMetric,
   formatTokens,
   formatUsd,
+  resolveModelDisplayInfo,
   sampleSummary,
   speedReasonText,
 } from '../../core/formatters.js';
@@ -35,6 +36,7 @@ import {
   getAgentBadgeClass,
   normalizeClientTopbarSlots,
   normalizeClientUpdateMode,
+  normalizeClientWindowMountMode,
   resolveScopedConversation,
   startAsyncTelemetryLoop,
   stopAsyncTelemetryLoop,
@@ -46,14 +48,15 @@ import {
   buildQuotaPoolItems,
   createPoolQuotaRow,
   CTX_CHANNEL_DEFS,
+  formatQuotaSummaryFooter,
   quotaPoolRowSig,
   syncPoolQuotaRow,
 } from '../../views/LiveOverviewView.js';
 
 const CAPSULE_HOST_ID = 'ag-usage-monitor-capsule';
 const PORTAL_HOST_ID = 'ag-usage-monitor-portal';
-const FLOATING_CARD_WIDTH = 492;
-const MULTI_PANEL_WIDTH = 484;
+const FLOATING_CARD_WIDTH = 522;
+const MULTI_PANEL_WIDTH = 464;
 const RING_RADIUS = 5.2;
 const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
 
@@ -96,15 +99,771 @@ export function computeCapsuleLayoutMode(availWidth, currentMode = 'wide', optio
   return 'ring-only';
 }
 
+function findIdeWorkbenchTitlebar() {
+  try {
+    if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
+      return null;
+    }
+    const workbench = document.querySelector('.monaco-workbench');
+    if (!workbench?.querySelector) return null;
+    const partTitlebar = workbench.querySelector('.part.titlebar');
+    if (!partTitlebar?.querySelector) return null;
+    if (partTitlebar.getBoundingClientRect) {
+      const pr = partTitlebar.getBoundingClientRect();
+      if (pr.width <= 0 || pr.height <= 0) return null;
+    }
+    const container =
+      partTitlebar.querySelector(':scope > .titlebar-container') ||
+      partTitlebar.querySelector('.titlebar-container');
+    const rightGroup =
+      container?.querySelector?.(':scope > .titlebar-right') ||
+      container?.querySelector?.('.titlebar-right');
+    if (!container || !rightGroup) return null;
+    const actionToolbar =
+      rightGroup.querySelector?.(':scope > .action-toolbar-container') ||
+      rightGroup.querySelector?.('.action-toolbar-container') ||
+      null;
+    return {
+      kind: 'ide-titlebar',
+      workbench,
+      titlebar: container,
+      targetContainer: rightGroup,
+      actionToolbar,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function findHostTitlebar() {
   try {
     if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
       return null;
     }
-    return document.querySelector('[class*="@container/titlebar"]');
+    const tb = document.querySelector('[class*="@container/titlebar"]');
+    if (tb?.getBoundingClientRect) {
+      const r = tb.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+    }
+    return tb;
   } catch {
     return null;
   }
+}
+
+const COMPOSER_EXCLUDED_ANCESTOR_SELECTOR =
+  '.part.titlebar, .part.statusbar, .quick-input-widget, .suggest-widget, .find-widget, .scm-editor, .search-view, [class*="@container/titlebar"]';
+const COMPOSER_MODEL_LABEL_RE =
+  /\b(?:gemini|claude|gpt|argon|carbon|hydrogen|helix|flash|sonnet|opus|haiku|orchestrator|llama|deepseek|qwen|mistral|model_placeholder|placeholder_m\d+|o[134](?:-\w+)?)\b/i;
+const COMPOSER_MODEL_ATTR_RE =
+  /\bmodel[-_\s]?(?:select|picker|switch|selector|menu|name)\b|选择模型|切换模型/i;
+const COMPOSER_MODE_EXACT_RE = /^(?:auto|自动)$/i;
+const COMPOSER_MODE_TEXT_RE =
+  /^(?:auto|ask|manual|supervised|autonomous|always\s*allow|turbo|safe|yolo|plan|act|review|confirm|normal|fast|自动|询问|手动|始终允许|受控|规划)(?:\s*(?:mode|模式))?$/i;
+const COMPOSER_MODE_ATTR_RE =
+  /\b(?:auto(?:nomy|matic)?|execution[-_]?mode|agent[-_]?mode|permission|approval|hitl|policy|mode[-_]?selector|mode[-_]?picker)\b|自动|执行模式|权限模式|审批/i;
+const COMPOSER_ICON_FONT_CLASS_RE =
+  /\b(?:codicon|material-symbols(?:-\w+)?|material-icons(?:-\w+)?|lucide(?:-\w+)?)\b/i;
+
+function querySimpleSelectorList(root, selectors) {
+  if (!root || typeof root.querySelectorAll !== 'function') return [];
+  const seen = new Set();
+  const out = [];
+  for (const sel of selectors) {
+    let list = [];
+    try {
+      list = root.querySelectorAll(sel) || [];
+    } catch {
+      list = [];
+    }
+    for (const item of list) {
+      if (item && !seen.has(item)) {
+        seen.add(item);
+        out.push(item);
+      }
+    }
+  }
+  return out;
+}
+
+function extractVisibleButtonText(node, isRoot = true) {
+  if (!node) return '';
+  const tag = String(node.tagName || node.nodeName || '').toLowerCase();
+  if (tag === 'svg' || tag === 'style' || tag === 'script') return '';
+  if (!isRoot) {
+    if (node.getAttribute?.('aria-hidden') === 'true') return '';
+    const cls = String(node.className || '');
+    if (cls && COMPOSER_ICON_FONT_CLASS_RE.test(cls)) return '';
+  }
+  if (tag === '#text' || node.nodeType === 3) {
+    return String(node.nodeValue ?? node.textContent ?? '');
+  }
+  const childNodes = node.childNodes || node.children;
+  if (!childNodes || childNodes.length === 0) {
+    return String(node.textContent || '');
+  }
+  let acc = '';
+  for (const ch of childNodes) {
+    acc += ` ${extractVisibleButtonText(ch, false)}`;
+  }
+  return acc;
+}
+
+function cleanComposerButtonText(btn) {
+  const raw = extractVisibleButtonText(btn, true)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!raw) return '';
+  return raw.replace(/^[⌃⌄▾▴∨∧^<>›‹+\s]+|[⌃⌄▾▴∨∧^<>›‹\s]+$/g, '').trim();
+}
+
+function isComposerModelButtonItem(item) {
+  if (!item) return false;
+  if (item.cleanText && COMPOSER_MODEL_LABEL_RE.test(item.cleanText)) return true;
+  if (item.attrText && COMPOSER_MODEL_ATTR_RE.test(item.attrText)) return true;
+  return false;
+}
+
+function hasExcludedComposerAncestor(el) {
+  if (!el) return false;
+  if (typeof el.closest === 'function') {
+    try {
+      if (el.closest(COMPOSER_EXCLUDED_ANCESTOR_SELECTOR)) return true;
+    } catch {
+      // 忽略选择器异常并回退祖先链遍历
+    }
+  }
+  let cur = el.parentElement || el.parentNode;
+  while (cur) {
+    const cls = String(cur.className || '');
+    if (
+      cls.includes('@container/titlebar') ||
+      cls.includes('quick-input-widget') ||
+      cls.includes('suggest-widget') ||
+      cls.includes('find-widget') ||
+      cls.includes('scm-editor') ||
+      cls.includes('search-view') ||
+      (cls.includes('part') && (cls.includes('titlebar') || cls.includes('statusbar')))
+    ) {
+      return true;
+    }
+    cur = cur.parentElement || cur.parentNode;
+  }
+  return false;
+}
+
+function isNodeHiddenByStyle(el) {
+  if (!el) return true;
+  if (el.hasAttribute?.('hidden') || el.getAttribute?.('aria-hidden') === 'true') return true;
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const cs = window.getComputedStyle(el);
+      if (cs?.display === 'none' || cs?.visibility === 'hidden') return true;
+    } catch {
+      // 忽略样式读取异常
+    }
+  }
+  return false;
+}
+
+function getInFlowHostChildren(container, capsuleNode, portalNode) {
+  const rawChildren = container?.children || [];
+  const out = [];
+  for (const ch of rawChildren) {
+    if (!ch || ch === capsuleNode || ch === portalNode) continue;
+    if (ch.id === CAPSULE_HOST_ID || ch.id === PORTAL_HOST_ID) continue;
+    if (ch.hasAttribute?.('hidden')) continue;
+    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+      try {
+        const cs = window.getComputedStyle(ch);
+        if (cs?.display === 'none') continue;
+        if (cs?.position === 'absolute' || cs?.position === 'fixed') continue;
+      } catch {
+        // 忽略计算样式异常
+      }
+    }
+    out.push(ch);
+  }
+  return out;
+}
+
+function isHorizontalFlexContainer(el) {
+  if (!el) return false;
+  const cls = String(el.className || '');
+  if (/\b(?:inline-)?flex\b/.test(cls) && !/\bflex-col\b/.test(cls)) return true;
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const cs = window.getComputedStyle(el);
+      const disp = String(cs?.display || '');
+      const dir = String(cs?.flexDirection || 'row');
+      if (disp.includes('flex') && !dir.startsWith('column')) return true;
+    } catch {
+      // 忽略计算样式异常
+    }
+  }
+  return false;
+}
+
+function isSpaceDistributedFlexContainer(el) {
+  if (!el) return false;
+  const cls = String(el.className || '');
+  if (/\bjustify-(?:between|around|evenly)\b/.test(cls)) return true;
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const jc = String(window.getComputedStyle(el)?.justifyContent || '');
+      if (jc.includes('space-between') || jc.includes('space-around') || jc.includes('space-evenly')) {
+        return true;
+      }
+    } catch {
+      // 忽略计算样式异常
+    }
+  }
+  return false;
+}
+
+function buildComposerDockDescriptor(autoBtn, composerCard, bottomRowBtns, capsuleNode, portalNode, patchedNode) {
+  if (!autoBtn || !composerCard) return null;
+  let item = autoBtn;
+  while (
+    (item.parentElement || item.parentNode) &&
+    (item.parentElement || item.parentNode) !== composerCard &&
+    (item.parentElement || item.parentNode) !== document.body
+  ) {
+    const parent = item.parentElement || item.parentNode;
+    const hostSiblings = getInFlowHostChildren(parent, capsuleNode, portalNode);
+    if (hostSiblings.length >= 2) break;
+    const grandParent = parent.parentElement || parent.parentNode;
+    const parentCls = String(parent.className || '');
+    const parentInlineMl = String(parent.style?.marginLeft || '').trim();
+    const isSingleClusterInSplitRow =
+      !/\b(?:relative|ml-auto|ms-auto)\b/.test(parentCls) &&
+      parentInlineMl !== 'auto' &&
+      isHorizontalFlexContainer(parent) &&
+      grandParent &&
+      isSpaceDistributedFlexContainer(grandParent) &&
+      getInFlowHostChildren(grandParent, capsuleNode, portalNode).length >= 2;
+    if (isSingleClusterInSplitRow) {
+      break;
+    }
+    item = parent;
+  }
+
+  const anchorNode = item;
+  const targetContainer = anchorNode.parentElement || anchorNode.parentNode;
+  if (!targetContainer) return null;
+
+  const hostChildren = getInFlowHostChildren(targetContainer, capsuleNode, portalNode);
+  const anchorIdx = hostChildren.indexOf(anchorNode);
+  const isFirstHostChild = anchorIdx <= 0;
+
+  let needsAutoMarginTransfer = false;
+  let patchMarginNode = null;
+
+  if (!isFirstHostChild) {
+    const cls = String(anchorNode.className || '');
+    const inlineMl = String(anchorNode.style?.marginLeft || '').trim();
+    let computedLargeMl = false;
+    if (
+      patchedNode !== anchorNode &&
+      typeof window !== 'undefined' &&
+      typeof window.getComputedStyle === 'function'
+    ) {
+      try {
+        const mlPx = parseFloat(window.getComputedStyle(anchorNode)?.marginLeft) || 0;
+        const prevSib = hostChildren[anchorIdx - 1];
+        const aRect = anchorNode.getBoundingClientRect?.();
+        const pRect = prevSib?.getBoundingClientRect?.();
+        if (mlPx > 24 && aRect && pRect && aRect.left - pRect.right >= mlPx - 6) {
+          computedLargeMl = true;
+        }
+      } catch {
+        // 忽略边距测量异常
+      }
+    }
+
+    if (
+      /\b(?:ml-auto|ms-auto)\b/.test(cls) ||
+      inlineMl === 'auto' ||
+      patchedNode === anchorNode ||
+      computedLargeMl
+    ) {
+      needsAutoMarginTransfer = true;
+      patchMarginNode = anchorNode;
+    } else if (isSpaceDistributedFlexContainer(targetContainer)) {
+      needsAutoMarginTransfer = true;
+    }
+  }
+
+  const autoRect = anchorNode.getBoundingClientRect?.() || autoBtn.getBoundingClientRect?.();
+  let leftClusterRightEdge = 0;
+  if (autoRect && Array.isArray(bottomRowBtns)) {
+    for (const entry of bottomRowBtns) {
+      if (entry.btn === autoBtn || anchorNode.contains?.(entry.btn)) continue;
+      if (entry.rect.left < autoRect.left - 2 && entry.rect.right <= autoRect.left + 4) {
+        if (entry.rect.right > leftClusterRightEdge) {
+          leftClusterRightEdge = entry.rect.right;
+        }
+      }
+    }
+  }
+
+  return {
+    kind: 'composer',
+    workbench: null,
+    titlebar: composerCard,
+    targetContainer,
+    actionToolbar: patchMarginNode,
+    anchorNode,
+    needsAutoMarginTransfer,
+    leftClusterRightEdge,
+  };
+}
+
+function buildComposerRightEndDockDescriptor(
+  leftAnchorBtn,
+  composerCard,
+  bottomRowBtns,
+  capsuleNode,
+  portalNode
+) {
+  if (!leftAnchorBtn || !composerCard) return null;
+  const cardRect = composerCard.getBoundingClientRect?.();
+  const minRowWidth = cardRect && cardRect.width > 0 ? cardRect.width * 0.65 : 180;
+  let toolbarRow = null;
+  let cur = leftAnchorBtn.parentElement || leftAnchorBtn.parentNode;
+  for (let d = 0; d < 8 && cur && cur !== composerCard && cur !== document.body; d += 1) {
+    const r = cur.getBoundingClientRect?.();
+    if (r && r.width >= minRowWidth && r.height > 0 && r.height <= 60 && isHorizontalFlexContainer(cur)) {
+      toolbarRow = cur;
+      break;
+    }
+    cur = cur.parentElement || cur.parentNode;
+  }
+  if (!toolbarRow) {
+    const p = leftAnchorBtn.parentElement || leftAnchorBtn.parentNode;
+    if (!p || !isHorizontalFlexContainer(p)) return null;
+    toolbarRow = p;
+  }
+
+  let leftClusterRightEdge = 0;
+  if (Array.isArray(bottomRowBtns)) {
+    for (const entry of bottomRowBtns) {
+      if (entry?.rect?.right > leftClusterRightEdge) {
+        leftClusterRightEdge = entry.rect.right;
+      }
+    }
+  }
+
+  const rowChildren = getInFlowHostChildren(toolbarRow, capsuleNode, portalNode);
+  const lastChild = rowChildren.length >= 2 ? rowChildren[rowChildren.length - 1] : null;
+  if (
+    lastChild &&
+    !lastChild.contains?.(leftAnchorBtn) &&
+    isHorizontalFlexContainer(lastChild) &&
+    getInFlowHostChildren(lastChild, capsuleNode, portalNode).length === 0
+  ) {
+    return {
+      kind: 'composer',
+      workbench: null,
+      titlebar: composerCard,
+      targetContainer: lastChild,
+      actionToolbar: null,
+      anchorNode: null,
+      needsAutoMarginTransfer: false,
+      leftClusterRightEdge,
+    };
+  }
+
+  return {
+    kind: 'composer',
+    workbench: null,
+    titlebar: composerCard,
+    targetContainer: toolbarRow,
+    actionToolbar: null,
+    anchorNode: null,
+    needsAutoMarginTransfer: true,
+    leftClusterRightEdge,
+  };
+}
+
+function collectComposerBottomButtons(container, editorEl, editorRect, capsuleNode, portalNode) {
+  const rawBtns = querySimpleSelectorList(container, ['button', '[role="button"]', '[aria-haspopup]']);
+  const hostBtns = [];
+  for (const btn of rawBtns) {
+    if (!btn || btn === editorEl || editorEl?.contains?.(btn)) continue;
+    if (editorEl && btn.contains?.(editorEl)) continue;
+    if (
+      btn.id === CAPSULE_HOST_ID ||
+      btn.id === PORTAL_HOST_ID ||
+      capsuleNode?.contains?.(btn) ||
+      portalNode?.contains?.(btn)
+    ) {
+      continue;
+    }
+    if (isNodeHiddenByStyle(btn)) continue;
+    // 仅排除嵌套在真实紧凑按钮内部的图标/子触发器，避免外层卡片级 role="button" 误杀工具栏按钮
+    let nestedInBtn = false;
+    let p = btn.parentElement || btn.parentNode;
+    while (p && p !== container) {
+      const pTag = String(p.tagName || '').toLowerCase();
+      if (pTag === 'button') {
+        nestedInBtn = true;
+        break;
+      }
+      if (
+        (p.getAttribute?.('role') === 'button' || p.hasAttribute?.('aria-haspopup')) &&
+        !(editorEl && p.contains?.(editorEl))
+      ) {
+        const pr = p.getBoundingClientRect?.();
+        if (pr && pr.height > 0 && pr.height <= 48 && pr.width > 0 && pr.width <= 360) {
+          nestedInBtn = true;
+          break;
+        }
+      }
+      p = p.parentElement || p.parentNode;
+    }
+    if (nestedInBtn) continue;
+
+    const br = btn.getBoundingClientRect?.();
+    if (!br || br.width <= 0 || br.height <= 0 || br.height > 48) continue;
+    const centerY = (br.top + br.bottom) / 2;
+    if (editorRect && centerY < editorRect.top - 4) continue;
+    hostBtns.push({
+      btn,
+      rect: br,
+      centerY,
+      centerX: (br.left + br.right) / 2,
+      cleanText: cleanComposerButtonText(btn),
+      attrText: `${btn.getAttribute?.('data-testid') || ''} ${btn.getAttribute?.('aria-label') || ''} ${btn.getAttribute?.('title') || ''}`.trim(),
+    });
+  }
+  if (hostBtns.length === 0) return [];
+  let maxCenterY = -Infinity;
+  for (const item of hostBtns) {
+    if (item.centerY > maxCenterY) maxCenterY = item.centerY;
+  }
+  const bottomBand = hostBtns.filter((item) => Math.abs(item.centerY - maxCenterY) <= 22);
+  bottomBand.sort((a, b) => a.rect.left - b.rect.left);
+  return bottomBand;
+}
+
+function pickAutoButtonFromRow(bottomRowBtns, containerRect, options = undefined) {
+  if (!Array.isArray(bottomRowBtns) || bottomRowBtns.length === 0) return null;
+  const requireModelForFallback = Boolean(options?.requireModelForFallback);
+  const rightSplitX = containerRect ? containerRect.left + containerRect.width * 0.35 : 0;
+  const rightFirst = [
+    ...bottomRowBtns.filter((b) => b.centerX >= rightSplitX),
+    ...bottomRowBtns.filter((b) => b.centerX < rightSplitX),
+  ];
+
+  // Tier 1: 精确文本 Auto / 自动 匹配
+  for (const item of rightFirst) {
+    if (COMPOSER_MODE_EXACT_RE.test(item.cleanText)) {
+      return { btn: item.btn, tier: 1 };
+    }
+  }
+
+  // Tier 2: 执行/权限模式文案或无障碍语义属性匹配（排除模型选择器按钮）
+  for (const item of rightFirst) {
+    if (isComposerModelButtonItem(item)) continue;
+    if (
+      (item.cleanText && COMPOSER_MODE_TEXT_RE.test(item.cleanText)) ||
+      (item.attrText && COMPOSER_MODE_ATTR_RE.test(item.attrText))
+    ) {
+      return { btn: item.btn, tier: 2 };
+    }
+  }
+
+  const hasModelBtn = bottomRowBtns.some(isComposerModelButtonItem);
+
+  // Tier 3: 几何右簇首按钮兜底（适配 Antigravity IDE 无 Auto 按钮、右侧为发送/语音按钮的输入栏布局）
+  if (bottomRowBtns.length >= 2 && (!requireModelForFallback || hasModelBtn)) {
+    let maxGap = -Infinity;
+    let splitIdx = -1;
+    for (let i = 1; i < bottomRowBtns.length; i += 1) {
+      const gap = bottomRowBtns[i].rect.left - bottomRowBtns[i - 1].rect.right;
+      if (gap > maxGap) {
+        maxGap = gap;
+        splitIdx = i;
+      }
+    }
+    if (splitIdx >= 1 && maxGap >= 16) {
+      return { btn: bottomRowBtns[splitIdx].btn, tier: 3 };
+    }
+  }
+
+  // Tier 4: 输入为空时若右侧发送按钮暂时隐藏、仅左侧存在模型选择器按钮，停靠至工具栏最右侧
+  if (hasModelBtn && containerRect && containerRect.width >= 200) {
+    const lastItem = bottomRowBtns[bottomRowBtns.length - 1];
+    if (lastItem.rect.right <= containerRect.left + containerRect.width * 0.72) {
+      return { btn: null, leftAnchorBtn: lastItem.btn, tier: 4 };
+    }
+  }
+
+  return null;
+}
+
+function resolveComposerEditorRect(ed) {
+  const er = ed?.getBoundingClientRect?.();
+  if (er && er.width >= 80 && er.height >= 12) return er;
+  let cur = ed;
+  for (let d = 0; d < 6 && cur; d += 1) {
+    if (String(cur.className || '').includes('monaco-editor')) {
+      const mr = cur.getBoundingClientRect?.();
+      if (mr && mr.width >= 80 && mr.height >= 12) return mr;
+      break;
+    }
+    cur = cur.parentElement || cur.parentNode;
+  }
+  return er || null;
+}
+
+function findHostComposerAutoTarget(capsuleNode = null, portalNode = null, patchedNode = null) {
+  try {
+    if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') {
+      return null;
+    }
+    const capEl = capsuleNode || document.getElementById?.(CAPSULE_HOST_ID) || null;
+    const porEl = portalNode || document.getElementById?.(PORTAL_HOST_ID) || null;
+    const activeRouteId = extractHostRouteCascadeId();
+
+    // 1. 优先从活跃会话的输入框编辑器向上定位底部工具栏与 Auto / 右簇发送按钮
+    const rawEditors = querySimpleSelectorList(document, [
+      'textarea',
+      '[contenteditable]',
+      '[role="textbox"]',
+      '[data-lexical-editor]',
+      '.ProseMirror',
+      '.monaco-editor',
+    ]);
+    const scoredEditors = [];
+    for (const ed of rawEditors) {
+      if (!ed || capEl?.contains?.(ed) || porEl?.contains?.(ed)) continue;
+      if (ed.hasAttribute?.('contenteditable')) {
+        const ce = String(ed.getAttribute('contenteditable') || '').trim().toLowerCase();
+        if (ce === 'false' && ed.getAttribute?.('role') !== 'textbox') continue;
+      }
+      if (isNodeHiddenByStyle(ed) || hasExcludedComposerAncestor(ed)) continue;
+      const er = resolveComposerEditorRect(ed);
+      if (!er || er.width < 100 || er.height < 12 || er.height > 540) continue;
+
+      let score = Math.min(1200, er.width) + Math.max(0, er.bottom) * 0.2;
+      if (activeRouteId) {
+        let anc = ed.parentElement || ed.parentNode;
+        while (anc) {
+          const cid = anc.getAttribute?.('data-cascade-id');
+          if (cid) {
+            score += cid === activeRouteId ? 4000 : -2000;
+            break;
+          }
+          anc = anc.parentElement || anc.parentNode;
+        }
+      }
+      if (
+        document.activeElement &&
+        (ed === document.activeElement || ed.contains?.(document.activeElement))
+      ) {
+        score += 1000;
+      }
+      scoredEditors.push({ ed, rect: er, score });
+    }
+    scoredEditors.sort((a, b) => b.score - a.score);
+
+    for (const { ed, rect: er } of scoredEditors) {
+      const isMonacoCandidate = String(ed.className || '').includes('monaco-editor') ||
+        String(ed.className || '').includes('inputarea');
+      let tier3Candidate = null;
+      let tier4Candidate = null;
+      let cur = ed.parentElement || ed.parentNode;
+      for (let depth = 0; depth < 18 && cur; depth += 1) {
+        if (cur === document.body || cur === document.documentElement) break;
+        const tag = String(cur.tagName || '').toLowerCase();
+        if (tag === 'main' || String(cur.className || '').includes('monaco-workbench')) break;
+        const cr = cur.getBoundingClientRect?.();
+        if (cr && cr.height > 680) break;
+        if (cr && cr.width >= 180 && cr.height > 0) {
+          const bottomRowBtns = collectComposerBottomButtons(cur, ed, er, capEl, porEl);
+          const picked = pickAutoButtonFromRow(bottomRowBtns, cr, {
+            requireModelForFallback: isMonacoCandidate,
+          });
+          if (picked) {
+            if (picked.tier <= 2) {
+              const desc = buildComposerDockDescriptor(
+                picked.btn,
+                cur,
+                bottomRowBtns,
+                capEl,
+                porEl,
+                patchedNode
+              );
+              if (desc) return desc;
+            } else if (picked.tier === 3 && !tier3Candidate) {
+              tier3Candidate = { btn: picked.btn, card: cur, bottomRowBtns };
+            } else if (picked.tier === 4 && !tier4Candidate) {
+              tier4Candidate = { leftAnchorBtn: picked.leftAnchorBtn, card: cur, bottomRowBtns };
+            }
+          }
+        }
+        cur = cur.parentElement || cur.parentNode;
+      }
+      if (tier3Candidate) {
+        const desc = buildComposerDockDescriptor(
+          tier3Candidate.btn,
+          tier3Candidate.card,
+          tier3Candidate.bottomRowBtns,
+          capEl,
+          porEl,
+          patchedNode
+        );
+        if (desc) return desc;
+      }
+      if (tier4Candidate) {
+        const desc = buildComposerRightEndDockDescriptor(
+          tier4Candidate.leftAnchorBtn,
+          tier4Candidate.card,
+          tier4Candidate.bottomRowBtns,
+          capEl,
+          porEl
+        );
+        if (desc) return desc;
+      }
+    }
+
+    // 2. 兜底路径：编辑器自定义封装或暂时只读时，直接扫描底部包含模型选择器或 Auto 按钮的输入工具栏
+    const vh = Number(window.innerHeight || 800);
+    const allBtns = querySimpleSelectorList(document, ['button', '[role="button"]', '[aria-haspopup]']);
+    let modelToolbarFallback = null;
+    for (const btn of allBtns) {
+      if (!btn || capEl?.contains?.(btn) || porEl?.contains?.(btn)) continue;
+      if (isNodeHiddenByStyle(btn) || hasExcludedComposerAncestor(btn)) continue;
+      const br = btn.getBoundingClientRect?.();
+      if (!br || br.width <= 0 || br.height <= 0 || br.height > 48 || br.top < vh * 0.2) continue;
+      const clean = cleanComposerButtonText(btn);
+      const attr = `${btn.getAttribute?.('data-testid') || ''} ${btn.getAttribute?.('aria-label') || ''} ${btn.getAttribute?.('title') || ''}`.trim();
+      const itemProbe = { cleanText: clean, attrText: attr };
+      const isModeBtn =
+        COMPOSER_MODE_EXACT_RE.test(clean) ||
+        (!isComposerModelButtonItem(itemProbe) &&
+          ((clean && COMPOSER_MODE_TEXT_RE.test(clean)) || (attr && COMPOSER_MODE_ATTR_RE.test(attr))));
+      const isModelBtn = isComposerModelButtonItem(itemProbe);
+      if (!isModeBtn && !isModelBtn) continue;
+
+      let cur = btn.parentElement || btn.parentNode;
+      for (let depth = 0; depth < 12 && cur; depth += 1) {
+        if (cur === document.body || cur === document.documentElement) break;
+        if (String(cur.className || '').includes('monaco-workbench')) break;
+        const cr = cur.getBoundingClientRect?.();
+        if (!cr || cr.height > 560) break;
+        if (cr.width >= 200) {
+          const rowBtns = collectComposerBottomButtons(cur, null, null, capEl, porEl);
+          if (isModeBtn) {
+            const hasModelSibling = rowBtns.some((b) => b.btn !== btn && isComposerModelButtonItem(b));
+            if (hasModelSibling) {
+              const desc = buildComposerDockDescriptor(btn, cur, rowBtns, capEl, porEl, patchedNode);
+              if (desc) return desc;
+            }
+          } else if (isModelBtn && !modelToolbarFallback) {
+            const picked = pickAutoButtonFromRow(rowBtns, cr, { requireModelForFallback: true });
+            if (picked) {
+              const desc =
+                picked.tier <= 3 && picked.btn
+                  ? buildComposerDockDescriptor(picked.btn, cur, rowBtns, capEl, porEl, patchedNode)
+                  : picked.tier === 4 && picked.leftAnchorBtn
+                    ? buildComposerRightEndDockDescriptor(
+                        picked.leftAnchorBtn,
+                        cur,
+                        rowBtns,
+                        capEl,
+                        porEl
+                      )
+                    : null;
+              if (desc) {
+                if (picked.tier <= 2) return desc;
+                modelToolbarFallback = desc;
+                break;
+              }
+            }
+          }
+        }
+        cur = cur.parentElement || cur.parentNode;
+      }
+    }
+    if (modelToolbarFallback) return modelToolbarFallback;
+  } catch {
+    // 忽略输入框探测异常
+  }
+  return null;
+}
+
+function isImmediatelyBeforeNode(node, refNode) {
+  if (!node || !refNode) return false;
+  if (node.nextElementSibling !== undefined) {
+    return node.nextElementSibling === refNode;
+  }
+  if (node.nextSibling !== undefined) {
+    return node.nextSibling === refNode;
+  }
+  const parent = node.parentElement || node.parentNode;
+  if (!parent?.children) return false;
+  const idx = Array.prototype.indexOf.call(parent.children, node);
+  return idx >= 0 && parent.children[idx + 1] === refNode;
+}
+
+function isIdeExtensionChatFrame() {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (window.__AGUsageMonitorBridge?.isIdeChatFrame === true) return true;
+    return /[?&]extension(?:View|Variant)=/i.test(String(window.location?.search || ''));
+  } catch {
+    return false;
+  }
+}
+
+function resolveActiveDockTarget(options = undefined) {
+  const settings = telemetryStore.getState().telemetry?.settings;
+  const rawMode =
+    settings?.windowMountMode ??
+    (typeof window !== 'undefined' ? window.__AGUsageMonitorBridge?.mountMode : undefined);
+  const mountMode =
+    options?.mountMode ||
+    normalizeClientWindowMountMode(rawMode, settings?.enableWindowOverlay);
+  if (isIdeExtensionChatFrame()) {
+    if (mountMode !== 'composer') return null;
+    return findHostComposerAutoTarget(
+      options?.capsuleNode || null,
+      options?.portalNode || null,
+      options?.patchedNode || null
+    );
+  }
+  if (mountMode === 'composer') {
+    const composerTarget = findHostComposerAutoTarget(
+      options?.capsuleNode || null,
+      options?.portalNode || null,
+      options?.patchedNode || null
+    );
+    if (composerTarget) return composerTarget;
+  }
+  const ideTarget = findIdeWorkbenchTitlebar();
+  if (ideTarget) return ideTarget;
+  const titlebar = findHostTitlebar();
+  if (!titlebar) return null;
+  let targetContainer = titlebar;
+  try {
+    const rightGroup = titlebar.querySelector(':scope > div.shrink-0') || titlebar.lastElementChild;
+    if (rightGroup && rightGroup !== titlebar.firstElementChild) {
+      targetContainer = rightGroup;
+    }
+  } catch {
+    // 忽略子选择器不兼容场景
+  }
+  return {
+    kind: 'flow',
+    workbench: null,
+    titlebar,
+    targetContainer,
+    actionToolbar: null,
+  };
 }
 
 function findNativeTopRightAnchor() {
@@ -135,6 +894,9 @@ function findNativeTopRightAnchor() {
 function getLeftSidebarRightEdge(vw) {
   try {
     if (typeof document !== 'undefined' && typeof document.querySelector === 'function') {
+      if (document.querySelector('.monaco-workbench')) {
+        return 0;
+      }
       const navEl = document.querySelector('div[role="navigation"]');
       if (navEl?.getBoundingClientRect) {
         const nr = navEl.getBoundingClientRect();
@@ -395,6 +1157,7 @@ export function mountWindowOverlay() {
     if (!hasPointerCoords || document.hidden || multiBtn.hasAttribute('hidden')) {
       return false;
     }
+    const bridgePad = multiOpen ? 12 : 1;
     if (multiBtn.getBoundingClientRect) {
       const mr = multiBtn.getBoundingClientRect();
       if (
@@ -402,8 +1165,8 @@ export function mountWindowOverlay() {
         mr.height > 0 &&
         lastPointerX >= mr.left - 1 &&
         lastPointerX <= mr.right + 1 &&
-        lastPointerY >= mr.top - 1 &&
-        lastPointerY <= mr.bottom + 10
+        lastPointerY >= mr.top - bridgePad &&
+        lastPointerY <= mr.bottom + bridgePad
       ) {
         return true;
       }
@@ -415,8 +1178,8 @@ export function mountWindowOverlay() {
         pr.height > 0 &&
         lastPointerX >= pr.left - 1 &&
         lastPointerX <= pr.right + 1 &&
-        lastPointerY >= pr.top - 4 &&
-        lastPointerY <= pr.bottom + 1
+        lastPointerY >= pr.top - 8 &&
+        lastPointerY <= pr.bottom + 12
       ) {
         return true;
       }
@@ -501,12 +1264,20 @@ export function mountWindowOverlay() {
     setPopoverOpen(true);
   }
 
-  // --- 1. 创建顶栏双胶囊 Shadow Host（左：多会话实时信息；右：单会话指标胶囊） ---
+  // --- 1. 创建顶栏/输入框双胶囊 Shadow Host（左：多会话实时信息；右：单会话指标胶囊） ---
   const capsuleHost = document.createElement('div');
   capsuleHost.id = CAPSULE_HOST_ID;
   capsuleHost.className = 'wm-capsule-host';
   capsuleHost.setAttribute('data-dock', 'fixed');
   capsuleHost.setAttribute('data-layout', layoutMode);
+  // 隔离冒泡事件，防止嵌入输入框工具栏时点击或回车误触外层编辑框聚焦或表单提交
+  capsuleHost.addEventListener?.('mousedown', (e) => e.stopPropagation?.());
+  capsuleHost.addEventListener?.('click', (e) => e.stopPropagation?.());
+  capsuleHost.addEventListener?.('keydown', (e) => {
+    if (e?.key !== 'Escape') {
+      e.stopPropagation?.();
+    }
+  });
   const capsuleShadow = capsuleHost.attachShadow({ mode: 'open' });
 
   const capsuleStyleEl = document.createElement('style');
@@ -864,8 +1635,8 @@ export function mountWindowOverlay() {
       updateRow: syncPoolQuotaRow,
     }
   );
-  const hoverWkFootLeft = h('span', { className: 'text-muted', text: '本周累计: 0 ($0.00)' });
-  const hoverWkFootRight = h('span', { className: 'text-muted', text: '本周调用: 0 次' });
+  const hoverWkFootLeft = h('span', { className: 'text-muted', text: '周期累计: 0 ($0.00)' });
+  const hoverWkFootRight = h('span', { className: 'text-muted', text: '周期调用: 0 次' });
 
   const hoverQuotaPanel = h('section', { className: 'panel' }, [
     h('div', { className: 'panel-header' }, [
@@ -1072,9 +1843,179 @@ export function mountWindowOverlay() {
   portalShadow.appendChild(popoverEl);
   (document.body || document.documentElement).appendChild(portalHost);
 
-  // --- 3. 几何测量、顶栏停靠与防溢出定位 ---
+  // --- 3. 几何测量、IDE 主题桥接、顶栏停靠与防溢出定位 ---
+  let patchedActionToolbar = null;
+  let patchedActionToolbarPrevMargin = '';
+  let observedWorkbench = null;
+  let themeObserver = null;
+  const mirroredThemeVars = new Map();
+
+  function restorePatchedActionToolbar() {
+    if (!patchedActionToolbar) return;
+    try {
+      if (patchedActionToolbar.style) {
+        patchedActionToolbar.style.marginLeft = patchedActionToolbarPrevMargin;
+      }
+    } catch {
+      // 忽略还原宿主工具栏边距异常
+    }
+    patchedActionToolbar = null;
+    patchedActionToolbarPrevMargin = '';
+  }
+
+  function syncWorkbenchThemeVars() {
+    if (disposed) return null;
+    try {
+      if (
+        typeof document === 'undefined' ||
+        typeof document.querySelector !== 'function' ||
+        typeof window.getComputedStyle !== 'function'
+      ) {
+        return null;
+      }
+      const workbenchEl = document.querySelector('.monaco-workbench');
+      const rootCs = document.documentElement
+        ? window.getComputedStyle(document.documentElement)
+        : null;
+      const bodyCs = document.body ? window.getComputedStyle(document.body) : null;
+      const nativeRootBg = String(
+        rootCs?.getPropertyValue?.('--background') ||
+          bodyCs?.getPropertyValue?.('--background') ||
+          ''
+      ).trim();
+      if (nativeRootBg) {
+        if (mirroredThemeVars.size > 0) {
+          for (const k of mirroredThemeVars.keys()) {
+            portalHost.style.removeProperty?.(k);
+            capsuleHost.style.removeProperty?.(k);
+          }
+          mirroredThemeVars.clear();
+        }
+        return workbenchEl || document.documentElement || null;
+      }
+
+      const themeSourceEl = workbenchEl || document.documentElement || document.body;
+      if (!themeSourceEl) return null;
+      const wbCs = window.getComputedStyle(themeSourceEl);
+      const pick = (...names) => {
+        for (const name of names) {
+          const val = String(wbCs?.getPropertyValue?.(name) || '').trim();
+          if (val) return val;
+        }
+        return '';
+      };
+
+      const nextVars = [
+        [
+          '--background',
+          pick('--vscode-sideBar-background', '--vscode-editor-background', '--vscode-panel-background'),
+        ],
+        [
+          '--card',
+          pick(
+            '--vscode-editorWidget-background',
+            '--vscode-sideBar-background',
+            '--vscode-editor-background'
+          ),
+        ],
+        ['--foreground', pick('--vscode-foreground', '--vscode-editor-foreground')],
+        [
+          '--muted-foreground',
+          pick('--vscode-descriptionForeground', '--vscode-sideBarTitle-foreground'),
+        ],
+        [
+          '--border',
+          pick(
+            '--vscode-widget-border',
+            '--vscode-panel-border',
+            '--vscode-commandCenter-border',
+            '--vscode-contrastBorder'
+          ),
+        ],
+        [
+          '--primary',
+          pick('--vscode-textLink-foreground', '--vscode-button-background', '--vscode-focusBorder'),
+        ],
+        ['--destructive', pick('--vscode-errorForeground', '--vscode-editorError-foreground')],
+      ];
+
+      for (const [cssVar, val] of nextVars) {
+        const prevVal = mirroredThemeVars.get(cssVar) || '';
+        if (val) {
+          if (prevVal !== val) {
+            portalHost.style.setProperty?.(cssVar, val);
+            capsuleHost.style.setProperty?.(cssVar, val);
+            mirroredThemeVars.set(cssVar, val);
+          }
+        } else if (prevVal) {
+          if (typeof portalHost.style.removeProperty === 'function') {
+            portalHost.style.removeProperty(cssVar);
+          } else {
+            portalHost.style.setProperty?.(cssVar, '');
+          }
+          if (typeof capsuleHost.style.removeProperty === 'function') {
+            capsuleHost.style.removeProperty(cssVar);
+          } else {
+            capsuleHost.style.setProperty?.(cssVar, '');
+          }
+          mirroredThemeVars.delete(cssVar);
+        }
+      }
+      return themeSourceEl;
+    } catch {
+      return null;
+    }
+  }
+
+  function ensureWorkbenchThemeObserved() {
+    const wb = syncWorkbenchThemeVars();
+    if (wb && wb !== observedWorkbench && themeObserver) {
+      observedWorkbench = wb;
+      try {
+        themeObserver.observe(wb, { attributes: true, attributeFilter: ['class', 'style'] });
+      } catch {
+        // 忽略工作台属性观察异常
+      }
+    }
+  }
+
+  function resolveRuntimeDockTarget() {
+    return resolveActiveDockTarget({
+      capsuleNode: capsuleHost,
+      portalNode: portalHost,
+      patchedNode: patchedActionToolbar,
+    });
+  }
+
+  function isDockPlacementSynced(dock) {
+    const curDockAttr = capsuleHost.getAttribute('data-dock');
+    if (!capsuleHost.isConnected || !portalHost.isConnected) return false;
+    if (!dock) {
+      if (isIdeExtensionChatFrame()) {
+        return curDockAttr === 'pending-composer' && capsuleHost.style.display === 'none';
+      }
+      return curDockAttr === 'fixed';
+    }
+    if (capsuleHost.style.display === 'none') return false;
+    if (!dock.targetContainer?.contains?.(capsuleHost) || curDockAttr !== dock.kind) return false;
+    if (dock.kind === 'composer') {
+      if (dock.anchorNode) {
+        if (!isImmediatelyBeforeNode(capsuleHost, dock.anchorNode)) return false;
+      } else {
+        const lastEl =
+          dock.targetContainer.lastElementChild !== undefined
+            ? dock.targetContainer.lastElementChild
+            : dock.targetContainer.children?.[dock.targetContainer.children.length - 1] ||
+              dock.targetContainer.lastChild;
+        if (lastEl !== capsuleHost) return false;
+      }
+    }
+    return true;
+  }
+
   function updateFixedFallbackPosition() {
-    if (capsuleHost.getAttribute('data-dock') === 'flow') {
+    const dockMode = capsuleHost.getAttribute('data-dock');
+    if (dockMode === 'flow' || dockMode === 'ide-titlebar' || dockMode === 'composer') {
       capsuleHost.style.top = '';
       capsuleHost.style.right = '';
       return;
@@ -1096,8 +2037,86 @@ export function mountWindowOverlay() {
     }
   }
 
-  function measureAvailableTitlebarWidth(titlebar) {
+  function measureAvailableTitlebarWidth(dockTarget) {
     try {
+      const titlebar = dockTarget?.titlebar || null;
+      if (dockTarget?.kind === 'composer' && titlebar?.getBoundingClientRect) {
+        const cRect = titlebar.getBoundingClientRect();
+        const aRect = dockTarget.anchorNode?.getBoundingClientRect?.();
+        if (cRect.width > 0) {
+          const leftEdge =
+            Number.isFinite(dockTarget.leftClusterRightEdge) &&
+            dockTarget.leftClusterRightEdge > cRect.left + 12
+              ? dockTarget.leftClusterRightEdge
+              : cRect.left + 12;
+          const leftOccupied = Math.max(12, leftEdge - cRect.left);
+          if (aRect && aRect.width > 0) {
+            const rightOccupied = Math.max(aRect.width + 8, cRect.right - aRect.left);
+            return cRect.width - leftOccupied - rightOccupied - 16;
+          }
+          if (!dockTarget.anchorNode) {
+            return cRect.width - leftOccupied - 28;
+          }
+        }
+      }
+
+      if (dockTarget?.kind === 'ide-titlebar' && titlebar?.getBoundingClientRect) {
+        const tbRect = titlebar.getBoundingClientRect();
+        if (tbRect.width > 0) {
+          let leftContentWidth = 12;
+          const leftGroup =
+            titlebar.querySelector?.(':scope > .titlebar-left') ||
+            titlebar.querySelector?.('.titlebar-left');
+          if (leftGroup) {
+            let leftSum = 0;
+            if (typeof window.getComputedStyle === 'function') {
+              leftSum += parseFloat(window.getComputedStyle(leftGroup).paddingLeft) || 0;
+            }
+            if (leftGroup.children) {
+              for (const child of leftGroup.children) {
+                if (child?.getBoundingClientRect) {
+                  leftSum += Math.max(0, child.getBoundingClientRect().width);
+                }
+              }
+            }
+            leftContentWidth = Math.min(Math.round(tbRect.width * 0.45), Math.max(12, leftSum));
+          }
+
+          let minCenterWidth = 0;
+          const centerGroup =
+            titlebar.querySelector?.(':scope > .titlebar-center') ||
+            titlebar.querySelector?.('.titlebar-center');
+          if (centerGroup?.getBoundingClientRect) {
+            const cr = centerGroup.getBoundingClientRect();
+            if (cr.width > 0 && cr.height > 0) {
+              minCenterWidth = Math.min(220, Math.ceil(cr.width));
+            }
+          }
+
+          let rightSiblingsWidth = 0;
+          let hasVisibleWindowControls = false;
+          const rightGroup = dockTarget.targetContainer;
+          if (rightGroup?.children) {
+            for (const child of rightGroup.children) {
+              if (child === capsuleHost || !child?.getBoundingClientRect) continue;
+              const cw = Math.max(0, child.getBoundingClientRect().width);
+              rightSiblingsWidth += cw;
+              if (cw > 0 && child.classList?.contains?.('window-controls-container')) {
+                hasVisibleWindowControls = true;
+              }
+            }
+          }
+          if (!hasVisibleWindowControls && navigator?.windowControlsOverlay?.visible) {
+            const wcoRect = navigator.windowControlsOverlay.getTitlebarAreaRect?.();
+            if (wcoRect && wcoRect.width > 0 && tbRect.right > wcoRect.right + 4) {
+              rightSiblingsWidth += tbRect.right - wcoRect.right;
+            }
+          }
+
+          return tbRect.width - leftContentWidth - minCenterWidth - rightSiblingsWidth - 28;
+        }
+      }
+
       if (titlebar?.getBoundingClientRect) {
         const tbRect = titlebar.getBoundingClientRect();
         if (tbRect.width > 0) {
@@ -1162,6 +2181,7 @@ export function mountWindowOverlay() {
       const minLeft = navRight > 0 ? Math.max(12, navRight + 12) : 12;
       const defaultCardW = Math.min(FLOATING_CARD_WIDTH, Math.max(280, vw - 24));
       const defaultMultiW = Math.min(MULTI_PANEL_WIDTH, Math.max(280, vw - 24));
+      const isDockComposer = capsuleHost.getAttribute('data-dock') === 'composer';
 
       if (multiOpen) {
         const mRect = multiBtn.getBoundingClientRect?.() || bRect;
@@ -1175,16 +2195,30 @@ export function mountWindowOverlay() {
           Number(multiPanelEl.offsetHeight) ||
           Number(multiPanelEl.getBoundingClientRect?.().height) ||
           320;
-        let top = Math.max(38, Math.round(anchorRect.bottom + 6));
-        if (top + panelH > vh - 8 && anchorRect.top > panelH + 12) {
-          top = Math.round(anchorRect.top - panelH - 6);
+        const spaceBelowMulti = vh - anchorRect.bottom - 12;
+        const spaceAboveMulti = anchorRect.top - 16;
+        const openMultiAbove =
+          (isDockComposer && spaceAboveMulti > spaceBelowMulti) ||
+          (anchorRect.bottom + 6 + panelH > vh - 8 && spaceAboveMulti > spaceBelowMulti);
+
+        let top;
+        let maxMultiH;
+        if (openMultiAbove) {
+          maxMultiH = Math.max(180, Math.floor(anchorRect.top - 20));
+          multiPanelEl.style.maxHeight = `${maxMultiH}px`;
+          const effMultiH = Math.min(Number(multiPanelEl.offsetHeight) || panelH, maxMultiH);
+          top = Math.max(12, Math.round(anchorRect.top - effMultiH - 8));
+        } else {
+          top = Math.max(38, Math.round(anchorRect.bottom + 6));
+          maxMultiH = Math.max(240, vh - top - 12);
+          multiPanelEl.style.maxHeight = `${maxMultiH}px`;
         }
+        patchClasses(multiPanelEl, { 'is-above': openMultiAbove });
         let left = Math.round(anchorRect.left);
         left = Math.min(left, vw - panelW - 12);
         left = Math.max(minLeft, left);
         multiPanelEl.style.top = `${top}px`;
         multiPanelEl.style.left = `${left}px`;
-        multiPanelEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
       }
 
       const rightAnchorEdge =
@@ -1198,13 +2232,31 @@ export function mountWindowOverlay() {
           Number(popoverEl.getBoundingClientRect?.().width) ||
           defaultCardW;
         const panelW = Math.min(rawW, Math.max(280, vw - minLeft - 12));
-        const top = Math.max(38, Math.min(vh - 140, Math.round(bRect.bottom + 6)));
+        const spaceBelowPop = vh - bRect.bottom - 12;
+        const spaceAbovePop = bRect.top - 16;
+        const openPopAbove =
+          (isDockComposer && spaceAbovePop > spaceBelowPop) ||
+          (spaceBelowPop < 360 && spaceAbovePop > spaceBelowPop);
+
+        let top;
+        if (openPopAbove) {
+          const maxPopH = Math.max(240, Math.floor(bRect.top - 20));
+          const targetPopH = Math.min(588, maxPopH);
+          popoverEl.style.height = `${targetPopH}px`;
+          popoverEl.style.maxHeight = `${maxPopH}px`;
+          const actualPopH = Math.min(Number(popoverEl.offsetHeight) || targetPopH, maxPopH);
+          top = Math.max(12, Math.round(bRect.top - actualPopH - 8));
+        } else {
+          popoverEl.style.height = '';
+          top = Math.max(38, Math.min(vh - 140, Math.round(bRect.bottom + 6)));
+          popoverEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
+        }
+        patchClasses(popoverEl, { 'is-above': openPopAbove });
         let left = Math.round(rightAnchorEdge - panelW);
         left = Math.min(left, vw - panelW - 12);
         left = Math.max(minLeft, left);
         popoverEl.style.top = `${top}px`;
         popoverEl.style.left = `${left}px`;
-        popoverEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
       }
 
       if (tooltipOpen && !popoverOpen && !multiOpen) {
@@ -1217,26 +2269,38 @@ export function mountWindowOverlay() {
           Number(hoverTipEl.offsetHeight) ||
           Number(hoverTipEl.getBoundingClientRect?.().height) ||
           480;
-        let top = Math.max(38, Math.round(bRect.bottom + 6));
-        if (top + tipH > vh - 8 && bRect.top > tipH + 12) {
-          top = Math.round(bRect.top - tipH - 6);
+        const spaceBelowTip = vh - bRect.bottom - 12;
+        const spaceAboveTip = bRect.top - 16;
+        const openTipAbove =
+          (isDockComposer && spaceAboveTip > spaceBelowTip) ||
+          (bRect.bottom + 6 + tipH > vh - 8 && spaceAboveTip > spaceBelowTip);
+
+        let top;
+        if (openTipAbove) {
+          const maxTipH = Math.max(220, Math.floor(bRect.top - 20));
+          hoverTipEl.style.maxHeight = `${maxTipH}px`;
+          const effTipH = Math.min(Number(hoverTipEl.offsetHeight) || tipH, maxTipH);
+          top = Math.max(12, Math.round(bRect.top - effTipH - 8));
+        } else {
+          top = Math.max(38, Math.round(bRect.bottom + 6));
+          hoverTipEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
         }
+        patchClasses(hoverTipEl, { 'is-above': openTipAbove });
         let left = Math.round(rightAnchorEdge - tipW);
         left = Math.min(left, vw - tipW - 12);
         left = Math.max(minLeft, left);
         hoverTipEl.style.top = `${top}px`;
         hoverTipEl.style.left = `${left}px`;
-        hoverTipEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
       }
     } catch {
       // 忽略定位异常
     }
   }
 
-  function updateResponsiveLayout() {
+  function updateResponsiveLayout(dockOverride = undefined) {
     if (disposed) return;
-    const titlebar = findHostTitlebar();
-    const avail = measureAvailableTitlebarWidth(titlebar);
+    const dockTarget = dockOverride === undefined ? resolveRuntimeDockTarget() : dockOverride;
+    const avail = measureAvailableTitlebarWidth(dockTarget);
     const curTel = telemetryStore.getState().telemetry;
     const showMulti = curTel?.settings?.showTopbarMultiSession !== false;
     const curUpdateMode = normalizeClientUpdateMode(
@@ -1265,27 +2329,79 @@ export function mountWindowOverlay() {
     if (bodyOrDoc && !portalHost.isConnected) {
       bodyOrDoc.appendChild(portalHost);
     }
+    ensureWorkbenchThemeObserved();
 
-    const titlebar = findHostTitlebar();
-    if (titlebar) {
-      let targetContainer = titlebar;
-      try {
-        const rightGroup = titlebar.querySelector(':scope > div.shrink-0') || titlebar.lastElementChild;
-        if (rightGroup && rightGroup !== titlebar.firstElementChild) {
-          targetContainer = rightGroup;
-        }
-      } catch {
-        // 忽略子选择器不兼容场景
+    const dockTarget = resolveRuntimeDockTarget();
+    if (dockTarget) {
+      if (capsuleHost.style.display === 'none') {
+        capsuleHost.style.display = '';
       }
-
-      if (capsuleHost.parentElement !== targetContainer) {
-        if (targetContainer.firstChild && targetContainer !== titlebar) {
-          targetContainer.insertBefore(capsuleHost, targetContainer.firstChild);
+      const { kind, titlebar, targetContainer, actionToolbar } = dockTarget;
+      if (kind === 'composer') {
+        if (patchedActionToolbar !== actionToolbar) {
+          restorePatchedActionToolbar();
+          if (actionToolbar?.style) {
+            patchedActionToolbar = actionToolbar;
+            patchedActionToolbarPrevMargin = actionToolbar.style.marginLeft || '';
+            actionToolbar.style.marginLeft = '0px';
+          }
+        }
+        if (dockTarget.anchorNode) {
+          if (
+            (capsuleHost.parentElement || capsuleHost.parentNode) !== targetContainer ||
+            !isImmediatelyBeforeNode(capsuleHost, dockTarget.anchorNode)
+          ) {
+            targetContainer.insertBefore(capsuleHost, dockTarget.anchorNode);
+          }
         } else {
-          targetContainer.appendChild(capsuleHost);
+          const lastEl =
+            targetContainer.lastElementChild !== undefined
+              ? targetContainer.lastElementChild
+              : targetContainer.children?.[targetContainer.children.length - 1] ||
+                targetContainer.lastChild;
+          if (
+            (capsuleHost.parentElement || capsuleHost.parentNode) !== targetContainer ||
+            lastEl !== capsuleHost
+          ) {
+            targetContainer.appendChild(capsuleHost);
+          }
         }
+        patchAttr(capsuleHost, 'data-dock', 'composer');
+        patchAttr(
+          capsuleHost,
+          'data-composer-push',
+          dockTarget.needsAutoMarginTransfer ? '1' : null
+        );
+      } else if (kind === 'ide-titlebar') {
+        if (patchedActionToolbar !== actionToolbar) {
+          restorePatchedActionToolbar();
+          if (actionToolbar?.style) {
+            patchedActionToolbar = actionToolbar;
+            patchedActionToolbarPrevMargin = actionToolbar.style.marginLeft || '';
+            actionToolbar.style.marginLeft = '0px';
+          }
+        }
+        if (capsuleHost.parentElement !== targetContainer || targetContainer.firstChild !== capsuleHost) {
+          if (targetContainer.firstChild) {
+            targetContainer.insertBefore(capsuleHost, targetContainer.firstChild);
+          } else {
+            targetContainer.appendChild(capsuleHost);
+          }
+        }
+        patchAttr(capsuleHost, 'data-dock', 'ide-titlebar');
+        patchAttr(capsuleHost, 'data-composer-push', null);
+      } else {
+        restorePatchedActionToolbar();
+        if (capsuleHost.parentElement !== targetContainer) {
+          if (targetContainer.firstChild && targetContainer !== titlebar) {
+            targetContainer.insertBefore(capsuleHost, targetContainer.firstChild);
+          } else {
+            targetContainer.appendChild(capsuleHost);
+          }
+        }
+        patchAttr(capsuleHost, 'data-dock', 'flow');
+        patchAttr(capsuleHost, 'data-composer-push', null);
       }
-      patchAttr(capsuleHost, 'data-dock', 'flow');
       if (capsuleHost.style.top) capsuleHost.style.top = '';
       if (capsuleHost.style.right) capsuleHost.style.right = '';
 
@@ -1301,15 +2417,31 @@ export function mountWindowOverlay() {
           // 忽略观察器异常
         }
       }
+    } else if (isIdeExtensionChatFrame()) {
+      restorePatchedActionToolbar();
+      if (popoverOpen) setPopoverOpen(false);
+      if (multiOpen) setMultiOpen(false);
+      if (tooltipOpen) setTooltipOpen(false);
+      if (bodyOrDoc && (capsuleHost.parentElement || capsuleHost.parentNode) !== bodyOrDoc) {
+        bodyOrDoc.appendChild(capsuleHost);
+      }
+      capsuleHost.style.display = 'none';
+      patchAttr(capsuleHost, 'data-dock', 'pending-composer');
+      patchAttr(capsuleHost, 'data-composer-push', null);
     } else if (bodyOrDoc) {
+      if (capsuleHost.style.display === 'none') {
+        capsuleHost.style.display = '';
+      }
+      restorePatchedActionToolbar();
       if (capsuleHost.parentElement !== bodyOrDoc) {
         bodyOrDoc.appendChild(capsuleHost);
       }
       patchAttr(capsuleHost, 'data-dock', 'fixed');
+      patchAttr(capsuleHost, 'data-composer-push', null);
       updateFixedFallbackPosition();
     }
 
-    updateResponsiveLayout();
+    updateResponsiveLayout(dockTarget);
     return Boolean(capsuleHost.isConnected && portalHost.isConnected);
   }
 
@@ -1979,9 +3111,13 @@ export function mountWindowOverlay() {
         hoverUpdateVerText,
         latestVer ? `发现新版本 v${latestVer}` : '发现新版本可用'
       );
+      const isComposerDock = capsuleHost.getAttribute('data-dock') === 'composer';
+      const dockPlaceWord = isComposerDock ? '版本胶囊' : '顶栏';
       patchText(
         hoverUpdateHintText,
-        latestVer ? `点击顶栏 v${latestVer} 即可更新` : '点击顶栏版本胶囊即可更新'
+        latestVer
+          ? `点击${dockPlaceWord} v${latestVer} 即可更新`
+          : `点击${isComposerDock ? '版本胶囊' : '顶栏版本胶囊'}即可更新`
       );
     }
     if (showUpdatePrompt !== lastShowUpdate) {
@@ -1990,11 +3126,9 @@ export function mountWindowOverlay() {
     }
 
     // --- 同步悬停三卡片全景概览（与 LiveOverviewView 保持完全一致的数据口径与视觉呈现） ---
-    const showUpstream = Boolean(telemetry.settings?.showUpstreamModel);
-    const activeModelDisplay =
-      (showUpstream
-        ? overviewActive.activeModelUpstream || overviewActive.activeModelShort
-        : overviewActive.activeModelShort) || '模型未知';
+    const activeModelDisplay = resolveModelDisplayInfo(overviewActive, telemetry.settings, {
+      fallback: '模型未知',
+    }).text;
 
     patchClasses(hoverPulseDot, { 'is-pulsing': Boolean(overviewActive.isRunning || isRunning) });
     patchText(hoverTpsVal, formatMetric(overviewActive.latestTokPerSec, ' tok/s'));
@@ -2050,7 +3184,6 @@ export function mountWindowOverlay() {
     }
 
     const quotas = telemetry.quotas || {};
-    const weekly = quotas.weekly || {};
     const minuteTick = Number(telSt.minuteTick || Math.floor(Date.now() / 30000));
     patchText(
       hoverTierBadge,
@@ -2062,17 +3195,17 @@ export function mountWindowOverlay() {
       createRow: createPoolQuotaRow,
       updateRow: syncPoolQuotaRow,
     });
-    patchText(
-      hoverWkFootLeft,
-      `本周累计: ${formatTokens(weekly.tokens || 0)} (${formatUsd(weekly.costUsd || 0)})`
-    );
-    patchText(
-      hoverWkFootRight,
-      telemetry.account?.aiCredits > 0
-        ? `AI 积分: ${telemetry.account.aiCredits}`
-        : `本周调用: ${weekly.calls || 0} 次`
-    );
+    const footSummary = formatQuotaSummaryFooter(quotas, telemetry.account);
+    patchText(hoverWkFootLeft, footSummary.leftText);
+    patchText(hoverWkFootRight, footSummary.rightText);
+    patchAttr(hoverWkFootLeft, 'title', footSummary.tooltip);
+    patchAttr(hoverWkFootRight, 'title', footSummary.tooltip);
   }
+
+  let lastAppliedMountMode = normalizeClientWindowMountMode(
+    telemetryStore.getState().telemetry?.settings?.windowMountMode,
+    telemetryStore.getState().telemetry?.settings?.enableWindowOverlay
+  );
 
   const unsubStore = telemetryStore.subscribe(
     (st) => ({
@@ -2082,10 +3215,18 @@ export function mountWindowOverlay() {
       selectedConversationId: st.selectedConversationId,
     }),
     (slice) => {
-      if (slice.telemetry?.settings?.enableWindowOverlay === false) {
+      const nextMountMode = normalizeClientWindowMountMode(
+        slice.telemetry?.settings?.windowMountMode,
+        slice.telemetry?.settings?.enableWindowOverlay
+      );
+      if (slice.telemetry?.settings?.enableWindowOverlay === false || nextMountMode === 'sidebar') {
         if (popoverOpen) setPopoverOpen(false);
         if (multiOpen) setMultiOpen(false);
+      } else if (nextMountMode !== lastAppliedMountMode) {
+        lastAppliedMountMode = nextMountMode;
+        ensureCapsuleDocked();
       }
+      lastAppliedMountMode = nextMountMode;
       renderCapsuleTelemetry();
     }
   );
@@ -2146,6 +3287,7 @@ export function mountWindowOverlay() {
   };
   const onWindowResize = () => updateResponsiveLayout();
   const onPopState = () => syncHostRouteIfChanged();
+  const onDocFocusIn = () => syncHostRouteIfChanged();
   const onVisibilityChange = () => {
     if (document.hidden) {
       hasPointerCoords = false;
@@ -2169,20 +3311,42 @@ export function mountWindowOverlay() {
       resizeObserver = new ResizeObserver(() => updateResponsiveLayout());
       if (document.body) resizeObserver.observe(document.body);
     }
-    if (typeof MutationObserver !== 'undefined' && document.body) {
-      hostDomObserver = new MutationObserver(() => {
-        syncHostRouteIfChanged();
-        const tb = findHostTitlebar();
-        if (
-          !capsuleHost.isConnected ||
-          !portalHost.isConnected ||
-          (tb && !tb.contains(capsuleHost)) ||
-          (!tb && capsuleHost.getAttribute('data-dock') === 'flow')
-        ) {
-          scheduleDockSync();
-        }
+    if (typeof MutationObserver !== 'undefined') {
+      themeObserver = new MutationObserver(() => {
+        syncWorkbenchThemeVars();
       });
-      hostDomObserver.observe(document.body, { childList: true, subtree: true });
+      if (document.head) {
+        themeObserver.observe(document.head, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      }
+      if (document.body) {
+        hostDomObserver = new MutationObserver((records) => {
+          if (
+            Array.isArray(records) &&
+            records.length > 0 &&
+            records.every((r) => r?.target === capsuleHost || r?.target === portalHost)
+          ) {
+            return;
+          }
+          syncHostRouteIfChanged();
+          if (!observedWorkbench) {
+            ensureWorkbenchThemeObserved();
+          }
+          const dock = resolveRuntimeDockTarget();
+          if (!isDockPlacementSynced(dock)) {
+            scheduleDockSync();
+          }
+        });
+        hostDomObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['data-cascade-id', 'data-selected'],
+        });
+      }
     }
   } catch {
     // 忽略观察器初始化异常
@@ -2190,6 +3354,7 @@ export function mountWindowOverlay() {
 
   document.addEventListener?.('mousedown', onDocMouseDown, true);
   document.addEventListener?.('keydown', onDocKeyDown);
+  document.addEventListener?.('focusin', onDocFocusIn);
   document.addEventListener?.('visibilitychange', onVisibilityChange);
   window.addEventListener?.('pointermove', onWindowPointerMove, { passive: true });
   window.addEventListener?.('blur', onWindowBlur);
@@ -2200,7 +3365,9 @@ export function mountWindowOverlay() {
   const watchdogTimer = setInterval(() => {
     if (disposed) return;
     syncHostRouteIfChanged();
-    if (!capsuleHost.isConnected || !portalHost.isConnected) {
+    ensureWorkbenchThemeObserved();
+    const dock = resolveRuntimeDockTarget();
+    if (!isDockPlacementSynced(dock)) {
       ensureCapsuleDocked();
     }
   }, 1200);
@@ -2225,6 +3392,11 @@ export function mountWindowOverlay() {
     ensureAlive() {
       if (disposed) return false;
       return ensureCapsuleDocked();
+    },
+    syncHostRoute() {
+      if (disposed) return false;
+      syncHostRouteIfChanged();
+      return true;
     },
     updateBridge(nextBridge) {
       if (disposed || !nextBridge || typeof nextBridge !== 'object') return false;
@@ -2273,6 +3445,30 @@ export function mountWindowOverlay() {
     isMultiHoverOpen: () => Boolean(multiOpen && !multiPinned),
     isMultiPinnedOpen: () => Boolean(multiOpen && multiPinned),
     getLayoutMode: () => layoutMode,
+    getDockKind: () => String(capsuleHost.getAttribute('data-dock') || ''),
+    getMountMode: () => lastAppliedMountMode,
+    applyMountMode(nextMode) {
+      if (disposed) return false;
+      const normalized = normalizeClientWindowMountMode(nextMode, nextMode !== 'sidebar');
+      if (typeof window !== 'undefined' && window.__AGUsageMonitorBridge) {
+        window.__AGUsageMonitorBridge.mountMode = normalized;
+      }
+      const curTel = telemetryStore.getState().telemetry;
+      if (curTel?.settings) {
+        telemetryStore.setState({
+          telemetry: {
+            ...curTel,
+            settings: {
+              ...curTel.settings,
+              windowMountMode: normalized,
+              enableWindowOverlay: normalized !== 'sidebar',
+            },
+          },
+        });
+      }
+      lastAppliedMountMode = normalized;
+      return ensureCapsuleDocked();
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -2300,14 +3496,19 @@ export function mountWindowOverlay() {
       try {
         hostDomObserver?.disconnect();
       } catch {}
+      try {
+        themeObserver?.disconnect();
+      } catch {}
       document.removeEventListener?.('mousedown', onDocMouseDown, true);
       document.removeEventListener?.('keydown', onDocKeyDown);
+      document.removeEventListener?.('focusin', onDocFocusIn);
       document.removeEventListener?.('visibilitychange', onVisibilityChange);
       window.removeEventListener?.('pointermove', onWindowPointerMove);
       window.removeEventListener?.('blur', onWindowBlur);
       window.removeEventListener?.('resize', onWindowResize);
       window.removeEventListener?.('popstate', onPopState);
       navigator?.windowControlsOverlay?.removeEventListener?.('geometrychange', onWindowResize);
+      restorePatchedActionToolbar();
       try {
         hoverCtxSegmentBar.destroy();
       } catch {}

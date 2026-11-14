@@ -28,6 +28,7 @@ import { enumerateAndSyncConversations } from './local-scanner.mjs';
 import { callLsRpc, getOfficialQuotaSummary } from './ls-rpc.mjs';
 import {
   computeStepCost,
+  formatUpstreamModelId,
   isArgonModelIdentifier,
   isCarbonModelIdentifier,
   resolveModelInfo,
@@ -135,7 +136,10 @@ function enrichActiveConversationSteps(
     const rawUpstreamModel =
       resolvedResponseModel ||
       (mInfo.modelId && mInfo.modelId !== 'unknown' ? mInfo.modelId : mInfo.shortName);
-    const modelUpstream = st.isCompactionStep ? `${rawUpstreamModel}·压缩` : rawUpstreamModel;
+    const annotatedUpstreamModel = formatUpstreamModelId(rawUpstreamModel, mInfo);
+    const modelUpstream = st.isCompactionStep
+      ? `${annotatedUpstreamModel}·压缩`
+      : annotatedUpstreamModel;
 
     const {
       viewableDelaySec: _viewableDelaySec,
@@ -705,7 +709,7 @@ export async function buildTelemetryPayloadInternal(
     weeklyResetMs: accountWeeklyResetMs || parseIsoMs(activeLiveWeekly?.resetTime),
   };
 
-  // 5. 多时间窗口聚合（预设窗口 + 当前选定窗口 + 趋势 + 月序列 + 来源与模型拆解）
+  // 5. 多时间窗口聚合（预设窗口 + 当前选定窗口 + 趋势 + 月序列 + 来源与模型拆解 + 各配额池独立周期统计）
   const {
     selectedWindow,
     trendStartMs,
@@ -719,6 +723,8 @@ export async function buildTelemetryPayloadInternal(
     monthlySeries,
     weekBucket,
     modelBreakdown,
+    poolCycleStats,
+    poolsWeeklySummary,
   } = aggregateMultiWindowUsage({
     filterOpts,
     cycleAnchors,
@@ -726,7 +732,23 @@ export async function buildTelemetryPayloadInternal(
     activeCascadeId,
     activeFamilyCascadeIds,
     dynamicModelMap,
+    quotaPoolsMap,
   });
+
+  const emptyCycleSummary = () => ({
+    calls: 0,
+    tokens: 0,
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+    unpricedCalls: 0,
+  });
+  for (const [pk, poolObj] of quotaPoolsMap.entries()) {
+    const pStats = poolCycleStats?.get(pk);
+    poolObj.cycle5h = pStats?.cycle5h || emptyCycleSummary();
+    poolObj.cycleWeekly = pStats?.cycleWeekly || emptyCycleSummary();
+  }
 
   // 6. 组装当前活跃配额池与每周限额视图数据
   const familyPoolQuota = quotaPoolsMap.get(activePoolKey);
@@ -756,6 +778,8 @@ export async function buildTelemetryPayloadInternal(
     weeklyRemainingIntPct: activeLiveWeekly?.remainingIntPct ?? null,
     weeklyUsedPct: activeLiveWeekly?.usedPct ?? null,
     weeklyResetTime: activeLiveWeekly?.resetTime || null,
+    cycle5h: emptyCycleSummary(),
+    cycleWeekly: emptyCycleSummary(),
     models: [],
   };
 
@@ -898,10 +922,11 @@ export async function buildTelemetryPayloadInternal(
           ? knownUpstreamByModelKey.get(bestMetricStep.modelKey) || ''
           : '');
       modelShort = mInfo.shortName || '';
-      modelUpstream =
+      const rawQuickUpstream =
         resolvedResp ||
         (mInfo.modelId && mInfo.modelId !== 'unknown' ? mInfo.modelId : mInfo.shortName) ||
         '';
+      modelUpstream = formatUpstreamModelId(rawQuickUpstream, mInfo);
       latestTokPerSec = roundMetric(speedMetric(bestMetricStep).value);
     }
 
@@ -1151,10 +1176,19 @@ export async function buildTelemetryPayloadInternal(
         title: isCustomWeeklyMode
           ? '每周限额 (自定义本机)'
           : `每周限额 (${activePoolLabel && activePoolLabel !== 'Unknown' ? activePoolLabel : '当前'})`,
-        calls: weekBucket.calls,
-        tokens: weekBucket.totalTokens,
-        costUsd: weekBucket.costUsd,
-        unpricedCalls: weekBucket.unpricedCalls,
+        calls: !isCustomWeeklyMode && poolsWeeklySummary ? poolsWeeklySummary.calls : weekBucket.calls,
+        tokens:
+          !isCustomWeeklyMode && poolsWeeklySummary
+            ? poolsWeeklySummary.tokens
+            : weekBucket.totalTokens,
+        costUsd:
+          !isCustomWeeklyMode && poolsWeeklySummary
+            ? poolsWeeklySummary.costUsd
+            : weekBucket.costUsd,
+        unpricedCalls:
+          !isCustomWeeklyMode && poolsWeeklySummary
+            ? poolsWeeklySummary.unpricedCalls
+            : weekBucket.unpricedCalls,
         usedPct: weeklyUsedPct,
         remainingPct: weeklyRemainingPct,
         remainingIntPct: weeklyRemainingIntPct,

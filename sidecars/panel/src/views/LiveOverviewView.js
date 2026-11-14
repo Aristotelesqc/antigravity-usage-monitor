@@ -23,6 +23,7 @@ import {
   formatMetric,
   formatTokens,
   formatUsd,
+  resolveModelDisplayInfo,
   sampleSummary,
   speedReasonText,
 } from '../core/formatters.js';
@@ -176,22 +177,27 @@ export function buildQuotaPoolItems(quotas, minuteTick = 0, { isPending = false 
 }
 
 /**
- * 创建单个配额池的 DOM 行结构，内含 5h 限额与每周限额两个可独立显隐的子窗口进度条。
+ * 创建单个配额池的 DOM 行结构，内含 5h 限额与每周限额两个可独立显隐的子窗口进度条，
+ * 并在窗口标题右侧内联展示该配额池自身的周期消耗统计（零额外纵向行高）。
  */
 export function createPoolQuotaRow() {
-  const title5h = h('span', { text: '5h 限额' });
-  const meta5h = h('span', { className: 'panel-meta text-mono', text: '--' });
+  const title5h = h('span', { className: 'quota-win-title', text: '5h' });
+  const usage5h = h('span', { className: 'quota-win-usage', hidden: true, text: '' });
+  const left5h = h('span', { className: 'quota-win-left' }, [title5h, usage5h]);
+  const meta5h = h('span', { className: 'panel-meta quota-win-meta text-mono', text: '--' });
   const fill5h = h('div', { className: 'progress-fill' });
   const row5h = h('div', { style: 'display: flex; flex-direction: column; gap: 4px;' }, [
-    h('div', { className: 'panel-header' }, [title5h, meta5h]),
+    h('div', { className: 'panel-header quota-win-head' }, [left5h, meta5h]),
     h('div', { className: 'progress-track' }, [fill5h]),
   ]);
 
-  const titleWk = h('span', { text: '每周限额' });
-  const metaWk = h('span', { className: 'panel-meta text-mono', text: '--' });
+  const titleWk = h('span', { className: 'quota-win-title', text: '周限' });
+  const usageWk = h('span', { className: 'quota-win-usage', hidden: true, text: '' });
+  const leftWk = h('span', { className: 'quota-win-left' }, [titleWk, usageWk]);
+  const metaWk = h('span', { className: 'panel-meta quota-win-meta text-mono', text: '--' });
   const fillWk = h('div', { className: 'progress-fill' });
   const rowWk = h('div', { style: 'display: flex; flex-direction: column; gap: 4px;' }, [
-    h('div', { className: 'panel-header' }, [titleWk, metaWk]),
+    h('div', { className: 'panel-header quota-win-head' }, [leftWk, metaWk]),
     h('div', { className: 'progress-track' }, [fillWk]),
   ]);
 
@@ -202,8 +208,39 @@ export function createPoolQuotaRow() {
 
   return {
     el,
-    refs: { row5h, title5h, meta5h, fill5h, rowWk, titleWk, metaWk, fillWk },
+    refs: {
+      row5h,
+      left5h,
+      title5h,
+      usage5h,
+      meta5h,
+      fill5h,
+      rowWk,
+      leftWk,
+      titleWk,
+      usageWk,
+      metaWk,
+      fillWk,
+    },
   };
+}
+
+/**
+ * 格式化可用额度面板底部的汇总行文案（官方配额模式下展示各池周期合计，自定义预算模式下展示自然周累计）。
+ */
+export function formatQuotaSummaryFooter(quotas, account) {
+  const weekly = quotas?.weekly || {};
+  const isCustomLocal = weekly.isOfficial === false;
+  const prefix = isCustomLocal ? '本周' : '周期';
+  const leftText = `${prefix}累计: ${formatTokens(weekly.tokens || 0)} (${formatUsd(weekly.costUsd || 0)})`;
+  const rightText =
+    Number(account?.aiCredits) > 0
+      ? `AI 积分: ${account.aiCredits}`
+      : `${prefix}调用: ${weekly.calls || 0} 次`;
+  const tooltip = isCustomLocal
+    ? '按本机自然周（周一 00:00 起）统计'
+    : '按各配额池独立周限重置周期分别统计并汇总';
+  return { leftText, rightText, tooltip };
 }
 
 /**
@@ -250,7 +287,24 @@ export function syncPoolQuotaRow(refs, item, idx, rowEl) {
 
   const fallbackMetaText = isPending ? '读取中...' : '获取失败 (--%)';
 
-  patchText(refs.title5h, `5h 限额 (${poolLabel})`);
+  patchText(refs.title5h, `5h (${poolLabel})`);
+  const c5h = poolData?.cycle5h;
+  if (!isPending && has5h && c5h && (c5h.tokens != null || c5h.costUsd != null)) {
+    const tok5h = formatTokens(c5h.tokens || 0);
+    const cost5h = formatUsd(c5h.costUsd || 0);
+    const calls5h = Number(c5h.calls || 0);
+    refs.usage5h.hidden = false;
+    patchText(refs.usage5h, `· ${tok5h} (${cost5h})`);
+    patchAttr(
+      refs.left5h,
+      'title',
+      `当前 5h 周期累计 (${poolLabel})：${tok5h} Tokens · ${cost5h} · ${calls5h} 次调用`
+    );
+  } else {
+    refs.usage5h.hidden = true;
+    patchText(refs.usage5h, '');
+    patchAttr(refs.left5h, 'title', null);
+  }
   patchText(
     refs.meta5h,
     has5h
@@ -264,10 +318,27 @@ export function syncPoolQuotaRow(refs, item, idx, rowEl) {
   });
 
   const customTitle =
-    isActivePool && fallbackWeekly?.isOfficial === false && fallbackWeekly?.title
-      ? fallbackWeekly.title
-      : `每周限额 (${poolLabel})`;
+    useCustomWeekly && fallbackWeekly?.title ? fallbackWeekly.title : `周限 (${poolLabel})`;
   patchText(refs.titleWk, customTitle);
+  const cWk = useCustomWeekly
+    ? fallbackWeekly
+    : poolData?.cycleWeekly || (isActivePool ? fallbackWeekly : null);
+  if (!isPending && hasWk && cWk && (cWk.tokens != null || cWk.costUsd != null)) {
+    const tokWk = formatTokens(cWk.tokens || 0);
+    const costWk = formatUsd(cWk.costUsd || 0);
+    const callsWk = Number(cWk.calls || 0);
+    refs.usageWk.hidden = false;
+    patchText(refs.usageWk, `· ${tokWk} (${costWk})`);
+    patchAttr(
+      refs.leftWk,
+      'title',
+      `${useCustomWeekly ? '本周自然周累计' : `当前周限周期累计 (${poolLabel})`}：${tokWk} Tokens · ${costWk} · ${callsWk} 次调用`
+    );
+  } else {
+    refs.usageWk.hidden = true;
+    patchText(refs.usageWk, '');
+    patchAttr(refs.leftWk, 'title', null);
+  }
   patchText(
     refs.metaWk,
     hasWk
@@ -282,7 +353,10 @@ export function syncPoolQuotaRow(refs, item, idx, rowEl) {
 }
 
 export function quotaPoolRowSig(item, idx) {
-  return `${idx}:${item.poolLabel}:${item.isActivePool}:${Boolean(item.isPending)}:${item.minuteTick}:${item.poolData?.usedPct}:${item.poolData?.remainingPct}:${item.poolData?.resetTime}:${item.poolData?.weeklyUsedPct}:${item.poolData?.weeklyRemainingPct}:${item.poolData?.weeklyResetTime}:${item.fallbackWeekly?.isOfficial}:${item.fallbackWeekly?.usedPct}:${item.fallbackWeekly?.remainingPct}:${item.fallbackWeekly?.resetTime}:${item.fallbackWeekly?.title}`;
+  const c5h = item.poolData?.cycle5h;
+  const cWk = item.poolData?.cycleWeekly;
+  const fw = item.fallbackWeekly;
+  return `${idx}:${item.poolLabel}:${item.isActivePool}:${Boolean(item.isPending)}:${item.minuteTick}:${item.poolData?.usedPct}:${item.poolData?.remainingPct}:${item.poolData?.resetTime}:${item.poolData?.weeklyUsedPct}:${item.poolData?.weeklyRemainingPct}:${item.poolData?.weeklyResetTime}:${c5h?.tokens}:${c5h?.costUsd}:${c5h?.calls}:${cWk?.tokens}:${cWk?.costUsd}:${cWk?.calls}:${fw?.isOfficial}:${fw?.usedPct}:${fw?.remainingPct}:${fw?.resetTime}:${fw?.title}:${fw?.tokens}:${fw?.costUsd}:${fw?.calls}`;
 }
 
 export const LiveOverviewView = defineComponent({
@@ -561,7 +635,7 @@ export const LiveOverviewView = defineComponent({
     const tierBadge = h('span', { className: 'panel-meta', text: 'Google AI · Pro' });
     const poolsListEl = h('div', { style: 'display: flex; flex-direction: column; gap: 0;' });
 
-    const wkFootLeft = h('span', { className: 'text-muted', text: '本周累计: 0 ($0.00)' });
+    const wkFootLeft = h('span', { className: 'text-muted', text: '周期累计: 0 ($0.00)' });
     const wkFootRight = h('span', { className: 'text-muted', text: '' });
 
     const quotaPanel = h('section', { className: 'panel' }, [
@@ -860,12 +934,10 @@ export const LiveOverviewView = defineComponent({
         ensureLiveTicker();
       }
 
-      // 1. 更新 4 格实时测速矩阵（展示当前会话全局汇总指标，遵循模型名称格式设置）
-      const showUpstream = Boolean(data.settings?.showUpstreamModel);
-      const activeModelDisplay =
-        (showUpstream
-          ? active.activeModelUpstream || active.activeModelShort
-          : active.activeModelShort) || '模型未知';
+      // 1. 更新 4 格实时测速矩阵（展示当前会话全局汇总指标，遵循模型名称格式与 Orchestrator ID 格式设置）
+      const activeModelDisplay = resolveModelDisplayInfo(active, data.settings, {
+        fallback: '模型未知',
+      }).text;
       patchClasses(pulseDot, { 'is-pulsing': Boolean(active.isRunning) });
       patchText(tpsVal, formatMetric(active.latestTokPerSec, ' tok/s'));
       const reason = speedReasonText(active.latestSpeedReason);
@@ -914,9 +986,9 @@ export const LiveOverviewView = defineComponent({
 
         const allAgentPills = agents.map((ag) => {
           const agPct = ag.context?.usedPct ?? 0;
-          const agModelDisplay =
-            (showUpstream ? ag.activeModelUpstream || ag.activeModelShort : ag.activeModelShort) ||
-            '模型未知';
+          const agModelDisplay = resolveModelDisplayInfo(ag, data.settings, {
+            fallback: '模型未知',
+          }).text;
           return {
             key: ag.agentId,
             label: `${ag.badgeText || ag.shortLabel} ${agPct}%`,
@@ -1038,7 +1110,6 @@ export const LiveOverviewView = defineComponent({
         tierBadge,
         `${data.account?.tierName || 'Google AI'} · ${data.account?.planName || 'Pro'}`
       );
-      const weekly = quotas.weekly || {};
       const minuteTick = Math.floor(Date.now() / 30000);
       const poolItems = buildQuotaPoolItems(quotas, minuteTick);
 
@@ -1049,16 +1120,11 @@ export const LiveOverviewView = defineComponent({
         updateRow: syncPoolQuotaRow,
       });
 
-      patchText(
-        wkFootLeft,
-        `本周累计: ${formatTokens(weekly.tokens || 0)} (${formatUsd(weekly.costUsd || 0)})`
-      );
-      patchText(
-        wkFootRight,
-        data.account?.aiCredits > 0
-          ? `AI 积分: ${data.account.aiCredits}`
-          : `本周调用: ${weekly.calls || 0} 次`
-      );
+      const footSummary = formatQuotaSummaryFooter(quotas, data.account);
+      patchText(wkFootLeft, footSummary.leftText);
+      patchText(wkFootRight, footSummary.rightText);
+      patchAttr(wkFootLeft, 'title', footSummary.tooltip);
+      patchAttr(wkFootRight, 'title', footSummary.tooltip);
 
       ensureCountdownTicker();
       viewScrollbar.refresh();

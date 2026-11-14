@@ -51,7 +51,7 @@ The dashboard is organized into four tabs, with a top header to switch conversat
 - **Preferences**
   - **Mount Mode**: Dual-mount (Top Bar + Sidebar) or Sidebar only.
   - **Top-Bar Customization**: Independently toggle the live running-sessions indicator, and customize the content and left-to-right order of the three metric slots in the capsule.
-  - **Model Name Format**: Compact short alias (e.g. `argon-4-high`) or raw upstream model ID (e.g. `gemini-3.8-flash-n`).
+  - **Model Name Format**: Compact short alias (e.g. `argon-4-high`) or raw upstream model ID (e.g. `gemini-3.8-flash-n`), plus an independent Orchestrator series ID selector (`orchestrator-argon` / `worker-agy-hydrogen` compact mode by default, or full annotated IDs).
   - **Version Updates & Pricing Sync**: Dynamically sync [`pricing-catalog.json`](pricing-catalog.json) from GitHub, with three update modes: *Notify only, manual update* (default), *Auto update*, and *Off*.
 
 ## Model Identification & Cost Accounting
@@ -98,8 +98,10 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
 ## Enabling & Opening the Panel
 
 1. Open **Customizations** in the left sidebar, switch to the **Installed** tab, locate `usage-monitor`, and toggle it on.
-2. **Top-Bar Floating Capsule (enabled by default)**: Once enabled, the background sidecar mounts a live status & metric capsule in the top-right bar of the main chat window (hover for quick overview, left-click to expand the full 4-tab panel, right-click to force refresh) without modifying `app.asar`. To disable the top-bar capsule, switch **Mount Mode** to *Sidebar only* in Preferences.
-3. **Right-Hand Sidebar Panel**: Click `⋮` in the top-right corner of the chat pane -> **Extensions** -> **Usage & Speed Monitor** (or **用量监控**) to dock the panel in the auxiliary sidebar.
+2. **Top-Bar Floating Capsule (enabled by default on both Antigravity 2.0 & Antigravity IDE)**:
+   - **Antigravity 2.0 App**: Immediately mounts a live status & metric capsule in the top-right bar of the main chat window (hover for quick overview, left-click to expand the full 4-tab panel, right-click to force refresh) without modifying `app.asar`.
+   - **Antigravity IDE**: On first enable, the background sidecar automatically adds `"remote-debugging-port": "0"` to `~/.antigravity-ide/argv.json` (preserving comments and existing settings). **Restart Antigravity IDE once**, and the capsule will dock into the top-right IDE window titlebar on every launch. Because Antigravity IDE does not currently expose the right-hand UI Sidecar auxiliary pane, keep **Mount Mode** set to *Dual-mount* in IDE and click the top-bar capsule to open the 4-tab dashboard.
+3. **Right-Hand Sidebar Panel (Antigravity 2.0)**: Open the auxiliary sidebar menu in the chat window to dock **Usage & Speed Monitor** on the right, or switch **Mount Mode** between *Top Bar + Sidebar* and *Sidebar only* in Preferences.
 
 ## Updating
 

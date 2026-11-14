@@ -49,6 +49,7 @@ function inferFamilyFromProviderOrKey(rawModelKey = '', modelId = '', apiProvide
     combined.includes('CARBON') ||
     combined.includes('ARGON') ||
     combined.includes('HYDROGEN') ||
+    combined.includes('ORCHESTRATOR') ||
     combined.includes('HELIX') ||
     combined.includes('FLASH') ||
     combined.includes('GOOGLE')
@@ -59,29 +60,42 @@ function inferFamilyFromProviderOrKey(rawModelKey = '', modelId = '', apiProvide
 }
 
 /**
- * 判断一组模型标识字段是否指向 Gemini 4 Argon 系列模型（含 M417/M418/M419 枚举）。
+ * 判断一组模型标识字段是否指向 Gemini 4 Argon 系列模型（含 M417/M418/M419 及 M681 Orchestrator (Argon)）。
  *
  * @param {...string} parts 待检测的标识片段
  * @returns {boolean}
  */
 export function isArgonModelIdentifier(...parts) {
-  return /argon|MODEL_PLACEHOLDER_M41[789]\b/i.test(parts.filter(Boolean).join(' '));
+  const text = parts.filter(Boolean).join(' ');
+  if (
+    /\bhydrogen\b|\bgemini-flash-worker-agy\b|MODEL_PLACEHOLDER_M(?:669|52[5678])\b/i.test(text) &&
+    !/\bargon\b|MODEL_PLACEHOLDER_M(?:41[789]|681)\b/i.test(text)
+  ) {
+    return false;
+  }
+  return /argon|MODEL_PLACEHOLDER_M(?:41[789]|681)\b/i.test(text);
 }
 
 /**
- * 判断一组模型标识字段是否指向 Gemini 4 Carbon 系列模型（含 M429 枚举）。
+ * 判断一组模型标识字段是否指向 Gemini 4 Carbon 系列模型（含 M427/M429/M437/M438 及 M667 Orchestrator (Carbon)）。
  *
  * @param {...string} parts 待检测的标识片段
  * @returns {boolean}
  */
 export function isCarbonModelIdentifier(...parts) {
-  return /\bcarbon\b|gemini-4-carbon|MODEL_PLACEHOLDER_M429\b/i.test(
-    parts.filter(Boolean).join(' ')
-  );
+  const text = parts.filter(Boolean).join(' ');
+  if (/\bcarbon\b|gemini-4-carbon|MODEL_PLACEHOLDER_M(?:42[79]|43[78]|667)\b/i.test(text)) {
+    return true;
+  }
+  if (/\bhydrogen\b|\bgemini-flash-worker-agy\b|MODEL_PLACEHOLDER_M(?:669|52[5678])\b/i.test(text)) {
+    return false;
+  }
+  return /\bgemini-pro-orchestrator\b(?!-argon)/i.test(text);
 }
 
 /**
- * 剥离模型展示名称末尾的思考档位后缀（如 `(High)`、`(Medium)`、`(Thinking)`），提取基础模型族名。
+ * 剥离模型展示名称末尾的思考档位后缀（如 `(XHigh)`、`(High)`、`(Medium)`、`(Thinking)`），提取基础模型族名。
+ * 保留 `(Carbon)` / `(Argon)` 后缀，以便 `Orchestrator (Carbon)` 与 `Orchestrator (Argon)` 在汇总表中保持分列。
  *
  * @param {string} [label='']
  * @returns {string}
@@ -89,13 +103,23 @@ export function isCarbonModelIdentifier(...parts) {
 export function getBaseModelLabel(label = '') {
   return (
     String(label || '')
-      .replace(/\s*\((?:Max|High|Medium|Low|Thinking|Extra Low|Tiered)\)\s*$/i, '')
+      .replace(/\bFlash-Lite\b/gi, 'Flash Lite')
+      .replace(/\s*\((?:Max|XHigh|High|Medium|Low|Thinking|Extra Low|Tiered|Preview)\)\s*$/i, '')
       .trim() || String(label || 'Unknown Model')
   );
 }
 
+const SLUG_TIER_LABELS = {
+  xhigh: 'XHigh',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+  'extra-low': 'Extra Low',
+  tiered: 'Tiered',
+};
+
 /**
- * 将严格匹配的 `gemini-3.1-pro`、`gemini-3.5-flash-lite` 或 `gemini-4-carbon` 通用模型 Slug 转为人类可读标签。
+ * 将严格匹配的 `gemini-3.1-pro`、`gemini-3.5-flash-lite`、`gemini-4-carbon` 或已知内部路由别名转为人类可读标签。
  * 使用行尾锚点 `$` 防止未收录新后缀（如 `gemini-3.1-pro-ultra-v2`）被静默截断伪装成旧模型获取错误定价。
  *
  * @param {string} [slug='']
@@ -106,20 +130,31 @@ export function formatGenericModelSlug(slug = '') {
     .trim()
     .replace(/^session-display:/i, '');
   if (!s || /^MODEL_PLACEHOLDER_/i.test(s)) return '';
+  if (/^gemini-4-argon-(?:f|disabled)$/i.test(s)) return 'Gemini 4 Argon';
+  if (/^gemini-3\.8-flash-n$/i.test(s)) return 'Gemini 3.8 Flash';
+  if (/^gemini-3\.7-flash-safety-le$/i.test(s)) return 'Gemini 3.7 Flash';
+  if (/^gemini-3-flash-(?:[abd]|agent)$/i.test(s)) return 'Gemini 3.5 Flash';
+  if (/^gemini-3-flash-c$/i.test(s)) return 'Gemini 3 Flash';
+  if (/^gemini-pro-(?:default|agent|b)$/i.test(s)) return 'Gemini 3.1 Pro';
   const m = s.match(
-    /^gemini-(\d+(?:\.\d+)?)-(pro|flash|argon|carbon|hydrogen|helix)(?:-(lite))?$/i
+    /^gemini-(\d+(?:\.\d+)?)-(pro|flash|argon|carbon|hydrogen|helix)(?:-(lite))?(?:-(xhigh|high|medium|low|extra-low|tiered|preview))?$/i
   );
   if (m) {
     const ver = m[1];
     const tier = m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase();
     const lite = m[3] ? ' Lite' : '';
-    return `Gemini ${ver} ${tier}${lite}`;
+    const suffixKey = m[4] ? m[4].toLowerCase() : '';
+    const tierSuffix = SLUG_TIER_LABELS[suffixKey] ? ` (${SLUG_TIER_LABELS[suffixKey]})` : '';
+    return `Gemini ${ver} ${tier}${lite}${tierSuffix}`;
   }
   const codenameMatch = s.match(/^gemini-(hydrogen|helix)$/i);
   if (codenameMatch) {
     const codename =
       codenameMatch[1].charAt(0).toUpperCase() + codenameMatch[1].slice(1).toLowerCase();
     return `Gemini ${codename}`;
+  }
+  if (/^gemini-flash-worker-agy$/i.test(s)) {
+    return 'Orchestrator Worker (Hydrogen)';
   }
   return '';
 }
@@ -156,8 +191,24 @@ export function resolveModelInfo(
     responseModel && responseModel !== 'unknown' ? String(responseModel).trim() : '';
   const cleanRawFallback =
     rawModelKey && rawModelKey !== 'unknown' ? rawModelKey : cleanResponseModel;
+  const isWorkerSlot =
+    rawModelKey === 'MODEL_PLACEHOLDER_M669' ||
+    /^gemini-flash-worker-agy$/i.test(cleanResponseModel);
+  const isVagueGenericDisplay = Boolean(
+    modelDisplayName &&
+      (/^gemini\s+(?:flash|pro)(?:\s+worker)?$/i.test(modelDisplayName.trim()) ||
+        (isWorkerSlot && /^gemini\s+4\s+hydrogen$/i.test(modelDisplayName.trim())))
+  );
+  const effectiveDisplayName =
+    modelDisplayName &&
+    ((mergedLabel &&
+      (/\borchestrator\b/i.test(modelDisplayName) || isVagueGenericDisplay) &&
+      !/\borchestrator\b/i.test(mergedLabel)) ||
+      (isVagueGenericDisplay && /^gemini-flash-worker-agy$/i.test(cleanResponseModel)))
+      ? ''
+      : modelDisplayName;
   const derivedDisplay =
-    modelDisplayName ||
+    effectiveDisplayName ||
     mergedLabel ||
     formatGenericModelSlug(rawModelKey) ||
     formatGenericModelSlug(cleanResponseModel) ||
@@ -181,14 +232,22 @@ export function resolveModelInfo(
     (rawModelKey && rawModelKey !== 'unknown' ? rawModelKey : cleanResponseModel) ||
     'unknown';
 
+  const isOpaqueOrchestratorResp = Boolean(
+    cleanResponseModel && /\borchestrator\b/i.test(cleanResponseModel)
+  );
   const explicitPricing =
     MODEL_PRICING[modelId] ||
     MODEL_PRICING[rawModelKey] ||
-    (cleanResponseModel ? MODEL_PRICING[cleanResponseModel] : null) ||
+    (cleanResponseModel && !isOpaqueOrchestratorResp
+      ? MODEL_PRICING[cleanResponseModel]
+      : null) ||
     MODEL_PRICING[tieredSlug] ||
     MODEL_PRICING[tieredDashedSlug] ||
     MODEL_PRICING[canonicalSlug] ||
-    MODEL_PRICING[dashedSlug];
+    MODEL_PRICING[dashedSlug] ||
+    (cleanResponseModel && isOpaqueOrchestratorResp
+      ? MODEL_PRICING[cleanResponseModel]
+      : null);
 
   if (explicitPricing) {
     return {
@@ -214,6 +273,36 @@ export function resolveModelInfo(
     pricing: null,
     isEstimatedPrice: true,
   };
+}
+
+/**
+ * 为不透明的 Orchestrator 路由模型 ID 补充底层实际模型代号标注（如 `gemini-pro-orchestrator (carbon-4)`），
+ * 普通透明上游模型 ID（如 `gemini-3.8-flash-n`、`gemini-4-hydrogen`）原样返回。
+ *
+ * @param {string} [rawUpstream='']
+ * @param {ReturnType<typeof resolveModelInfo>|null} [mInfo=null]
+ * @returns {string}
+ */
+export function formatUpstreamModelId(rawUpstream = '', mInfo = null) {
+  const s = String(rawUpstream || '').trim();
+  if (!s || !/(?:orchestrator|-worker-agy\b)/i.test(s) || /\([^)]+\)\s*$/.test(s)) {
+    return s;
+  }
+  const metaText = `${mInfo?.rawModel || ''} ${mInfo?.modelId || ''} ${mInfo?.shortName || ''} ${mInfo?.label || ''} ${s}`;
+  if (
+    /\bhydrogen\b|\bgemini-flash-worker-agy\b|MODEL_PLACEHOLDER_M(?:669|52[5678])\b/i.test(
+      metaText
+    )
+  ) {
+    return `${s} (hydrogen-4)`;
+  }
+  if (isArgonModelIdentifier(mInfo?.rawModel, mInfo?.modelId, mInfo?.label, s)) {
+    return `${s} (argon-4)`;
+  }
+  if (isCarbonModelIdentifier(mInfo?.rawModel, mInfo?.modelId, mInfo?.label, s)) {
+    return `${s} (carbon-4)`;
+  }
+  return s;
 }
 
 /**

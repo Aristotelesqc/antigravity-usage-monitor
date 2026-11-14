@@ -26,10 +26,33 @@ export const PLUGIN_MANIFEST_FILE = join(PLUGIN_ROOT, 'plugin.json');
 export const LOCAL_CATALOG_FILE = join(PLUGIN_ROOT, 'pricing-catalog.json');
 
 /**
- * 插件持久化数据目录（默认由 Antigravity 宿主注入 `~/.gemini/antigravity/sidecar_data/usage-monitor`）。
- * 存放用户偏好设置、历史轨迹缓存及云端价格表缓存，插件升级不会清除此目录。
+ * 插件持久化数据目录（默认由 Antigravity 宿主注入 `~/.gemini/antigravity/sidecar_data/usage-monitor/panel/data`）。
+ * 当通过插件 `mcp_config.json` 在 Antigravity IDE 中后台启动且未注入 `ANTIGRAVITY_EXECUTABLE_DATA_DIR` 时，
+ * 自动对齐至同一 `sidecar_data` 目录，确保双端共享同一份设置、历史轨迹缓存与窗口桥接租约。
  */
-export const DATA_DIR = process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR || join(HERE, '.data');
+function resolveDefaultDataDir() {
+  if (process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR) {
+    return process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR;
+  }
+  if (String(process.env.ANTIGRAVITY_LS_ADDRESS || '').trim() === 'test.invalid') {
+    return join(HERE, '.data');
+  }
+  const antigravityRoot = join(homedir(), '.gemini', 'antigravity');
+  const panelDataDir = join(antigravityRoot, 'sidecar_data', 'usage-monitor', 'panel', 'data');
+  const legacyDataDir = join(antigravityRoot, 'sidecar_data', 'usage-monitor', 'data');
+  if (existsSync(panelDataDir)) return panelDataDir;
+  if (existsSync(legacyDataDir)) return legacyDataDir;
+  if (existsSync(antigravityRoot)) return panelDataDir;
+  if (
+    process.env.USAGE_MONITOR_PLUGIN_DATA &&
+    !process.env.USAGE_MONITOR_PLUGIN_DATA.includes('${')
+  ) {
+    return process.env.USAGE_MONITOR_PLUGIN_DATA;
+  }
+  return join(HERE, '.data');
+}
+
+export const DATA_DIR = resolveDefaultDataDir();
 export const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 export const CACHE_FILE = join(DATA_DIR, 'trajectory_usage_cache.json');
 export const REMOTE_CATALOG_CACHE_FILE = join(DATA_DIR, 'remote_pricing_cache.json');
@@ -46,13 +69,34 @@ export const DEEP_STATS_CACHE_CANDIDATES = [
 ];
 
 /**
- * Antigravity 本地 Language Server Connect RPC 端点与鉴权 Token（自动剥离重复协议前缀与尾部斜杠）。
+ * Antigravity 本地 Language Server Connect RPC 端点与鉴权 Token（支持环境变量静态注入与进程动态发现）。
  */
 const rawLsAddr = String(process.env.ANTIGRAVITY_LS_ADDRESS || '').trim();
 const LS_PROTOCOL = /^https:\/\//i.test(rawLsAddr) ? 'https' : 'http';
 export const LS_ADDR = rawLsAddr.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
 export const LS_BASE_URL = LS_ADDR ? `${LS_PROTOCOL}://${LS_ADDR}` : '';
 export const CSRF_TOKEN = process.env.ANTIGRAVITY_CSRF_TOKEN;
+
+export const lsRuntimeEndpoint = {
+  addr: LS_ADDR,
+  baseUrl: LS_BASE_URL,
+  csrfToken: CSRF_TOKEN || '',
+};
+
+/**
+ * 动态更新运行时 Language Server / Hub RPC 连接端点与 CSRF 令牌。
+ *
+ * @param {string} nextAddr
+ * @param {string} nextCsrfToken
+ */
+export function setLsRuntimeEndpoint(nextAddr, nextCsrfToken) {
+  const raw = String(nextAddr || '').trim();
+  const proto = /^https:\/\//i.test(raw) ? 'https' : 'http';
+  const cleanAddr = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  lsRuntimeEndpoint.addr = cleanAddr;
+  lsRuntimeEndpoint.baseUrl = cleanAddr ? `${proto}://${cleanAddr}` : '';
+  lsRuntimeEndpoint.csrfToken = String(nextCsrfToken || '').trim();
+}
 
 /**
  * GitHub 官方云端价格目录与插件发布包地址配置。
@@ -90,6 +134,38 @@ export const TOPBAR_SLOT_KEYS = Object.freeze([
 export const DEFAULT_TOPBAR_SLOTS = Object.freeze(['context', 'tps', 'quota_auto']);
 
 export const PLUGIN_UPDATE_MODES = Object.freeze(['off', 'manual', 'auto']);
+
+export const ORCHESTRATOR_ID_MODES = Object.freeze(['compact', 'full']);
+
+export const WINDOW_MOUNT_MODES = Object.freeze(['dual', 'composer', 'sidebar']);
+
+/**
+ * 归一化面板挂载方式枚举（`'dual'` 顶部栏+侧边栏 | `'composer'` 输入框+侧边栏 | `'sidebar'` 仅侧边栏），
+ * 兼容历史 `enableWindowOverlay` 布尔开关，默认 `'dual'`。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyEnableOverlay]
+ * @returns {'dual'|'composer'|'sidebar'}
+ */
+export function normalizeWindowMountMode(mode, legacyEnableOverlay) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'composer' || m === 'input') return 'composer';
+  if (m === 'sidebar' || m === 'sidebar_only' || m === 'off') return 'sidebar';
+  if (m === 'dual' || m === 'topbar') return 'dual';
+  if (legacyEnableOverlay === false) return 'sidebar';
+  return 'dual';
+}
+
+/**
+ * 归一化 Orchestrator 系列模型 ID 显示风格（`'compact'` 精简代号 vs `'full'` 完整模型 ID，默认 `'compact'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'compact'|'full'}
+ */
+export function normalizeOrchestratorIdMode(mode) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  return m === 'full' ? 'full' : 'compact';
+}
 
 /**
  * 归一化插件更新策略枚举（兼容历史 `autoUpdatePlugin` 布尔开关，默认 `'manual'`）。
@@ -131,9 +207,11 @@ const DEFAULT_SETTINGS = {
   weeklyCostBudget: 100,        // 自定义每周美元费用预算默认值 ($100，保留底层兼容)
   weeklyLimitMode: 'official',  // 'official' | 'custom_tokens' | 'custom_cost'
   showUpstreamModel: false,     // 是否显示上游真实 responseModel 名称
+  orchestratorIdMode: 'compact', // 'compact' | 'full'（Orchestrator 系列显示精简 ID 或完整 ID）
   pluginUpdateMode: 'manual',   // 'off' | 'manual' | 'auto'（默认仅提示新版本，手动更新）
   autoUpdatePlugin: false,      // 派生自 pluginUpdateMode === 'auto'，保留底层兼容
-  enableWindowOverlay: true,    // 是否启用双栖模式（自动通过 CDP 在主窗口顶栏挂载胶囊与悬浮面板）
+  windowMountMode: 'dual',      // 'dual' | 'composer' | 'sidebar'（顶部栏 / 输入框 Auto 左侧 / 仅侧边栏）
+  enableWindowOverlay: true,    // 派生自 windowMountMode !== 'sidebar'，控制主窗口 CDP 注入启停
   showTopbarMultiSession: true, // 是否在顶栏左侧显示实时运行会话入口
   topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS], // 顶栏右侧胶囊三槽位指标与顺序
 };
@@ -218,6 +296,10 @@ export function loadSettings() {
     safeRaw.pluginUpdateMode,
     safeRaw.autoUpdatePlugin
   );
+  const windowMountMode = normalizeWindowMountMode(
+    safeRaw.windowMountMode,
+    safeRaw.enableWindowOverlay
+  );
   return {
     weeklyTokenBudget: sanitizeSettingNumber(
       safeRaw.weeklyTokenBudget ?? safeRaw.weeklyTokenLimit ?? merged.weeklyTokenBudget,
@@ -229,9 +311,11 @@ export function loadSettings() {
     ),
     weeklyLimitMode: normalizeWeeklyLimitMode(merged.weeklyLimitMode),
     showUpstreamModel: merged.showUpstreamModel === true,
+    orchestratorIdMode: normalizeOrchestratorIdMode(merged.orchestratorIdMode),
     pluginUpdateMode,
     autoUpdatePlugin: pluginUpdateMode === 'auto',
-    enableWindowOverlay: merged.enableWindowOverlay !== false,
+    windowMountMode,
+    enableWindowOverlay: windowMountMode !== 'sidebar',
     showTopbarMultiSession: merged.showTopbarMultiSession !== false,
     topbarCapsuleSlots: normalizeTopbarCapsuleSlots(safeRaw.topbarCapsuleSlots),
   };
@@ -258,7 +342,10 @@ export function computeRuntimeCodeVersion() {
     join(HERE, 'app.js'),
     join(HERE, 'styles.css'),
     join(HERE, 'main.mjs'),
+    join(HERE, 'bridge-daemon.mjs'),
+    join(HERE, 'mcp-entry.mjs'),
     join(HERE, 'speed-metrics.mjs'),
+    LOCAL_CATALOG_FILE,
   ];
   const backendDir = join(HERE, 'backend');
   try {

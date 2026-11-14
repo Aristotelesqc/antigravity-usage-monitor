@@ -308,6 +308,12 @@ test('telemetryStore isEquivalentTelemetry detects quota changes in non-active p
   b.quotas.pools[1].weeklyUsedPct = 55;
   b.quotas.pools[1].weeklyRemainingPct = 45;
   assert.equal(ctx.compare(a, b), false);
+  const c = structuredClone(a);
+  c.quotas.pools[0].cycleWeekly = { tokens: 120_000, costUsd: 0.35, calls: 4 };
+  assert.equal(ctx.compare(a, c), false, 'Pool cycleWeekly change must trigger store update');
+  const d = structuredClone(a);
+  d.quotas.pools[0].cycle5h = { tokens: 50_000, costUsd: 0.15, calls: 2 };
+  assert.equal(ctx.compare(a, d), false, 'Pool cycle5h change must trigger store update');
   assert.equal(ctx.compare(a, structuredClone(a)), true);
 });
 
@@ -394,4 +400,229 @@ test('switching accounts within 10s immediately invalidates quotaSummaryCache', 
     ['Gemini', 'Claude & GPT']
   );
   assert.equal(second.quotas.pools[0].weeklyRemainingPct, 8.7);
+});
+
+test('Orchestrator quota pool binding follows active phase: Carbon/Argon while planning, Gemini when offloaded to Hydrogen', async () => {
+  const ORCH_CARBON = 'MODEL_PLACEHOLDER_M667';
+  const ORCH_ARGON = 'MODEL_PLACEHOLDER_M681';
+  const ORCH_EXEC_HYDROGEN = 'MODEL_PLACEHOLDER_M669';
+  const geminiReset = new Date(Date.now() + 24 * 3600_000).toISOString();
+  const argonReset = new Date(Date.now() + 48 * 3600_000).toISOString();
+  const carbonReset = new Date(Date.now() + 72 * 3600_000).toISOString();
+  const fiveHourReset = new Date(Date.now() + 2 * 3600_000).toISOString();
+
+  const h = backendHarness({
+    summaries: {
+      orchCarbonPlan: { stepCount: 1 },
+      orchArgonPlan: { stepCount: 1 },
+      orchHydrogenExec: { stepCount: 2 },
+    },
+    trajectories: {
+      orchCarbonPlan: { trajectory: { steps: [makeStep(1, ORCH_CARBON)] } },
+      orchArgonPlan: { trajectory: { steps: [makeStep(1, ORCH_ARGON)] } },
+      orchHydrogenExec: {
+        trajectory: { steps: [makeStep(1, ORCH_CARBON), makeStep(2, ORCH_EXEC_HYDROGEN)] },
+      },
+    },
+    userStatus: {
+      userTier: { id: 'g1-pro-tier', name: 'Google AI Pro' },
+      cascadeModelConfigData: {
+        clientModelConfigs: [
+          {
+            label: 'Orchestrator (Carbon)',
+            modelId: 'gemini-pro-orchestrator',
+            modelOrAlias: { model: ORCH_CARBON },
+            quotaInfo: { remainingFraction: 0.4, resetTime: carbonReset },
+          },
+          {
+            label: 'Orchestrator (Argon)',
+            modelId: 'gemini-pro-orchestrator-argon',
+            modelOrAlias: { model: ORCH_ARGON },
+            quotaInfo: { remainingFraction: 0.6, resetTime: argonReset },
+          },
+          {
+            label: 'Gemini 3.8 Flash (High)',
+            modelId: 'gemini-3.8-flash-high',
+            modelOrAlias: { model: FLASH },
+            quotaInfo: { remainingFraction: 0.9, resetTime: geminiReset },
+          },
+        ],
+      },
+    },
+    quotaSummary: {
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [
+            { bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.95, resetTime: fiveHourReset },
+            { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 0.9, resetTime: geminiReset },
+          ],
+        },
+        {
+          displayName: 'Gemini 4 Argon',
+          buckets: [
+            { bucketId: 'argon-weekly', window: 'weekly', remainingFraction: 0.6, resetTime: argonReset },
+          ],
+        },
+        {
+          displayName: 'Gemini 4 Carbon',
+          buckets: [
+            { bucketId: 'carbon-weekly', window: 'weekly', remainingFraction: 0.4, resetTime: carbonReset },
+          ],
+        },
+      ],
+    },
+  });
+
+  const pCarbon = await h.buildTelemetryPayloadInternal('orchCarbonPlan');
+  assert.equal(pCarbon.quotas.activePool.family, 'Carbon');
+  assert.equal(pCarbon.quotas.weekly.poolFamily, 'Carbon');
+  assert.equal(pCarbon.quotas.weekly.remainingPct, 40);
+
+  const pArgon = await h.buildTelemetryPayloadInternal('orchArgonPlan');
+  assert.equal(pArgon.quotas.activePool.family, 'Argon');
+  assert.equal(pArgon.quotas.weekly.poolFamily, 'Argon');
+  assert.equal(pArgon.quotas.weekly.remainingPct, 60);
+
+  const pExec = await h.buildTelemetryPayloadInternal('orchHydrogenExec');
+  assert.equal(pExec.quotas.activePool.family, 'Gemini');
+  assert.equal(pExec.quotas.weekly.poolFamily, 'Gemini');
+  assert.equal(pExec.quotas.weekly.remainingPct, 90);
+});
+
+test('per-pool cycle5h and cycleWeekly isolate each pool by its own reset window and sum into quotas.weekly', async () => {
+  const now = Date.now();
+  const CLAUDE_SONNET = 'MODEL_CLAUDE_4_5_SONNET';
+  // Gemini weekly cycle started 1d ago (resets in +6d); 5h cycle started 1h ago (resets in +4h)
+  const geminiWkReset = new Date(now + 6 * 24 * 3600_000).toISOString();
+  const gemini5hReset = new Date(now + 4 * 3600_000).toISOString();
+  // Argon weekly cycle started 5d ago (resets in +2d)
+  const argonWkReset = new Date(now + 2 * 24 * 3600_000).toISOString();
+  // Claude & GPT weekly cycle started 6d ago (resets in +1d); 5h cycle started 4h ago (resets in +1h)
+  const claudeWkReset = new Date(now + 1 * 24 * 3600_000).toISOString();
+  const claude5hReset = new Date(now + 1 * 3600_000).toISOString();
+
+  const makeTimedStep = (idx, model, ageMs, provider = 'API_PROVIDER_GOOGLE_GEMINI', tok = 10_000) => {
+    const t = now - ageMs;
+    return {
+      type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+      status: 'CORTEX_STEP_STATUS_DONE',
+      metadata: {
+        sourceTrajectoryStepInfo: { stepIndex: idx },
+        createdAt: new Date(t).toISOString(),
+        completedAt: new Date(t + 2_000).toISOString(),
+        modelUsage: {
+          model,
+          apiProvider: provider,
+          inputTokens: String(tok),
+          cacheReadTokens: '0',
+          outputTokens: '1000',
+        },
+      },
+    };
+  };
+
+  const h = backendHarness({
+    summaries: { multiCycleConv: { stepCount: 6 } },
+    trajectories: {
+      multiCycleConv: {
+        trajectory: {
+          steps: [
+            // 1. Gemini Flash 30m ago -> inside Gemini 5h (1h ago) & Gemini weekly (1d ago)
+            makeTimedStep(1, FLASH, 30 * 60_000, 'API_PROVIDER_GOOGLE_GEMINI', 10_000),
+            // 2. Gemini Flash 3h ago -> OUTSIDE Gemini 5h (started 1h ago), INSIDE Gemini weekly (1d ago)
+            makeTimedStep(2, FLASH, 3 * 3600_000, 'API_PROVIDER_GOOGLE_GEMINI', 20_000),
+            // 3. Gemini Flash 3d ago -> OUTSIDE Gemini weekly (started 1d ago)!
+            makeTimedStep(3, FLASH, 3 * 24 * 3600_000, 'API_PROVIDER_GOOGLE_GEMINI', 99_000),
+            // 4. Argon 3d ago -> INSIDE Argon weekly (started 5d ago)!
+            makeTimedStep(4, ARGON, 3 * 24 * 3600_000, 'API_PROVIDER_GOOGLE_GEMINI', 40_000),
+            // 5. Claude 3h ago -> INSIDE Claude 5h (started 4h ago) & Claude weekly (started 6d ago)
+            makeTimedStep(5, CLAUDE_SONNET, 3 * 3600_000, 'API_PROVIDER_ANTHROPIC', 30_000),
+            // 6. Claude 4d ago -> OUTSIDE Claude 5h, INSIDE Claude weekly (started 6d ago)
+            makeTimedStep(6, CLAUDE_SONNET, 4 * 24 * 3600_000, 'API_PROVIDER_ANTHROPIC', 50_000),
+          ],
+        },
+      },
+    },
+    userStatus: {
+      userTier: { id: 'g1-pro-tier', name: 'Google AI Pro' },
+      cascadeModelConfigData: {
+        clientModelConfigs: [
+          {
+            label: 'Gemini 3.8 Flash (High)',
+            modelId: 'gemini-3.8-flash-high',
+            modelOrAlias: { model: FLASH },
+            quotaInfo: { remainingFraction: 0.85, resetTime: gemini5hReset },
+          },
+          {
+            label: 'Gemini 4 Argon (High)',
+            modelId: 'gemini-4-argon-high',
+            modelOrAlias: { model: ARGON },
+            quotaInfo: { remainingFraction: 0.6, resetTime: argonWkReset },
+          },
+          {
+            label: 'Claude 4.5 Sonnet',
+            modelId: 'claude-sonnet-4-5',
+            modelOrAlias: { model: CLAUDE_SONNET },
+            quotaInfo: { remainingFraction: 0.7, resetTime: claude5hReset },
+          },
+        ],
+      },
+    },
+    quotaSummary: {
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [
+            { bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.85, resetTime: gemini5hReset },
+            { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 0.8, resetTime: geminiWkReset },
+          ],
+        },
+        {
+          displayName: 'Gemini 4 Argon',
+          buckets: [
+            { bucketId: 'argon-weekly', window: 'weekly', remainingFraction: 0.6, resetTime: argonWkReset },
+          ],
+        },
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [
+            { bucketId: '3p-5h', window: '5h', remainingFraction: 0.7, resetTime: claude5hReset },
+            { bucketId: '3p-weekly', window: 'weekly', remainingFraction: 0.5, resetTime: claudeWkReset },
+          ],
+        },
+      ],
+    },
+  });
+
+  const p = await h.buildTelemetryPayloadInternal('multiCycleConv');
+  const byKey = new Map(p.quotas.pools.map((pool) => [pool.poolKey, pool]));
+
+  const geminiPool = byKey.get('Gemini');
+  const argonPool = byKey.get('Argon');
+  const claudePool = byKey.get('Claude & GPT');
+
+  // Gemini: step 1 (11,000) in 5h; steps 1+2 (32,000) in weekly; step 3 (3d ago) excluded!
+  assert.equal(geminiPool.cycle5h.calls, 1);
+  assert.equal(geminiPool.cycle5h.tokens, 11_000);
+  assert.equal(geminiPool.cycleWeekly.calls, 2);
+  assert.equal(geminiPool.cycleWeekly.tokens, 32_000);
+
+  // Argon: step 4 (41,000) in weekly (3d ago < 5d window)
+  assert.equal(argonPool.cycleWeekly.calls, 1);
+  assert.equal(argonPool.cycleWeekly.tokens, 41_000);
+
+  // Claude & GPT: step 5 (31,000) in 5h; steps 5+6 (82,000) in weekly (4d ago < 6d window, not clipped by Gemini's 1d window!)
+  assert.equal(claudePool.cycle5h.calls, 1);
+  assert.equal(claudePool.cycle5h.tokens, 31_000);
+  assert.equal(claudePool.cycleWeekly.calls, 2);
+  assert.equal(claudePool.cycleWeekly.tokens, 82_000);
+
+  // Global quotas.weekly equals the exact sum across all pools' weekly cycles (2 + 1 + 2 = 5 calls; 32k + 41k + 82k = 155k tokens)
+  assert.equal(p.quotas.weekly.calls, 5);
+  assert.equal(p.quotas.weekly.tokens, 155_000);
+  assert.equal(
+    p.quotas.weekly.costUsd,
+    +(geminiPool.cycleWeekly.costUsd + argonPool.cycleWeekly.costUsd + claudePool.cycleWeekly.costUsd).toFixed(2)
+  );
 });

@@ -30,6 +30,7 @@ import {
 } from './config.mjs';
 import { callLsRpc } from './ls-rpc.mjs';
 import { formatGenericModelSlug, getBaseModelLabel } from './model-pricing.mjs';
+import { PLACEHOLDER_MAP } from './pricing-catalog.mjs';
 
 /**
  * 扫描本地 `conversations` 目录，返回 `cascadeId -> 最新磁盘修改时间 (mtimeMs)` 映射表。
@@ -99,9 +100,23 @@ export function loadExternalDeepStatsCache() {
 
     for (const item of Object.values(raw.perConvo)) {
       for (const e of item?.entries || []) {
+        const intrinsicDisplay =
+          PLACEHOLDER_MAP[e?.modelRuntimeId]?.label ||
+          formatGenericModelSlug(e?.modelCanonicalId || e?.model);
+        const isSessionDisplayAgg = /^session-display:/i.test(String(e?.modelAggregationId || ''));
+        const usableDisplayHint =
+          e?.modelDisplayName &&
+          !(
+            isSessionDisplayAgg &&
+            intrinsicDisplay &&
+            getBaseModelLabel(e.modelDisplayName) !== getBaseModelLabel(intrinsicDisplay)
+          )
+            ? e.modelDisplayName
+            : '';
         const display =
-          e?.modelDisplayName ||
-          formatGenericModelSlug(e?.modelCanonicalId || e?.model || e?.modelAggregationId);
+          usableDisplayHint ||
+          intrinsicDisplay ||
+          formatGenericModelSlug(e?.modelAggregationId);
         if (!display) continue;
         const base = getBaseModelLabel(display);
         if (e?.modelRuntimeId && !runtimeDisplayMap.has(e.modelRuntimeId)) {
@@ -140,18 +155,41 @@ export function loadExternalDeepStatsCache() {
         if (inputTokens === 0 && cacheReadTokens === 0 && outputTokens === 0) continue;
         const createdAtMs = e?.ts ? Date.parse(e.ts) || 0 : 0;
         if (createdAtMs > lastModifiedMs) lastModifiedMs = createdAtMs;
+        const stepIntrinsicLabel =
+          PLACEHOLDER_MAP[e?.modelRuntimeId]?.label ||
+          formatGenericModelSlug(e?.modelCanonicalId || e?.model);
+        const isSessionDisplayAgg = /^session-display:/i.test(String(e?.modelAggregationId || ''));
+        const safeStepDisplayName =
+          e?.modelDisplayName &&
+          !(
+            isSessionDisplayAgg &&
+            stepIntrinsicLabel &&
+            getBaseModelLabel(e.modelDisplayName) !== getBaseModelLabel(stepIntrinsicLabel)
+          )
+            ? e.modelDisplayName
+            : '';
         const resolvedDisplay =
-          e?.modelDisplayName ||
+          safeStepDisplayName ||
+          stepIntrinsicLabel ||
           runtimeDisplayMap.get(e?.model) ||
           runtimeDisplayMap.get(e?.modelRuntimeId) ||
-          formatGenericModelSlug(e?.modelCanonicalId || e?.model || e?.modelAggregationId) ||
+          formatGenericModelSlug(e?.modelAggregationId) ||
           '';
+        const rawUpstreamCandidate = String(e?.model || e?.modelCanonicalId || '').trim();
+        const inferredResponseModel =
+          /^session:/i.test(String(e?.modelAggregationId || '')) &&
+          rawUpstreamCandidate &&
+          !/^MODEL_/i.test(rawUpstreamCandidate) &&
+          !/\s/.test(rawUpstreamCandidate)
+            ? rawUpstreamCandidate
+            : '';
         steps.push({
           stepIndex: idx + 1,
           createdAt: e?.ts || '',
           createdAtMs,
           modelKey: e?.modelCanonicalId || e?.model || e?.modelRuntimeId || 'unknown',
           modelDisplayName: resolvedDisplay,
+          ...(inferredResponseModel ? { responseModel: inferredResponseModel } : {}),
           apiProvider: e?.provider || '',
           appSource,
           inputTokens,

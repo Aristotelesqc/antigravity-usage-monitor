@@ -23,11 +23,16 @@ import {
   formatDateSpanBadge,
   formatTokensPrecise,
   formatUsd,
+  mergeModelsByDisplayName,
+  normalizeOrchestratorIdDisplayMode,
 } from '../core/formatters.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
 import { fetchTelemetry, telemetryStore } from '../store/telemetryStore.js';
 import { uiStore } from '../store/uiStore.js';
-import { createTrendAreaChart } from '../components/charts/TrendAreaChart.js';
+import {
+  createTrendAreaChart,
+  HEATMAP_DAYS_THRESHOLD,
+} from '../components/charts/TrendAreaChart.js';
 import { CustomDateTimePicker } from '../components/ui/CustomDateTimePicker.js';
 import { CustomScrollbar } from '../components/ui/CustomScrollbar.js';
 import { createFourSegmentBar } from '../components/ui/FourSegmentBar.js';
@@ -411,13 +416,24 @@ export const ConsumptionView = defineComponent({
      * 增量更新热门模型或数据来源单行的指标文本与 4 段比例条宽度。
      */
     function updateBreakdownItemRow(refs, item, grandTotalTokens, showTokensInHeader = true) {
-      patchText(refs.nameEl, item.label || item.name || item.shortName || '—');
+      const displayLabel = item.label || item.name || item.shortName || '—';
+      patchText(refs.nameEl, displayLabel);
+      patchAttr(refs.nameEl, 'title', item.title || displayLabel);
       const total = Number(item.totalTokens || 0);
       const share = grandTotalTokens > 0 ? +((total / grandTotalTokens) * 100).toFixed(1) : 0;
       patchText(refs.pctBadge, `${share.toFixed(1)}%`);
       patchText(refs.totalTokEl, showTokensInHeader ? formatTokensPrecise(total) : '');
       patchAttr(refs.totalTokEl, 'hidden', !showTokensInHeader);
-      patchText(refs.costEl, formatUsd(item.costUsd || 0));
+      const costVal = Number(item.costUsd || 0);
+      const callsCount = Number(item.calls || 0);
+      const isAllUnpriced =
+        callsCount > 0 && Number(item.unpricedCalls || 0) >= callsCount && !(costVal > 0);
+      patchText(
+        refs.costEl,
+        formatUsd(isAllUnpriced ? null : costVal, {
+          precise: costVal > 0 && costVal < 0.1,
+        })
+      );
 
       const responseTok =
         item.responseTokens != null
@@ -530,36 +546,40 @@ export const ConsumptionView = defineComponent({
         thinkingTokens,
       });
 
-      // 2. 同步历史趋势交互式 SVG 面积图与粒度提示
+      // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与粒度提示
       patchText(trendRangeBadge, preset?.label || rangeInfo.label || '全部时间');
       const trendSeries = cons.trendSeries || [];
       const isHourlyTrend =
         trendSeries[0]?.granularity === 'hour' ||
         (trendSeries[0]?.label || '').includes(':');
+      const isHeatmapTrend = !isHourlyTrend && trendSeries.length > HEATMAP_DAYS_THRESHOLD;
       patchText(
         trendGranularityHint,
-        `${isHourlyTrend ? '按小时' : '按日'} (${trendSeries.length || 0}点) · 悬停查看`
+        isHeatmapTrend
+          ? `按日 (${trendSeries.length}天) · 悬停查看`
+          : `${isHourlyTrend ? '按小时' : '按日'} (${trendSeries.length || 0}点) · 悬停查看`
       );
       trendChart.update(trendSeries);
 
-      // 3. 同步热门模型列表（按总 Token 数降序排列并执行键值增量对账，遵循模型名称显示格式设置）
-      const showUpstream = Boolean(slice.showUpstreamModel);
-      const models = (slice.modelBreakdown || [])
-        .slice()
-        .sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0));
+      // 3. 同步热门模型列表（按最终展示名称去重归并后按总 Token 数降序排列并执行键值增量对账）
+      const displaySettings = {
+        showUpstreamModel: Boolean(slice.showUpstreamModel),
+        orchestratorIdMode: slice.orchestratorIdMode,
+      };
+      const models = mergeModelsByDisplayName(slice.modelBreakdown || [], displaySettings, {
+        preferLabelInShort: true,
+      }).sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0));
       const modelsTotalTok = models.reduce((s, m) => s + Number(m.totalTokens || 0), 0);
 
       patchKeyedList(modelsListEl, models, {
-        keyFn: (m) => m.label || m.shortName,
+        keyFn: (m) => m.displayText || m.label || m.shortName,
         sigFn: (m) =>
-          `${showUpstream}:${m.label}:${m.upstreamName || ''}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`,
+          `${m.displayText}:${m.displayTitle}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`,
         createRow: createBreakdownItemRow,
         updateRow: (refs, m) =>
           updateBreakdownItemRow(
             refs,
-            showUpstream
-              ? { ...m, label: m.upstreamName || m.label || m.shortName }
-              : m,
+            { ...m, label: m.displayText, title: m.displayTitle },
             modelsTotalTok,
             true
           ),
@@ -632,6 +652,9 @@ export const ConsumptionView = defineComponent({
         consumption: st.telemetry?.consumption,
         modelBreakdown: st.telemetry?.modelBreakdown,
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
+        orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
+          st.telemetry?.settings?.orchestratorIdMode
+        ),
       }),
       (slice) => {
         latestSlice = slice;
@@ -659,6 +682,7 @@ export const ConsumptionView = defineComponent({
     onCleanup(() => {
       unsub();
       unsubView();
+      trendChart.destroy?.();
       timeFilterSwitch.destroy();
       startPicker.destroy();
       endPicker.destroy();

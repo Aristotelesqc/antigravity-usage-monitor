@@ -26,12 +26,12 @@ import {
   DATA_DIR,
   DEFAULT_ARCHIVE_FALLBACK_URL,
   DEFAULT_DOWNLOAD_URL,
-  LS_ADDR,
   PLUGIN_ROOT,
   REMOTE_CATALOG_CACHE_FILE,
   cloudSyncState,
   loadJson,
   loadSettings,
+  lsRuntimeEndpoint,
   pluginUpdateState,
   saveJson,
 } from './config.mjs';
@@ -76,7 +76,13 @@ function runExecFile(cmd, args, opts = {}) {
  * @param {number} [delayMs=350] 延迟毫秒数，确保当前 HTTP 响应先发回前端
  */
 export function scheduleSidecarRestart(delayMs = 350) {
-  if (!LS_ADDR || LS_ADDR === 'test.invalid' || typeof process?.exit !== 'function') return;
+  if (
+    !lsRuntimeEndpoint.addr ||
+    lsRuntimeEndpoint.addr === 'test.invalid' ||
+    typeof process?.exit !== 'function'
+  ) {
+    return;
+  }
   setTimeout(() => {
     try {
       process.exit(0);
@@ -164,10 +170,12 @@ function pruneExtraneousFiles(targetDir, referenceDir) {
  * @param {string} rootDir 插件根目录或解压目录
  */
 async function verifyPluginJsSyntax(rootDir) {
-  if (!LS_ADDR || LS_ADDR === 'test.invalid') return;
+  if (!lsRuntimeEndpoint.addr || lsRuntimeEndpoint.addr === 'test.invalid') return;
   const nodeBin = process?.execPath || 'node';
   const filesToCheck = [
     join(rootDir, 'sidecars', 'panel', 'main.mjs'),
+    join(rootDir, 'sidecars', 'panel', 'bridge-daemon.mjs'),
+    join(rootDir, 'sidecars', 'panel', 'mcp-entry.mjs'),
     join(rootDir, 'sidecars', 'panel', 'app.js'),
   ];
   for (const file of filesToCheck) {

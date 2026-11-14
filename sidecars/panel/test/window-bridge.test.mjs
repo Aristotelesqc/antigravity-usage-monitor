@@ -1,21 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import {
+  associateIdeIframeRoutes,
   createWindowBridgeController,
+  ensureIdeRemoteDebuggingArgv,
+  ensureRemoteDebuggingInArgvText,
+  extractIdeExtensionCascadeId,
   isAllowedBridgeOrigin,
   isAntigravityMainPageTarget,
+  isIdeExtensionChatTarget,
   parseDevToolsPortFile,
   resolveDevToolsPortCandidates,
+  resolveIdeArgvPath,
 } from '../backend/window-bridge.mjs';
+import {
+  discoverAntigravityLsEndpoint,
+  parseLsArgsFromCommandLine,
+} from '../backend/ls-discovery.mjs';
+import { handleMcpJsonRpcMessage } from '../mcp-entry.mjs';
 import { computeCapsuleLayoutMode } from '../src/components/layout/WindowOverlayShell.js';
 import { backendHarness } from './backend-harness.mjs';
 
-test('DevToolsActivePort parsing, cross-platform discovery, and strict target/origin filtering', () => {
+test('DevToolsActivePort parsing, cross-platform discovery (2.0 + IDE), and strict target/origin filtering', () => {
   assert.equal(parseDevToolsPortFile('9222\n/devtools/browser/abc-123\n'), 9222);
   assert.equal(parseDevToolsPortFile('54321\r\n/devtools/browser/win'), 54321);
   assert.equal(parseDevToolsPortFile('0\n/devtools'), null);
@@ -34,12 +46,27 @@ test('DevToolsActivePort parsing, cross-platform discovery, and strict target/or
     'win32',
     'C:\\Users\\Dev'
   );
-  assert.equal(winPaths.length, 2);
-  assert.ok(winPaths[0].includes('Roaming'));
-  assert.ok(winPaths[1].includes('Local'));
+  assert.equal(winPaths.length, 4);
+  assert.equal(winPaths[0], path.join('C:\\Roaming', 'Antigravity', 'DevToolsActivePort'));
+  assert.equal(winPaths[1], path.join('C:\\Local', 'Antigravity', 'DevToolsActivePort'));
+  assert.equal(winPaths[2], path.join('C:\\Roaming', 'Antigravity IDE', 'DevToolsActivePort'));
+  assert.equal(winPaths[3], path.join('C:\\Local', 'Antigravity IDE', 'DevToolsActivePort'));
 
   const macPaths = resolveDevToolsPortCandidates({}, 'darwin', '/Users/dev');
-  assert.equal(macPaths[0], path.join('/Users/dev', 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort'));
+  assert.equal(macPaths.length, 2);
+  assert.equal(
+    macPaths[0],
+    path.join('/Users/dev', 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort')
+  );
+  assert.equal(
+    macPaths[1],
+    path.join('/Users/dev', 'Library', 'Application Support', 'Antigravity IDE', 'DevToolsActivePort')
+  );
+
+  const linuxPaths = resolveDevToolsPortCandidates({ XDG_CONFIG_HOME: '/home/dev/.config' }, 'linux', '/home/dev');
+  assert.equal(linuxPaths.length, 2);
+  assert.equal(linuxPaths[0], path.join('/home/dev/.config', 'Antigravity', 'DevToolsActivePort'));
+  assert.equal(linuxPaths[1], path.join('/home/dev/.config', 'Antigravity IDE', 'DevToolsActivePort'));
 
   assert.equal(
     isAntigravityMainPageTarget({
@@ -49,12 +76,53 @@ test('DevToolsActivePort parsing, cross-platform discovery, and strict target/or
     }),
     true
   );
-  // Reject auxiliary webviews, non-HTTPS pages, and non-loopback debugger sockets
+  assert.equal(
+    isAntigravityMainPageTarget({
+      type: 'page',
+      url: 'vscode-file://vscode-app/c:/Users/Admin/AppData/Local/Programs/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/workbench/workbench.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/ide-main',
+    }),
+    true
+  );
+  assert.equal(
+    isAntigravityMainPageTarget({
+      type: 'page',
+      url: 'vscode-file://vscode-app/Applications/Antigravity%20IDE.app/Contents/Resources/app/out/vs/code/electron-browser/workbench/workbench.esm.html?ew=1',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/ide-esm',
+    }),
+    true
+  );
+  assert.equal(
+    isAntigravityMainPageTarget({
+      type: 'page',
+      url: 'vscode-file://vscode-app/c:/Users/Admin/AppData/Local/Programs/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/workbench/workbench-jetski-agent.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/ide-jetski',
+    }),
+    true
+  );
+
+  // Reject auxiliary webviews, sharedProcess, non-HTTPS pages, and non-loopback debugger sockets
   assert.equal(
     isAntigravityMainPageTarget({
       type: 'iframe',
       url: 'vscode-webview://panel/index.html',
       webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/wv1',
+    }),
+    false
+  );
+  assert.equal(
+    isAntigravityMainPageTarget({
+      type: 'page',
+      url: 'vscode-webview://panel/index.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/wv-page',
+    }),
+    false
+  );
+  assert.equal(
+    isAntigravityMainPageTarget({
+      type: 'page',
+      url: 'vscode-file://vscode-app/c:/App/out/vs/code/electron-browser/sharedProcess/sharedProcess.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/shared',
     }),
     false
   );
@@ -77,6 +145,8 @@ test('DevToolsActivePort parsing, cross-platform discovery, and strict target/or
 
   assert.equal(isAllowedBridgeOrigin('https://127.0.0.1:58123'), true);
   assert.equal(isAllowedBridgeOrigin('https://localhost:58123'), true);
+  assert.equal(isAllowedBridgeOrigin('vscode-file://vscode-app'), true);
+  assert.equal(isAllowedBridgeOrigin('vscode-file://evil-host'), false);
   assert.equal(isAllowedBridgeOrigin('http://127.0.0.1:58123'), false);
   assert.equal(isAllowedBridgeOrigin('https://example.com:58123'), false);
   assert.equal(isAllowedBridgeOrigin('vscode-webview://panel'), false);
@@ -378,9 +448,10 @@ test('Capsule 4-stage responsive hysteresis and backend settings default/overrid
   assert.equal(computeCapsuleLayoutMode(200, 'wide', { showMulti: false }), 'wide');
   assert.equal(computeCapsuleLayoutMode(150, 'wide', { showMulti: false }), 'compact');
 
-  // Backend harness verifies enableWindowOverlay, showTopbarMultiSession, and topbarCapsuleSlots defaults & normalization
+  // Backend harness verifies windowMountMode, enableWindowOverlay, showTopbarMultiSession, and topbarCapsuleSlots defaults & normalization
   const defaultEnv = backendHarness({ settings: {} });
   const defaultPayload = await defaultEnv.buildTelemetryPayloadInternal('', false, {});
+  assert.equal(defaultPayload.settings.windowMountMode, 'dual');
   assert.equal(defaultPayload.settings.enableWindowOverlay, true);
   assert.equal(defaultPayload.settings.showTopbarMultiSession, true);
   assert.deepEqual(Array.from(defaultPayload.settings.topbarCapsuleSlots), [
@@ -397,6 +468,7 @@ test('Capsule 4-stage responsive hysteresis and backend settings default/overrid
     },
   });
   const disabledPayload = await disabledEnv.buildTelemetryPayloadInternal('', false, {});
+  assert.equal(disabledPayload.settings.windowMountMode, 'sidebar');
   assert.equal(disabledPayload.settings.enableWindowOverlay, false);
   assert.equal(disabledPayload.settings.showTopbarMultiSession, false);
   assert.deepEqual(Array.from(disabledPayload.settings.topbarCapsuleSlots), [
@@ -404,6 +476,16 @@ test('Capsule 4-stage responsive hysteresis and backend settings default/overrid
     'ttft',
     'claude_weekly',
   ]);
+
+  const composerEnv = backendHarness({
+    settings: {
+      windowMountMode: 'composer',
+      enableWindowOverlay: false,
+    },
+  });
+  const composerPayload = await composerEnv.buildTelemetryPayloadInternal('', false, {});
+  assert.equal(composerPayload.settings.windowMountMode, 'composer');
+  assert.equal(composerPayload.settings.enableWindowOverlay, true);
 
   const allNoneEnv = backendHarness({
     settings: { topbarCapsuleSlots: ['none', 'none', 'none'] },
@@ -609,6 +691,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
 
   let reloadCalled = false;
   let currentBundleVer = 'ver-100';
+  let liveSubagentPollActive = false;
   const fetchedUrls = [];
   const fetchedHeaders = [];
 
@@ -654,6 +737,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     weeklyTokenBudget: 150000000,
     weeklyCostBudget: 100,
     showUpstreamModel: false,
+    orchestratorIdMode: 'compact',
     autoUpdatePlugin: false,
     enableWindowOverlay: true,
     showTopbarMultiSession: true,
@@ -793,35 +877,246 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
               lastModifiedMs: Date.now() - 180000,
             },
           ],
-          activeConversation: {
-            cascadeId: 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb',
-            title: 'Dual Mode Session',
-            isRunning: false,
-            stepCount: 6,
-            latestTokPerSec: 92.4,
-            latestTtftSec: 0.85,
-            avgTokPerSec: 88.2,
-            latestStepCostUsd: 0.04,
-            latestCacheHitPct: 98.7,
-            sessionCostUsd: 7.3,
-            activeModelShort: 'carbon-high',
-            context: {
-              totalTokens: 128000,
-              compactionLimitTokens: 256000,
-              limitTokens: 256000,
-              toolResultsTokens: 76000,
-              assistantTokens: 42000,
-              userRulesTokens: 10000,
-            },
-            recentSteps: [],
-          },
-          consumption: {
-            selectedRange: { key: 'today', label: '今天', startMs: 1, endMs: 2 },
-            session: { totalTokens: 128000, costUsd: 0.42, unpricedCalls: 12 },
-            account: { totalTokens: 500000, costUsd: 1.5, unpricedCalls: 3993 },
-            trendSeries: [],
-            monthlySeries: [],
-          },
+          activeConversation: (() => {
+            const mainSteps = [
+              {
+                stepIndex: 35,
+                createdAtMs: 2000,
+                modelLabel: 'Gemini 4 Hydrogen',
+                modelShort: 'gemini-4-hydrogen',
+                modelUpstream: 'gemini-4-hydrogen',
+                tokPerSec: 92.3,
+                ttftSec: 5.6,
+                contextTokens: 37800,
+                inputTokens: 2500,
+                cacheReadTokens: 34615,
+                outputTokens: 685,
+                thinkingTokens: 420,
+                responseTokens: 265,
+                cacheHitPct: 93.6,
+                costUsd: 0.014,
+              },
+              {
+                stepIndex: 20,
+                createdAtMs: 1000,
+                modelLabel: 'Claude Opus 4.6',
+                modelShort: 'claude-opus-4.6',
+                modelUpstream: 'claude-opus-4-6',
+                tokPerSec: 52.2,
+                ttftSec: 14.8,
+                contextTokens: 117746,
+                inputTokens: 4492,
+                cacheReadTokens: 98713,
+                outputTokens: 14541,
+                thinkingTokens: 14484,
+                cacheHitPct: 95.6,
+                costUsd: 0.032,
+              },
+            ];
+            const mainModels = [
+              {
+                label: 'Gemini 4 Hydrogen',
+                shortName: 'gemini-4-hydrogen',
+                upstreamName: 'gemini-4-hydrogen',
+                calls: 1,
+                avgTokPerSec: 92.3,
+                avgTtftSec: 5.6,
+                cacheHitPct: 93.3,
+                inputTokens: 2500,
+                cacheReadTokens: 34615,
+                outputTokens: 685,
+                thinkingTokens: 420,
+                responseTokens: 265,
+                totalTokens: 37800,
+                costUsd: 0.014,
+              },
+              {
+                label: 'Claude Opus 4.6',
+                shortName: 'claude-opus-4.6',
+                upstreamName: 'claude-opus-4-6',
+                calls: 1,
+                avgTokPerSec: 52.2,
+                avgTtftSec: 14.8,
+                cacheHitPct: 95.6,
+                inputTokens: 4492,
+                cacheReadTokens: 98713,
+                outputTokens: 14541,
+                thinkingTokens: 14484,
+                responseTokens: 57,
+                totalTokens: 117746,
+                costUsd: 0.032,
+              },
+            ];
+            if (!liveSubagentPollActive) {
+              return {
+                cascadeId: 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb',
+                title: 'Dual Mode Session',
+                isRunning: false,
+                stepCount: 6,
+                latestTokPerSec: 92.4,
+                latestTtftSec: 0.85,
+                avgTokPerSec: 88.2,
+                latestStepCostUsd: 0.04,
+                latestCacheHitPct: 98.7,
+                sessionCostUsd: 7.3,
+                activeModelLabel: 'Gemini 4 Hydrogen',
+                activeModelShort: 'gemini-4-hydrogen',
+                context: {
+                  totalTokens: 128000,
+                  compactionLimitTokens: 256000,
+                  limitTokens: 256000,
+                  toolResultsTokens: 76000,
+                  assistantTokens: 42000,
+                  userRulesTokens: 10000,
+                },
+                recentSteps: mainSteps,
+                modelBreakdown: mainModels,
+              };
+            }
+            const subStep = {
+              agentId: 'sub-fast-1',
+              agentCascadeId: 'sub-fast-1',
+              agentIndex: 1,
+              agentBadge: '子1',
+              agentLabel: '子代理 #1 · Flash Researcher',
+              isSubagent: true,
+              stepIndex: 4,
+              createdAtMs: 3500,
+              modelLabel: 'Gemini 3 Flash',
+              modelShort: 'gemini-3-flash',
+              modelUpstream: 'gemini-3-flash',
+              tokPerSec: 145.0,
+              ttftSec: 1.2,
+              contextTokens: 18400,
+              inputTokens: 1800,
+              cacheReadTokens: 16200,
+              outputTokens: 400,
+              thinkingTokens: 80,
+              responseTokens: 320,
+              cacheHitPct: 90.0,
+              costUsd: 0.004,
+            };
+            const subModel = {
+              label: 'Gemini 3 Flash',
+              shortName: 'gemini-3-flash',
+              upstreamName: 'gemini-3-flash',
+              calls: 1,
+              avgTokPerSec: 145.0,
+              avgTtftSec: 1.2,
+              cacheHitPct: 90.0,
+              inputTokens: 1800,
+              cacheReadTokens: 16200,
+              outputTokens: 400,
+              thinkingTokens: 80,
+              responseTokens: 320,
+              totalTokens: 18400,
+              costUsd: 0.004,
+            };
+            return {
+              cascadeId: 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb',
+              title: 'Dual Mode Session',
+              isRunning: true,
+              hasSubagents: true,
+              subagentCount: 1,
+              stepCount: 6,
+              latestTokPerSec: 145.0,
+              latestTtftSec: 1.2,
+              avgTokPerSec: 96.5,
+              latestStepCostUsd: 0.004,
+              latestCacheHitPct: 90.0,
+              sessionCostUsd: 7.304,
+              activeModelLabel: 'Gemini 3 Flash',
+              activeModelShort: 'gemini-3-flash',
+              context: {
+                totalTokens: 128000,
+                compactionLimitTokens: 256000,
+                limitTokens: 256000,
+                toolResultsTokens: 76000,
+                assistantTokens: 42000,
+                userRulesTokens: 10000,
+              },
+              recentSteps: mainSteps.map((s) => ({
+                ...s,
+                agentId: 'main',
+                agentBadge: '主',
+                isSubagent: false,
+              })),
+              modelBreakdown: mainModels,
+              agents: [
+                {
+                  agentId: 'main',
+                  isMain: true,
+                  index: 0,
+                  shortLabel: '主代理',
+                  badgeText: '主',
+                  stepCount: 2,
+                  activeModelLabel: 'Gemini 4 Hydrogen',
+                  activeModelShort: 'gemini-4-hydrogen',
+                  modelBreakdown: mainModels,
+                },
+                {
+                  agentId: 'sub-fast-1',
+                  isMain: false,
+                  index: 1,
+                  shortLabel: '子代理 #1',
+                  badgeText: '子1',
+                  role: 'Flash Researcher',
+                  isRunning: true,
+                  stepCount: 1,
+                  activeModelLabel: 'Gemini 3 Flash',
+                  activeModelShort: 'gemini-3-flash',
+                  recentSteps: [subStep],
+                  modelBreakdown: [subModel],
+                },
+              ],
+              aggregated: {
+                agentId: 'all',
+                shortLabel: '全部汇总',
+                badgeText: '全部',
+                stepCount: 3,
+                activeAgentId: 'sub-fast-1',
+                activeModelLabel: 'Gemini 3 Flash',
+                activeModelShort: 'gemini-3-flash',
+                modelBreakdown: [...mainModels, subModel],
+              },
+            };
+          })(),
+          consumption: (() => {
+            const isAllRange = String(url).includes('range=all');
+            const dayCount = isAllRange ? 120 : 30;
+            const baseDayMs = Date.UTC(2026, 6, 18, 0, 0, 0);
+            const trendSeries = Array.from({ length: dayCount }, (_, idx) => {
+              const sMs = baseDayMs + idx * 86400_000;
+              const d = new Date(sMs);
+              const tokens = idx % 3 === 0 ? (idx + 1) * 100_000 : 0;
+              return {
+                index: idx,
+                startMs: sMs,
+                endMs: sMs + 86400_000,
+                granularity: 'day',
+                label: `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, '0')}`,
+                fullLabel: `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (周六)`,
+                tokens,
+                inputTokens: tokens > 0 ? 20_000 : 0,
+                cacheReadTokens: tokens > 0 ? tokens - 25_000 : 0,
+                outputTokens: tokens > 0 ? 5_000 : 0,
+                costUsd: tokens > 0 ? 0.12 : 0,
+                calls: tokens > 0 ? 4 : 0,
+              };
+            });
+            return {
+              selectedRange: {
+                key: isAllRange ? 'all' : 'today',
+                label: isAllRange ? '全部时间' : '今天',
+                startMs: baseDayMs,
+                endMs: baseDayMs + dayCount * 86400_000,
+              },
+              session: { totalTokens: 128000, costUsd: 0.42, unpricedCalls: 12 },
+              account: { totalTokens: 500000, costUsd: 1.5, unpricedCalls: 3993 },
+              trendSeries,
+              monthlySeries: [],
+            };
+          })(),
           quotas: {
             meta: { hasOfficialData: true },
             activePool: { family: 'Carbon', poolLabel: 'Carbon', remainingPct: 68, weeklyRemainingPct: 81 },
@@ -829,17 +1124,35 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
               {
                 poolKey: 'Gemini',
                 poolLabel: 'Gemini',
+                usedPct: 56,
                 remainingPct: 44,
+                resetTime: new Date(Date.now() + 2 * 3600_000).toISOString(),
+                weeklyUsedPct: 74,
                 weeklyRemainingPct: 26,
+                weeklyResetTime: new Date(Date.now() + 4 * 24 * 3600_000).toISOString(),
+                cycle5h: { tokens: 3_100_000, costUsd: 0.92, calls: 18 },
+                cycleWeekly: { tokens: 18_200_000, costUsd: 5.4, calls: 112 },
               },
               {
                 poolKey: 'Claude & GPT',
                 poolLabel: 'Claude & GPT',
+                usedPct: 0,
                 remainingPct: 100,
+                resetTime: new Date(Date.now() + 5 * 3600_000).toISOString(),
+                weeklyUsedPct: 9,
                 weeklyRemainingPct: 91,
+                weeklyResetTime: new Date(Date.now() + 6 * 24 * 3600_000).toISOString(),
+                cycle5h: { tokens: 0, costUsd: 0, calls: 0 },
+                cycleWeekly: { tokens: 7_300_000, costUsd: 3.82, calls: 48 },
               },
             ],
-            weekly: { remainingPct: 81 },
+            weekly: {
+              isOfficial: true,
+              remainingPct: 81,
+              tokens: 25_500_000,
+              costUsd: 9.22,
+              calls: 160,
+            },
           },
           modelBreakdown: [],
         }),
@@ -944,6 +1257,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(liveDotSvg.attributes.get('width'), '11', 'Enlarged live activity SVG dot size is 11');
     assert.equal(liveDotSvg.children[0].attributes.get('r'), '5', 'Enlarged dot circle radius is 5');
     assert.match(stylesCss, /\.wm-multi-dot\s*\{\s*width:\s*8px;\s*height:\s*8px;/, 'Topbar multi-session dot enlarged to 8px');
+    assert.match(stylesCss, /\.wm-hover-tip\s*\{[^}]*width:\s*min\(542px,\s*calc\(100vw - 24px\)\);/, 'Hover floating card widened by 50px to 542px');
     assert.equal(multiPanelEl.querySelector('.wm-recent-list'), null, 'Recent sessions list removed so panel shows online sessions only');
     assert.equal(multiPanelEl.querySelector('.panel'), null, 'Single-layer multi-session panel without nested .panel box');
 
@@ -981,6 +1295,19 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(firstLegendSlotBefore.children[0].children[1].textContent, '工具结果');
     assert.equal(firstLegendSlotBefore.children[1].textContent, '76.0k');
     assert.equal(hoverQuotaPools.children.length, 2, 'Default Gemini & Claude/GPT quota pools pre-reserved');
+    assert.equal(hoverQuotaPools.children[0].children.length, 2, 'Zero extra vertical rows in pool item');
+    const geminiHoverTitles = hoverQuotaPools.children[0].querySelectorAll('.quota-win-title');
+    const geminiHoverUsages = hoverQuotaPools.children[0].querySelectorAll('.quota-win-usage');
+    assert.equal(geminiHoverTitles[0].textContent, '5h (Gemini)');
+    assert.equal(geminiHoverUsages[0].textContent, '· 3.1M ($0.92)');
+    assert.equal(geminiHoverTitles[1].textContent, '周限 (Gemini)');
+    assert.equal(geminiHoverUsages[1].textContent, '· 18.2M ($5.40)');
+    const claudeHoverUsages = hoverQuotaPools.children[1].querySelectorAll('.quota-win-usage');
+    assert.equal(claudeHoverUsages[0].textContent, '· 0 ($0.00)');
+    assert.equal(claudeHoverUsages[1].textContent, '· 7.3M ($3.82)');
+    const hoverFootSpans = hoverTipEl.querySelector('.wm-hover-quota-foot').children;
+    assert.equal(hoverFootSpans[0].textContent, '周期累计: 25.5M ($9.22)');
+    assert.equal(hoverFootSpans[1].textContent, '周期调用: 160 次');
 
     // Verify clicking multi-session button pins open multi-session panel, and clicking capsule switches to 4-tab panel
     multiBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -995,6 +1322,10 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(ov.isOpen(), true);
     const popoverEl = portalHost.shadowRoot.querySelector('.wm-popover-panel');
     assert.equal(popoverEl.hasAttribute('hidden'), false);
+    const overviewUsageSpans = popoverEl.querySelectorAll('.quota-win-usage');
+    assert.equal(overviewUsageSpans.length, 4, 'LiveOverviewView renders inline 5h and weekly cycle stats for both pools');
+    assert.equal(overviewUsageSpans[0].textContent, '· 3.1M ($0.92)');
+    assert.equal(overviewUsageSpans[1].textContent, '· 18.2M ($5.40)');
 
     // Verify Shadow DOM retargeted click inside CustomSelect does NOT close select or popover
     const selectRoot = portalHost.shadowRoot.querySelector('.custom-select');
@@ -1023,26 +1354,36 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const settingsSelects = settingsPane.querySelectorAll('.custom-select');
     assert.equal(
       settingsSelects.length,
-      6,
-      'SettingsView renders 6 CustomSelect controls (mount, modelFormat, 3 topbar slots, autoUpdate)'
+      7,
+      'SettingsView renders 7 CustomSelect controls (mount, modelFormat, orchestratorIdFormat, 3 topbar slots, autoUpdate)'
     );
     const mountSelectEl = settingsSelects[0];
     const modelFormatSelectEl = settingsSelects[1];
-    const slot0SelectEl = settingsSelects[2];
-    const slot1SelectEl = settingsSelects[3];
-    const slot2SelectEl = settingsSelects[4];
+    const orchestratorIdSelectEl = settingsSelects[2];
+    const slot0SelectEl = settingsSelects[3];
+    const slot1SelectEl = settingsSelects[4];
+    const slot2SelectEl = settingsSelects[5];
 
-    // Toggle windowMountSelect: dual -> sidebar -> dual
+    // Toggle windowMountSelect: dual -> composer -> sidebar -> dual
     assert.ok(mountSelectEl.querySelector('.select-label').textContent.includes('顶部栏 + 侧边栏'));
     mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     mountSelectEl.querySelectorAll('.select-option')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.windowMountMode, 'composer', 'windowMountMode persisted as composer');
+    assert.equal(mockSettings.enableWindowOverlay, true, 'enableWindowOverlay stays true in composer mode');
+    assert.ok(mountSelectEl.querySelector('.select-label').textContent.includes('输入框挂载'), 'UI reflects composer mode');
+
+    mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    mountSelectEl.querySelectorAll('.select-option')[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.windowMountMode, 'sidebar', 'windowMountMode persisted as sidebar');
     assert.equal(mockSettings.enableWindowOverlay, false, 'enableWindowOverlay persisted as false');
     assert.ok(mountSelectEl.querySelector('.select-label').textContent.includes('仅侧边栏'), 'UI reflects sidebar mode');
 
     mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     mountSelectEl.querySelectorAll('.select-option')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.windowMountMode, 'dual', 'windowMountMode persisted back to dual');
     assert.equal(mockSettings.enableWindowOverlay, true, 'enableWindowOverlay persisted back to true');
     assert.ok(mountSelectEl.querySelector('.select-label').textContent.includes('顶部栏 + 侧边栏'), 'UI reflects dual mode');
 
@@ -1059,6 +1400,20 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.showUpstreamModel, false);
     assert.ok(modelFormatSelectEl.querySelector('.select-label').textContent.includes('精简代号'));
+
+    // Toggle orchestratorIdSelect: compact -> full -> compact
+    assert.ok(orchestratorIdSelectEl.querySelector('.select-label').textContent.includes('精简代号'));
+    orchestratorIdSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    orchestratorIdSelectEl.querySelectorAll('.select-option')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.orchestratorIdMode, 'full');
+    assert.ok(orchestratorIdSelectEl.querySelector('.select-label').textContent.includes('原始完整 ID'));
+
+    orchestratorIdSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    orchestratorIdSelectEl.querySelectorAll('.select-option')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.orchestratorIdMode, 'compact');
+    assert.ok(orchestratorIdSelectEl.querySelector('.select-label').textContent.includes('精简代号'));
 
     // Toggle topbar multi-session switch: show -> hide -> show
     const topbarSegBtns = settingsPane.querySelectorAll('.seg-btn');
@@ -1165,7 +1520,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     );
     assert.equal(headerUpdateBtn.hasAttribute('hidden'), false);
 
-    const updateModeSelectEl = settingsSelects[5];
+    const updateModeSelectEl = settingsSelects[6];
     assert.equal(updateModeSelectEl.querySelector('.select-label').textContent, '仅提示新版本，手动更新');
     updateModeSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     const updateOpts = updateModeSelectEl.querySelectorAll('.select-option');
@@ -1209,6 +1564,352 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     );
     assert.ok(popoverEl.querySelector('.steps-panel-header'), 'Steps header flex wrapper present');
     assert.ok(popoverEl.querySelector('.steps-panel-title'), 'Steps title non-shrinking class present');
+
+    // Verify <=90d renders flush edge-to-edge SVG line chart, while >90d ('all' = 120 days) switches to GitHub-style daily heatmap grid
+    const plotStageEl = popoverEl.querySelector('.trend-plot-stage');
+    const heatmapStageEl = popoverEl.querySelector('.trend-heatmap-stage');
+    assert.equal(plotStageEl.hasAttribute('hidden'), false, 'Line chart visible for <=90 days');
+    assert.equal(heatmapStageEl.hasAttribute('hidden'), true, 'Heatmap hidden for <=90 days');
+    const consTrendTicks = popoverEl.querySelector('.trend-x-axis').querySelectorAll('.trend-x-tick');
+    assert.equal(consTrendTicks[0].classList.contains('is-start'), true);
+    assert.equal(consTrendTicks[0].style.getPropertyValue('--tick-x'), '0.00%', 'Consumption trend start tick flush left');
+    assert.equal(consTrendTicks[consTrendTicks.length - 1].classList.contains('is-end'), true);
+    assert.equal(
+      consTrendTicks[consTrendTicks.length - 1].style.getPropertyValue('--tick-x'),
+      '100.00%',
+      'Consumption trend end tick flush right'
+    );
+    assert.equal(
+      plotStageEl.querySelector('.trend-svg').getAttribute('viewBox'),
+      '0 0 180 120',
+      'TrendAreaChart dynamically adapts viewBox width to measured container width (180px in MockNode)'
+    );
+    assert.match(
+      plotStageEl.querySelector('.trend-line').getAttribute('d') || '',
+      /^M 1\.0 .* 179\.0 \d+\.\d$/,
+      'Consumption trend curve spans flush edge-to-edge (1.0..179.0) across measured 180px viewBox'
+    );
+    assert.match(stylesCss, /\.app-shell\s*\{[^}]*max-width:\s*none;/, 'Sidecar .app-shell removes 560px width cap');
+    assert.match(
+      stylesCss,
+      /\.models-analytics-pane\s*\{[^}]*padding:\s*var\(--space-3\)\s+0\s+2px;/,
+      'Models analytics pane eliminates nested horizontal double-padding'
+    );
+    assert.doesNotMatch(
+      stylesCss,
+      /hsl\(145\s+78%\s+60%\)/,
+      'Heatmap palette uses unified project blue tokens instead of hardcoded green'
+    );
+
+    // Click '全部' (option index 5 in ConsumptionView timeFilterSwitch) to load 120-day series
+    const consPane = allPanes[1];
+    const consTimeSegBtns = consPane.querySelectorAll('.seg-btn');
+    consTimeSegBtns[5].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 35));
+
+    assert.equal(plotStageEl.hasAttribute('hidden'), true, 'Line chart hidden when trend exceeds 90 days');
+    assert.equal(heatmapStageEl.hasAttribute('hidden'), false, 'GitHub heatmap shown when trend exceeds 90 days');
+    const hmGridEl = heatmapStageEl.querySelector('.trend-hm-grid');
+    const realDayCells = hmGridEl.children.filter((c) => !c.classList.contains('is-pad'));
+    assert.equal(realDayCells.length, 120, 'Renders exactly 1 cell per day for 120-day span');
+    assert.ok(
+      realDayCells.some((c) => c.classList.contains('lv-0')) &&
+        realDayCells.some((c) => c.classList.contains('lv-4')),
+      'Assigns empty lv-0 and peak lv-4 intensity classes across daily squares'
+    );
+    assert.match(
+      heatmapStageEl.querySelector('.trend-hm-summary').textContent,
+      /^活跃 40\/120 天 · 峰值 /
+    );
+
+    // Hovering a heatmap day square populates shared tooltip and docks away from hovered row
+    const activeCell = realDayCells[0];
+    hmGridEl.dispatchEvent({ type: 'mouseover', target: activeCell });
+    const trendTooltipEl = popoverEl.querySelector('.trend-tooltip');
+    assert.equal(trendTooltipEl.hasAttribute('hidden'), false, 'Tooltip opens on heatmap cell hover');
+    assert.equal(activeCell.classList.contains('is-hovered'), true);
+    assert.match(trendTooltipEl.querySelector('.trend-tip-tokens').textContent, /100\.0k tok/);
+    hmGridEl.dispatchEvent({ type: 'mouseleave' });
+    assert.equal(trendTooltipEl.hasAttribute('hidden'), true, 'Tooltip hides on mouseleave');
+
+    // Verify StepsDetailView renders '上下文 / 思考 / 正文' column header and split values
+    pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 20));
+    const stepsPane = allPanes[2];
+    const stepHeaders = stepsPane.querySelectorAll('.data-table')[0].children[0].children[0].children;
+    assert.equal(stepHeaders[4].textContent, '上下文 / 思考 / 正文');
+    const stepRows = stepsPane.querySelectorAll('.data-table')[0].children[1].children;
+    assert.equal(stepRows.length, 2);
+    assert.equal(stepRows[0].children[4].textContent, '37.8k / 420 / 265');
+    assert.equal(stepRows[0].children[4].getAttribute('title'), '上下文 37800 · 思考 420 · 正文 265');
+    assert.equal(stepRows[1].children[4].textContent, '117.7k / 14.5k / 57');
+
+    // Verify '按步查看' multi-select model filter (visible when >1 model) & '总汇总' sub-tab rename
+    const stepsHeaderSegBtns = stepsPane.querySelector('.steps-header-controls').querySelectorAll('.seg-btn');
+    assert.equal(stepsHeaderSegBtns[0].textContent, '按步查看 (2)');
+    assert.equal(stepsHeaderSegBtns[1].textContent, '总汇总', 'Second sub-tab renamed cleanly to 总汇总');
+
+    const stepsModelSelectEl = stepsPane.querySelector('.steps-inline-model-select');
+    assert.ok(stepsModelSelectEl, 'Inline model multi-select mounted in 按步查看 header');
+    assert.equal(
+      stepsModelSelectEl.hasAttribute('hidden'),
+      false,
+      'Steps model dropdown visible when >1 model exists in 按步查看'
+    );
+    assert.equal(stepsModelSelectEl.classList.contains('is-multi'), true);
+    stepsModelSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    const hydroStepOpt = stepsModelSelectEl
+      .querySelectorAll('.select-option')
+      .find((o) => o.getAttribute('data-value') === 'Gemini 4 Hydrogen');
+    assert.ok(hydroStepOpt, 'Gemini 4 Hydrogen option present in 按步查看 model filter');
+    hydroStepOpt.dispatchEvent({ type: 'click', stopPropagation() {} });
+    assert.equal(
+      stepsPane.querySelectorAll('.data-table')[0].children[1].children.length,
+      1,
+      'Filtering 按步查看 by Gemini 4 Hydrogen narrows table to 1 matching row'
+    );
+    assert.equal(stepsHeaderSegBtns[0].textContent, '按步查看 (1/2)');
+    // Reset 按步查看 model filter back to 全部模型
+    stepsModelSelectEl
+      .querySelectorAll('.select-option')
+      .find((o) => o.getAttribute('data-value') === '__all__')
+      .dispatchEvent({ type: 'click', stopPropagation() {} });
+    stepsModelSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    assert.equal(stepsPane.querySelectorAll('.data-table')[0].children[1].children.length, 2);
+
+    // Switch to '总汇总' sub-tab and verify top SessionLineChart + ModelFitChart + minimalist model cards
+    stepsHeaderSegBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(
+      stepsModelSelectEl.hasAttribute('hidden'),
+      true,
+      'Header model dropdown for 按步查看 hides when switching to 总汇总'
+    );
+
+    const modelsAnalyticsPane = stepsPane.querySelector('.models-analytics-pane');
+    assert.ok(modelsAnalyticsPane, 'Models analytics pane rendered');
+    assert.equal(
+      modelsAnalyticsPane.querySelectorAll('.data-table').length,
+      0,
+      'Old 5-column model table replaced by minimalist model cards'
+    );
+
+    const lineCard = modelsAnalyticsPane.querySelector('.sstep-line-card');
+    const fitCard = modelsAnalyticsPane.querySelector('.sstep-fit-card');
+    assert.ok(lineCard && fitCard, 'Both top session line chart and top model fit chart mounted');
+
+    const lineModelSelectEl = lineCard.querySelector('.sstep-line-model-select');
+    assert.ok(lineModelSelectEl, 'SessionLineChart has its own multi-select model dropdown');
+    assert.equal(
+      lineModelSelectEl.hasAttribute('hidden'),
+      false,
+      'SessionLineChart model dropdown visible when >1 model exists'
+    );
+    assert.equal(lineModelSelectEl.classList.contains('is-multi'), true);
+    assert.equal(lineModelSelectEl.querySelector('.select-label').textContent, '全部模型');
+
+    // Verify SessionLineChart 5 metrics ('总Token', '上下文', 'TPS', '首字', '费用')
+    const lineSegBtns = lineCard.querySelectorAll('.seg-btn');
+    assert.deepEqual(
+      lineSegBtns.map((b) => b.textContent),
+      ['总Token', '上下文', 'TPS', '首字', '费用']
+    );
+    assert.match(lineCard.querySelector('.cons-badge').textContent, /^累计 155\.5k$/);
+    lineSegBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} }); // 上下文
+    assert.match(lineCard.querySelector('.cons-badge').textContent, /^当前 37\.8k$/);
+    lineSegBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} }); // TPS
+    assert.match(lineCard.querySelector('.cons-badge').textContent, /^均值 72\.3 tok\/s$/);
+    lineSegBtns[3].dispatchEvent({ type: 'click', stopPropagation() {} }); // 首字
+    assert.match(lineCard.querySelector('.cons-badge').textContent, /^均值 10\.2s$/);
+    lineSegBtns[4].dispatchEvent({ type: 'click', stopPropagation() {} }); // 费用
+    assert.match(lineCard.querySelector('.cons-badge').textContent, /^累计 \$0\.046$/);
+
+    // Verify ModelFitChart defaults to current calling model ('gemini-4-hydrogen') on view entry
+    const fitModelSelectEl = fitCard.querySelector('.sstep-fit-model-select');
+    assert.equal(fitModelSelectEl.hasAttribute('hidden'), false, 'Fit model dropdown visible when >1 model');
+    assert.equal(fitModelSelectEl.classList.contains('is-multi'), true);
+    assert.equal(
+      fitModelSelectEl.querySelector('.select-label').textContent,
+      'gemini-4-hydrogen',
+      'Fit chart defaults to active calling model upon entering 总汇总'
+    );
+    const fitSegBtns = fitCard.querySelectorAll('.seg-btn');
+    assert.deepEqual(
+      fitSegBtns.map((b) => b.textContent),
+      ['TPS', '首字', '缓存', '费用']
+    );
+
+    // Verify minimalist model summary cards (.smodel-card)
+    let smodelCards = modelsAnalyticsPane.querySelectorAll('.smodel-card');
+    assert.equal(smodelCards.length, 2, 'Two minimalist model summary cards rendered');
+    assert.equal(smodelCards[0].classList.contains('is-fit-active'), true);
+    assert.equal(smodelCards[0].querySelector('.smodel-name').textContent, 'gemini-4-hydrogen');
+    assert.equal(smodelCards[0].querySelector('.smodel-calls-pill').textContent, '1次 · 50%');
+    assert.match(smodelCards[0].querySelector('.smodel-perf').textContent, /均速 92\.3 tok\/s · 首字 5\.6s · 缓存 93\.3%/);
+    assert.match(smodelCards[0].querySelector('.smodel-split').textContent, /入 2\.5k · 缓 34\.6k · 思 420 · 正 265/);
+
+    // Simulate live telemetry poll where a subagent spawns on 'Gemini 3 Flash' (changing activeModelLabel)
+    // while the user remains inside 总汇总 -> fit model MUST NOT jump!
+    liveSubagentPollActive = true;
+    const headerRefreshBtn = popoverEl.querySelector('.session-header').querySelector('.icon-btn');
+    headerRefreshBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 260));
+
+    smodelCards = modelsAnalyticsPane.querySelectorAll('.smodel-card');
+    assert.equal(smodelCards.length, 3, 'Subagent model card added in aggregated scope');
+    assert.equal(
+      fitModelSelectEl.querySelector('.select-label').textContent,
+      'gemini-4-hydrogen',
+      'Fit chart model remains pinned and does NOT jump when activeModelShort switches to subagent model during polling'
+    );
+
+    // Verify checking 2 and all 3 models in SessionLineChart (会话走势) renders independent colored series without collapsing back to 全部模型
+    lineModelSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    for (const modelKey of ['Gemini 4 Hydrogen', 'Claude Opus 4.6', 'Gemini 3 Flash']) {
+      const opt = lineModelSelectEl
+        .querySelectorAll('.select-option')
+        .find((o) => o.getAttribute('data-value') === modelKey);
+      assert.ok(opt, `${modelKey} option available in SessionLineChart model dropdown`);
+      opt.dispatchEvent({ type: 'click', stopPropagation() {} });
+    }
+    assert.equal(
+      lineModelSelectEl.querySelector('.select-label').textContent,
+      '已选 3 模型',
+      'Checking all 3 models in SessionLineChart stays in 已选 3 模型 multi-compare mode'
+    );
+    assert.equal(
+      lineCard.querySelector('.sstep-multi-line-group').children.length,
+      3,
+      'All 3 checked models rendered as independent colored series on SessionLineChart'
+    );
+    assert.equal(
+      lineCard.querySelector('.sstep-model-legend').querySelectorAll('.sstep-legend-item').length,
+      3,
+      'SessionLineChart legend lists all 3 checked models with matching color swatches'
+    );
+    // Reset SessionLineChart back to 全部模型
+    lineModelSelectEl
+      .querySelectorAll('.select-option')
+      .find((o) => o.getAttribute('data-value') === '__all__')
+      .dispatchEvent({ type: 'click', stopPropagation() {} });
+    lineModelSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    assert.equal(lineModelSelectEl.querySelector('.select-label').textContent, '全部模型');
+
+    // Clicking another model card ('claude-opus-4.6') updates fit target; multi-checking a second model draws 2 independent colored fit curves!
+    smodelCards[1].onclick();
+    assert.equal(fitModelSelectEl.querySelector('.select-label').textContent, 'claude-opus-4.6');
+    assert.equal(smodelCards[1].classList.contains('is-fit-active'), true);
+
+    fitModelSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    let fitOpts = fitModelSelectEl.querySelectorAll('.select-option');
+    const hydroFitOpt = fitOpts.find((o) => o.getAttribute('data-value') === 'Gemini 4 Hydrogen');
+    assert.ok(hydroFitOpt, 'Gemini 4 Hydrogen option available for multi-select comparison');
+    hydroFitOpt.dispatchEvent({ type: 'click', stopPropagation() {} });
+    assert.equal(
+      fitModelSelectEl.querySelector('.select-label').textContent,
+      '已选 2 模型',
+      'Checking two models keeps dropdown open and displays 已选 2 模型'
+    );
+    assert.equal(
+      fitCard.querySelector('.sstep-multi-curve-group').querySelectorAll('.sstep-fit-line').length,
+      2,
+      'Two independent colored regression curves rendered simultaneously in multi-model compare mode'
+    );
+    assert.equal(
+      fitCard.querySelector('.sstep-model-legend').hasAttribute('hidden'),
+      false,
+      'Multi-model color legend shown below fit chart when >=2 models compared'
+    );
+
+    fitOpts = fitModelSelectEl.querySelectorAll('.select-option');
+    const allModelsOpt = fitOpts.find((o) => o.getAttribute('data-value') === '__all__');
+    assert.ok(allModelsOpt, '全部模型 option available in fit model dropdown');
+    allModelsOpt.dispatchEvent({ type: 'click', stopPropagation() {} });
+    fitModelSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    assert.equal(fitModelSelectEl.querySelector('.select-label').textContent, '全部模型');
+    assert.match(fitCard.querySelector('.cons-badge').textContent, /^3步 · 均 96\.5 tok\/s$/);
+    assert.ok(fitCard.querySelector('.sstep-sci-axes'), 'Scientific L-shaped coordinate axes mounted');
+    assert.ok(
+      fitCard.querySelectorAll('.sstep-axis-label').length >= 5,
+      'Numeric Y-axis and X-axis tick labels rendered'
+    );
+    assert.equal(
+      fitCard.querySelector('.sstep-fit-svg').getAttribute('viewBox'),
+      '0 0 180 136',
+      'ModelFitChart dynamically adapts viewBox width to measured container width (180px in MockNode)'
+    );
+    assert.match(
+      fitCard.querySelector('.sstep-ci-band').getAttribute('d') || '',
+      /^M 2\.0 .* Z$/,
+      'Closed 95% CI confidence band polygon rendered flush around regression fit'
+    );
+    assert.match(
+      fitCard.querySelector('.sstep-fit-line').getAttribute('d') || '',
+      /^M 2\.0 .* L 178\.0 \d+\.\d$/,
+      'Model fit regression curve spans flush edge-to-edge (2.0..178.0) across measured 180px viewBox'
+    );
+    const fitSpineEl = fitCard.querySelector('.sstep-axis-spine');
+    assert.equal(fitSpineEl.getAttribute('x1'), '0');
+    assert.equal(fitSpineEl.getAttribute('x2'), '180');
+    assert.ok(
+      fitCard.querySelectorAll('.sstep-axis-label.is-y-inline').every((el) => el.getAttribute('x') === '0'),
+      'Inline Y-axis tick labels sit flush left at x=0 with zero left dead zone'
+    );
+    // Simulate widening the Sidecar panel to 620px and verify dynamic re-layout edge-to-edge
+    fitCard.querySelector('.sstep-plot-stage').clientWidth = 620;
+    for (const fn of winListeners.get('resize') || []) fn({});
+    assert.equal(fitCard.querySelector('.sstep-fit-svg').getAttribute('viewBox'), '0 0 620 136');
+    assert.equal(fitCard.querySelector('.sstep-axis-spine').getAttribute('x2'), '620');
+    assert.match(
+      fitCard.querySelector('.sstep-fit-line').getAttribute('d') || '',
+      /^M 2\.0 .* L 618\.0 \d+\.\d$/,
+      'Widening Sidecar to 620px stretches regression curve flush to 2.0..618.0'
+    );
+    assert.equal(
+      lineCard.querySelector('.sstep-chart-wrap').style.getPropertyValue('--sstep-accent'),
+      'var(--ctx-cached)',
+      'Session line chart uses project calm blue accent'
+    );
+    assert.equal(
+      fitCard.querySelector('.sstep-chart-wrap').style.getPropertyValue('--sstep-fit-accent'),
+      'var(--ctx-cached)',
+      'Model fit chart uses project calm blue accent instead of fiery orange'
+    );
+    assert.match(
+      fitCard.querySelector('.sstep-fit-delta').textContent,
+      /^r = [+-]\d+\.\d{2} · R² = \d+\.\d{2}$/,
+      'Statistical r and R² diagnostics rendered in footer'
+    );
+
+    // Filter to Subagent #1 via multi-select inlineScopeSelect -> single-model scope auto-hides model dropdowns!
+    const inlineScopeSelectEl = stepsPane.querySelector('.steps-inline-scope-select');
+    assert.equal(inlineScopeSelectEl.hasAttribute('hidden'), false, 'Inline agent scope selector visible when subagents exist');
+    assert.equal(inlineScopeSelectEl.classList.contains('is-multi'), true);
+    inlineScopeSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    const subScopeOpt = inlineScopeSelectEl
+      .querySelectorAll('.select-option')
+      .find((o) => o.getAttribute('data-value') === 'sub-fast-1');
+    assert.ok(subScopeOpt, 'Subagent scope option rendered');
+    subScopeOpt.dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 20));
+    smodelCards = modelsAnalyticsPane.querySelectorAll('.smodel-card');
+    assert.equal(smodelCards.length, 1, 'Scoped to subagent #1 model only');
+    assert.equal(smodelCards[0].querySelector('.smodel-name').textContent, 'gemini-3-flash');
+    assert.match(fitCard.querySelector('.cons-badge').textContent, /^1步 · 均 145\.0 tok\/s$/);
+    assert.equal(
+      lineModelSelectEl.hasAttribute('hidden'),
+      true,
+      'SessionLineChart model dropdown auto-hidden when only 1 model exists'
+    );
+    assert.equal(
+      fitModelSelectEl.hasAttribute('hidden'),
+      true,
+      'ModelFitChart model dropdown auto-hidden when only 1 model exists'
+    );
+
+    // Restore sub-tab to 'steps' before subsequent route tests
+    stepsHeaderSegBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    liveSubagentPollActive = false;
 
     // Verify bundle version bump NEVER calls window.location.reload() in overlay mode
     currentBundleVer = 'ver-200';
@@ -1280,5 +1981,2031 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     mockWindow.__AGUsageMonitorOverlay?.dispose?.();
     assert.equal(mockDocument.getElementById('ag-usage-monitor-capsule'), null);
     assert.equal(mockDocument.getElementById('ag-usage-monitor-portal'), null);
+  }
+});
+
+test('Antigravity IDE argv.json JSONC auto-provisioning preserves comments, upgrades numeric ports to string, and rejects invalid JSONC', () => {
+  assert.equal(
+    resolveIdeArgvPath({ VSCODE_PORTABLE: 'D:\\PortableIDE' }, 'C:\\Users\\Dev'),
+    path.join('D:\\PortableIDE', 'argv.json')
+  );
+  assert.equal(
+    resolveIdeArgvPath({}, 'C:\\Users\\Dev'),
+    path.join('C:\\Users\\Dev', '.antigravity-ide', 'argv.json')
+  );
+
+  // 1. Empty / missing file produces valid commented JSONC with string "0"
+  const fromEmpty = ensureRemoteDebuggingInArgvText('');
+  assert.equal(fromEmpty.valid, true);
+  assert.equal(fromEmpty.changed, true);
+  assert.equal(fromEmpty.portValue, '0');
+  assert.match(fromEmpty.text, /"remote-debugging-port":\s*"0"/);
+
+  // 2. Realistic commented VS Code / Antigravity IDE argv.json with inline & trailing comments + CRLF
+  const sampleJsonc = [
+    '// This configuration file allows you to pass permanent command line arguments to Antigravity IDE.',
+    '{',
+    '\t/* Hardware acceleration toggle */',
+    '\t// "disable-hardware-acceleration": true,',
+    '\t"enable-crash-reporter": true,',
+    '\t"crash-reporter-id": "12345678-1234-1234-1234-123456789abc" // keep crash id',
+    '\t// bottom comment before closing brace',
+    '}',
+    '',
+  ].join('\r\n');
+
+  const patched = ensureRemoteDebuggingInArgvText(sampleJsonc);
+  assert.equal(patched.valid, true);
+  assert.equal(patched.changed, true);
+  assert.equal(patched.portValue, '0');
+  assert.ok(
+    patched.text.includes('"crash-reporter-id": "12345678-1234-1234-1234-123456789abc", // keep crash id'),
+    'Comma inserted right after property value before inline comment'
+  );
+  assert.ok(patched.text.includes('// bottom comment before closing brace'), 'Bottom comment preserved');
+  assert.ok(patched.text.includes('\t"remote-debugging-port": "0"\r\n}'), 'String port inserted with matching tab indent and CRLF');
+
+  // Idempotent on second pass
+  const secondPass = ensureRemoteDebuggingInArgvText(patched.text);
+  assert.equal(secondPass.valid, true);
+  assert.equal(secondPass.changed, false);
+  assert.equal(secondPass.alreadyConfigured, true);
+  assert.equal(secondPass.text, patched.text);
+
+  // 3. Upgrades numeric 0 or 9222 (which IDE silently ignores!) to string "0" / "9222"
+  const numericZero = '{\n\t// user wrote number\n\t"remote-debugging-port": 0,\n\t"enable-crash-reporter": true\n}\n';
+  const upgradedZero = ensureRemoteDebuggingInArgvText(numericZero);
+  assert.equal(upgradedZero.valid, true);
+  assert.equal(upgradedZero.changed, true);
+  assert.equal(upgradedZero.portValue, '0');
+  assert.ok(upgradedZero.text.includes('"remote-debugging-port": "0",'));
+  assert.ok(upgradedZero.text.includes('// user wrote number'));
+
+  const numericCustom = '{\n\t"remote-debugging-port": 9229\n}\n';
+  const upgradedCustom = ensureRemoteDebuggingInArgvText(numericCustom);
+  assert.equal(upgradedCustom.valid, true);
+  assert.equal(upgradedCustom.changed, true);
+  assert.equal(upgradedCustom.portValue, '9229');
+  assert.ok(upgradedCustom.text.includes('"remote-debugging-port": "9229"'));
+
+  // 4. Malformed JSONC is never overwritten
+  const broken = '{\n\t"enable-crash-reporter": \n}';
+  const brokenRes = ensureRemoteDebuggingInArgvText(broken);
+  assert.equal(brokenRes.valid, false);
+  assert.equal(brokenRes.changed, false);
+  assert.equal(brokenRes.text, broken);
+
+  // 5. Filesystem helper skips missing ~/.antigravity-ide and updates existing ~/.antigravity-ide/argv.json
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-ide-argv-test-'));
+  try {
+    const missingRes = ensureIdeRemoteDebuggingArgv({ env: {}, homeDir: tmpHome, enabled: true });
+    assert.equal(missingRes.updated, false);
+    assert.equal(missingRes.reason, 'ide_dir_missing');
+    assert.equal(fs.existsSync(path.join(tmpHome, '.antigravity-ide')), false, 'Never creates .antigravity-ide if IDE is not installed');
+
+    const ideDir = path.join(tmpHome, '.antigravity-ide');
+    fs.mkdirSync(ideDir, { recursive: true });
+    const argvFile = path.join(ideDir, 'argv.json');
+    fs.writeFileSync(argvFile, sampleJsonc, 'utf8');
+
+    const writeRes = ensureIdeRemoteDebuggingArgv({ env: {}, homeDir: tmpHome, enabled: true });
+    assert.equal(writeRes.updated, true);
+    assert.equal(writeRes.portValue, '0');
+    const diskText = fs.readFileSync(argvFile, 'utf8');
+    assert.ok(diskText.includes('"remote-debugging-port": "0"'));
+
+    const noopRes = ensureIdeRemoteDebuggingArgv({ env: {}, homeDir: tmpHome, enabled: true });
+    assert.equal(noopRes.updated, false);
+    assert.equal(noopRes.alreadyConfigured, true);
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+test('Multi-port CDP discovery tolerates stale 2.0 DevToolsActivePort while injecting Antigravity IDE workbench and allowing vscode-file://vscode-app origin', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-wm-multiport-'));
+  const roamingDir = path.join(tmpDir, 'Roaming');
+  const localDir = path.join(tmpDir, 'Local');
+  fs.mkdirSync(path.join(roamingDir, 'Antigravity'), { recursive: true });
+  fs.mkdirSync(path.join(roamingDir, 'Antigravity IDE'), { recursive: true });
+
+  // Reserve and immediately close a port to simulate a stale Antigravity 2.0 DevToolsActivePort file
+  const deadServer = http.createServer();
+  await new Promise((resolve) => deadServer.listen(0, '127.0.0.1', resolve));
+  const stalePort = deadServer.address().port;
+  await new Promise((resolve) => deadServer.close(resolve));
+  fs.writeFileSync(
+    path.join(roamingDir, 'Antigravity', 'DevToolsActivePort'),
+    `${stalePort}\n/devtools/browser/stale-20`,
+    'utf8'
+  );
+
+  // Live Antigravity IDE CDP server exposing workbench.html + workbench-jetski-agent.html + ignored sharedProcess.html
+  const ideContextObj = {
+    location: { pathname: '/out/vs/code/electron-browser/workbench/workbench.html' },
+    document: {
+      querySelector(sel) {
+        if (sel.includes('conversation-view')) {
+          return {
+            getAttribute(k) {
+              return k === 'data-cascade-id' ? '99999999-aaaa-bbbb-cccc-888888888888' : null;
+            },
+          };
+        }
+        return null;
+      },
+    },
+  };
+  ideContextObj.window = ideContextObj;
+  ideContextObj.globalThis = ideContextObj;
+  const ideVm = vm.createContext(ideContextObj);
+
+  const jetskiObj = { location: { pathname: '/out/vs/code/electron-browser/workbench/workbench-jetski-agent.html' } };
+  jetskiObj.window = jetskiObj;
+  jetskiObj.globalThis = jetskiObj;
+  const jetskiVm = vm.createContext(jetskiObj);
+
+  const vmMap = new Map([
+    ['ide-main', ideVm],
+    ['ide-jetski', jetskiVm],
+  ]);
+
+  class MockIdeWebSocket {
+    constructor(url) {
+      this.targetId = url.split('/').pop();
+      this.listeners = new Map();
+      queueMicrotask(() => this._emit('open', {}));
+    }
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(fn);
+    }
+    send(raw) {
+      const msg = JSON.parse(raw);
+      if (msg.method === 'Runtime.evaluate') {
+        const ctx = vmMap.get(this.targetId);
+        const value = vm.runInContext(msg.params.expression, ctx);
+        queueMicrotask(() =>
+          this._emit('message', {
+            data: JSON.stringify({ id: msg.id, result: { result: { value } } }),
+          })
+        );
+      }
+    }
+    close() {}
+    _emit(type, ev) {
+      for (const fn of this.listeners.get(type) || []) fn(ev);
+    }
+  }
+
+  const ideCdpServer = http.createServer((req, res) => {
+    if (req.url === '/json/list') {
+      const p = ideCdpServer.address().port;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify([
+          {
+            type: 'page',
+            url: 'vscode-file://vscode-app/c:/Program%20Files/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/workbench/workbench.html',
+            webSocketDebuggerUrl: `ws://127.0.0.1:${p}/devtools/page/ide-main`,
+          },
+          {
+            type: 'page',
+            url: 'vscode-file://vscode-app/c:/Program%20Files/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/workbench/workbench-jetski-agent.html',
+            webSocketDebuggerUrl: `ws://127.0.0.1:${p}/devtools/page/ide-jetski`,
+          },
+          {
+            type: 'page',
+            url: 'vscode-file://vscode-app/c:/Program%20Files/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/sharedProcess/sharedProcess.html',
+            webSocketDebuggerUrl: `ws://127.0.0.1:${p}/devtools/page/shared`,
+          },
+        ])
+      );
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise((resolve) => ideCdpServer.listen(0, '127.0.0.1', resolve));
+  fs.writeFileSync(
+    path.join(roamingDir, 'Antigravity IDE', 'DevToolsActivePort'),
+    `${ideCdpServer.address().port}\n/devtools/browser/live-ide`,
+    'utf8'
+  );
+
+  const prefetchedConvIds = [];
+  const mockAppJs = `
+    (() => {
+      const br = window.__AGUsageMonitorBridge;
+      let alive = true;
+      window.__AGUsageMonitorOverlay = {
+        bundleVersion: br.bundleVersion,
+        ensureAlive: () => alive,
+        dispose: () => { alive = false; },
+      };
+    })();
+  `;
+
+  const controller = createWindowBridgeController({
+    handleApiRequest: async (pathname, _method, data) => {
+      if (pathname === '/api/telemetry') {
+        prefetchedConvIds.push(data.conversationId || '');
+      }
+      return { status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) };
+    },
+    readAssetFn: async (rel) => (rel === 'styles.css' ? ':host{}' : mockAppJs),
+    getSettingsFn: () => ({ enableWindowOverlay: true }),
+    getBundleVersionFn: () => 'ide-v1',
+    env: { APPDATA: roamingDir, LOCALAPPDATA: localDir },
+    platform: 'win32',
+    homeDir: tmpDir,
+    WebSocketImpl: MockIdeWebSocket,
+  });
+
+  try {
+    const syncRes = await controller.syncAllWindows();
+    assert.equal(syncRes.ok, true, 'Stale 2.0 port did not block live Antigravity IDE port');
+    assert.equal(syncRes.targets, 2, 'Matched workbench.html and workbench-jetski-agent.html while excluding sharedProcess.html');
+    assert.equal(syncRes.injected, 2);
+    assert.ok(
+      prefetchedConvIds.includes('99999999-aaaa-bbbb-cccc-888888888888'),
+      'Initial telemetry prefetch extracted active IDE conversation UUID from DOM'
+    );
+
+    // Verify loopback HTTP bridge accepts Origin: vscode-file://vscode-app
+    const { port, token } = controller.getBridgeInfo();
+    const ideOriginRes = await fetch(`http://127.0.0.1:${port}/api/telemetry?range=today`, {
+      headers: {
+        Origin: 'vscode-file://vscode-app',
+        'X-Usage-Monitor-Token': token,
+      },
+    });
+    assert.equal(ideOriginRes.status, 200);
+  } finally {
+    await controller.stop({ disposeWindows: true });
+    await new Promise((resolve) => ideCdpServer.close(resolve));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Compiled app.js in Antigravity IDE workbench.html docks into .part.titlebar, manages .action-toolbar-container margin, tracks DOM cascade IDs, and mirrors --vscode-* theme tokens', async () => {
+  const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+
+  class IdeMockNode {
+    constructor(tag = 'div') {
+      this.tagName = String(tag).toUpperCase();
+      this.id = '';
+      this.className = '';
+      this.textContent = '';
+      this._rect = { left: 0, right: 1440, top: 0, bottom: 35, width: 1440, height: 35 };
+      this.dataset = {};
+      const vars = new Map();
+      this.style = {
+        marginLeft: '',
+        top: '',
+        right: '',
+        left: '',
+        maxHeight: '',
+        _vars: vars,
+        setProperty(k, v) {
+          vars.set(k, String(v));
+        },
+        removeProperty(k) {
+          vars.delete(k);
+        },
+        getPropertyValue(k) {
+          return vars.get(k) || '';
+        },
+      };
+      this.attributes = new Map();
+      this.children = [];
+      this.parentNode = null;
+      this.shadowRoot = null;
+      this._listeners = new Map();
+      const self = this;
+      this.classList = {
+        _set() {
+          return new Set(String(self.className || '').split(/\s+/).filter(Boolean));
+        },
+        add(...tokens) {
+          const s = this._set();
+          for (const t of tokens) if (t) s.add(t);
+          self.className = Array.from(s).join(' ');
+        },
+        contains(tok) {
+          return this._set().has(tok);
+        },
+        toggle(tok, force) {
+          const s = this._set();
+          const should = force === undefined ? !s.has(tok) : Boolean(force);
+          if (should) s.add(tok);
+          else s.delete(tok);
+          self.className = Array.from(s).join(' ');
+        },
+      };
+    }
+    get parentElement() {
+      return this.parentNode;
+    }
+    get firstChild() {
+      return this.children[0] || null;
+    }
+    get firstElementChild() {
+      return this.children[0] || null;
+    }
+    get lastElementChild() {
+      return this.children[this.children.length - 1] || null;
+    }
+    get isConnected() {
+      let cur = this;
+      while (cur) {
+        if (cur.isDocumentRoot) return true;
+        cur = cur.parentNode || cur.host || null;
+      }
+      return false;
+    }
+    setAttribute(k, v) {
+      const s = String(v);
+      this.attributes.set(k, s);
+      if (k === 'id') this.id = s;
+      if (k === 'class') this.className = s;
+    }
+    getAttribute(k) {
+      return this.attributes.has(k) ? this.attributes.get(k) : null;
+    }
+    hasAttribute(k) {
+      return this.attributes.has(k);
+    }
+    removeAttribute(k) {
+      this.attributes.delete(k);
+    }
+    appendChild(child) {
+      if (child.parentNode) child.parentNode.removeChild(child);
+      child.parentNode = this;
+      this.children.push(child);
+      return child;
+    }
+    insertBefore(node, refNode) {
+      if (!refNode) return this.appendChild(node);
+      if (node.parentNode) node.parentNode.removeChild(node);
+      const idx = this.children.indexOf(refNode);
+      node.parentNode = this;
+      if (idx < 0) this.children.push(node);
+      else this.children.splice(idx, 0, node);
+      return node;
+    }
+    removeChild(child) {
+      const idx = this.children.indexOf(child);
+      if (idx >= 0) {
+        this.children.splice(idx, 1);
+        child.parentNode = null;
+      }
+      return child;
+    }
+    remove() {
+      if (this.parentNode) this.parentNode.removeChild(this);
+    }
+    attachShadow() {
+      const sr = new IdeMockNode('#shadow-root');
+      sr.host = this;
+      this.shadowRoot = sr;
+      return sr;
+    }
+    contains(other) {
+      let cur = other;
+      while (cur) {
+        if (cur === this) return true;
+        cur = cur.parentNode;
+      }
+      return false;
+    }
+    addEventListener(type, fn) {
+      if (!this._listeners.has(type)) this._listeners.set(type, []);
+      this._listeners.get(type).push(fn);
+    }
+    removeEventListener(type, fn) {
+      const arr = this._listeners.get(type);
+      if (!arr) return;
+      const idx = arr.indexOf(fn);
+      if (idx >= 0) arr.splice(idx, 1);
+    }
+    dispatchEvent(ev) {
+      for (const fn of [...(this._listeners.get(ev.type) || [])]) fn(ev);
+    }
+    getBoundingClientRect() {
+      if (this._rect) return this._rect;
+      if (this._ownRect) return this._ownRect;
+      let cur = this.parentNode || this.host || null;
+      while (cur) {
+        if (cur._rect) return cur._rect;
+        if (cur._ownRect) return cur._ownRect;
+        cur = cur.parentNode || cur.host || null;
+      }
+      return { left: 820, right: 946, top: 810, bottom: 836, width: 126, height: 26 };
+    }
+    matchesNode(sel) {
+      if (sel === '[class*="@container/titlebar"]') {
+        return String(this.className || '').includes('@container/titlebar');
+      }
+      if (sel === '[data-testid="conversation-view"][data-cascade-id]') {
+        return (
+          this.getAttribute('data-testid') === 'conversation-view' &&
+          this.hasAttribute('data-cascade-id')
+        );
+      }
+      if (sel === '[data-testid^="conversation-row-"][data-selected="true"][data-cascade-id]') {
+        return (
+          String(this.getAttribute('data-testid') || '').startsWith('conversation-row-') &&
+          this.getAttribute('data-selected') === 'true' &&
+          this.hasAttribute('data-cascade-id')
+        );
+      }
+      if (sel.startsWith('.')) {
+        const classes = sel.slice(1).split('.').filter(Boolean);
+        return classes.every((c) => this.classList.contains(c));
+      }
+      return false;
+    }
+    querySelector(sel) {
+      if (sel.startsWith(':scope > ')) {
+        const rest = sel.slice(':scope > '.length).trim();
+        if (rest === 'div.shrink-0') {
+          return this.children.find((c) => c.classList.contains('shrink-0')) || null;
+        }
+        return this.children.find((c) => c.matchesNode(rest)) || null;
+      }
+      return this._find((n) => n.matchesNode(sel));
+    }
+    querySelectorAll(sel) {
+      const out = [];
+      const walk = (node) => {
+        for (const c of node.children) {
+          if (c.matchesNode(sel)) out.push(c);
+          walk(c);
+        }
+      };
+      walk(this);
+      return out;
+    }
+    _find(pred) {
+      for (const c of this.children) {
+        if (pred(c)) return c;
+        const hit = c._find(pred);
+        if (hit) return hit;
+      }
+      return null;
+    }
+  }
+
+  const docRoot = new IdeMockNode('html');
+  docRoot.isDocumentRoot = true;
+  const head = new IdeMockNode('head');
+  const body = new IdeMockNode('body');
+  docRoot.appendChild(head);
+  docRoot.appendChild(body);
+
+  // Build Antigravity IDE .monaco-workbench with BOTH top window .part.titlebar AND inner chat @container/titlebar
+  const workbench = new IdeMockNode('div');
+  workbench.className = 'monaco-workbench vs-dark';
+
+  const partTitlebar = new IdeMockNode('div');
+  partTitlebar.className = 'part titlebar';
+  const tbContainer = new IdeMockNode('div');
+  tbContainer.className = 'titlebar-container has-center';
+  const tbLeft = new IdeMockNode('div');
+  tbLeft.className = 'titlebar-left';
+  tbLeft._rect = { left: 0, right: 60, top: 0, bottom: 35, width: 60, height: 35 };
+  const tbCenter = new IdeMockNode('div');
+  tbCenter.className = 'titlebar-center';
+  tbCenter._rect = { left: 540, right: 900, top: 0, bottom: 35, width: 360, height: 35 };
+  const tbRight = new IdeMockNode('div');
+  tbRight.className = 'titlebar-right';
+  tbRight._rect = { left: 900, right: 1440, top: 0, bottom: 35, width: 540, height: 35 };
+
+  const actionToolbar = new IdeMockNode('div');
+  actionToolbar.className = 'action-toolbar-container';
+  actionToolbar.style.marginLeft = 'auto';
+  actionToolbar._rect = { left: 1170, right: 1300, top: 0, bottom: 35, width: 130, height: 35 };
+
+  const winControls = new IdeMockNode('div');
+  winControls.className = 'window-controls-container';
+  winControls._rect = { left: 1300, right: 1440, top: 0, bottom: 35, width: 140, height: 35 };
+
+  tbRight.appendChild(actionToolbar);
+  tbRight.appendChild(winControls);
+  tbContainer.appendChild(tbLeft);
+  tbContainer.appendChild(tbCenter);
+  tbContainer.appendChild(tbRight);
+  partTitlebar.appendChild(tbContainer);
+  workbench.appendChild(partTitlebar);
+
+  // Inner chat pane header + conversation view
+  const innerChatHeader = new IdeMockNode('div');
+  innerChatHeader.className = 'flex items-center @container/titlebar';
+  const innerChatRight = new IdeMockNode('div');
+  innerChatRight.className = 'shrink-0 flex items-center';
+  innerChatHeader.appendChild(new IdeMockNode('div'));
+  innerChatHeader.appendChild(innerChatRight);
+  workbench.appendChild(innerChatHeader);
+
+  const convView = new IdeMockNode('div');
+  convView.setAttribute('data-testid', 'conversation-view');
+  convView.setAttribute('data-cascade-id', '12345678-aaaa-bbbb-cccc-1234567890ab');
+  workbench.appendChild(convView);
+
+  body.appendChild(workbench);
+
+  const vscodeVars = new Map([
+    ['--vscode-sideBar-background', '#181818'],
+    ['--vscode-editorWidget-background', '#202020'],
+    ['--vscode-foreground', '#cccccc'],
+    ['--vscode-descriptionForeground', '#9d9d9d'],
+    ['--vscode-widget-border', '#303031'],
+    ['--vscode-textLink-foreground', '#4daafc'],
+    ['--vscode-errorForeground', '#f14c4c'],
+  ]);
+
+  const mutationObservers = [];
+  class MockMutationObserver {
+    constructor(cb) {
+      this.cb = cb;
+      this.targets = [];
+      mutationObservers.push(this);
+    }
+    observe(target, options) {
+      this.targets.push({ target, options });
+    }
+    disconnect() {
+      this.targets = [];
+    }
+  }
+
+  const fetchedUrls = [];
+  const mockDocument = {
+    readyState: 'complete',
+    hidden: false,
+    activeElement: null,
+    documentElement: docRoot,
+    head,
+    body,
+    createElement: (tag) => new IdeMockNode(tag),
+    createElementNS: (_ns, tag) => new IdeMockNode(tag),
+    createTextNode: (txt) => {
+      const t = new IdeMockNode('#text');
+      t.textContent = String(txt);
+      return t;
+    },
+    getElementById: (id) => docRoot._find((n) => n.id === id),
+    querySelector: (sel) => docRoot.querySelector(sel),
+    querySelectorAll: (sel) => docRoot.querySelectorAll(sel),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  const mockWindow = {
+    innerWidth: 1440,
+    innerHeight: 900,
+    location: {
+      pathname: '/out/vs/code/electron-browser/workbench/workbench.html',
+      reload() {},
+    },
+    document: mockDocument,
+    __AGUsageMonitorBridge: {
+      port: 49200,
+      token: 'ide-bridge-token',
+      bundleVersion: 'ide-ver-1',
+      stylesCss,
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    getComputedStyle(el) {
+      if (el === workbench) {
+        return {
+          paddingLeft: '0px',
+          paddingRight: '0px',
+          getPropertyValue: (k) => vscodeVars.get(k) || '',
+        };
+      }
+      return {
+        paddingLeft: '0px',
+        paddingRight: '0px',
+        getPropertyValue: () => '',
+      };
+    },
+    fetch: async (url) => {
+      fetchedUrls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          uiBundleVersion: 'ide-ver-1',
+          settings: {
+            enableWindowOverlay: true,
+            showTopbarMultiSession: true,
+            topbarCapsuleSlots: ['context', 'tps', 'quota_auto'],
+          },
+          activeConversation: {
+            cascadeId: convView.getAttribute('data-cascade-id'),
+            title: 'IDE Session',
+            isRunning: false,
+            stepCount: 3,
+            latestTokPerSec: 84.5,
+            context: { totalTokens: 64000, compactionLimitTokens: 256000, limitTokens: 256000 },
+            recentSteps: [],
+          },
+          consumption: { selectedRange: { key: 'today', label: '今天', startMs: 1, endMs: 2 }, session: {}, account: {}, trendSeries: [], monthlySeries: [] },
+          quotas: null,
+          modelBreakdown: [],
+        }),
+      };
+    },
+  };
+  mockWindow.window = mockWindow;
+  mockWindow.globalThis = mockWindow;
+
+  const sandbox = vm.createContext({
+    window: mockWindow,
+    globalThis: mockWindow,
+    document: mockDocument,
+    location: mockWindow.location,
+    navigator: {},
+    MutationObserver: MockMutationObserver,
+    URLSearchParams,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    queueMicrotask,
+    fetch: mockWindow.fetch,
+    console,
+  });
+
+  vm.runInContext(appJs, sandbox);
+  await new Promise((r) => setTimeout(r, 35));
+
+  try {
+    const ov = mockWindow.__AGUsageMonitorOverlay;
+    assert.ok(ov, 'Overlay mounted in Antigravity IDE');
+    const capsuleHost = mockDocument.getElementById('ag-usage-monitor-capsule');
+    const portalHost = mockDocument.getElementById('ag-usage-monitor-portal');
+
+    // 1. Prioritizes IDE window .part.titlebar > .titlebar-right over inner chat @container/titlebar
+    assert.equal(capsuleHost.getAttribute('data-dock'), 'ide-titlebar');
+    assert.equal(capsuleHost.parentNode, tbRight);
+    assert.equal(tbRight.firstChild, capsuleHost, 'Capsule inserted before .action-toolbar-container');
+    assert.equal(innerChatRight.children.includes(capsuleHost), false, 'Does not dock into narrower inner chat header when IDE titlebar is visible');
+    assert.equal(actionToolbar.style.marginLeft, '0px', 'Transfers margin-left:auto to capsuleHost while docked');
+    assert.equal(ov.getLayoutMode(), 'wide');
+
+    // 2. Mirrors --vscode-* theme variables onto body portalHost when :root lacks --background
+    assert.equal(portalHost.style.getPropertyValue('--background'), '#181818');
+    assert.equal(portalHost.style.getPropertyValue('--card'), '#202020');
+    assert.equal(portalHost.style.getPropertyValue('--foreground'), '#cccccc');
+    assert.equal(portalHost.style.getPropertyValue('--muted-foreground'), '#9d9d9d');
+    assert.equal(portalHost.style.getPropertyValue('--border'), '#303031');
+    assert.equal(portalHost.style.getPropertyValue('--primary'), '#4daafc');
+    assert.equal(portalHost.style.getPropertyValue('--destructive'), '#f14c4c');
+
+    // Live theme switch updates portalHost variables
+    vscodeVars.set('--vscode-sideBar-background', '#f8f8f8');
+    vscodeVars.set('--vscode-foreground', '#1f1f1f');
+    for (const mo of mutationObservers) {
+      if (mo.targets.some((t) => t.target === workbench)) {
+        mo.cb([{ target: workbench, type: 'attributes', attributeName: 'class' }]);
+      }
+    }
+    assert.equal(portalHost.style.getPropertyValue('--background'), '#f8f8f8');
+    assert.equal(portalHost.style.getPropertyValue('--foreground'), '#1f1f1f');
+
+    // 3. Extracts active conversation UUID from [data-testid="conversation-view"][data-cascade-id] and reacts to session switch
+    assert.ok(
+      fetchedUrls.some((u) => u.includes('conversationId=12345678-aaaa-bbbb-cccc-1234567890ab')),
+      'Initial IDE conversation UUID tracked from DOM'
+    );
+    convView.setAttribute('data-cascade-id', '87654321-dddd-eeee-ffff-0987654321fe');
+    for (const mo of mutationObservers) {
+      if (mo.targets.some((t) => t.target === body)) {
+        mo.cb([{ target: convView, type: 'attributes', attributeName: 'data-cascade-id' }]);
+      }
+    }
+    await new Promise((r) => setTimeout(r, 25));
+    assert.ok(
+      fetchedUrls.some((u) => u.includes('conversationId=87654321-dddd-eeee-ffff-0987654321fe')),
+      'Switching conversation in IDE immediately fetches new conversation telemetry'
+    );
+
+    // 4. Fullscreen / hidden .part.titlebar gracefully falls back to inner chat @container/titlebar and restores .action-toolbar-container margin
+    partTitlebar._rect = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+    ov.ensureAlive();
+    assert.equal(capsuleHost.getAttribute('data-dock'), 'flow');
+    assert.equal(capsuleHost.parentNode, innerChatRight);
+    assert.equal(actionToolbar.style.marginLeft, 'auto', 'Restored original marginLeft when undocking from IDE titlebar');
+
+    // Re-showing .part.titlebar re-docks into IDE titlebar
+    partTitlebar._rect = { left: 0, right: 1440, top: 0, bottom: 35, width: 1440, height: 35 };
+    ov.ensureAlive();
+    assert.equal(capsuleHost.getAttribute('data-dock'), 'ide-titlebar');
+    assert.equal(actionToolbar.style.marginLeft, '0px');
+
+    // 5. Tracks external IDE child iframe route updates pushed via window.__AGUsageMonitorBridge.hostRouteCascadeId
+    mockWindow.__AGUsageMonitorBridge.hostRouteCascadeId =
+      'a4206937-54dd-4d4e-a161-813719bf7107';
+    ov.syncHostRoute();
+    await new Promise((r) => setTimeout(r, 25));
+    assert.ok(
+      fetchedUrls.some((u) =>
+        u.includes('conversationId=a4206937-54dd-4d4e-a161-813719bf7107')
+      ),
+      'External IDE iframe route sync immediately fetches matching conversation telemetry'
+    );
+  } finally {
+    mockWindow.__AGUsageMonitorOverlay?.dispose?.();
+    assert.equal(actionToolbar.style.marginLeft, 'auto', 'dispose() cleanly restores .action-toolbar-container marginLeft');
+  }
+});
+
+test('Antigravity IDE iframe route association, LS process discovery, and 0-tool MCP stdio protocol', async () => {
+  // 1. IDE extensionView iframe route extraction & parentId multi-window isolation
+  assert.equal(
+    extractIdeExtensionCascadeId(
+      'http://127.0.0.1:41362/c/a4206937-54dd-4d4e-a161-813719bf7107?extensionView=true&extensionVariant=vs-code'
+    ),
+    'a4206937-54dd-4d4e-a161-813719bf7107'
+  );
+  assert.equal(
+    extractIdeExtensionCascadeId('http://127.0.0.1:41362/?extensionView=true'),
+    ''
+  );
+
+  const rawTargets = [
+    {
+      id: 'WB-1',
+      type: 'page',
+      url: 'vscode-file://vscode-app/c:/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/workbench/workbench.html',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:1648/devtools/page/WB-1',
+    },
+    {
+      id: 'WB-2',
+      type: 'page',
+      url: 'vscode-file://vscode-app/c:/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/workbench/workbench.html?windowId=2',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:1648/devtools/page/WB-2',
+    },
+    {
+      id: 'WV-1',
+      parentId: 'WB-1',
+      type: 'iframe',
+      url: 'vscode-webview://1234/index.html?purpose=webviewView',
+    },
+    {
+      id: 'CHAT-1',
+      parentId: 'WV-1',
+      type: 'iframe',
+      url: 'http://127.0.0.1:41362/c/11111111-2222-3333-4444-555555555555?extensionView=true',
+    },
+    {
+      id: 'WV-2',
+      parentId: 'WB-2',
+      type: 'iframe',
+      url: 'vscode-webview://5678/index.html?purpose=webviewView',
+    },
+    {
+      id: 'CHAT-2',
+      parentId: 'WV-2',
+      type: 'iframe',
+      url: 'http://127.0.0.1:41999/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?extensionView=true',
+    },
+  ];
+  const mainTargets = rawTargets.filter(isAntigravityMainPageTarget);
+  const associated = associateIdeIframeRoutes(rawTargets, mainTargets);
+  assert.equal(associated.length, 2);
+  assert.equal(associated[0].isIdeWorkbench, true);
+  assert.equal(associated[0].ideRouteCascadeId, '11111111-2222-3333-4444-555555555555');
+  assert.equal(associated[1].ideRouteCascadeId, 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+
+  // Single IDE window fallback when parentId is absent
+  const noParentRaw = [
+    rawTargets[0],
+    {
+      id: 'CHAT-SOLO',
+      type: 'iframe',
+      url: 'http://127.0.0.1:41362/c/a4206937-54dd-4d4e-a161-813719bf7107?extensionView=true',
+    },
+  ];
+  const soloAssoc = associateIdeIframeRoutes(
+    noParentRaw,
+    noParentRaw.filter(isAntigravityMainPageTarget)
+  );
+  assert.equal(soloAssoc[0].ideRouteCascadeId, 'a4206937-54dd-4d4e-a161-813719bf7107');
+
+  // 2. Language Server / Hub CLI parsing & ancestor PID prioritization
+  const parsedWinHub = parseLsArgsFromCommandLine(
+    '"C:\\Users\\Admin\\.gemini\\bin\\agy.exe" --hub --hub-port=41362 --app_data_dir=antigravity --csrf_token=0759efca-5597-49d9-bcc1-347cfbca99c2'
+  );
+  assert.equal(parsedWinHub.isHub, true);
+  assert.equal(parsedWinHub.hubPort, 41362);
+  assert.equal(parsedWinHub.csrfToken, '0759efca-5597-49d9-bcc1-347cfbca99c2');
+
+  const discovered = await discoverAntigravityLsEndpoint({
+    ppid: 6832,
+    platform: 'win32',
+    execCmdFn: async () =>
+      JSON.stringify([
+        {
+          ProcessId: 5100,
+          ParentProcessId: 1000,
+          CommandLine: 'agy.exe --hub --hub-port=39000 --csrf_token=other-tok',
+        },
+        {
+          ProcessId: 6832,
+          ParentProcessId: 2000,
+          CommandLine:
+            '"C:\\Users\\Admin\\.gemini\\bin\\agy.exe" --hub --hub-port=41362 --csrf_token=parent-tok',
+        },
+      ]),
+    fetchFn: async (url, opts) => ({
+      ok:
+        String(url).startsWith('http://127.0.0.1:41362/') &&
+        opts?.headers?.['x-codeium-csrf-token'] === 'parent-tok',
+    }),
+  });
+  assert.deepEqual(discovered, {
+    addr: '127.0.0.1:41362',
+    baseUrl: 'http://127.0.0.1:41362',
+    csrfToken: 'parent-tok',
+    pid: 6832,
+  });
+
+  // 3. Zero-tool MCP JSON-RPC 2.0 protocol responses
+  const initResp = handleMcpJsonRpcMessage(
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-03-26' },
+    },
+    '1.4.4'
+  );
+  assert.equal(initResp.result.protocolVersion, '2025-03-26');
+  assert.equal(initResp.result.serverInfo.name, 'usage-monitor-host');
+
+  assert.equal(
+    handleMcpJsonRpcMessage({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+    null
+  );
+
+  const toolsResp = handleMcpJsonRpcMessage({
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/list',
+  });
+  assert.deepEqual(toolsResp.result, { tools: [] });
+
+  const unknownResp = handleMcpJsonRpcMessage({
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'tools/call',
+  });
+  assert.equal(unknownResp.error.code, -32601);
+
+  // 4. End-to-end child process stdio framing & clean shutdown on stdin EOF
+  const mcpEntryPath = path.resolve(
+    path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')),
+    '../mcp-entry.mjs'
+  );
+  const child = spawn(process.execPath, [mcpEntryPath], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    env: {
+      ...process.env,
+      ANTIGRAVITY_LS_ADDRESS: 'test.invalid',
+    },
+  });
+
+  const stdoutLines = [];
+  let buf = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
+    buf += chunk;
+    const parts = buf.split(/\r?\n/);
+    buf = parts.pop() || '';
+    for (const line of parts) {
+      if (line.trim()) stdoutLines.push(JSON.parse(line));
+    }
+  });
+
+  child.stdin.write(
+    `${JSON.stringify({
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'initialize',
+      params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '1.0' } },
+    })}\n`
+  );
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'tools/list', params: {} })}\n`);
+
+  const waitDeadline = Date.now() + 3000;
+  while (stdoutLines.length < 2 && Date.now() < waitDeadline) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(stdoutLines.length, 2, 'Received initialize and tools/list responses with zero stray stdout noise');
+  assert.equal(stdoutLines[0].id, 10);
+  assert.equal(stdoutLines[0].result.protocolVersion, '2025-03-26');
+  assert.equal(stdoutLines[1].id, 11);
+  assert.deepEqual(stdoutLines[1].result, { tools: [] });
+
+  const exitCode = await new Promise((resolve) => {
+    child.once('exit', (code) => resolve(code));
+    child.stdin.end();
+  });
+  assert.equal(exitCode, 0, 'mcp-entry exits cleanly with code 0 when host closes stdin');
+});
+
+test('Composer mount mode (输入框挂载) docks capsule immediately left of Auto button, opens popups upward, and hot-switches cleanly', async () => {
+  const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+
+  class ComposerMockNode {
+    constructor(tag, rect = null) {
+      this.tagName = String(tag || 'div').toUpperCase();
+      this.nodeName = this.tagName;
+      this.id = '';
+      this.className = '';
+      this._text = '';
+      this._ownRect = rect || null;
+      this.style = {
+        marginLeft: '',
+        top: '',
+        left: '',
+        right: '',
+        height: '',
+        maxHeight: '',
+        _vars: new Map(),
+        setProperty(k, v) {
+          this._vars.set(k, String(v));
+        },
+        getPropertyValue(k) {
+          return this._vars.get(k) || '';
+        },
+      };
+      this.dataset = {};
+      this.attributes = new Map();
+      this.children = [];
+      this.parentNode = null;
+      this.shadowRoot = null;
+      this._listeners = new Map();
+      const self = this;
+      this.classList = {
+        _set() {
+          return new Set(String(self.className || '').split(/\s+/).filter(Boolean));
+        },
+        add(...tokens) {
+          const s = this._set();
+          for (const t of tokens) if (t) s.add(t);
+          self.className = Array.from(s).join(' ');
+        },
+        contains(tok) {
+          return this._set().has(tok);
+        },
+        toggle(tok, force) {
+          const s = this._set();
+          const should = force === undefined ? !s.has(tok) : Boolean(force);
+          if (should) s.add(tok);
+          else s.delete(tok);
+          self.className = Array.from(s).join(' ');
+        },
+      };
+    }
+    get textContent() {
+      if (this.children.length === 0) return this._text;
+      return this._text + this.children.map((c) => c.textContent).join('');
+    }
+    set textContent(v) {
+      this._text = String(v ?? '');
+      this.children = [];
+    }
+    get parentElement() {
+      return this.parentNode;
+    }
+    get firstChild() {
+      return this.children[0] || null;
+    }
+    get firstElementChild() {
+      return this.children[0] || null;
+    }
+    get lastElementChild() {
+      return this.children[this.children.length - 1] || null;
+    }
+    get nextElementSibling() {
+      if (!this.parentNode) return null;
+      const idx = this.parentNode.children.indexOf(this);
+      return idx >= 0 ? this.parentNode.children[idx + 1] || null : null;
+    }
+    get isConnected() {
+      let cur = this;
+      while (cur) {
+        if (cur.isDocumentRoot) return true;
+        cur = cur.parentNode || cur.host || null;
+      }
+      return false;
+    }
+    setAttribute(k, v) {
+      const s = String(v);
+      this.attributes.set(k, s);
+      if (k === 'id') this.id = s;
+      if (k === 'class') this.className = s;
+    }
+    getAttribute(k) {
+      return this.attributes.has(k) ? this.attributes.get(k) : null;
+    }
+    hasAttribute(k) {
+      return this.attributes.has(k);
+    }
+    removeAttribute(k) {
+      this.attributes.delete(k);
+    }
+    appendChild(child) {
+      if (child.parentNode) child.parentNode.removeChild(child);
+      child.parentNode = this;
+      this.children.push(child);
+      return child;
+    }
+    insertBefore(node, refNode) {
+      if (!refNode) return this.appendChild(node);
+      if (node.parentNode) node.parentNode.removeChild(node);
+      const idx = this.children.indexOf(refNode);
+      node.parentNode = this;
+      if (idx < 0) this.children.push(node);
+      else this.children.splice(idx, 0, node);
+      return node;
+    }
+    removeChild(child) {
+      const idx = this.children.indexOf(child);
+      if (idx >= 0) {
+        this.children.splice(idx, 1);
+        child.parentNode = null;
+      }
+      return child;
+    }
+    remove() {
+      if (this.parentNode) this.parentNode.removeChild(this);
+    }
+    attachShadow() {
+      const sr = new ComposerMockNode('#shadow-root');
+      sr.host = this;
+      this.shadowRoot = sr;
+      return sr;
+    }
+    contains(other) {
+      let cur = other;
+      while (cur) {
+        if (cur === this) return true;
+        cur = cur.parentNode;
+      }
+      return false;
+    }
+    addEventListener(type, fn) {
+      if (!this._listeners.has(type)) this._listeners.set(type, []);
+      this._listeners.get(type).push(fn);
+    }
+    removeEventListener(type, fn) {
+      const arr = this._listeners.get(type);
+      if (!arr) return;
+      const i = arr.indexOf(fn);
+      if (i >= 0) arr.splice(i, 1);
+    }
+    dispatchEvent(ev) {
+      for (const fn of [...(this._listeners.get(ev.type) || [])]) fn(ev);
+    }
+    getBoundingClientRect() {
+      if (this._rect) return this._rect;
+      if (this._ownRect) return this._ownRect;
+      let cur = this.parentNode || this.host || null;
+      while (cur) {
+        if (cur._rect) return cur._rect;
+        if (cur._ownRect) return cur._ownRect;
+        cur = cur.parentNode || cur.host || null;
+      }
+      return { left: 820, right: 946, top: 810, bottom: 836, width: 126, height: 26 };
+    }
+    _matchesSingle(sel) {
+      const s = String(sel || '').trim();
+      if (!s) return false;
+      if (s === '[class*="@container/titlebar"]') {
+        return String(this.className || '').includes('@container/titlebar');
+      }
+      if (s.startsWith('.')) return this.classList.contains(s.slice(1));
+      if (s.startsWith('[') && s.endsWith(']')) {
+        const inner = s.slice(1, -1);
+        const eqIdx = inner.indexOf('=');
+        if (eqIdx < 0) return this.hasAttribute(inner);
+        const attr = inner.slice(0, eqIdx).trim();
+        const val = inner.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+        return this.getAttribute(attr) === val;
+      }
+      return this.tagName.toLowerCase() === s.toLowerCase();
+    }
+    querySelector(sel) {
+      if (sel === ':scope > div.shrink-0') {
+        return this.children.find((c) => c.classList.contains('shrink-0')) || null;
+      }
+      return this.querySelectorAll(sel)[0] || null;
+    }
+    querySelectorAll(sel) {
+      const s = String(sel || '').trim();
+      if (!s) return [];
+      const out = [];
+      const walk = (node) => {
+        for (const c of node.children) {
+          if (c._matchesSingle(s)) out.push(c);
+          walk(c);
+        }
+      };
+      walk(this);
+      return out;
+    }
+  }
+
+  const docRoot = new ComposerMockNode('html', { left: 0, right: 1440, top: 0, bottom: 900, width: 1440, height: 900 });
+  docRoot.isDocumentRoot = true;
+  const body = new ComposerMockNode('body', { left: 0, right: 1440, top: 0, bottom: 900, width: 1440, height: 900 });
+  docRoot.appendChild(body);
+
+  // 1. Topbar
+  const titlebar = new ComposerMockNode('div', { left: 0, right: 1440, top: 0, bottom: 38, width: 1440, height: 38 });
+  titlebar.className = 'flex items-center @container/titlebar';
+  const titleLeft = new ComposerMockNode('div', { left: 16, right: 220, top: 6, bottom: 32, width: 204, height: 26 });
+  titleLeft.textContent = 'Chat Title';
+  const titleRight = new ComposerMockNode('div', { left: 1200, right: 1420, top: 6, bottom: 32, width: 220, height: 26 });
+  titleRight.className = 'shrink-0 flex items-center';
+  titleRight.appendChild(new ComposerMockNode('button', { left: 1380, right: 1412, top: 6, bottom: 32, width: 32, height: 26 }));
+  titlebar.appendChild(titleLeft);
+  titlebar.appendChild(titleRight);
+  body.appendChild(titlebar);
+
+  // 2. Chat composer card at bottom: [+] [Gemini 4 Carbon High ^]  ...  [🛡️ Auto ^] [🎤] [→]
+  const composerCard = new ComposerMockNode('div', { left: 220, right: 1120, top: 700, bottom: 848, width: 900, height: 148 });
+  composerCard.className = 'rounded-2xl border p-3';
+  const editorEl = new ComposerMockNode('textarea', { left: 236, right: 1104, top: 712, bottom: 796, width: 868, height: 84 });
+  editorEl.setAttribute('role', 'textbox');
+  const toolbarRow = new ComposerMockNode('div', { left: 236, right: 1104, top: 808, bottom: 838, width: 868, height: 30 });
+  toolbarRow.className = 'flex items-center justify-between';
+
+  const leftCluster = new ComposerMockNode('div', { left: 236, right: 446, top: 808, bottom: 838, width: 210, height: 30 });
+  leftCluster.className = 'flex items-center gap-1';
+  const plusBtn = new ComposerMockNode('button', { left: 236, right: 264, top: 810, bottom: 836, width: 28, height: 26 });
+  plusBtn.textContent = '+';
+  const modelBtn = new ComposerMockNode('button', { left: 270, right: 446, top: 810, bottom: 836, width: 176, height: 26 });
+  modelBtn.textContent = 'Gemini 4 Carbon High ^';
+  leftCluster.appendChild(plusBtn);
+  leftCluster.appendChild(modelBtn);
+
+  const rightCluster = new ComposerMockNode('div', { left: 950, right: 1104, top: 808, bottom: 838, width: 154, height: 30 });
+  rightCluster.className = 'flex items-center gap-1.5';
+  const autoWrap = new ComposerMockNode('div', { left: 950, right: 1028, top: 810, bottom: 836, width: 78, height: 26 });
+  autoWrap.className = 'relative';
+  const autoBtn = new ComposerMockNode('button', { left: 950, right: 1028, top: 810, bottom: 836, width: 78, height: 26 });
+  const shieldSvg = new ComposerMockNode('svg');
+  const shieldTitle = new ComposerMockNode('title');
+  shieldTitle.textContent = 'Shield Icon';
+  shieldSvg.appendChild(shieldTitle);
+  const autoLabel = new ComposerMockNode('span');
+  autoLabel.textContent = 'Auto';
+  const chevronSvg = new ComposerMockNode('svg');
+  autoBtn.appendChild(shieldSvg);
+  autoBtn.appendChild(autoLabel);
+  autoBtn.appendChild(chevronSvg);
+  autoWrap.appendChild(autoBtn);
+
+  const micBtn = new ComposerMockNode('button', { left: 1034, right: 1062, top: 810, bottom: 836, width: 28, height: 26 });
+  micBtn.setAttribute('aria-label', 'Voice input');
+  const sendBtn = new ComposerMockNode('button', { left: 1068, right: 1100, top: 808, bottom: 838, width: 32, height: 30 });
+  sendBtn.setAttribute('aria-label', 'Send message');
+
+  rightCluster.appendChild(autoWrap);
+  rightCluster.appendChild(micBtn);
+  rightCluster.appendChild(sendBtn);
+  toolbarRow.appendChild(leftCluster);
+  toolbarRow.appendChild(rightCluster);
+  composerCard.appendChild(editorEl);
+  composerCard.appendChild(toolbarRow);
+  body.appendChild(composerCard);
+
+  const mockSettings = {
+    weeklyLimitMode: 'official',
+    weeklyTokenBudget: 150000000,
+    weeklyCostBudget: 100,
+    showUpstreamModel: false,
+    orchestratorIdMode: 'compact',
+    pluginUpdateMode: 'manual',
+    autoUpdatePlugin: false,
+    windowMountMode: 'composer',
+    enableWindowOverlay: true,
+    showTopbarMultiSession: true,
+    topbarCapsuleSlots: ['context', 'tps', 'quota_auto'],
+  };
+
+  const mockDocument = {
+    readyState: 'complete',
+    hidden: false,
+    documentElement: docRoot,
+    body,
+    createElement: (tag) => new ComposerMockNode(tag),
+    createElementNS: (_ns, tag) => new ComposerMockNode(tag),
+    createTextNode: (txt) => {
+      const t = new ComposerMockNode('#text');
+      t.textContent = String(txt);
+      return t;
+    },
+    getElementById: (id) => {
+      const walk = (n) => {
+        if (n.id === id) return n;
+        for (const c of n.children) {
+          const hit = walk(c);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      return walk(docRoot);
+    },
+    querySelector: (sel) => docRoot.querySelector(sel),
+    querySelectorAll: (sel) => docRoot.querySelectorAll(sel),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  const mockWindow = {
+    innerWidth: 1440,
+    innerHeight: 900,
+    location: { pathname: '/c/cccccccc-1111-2222-3333-dddddddddddd', reload() {} },
+    document: mockDocument,
+    __AGUsageMonitorBridge: {
+      port: 49152,
+      token: 'composer-token-456',
+      bundleVersion: 'ver-composer-1',
+      stylesCss,
+      initialTelemetry: {
+        uiBundleVersion: 'ver-composer-1',
+        settings: { ...mockSettings },
+        cloudStatus: { updateAvailable: false, currentPluginVersion: '1.4.5' },
+        account: { tierName: 'Google AI Ultra', planName: 'Pro' },
+        runningConversations: [],
+        conversations: [],
+        activeConversation: {
+          cascadeId: 'cccccccc-1111-2222-3333-dddddddddddd',
+          title: 'Composer Test',
+          isRunning: false,
+          stepCount: 2,
+          latestTokPerSec: 61.5,
+          latestTtftSec: 1.4,
+          context: { totalTokens: 64000, limitTokens: 256000 },
+          recentSteps: [],
+          modelBreakdown: [],
+        },
+        consumption: { session: {}, account: {}, trendSeries: [], monthlySeries: [] },
+        quotas: { pools: [], weekly: {} },
+        modelBreakdown: [],
+      },
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    getComputedStyle: () => ({ display: 'flex', flexDirection: 'row', justifyContent: 'flex-start', getPropertyValue: () => '' }),
+    fetch: async (url, opts = {}) => {
+      if (String(url).includes('/api/settings') && String(opts.method || '').toUpperCase() === 'POST') {
+        Object.assign(mockSettings, JSON.parse(opts.body || '{}'));
+        return { ok: true, status: 200, json: async () => ({ ...mockSettings }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          uiBundleVersion: 'ver-composer-1',
+          settings: { ...mockSettings },
+          cloudStatus: { updateAvailable: false, currentPluginVersion: '1.4.5' },
+          account: { tierName: 'Google AI Ultra', planName: 'Pro' },
+          runningConversations: [],
+          conversations: [],
+          activeConversation: {
+            cascadeId: 'cccccccc-1111-2222-3333-dddddddddddd',
+            title: 'Composer Test',
+            isRunning: false,
+            stepCount: 2,
+            latestTokPerSec: 61.5,
+            latestTtftSec: 1.4,
+            context: { totalTokens: 64000, limitTokens: 256000 },
+            recentSteps: [],
+            modelBreakdown: [],
+          },
+          consumption: { session: {}, account: {}, trendSeries: [], monthlySeries: [] },
+          quotas: { pools: [], weekly: {} },
+          modelBreakdown: [],
+        }),
+      };
+    },
+  };
+  mockWindow.window = mockWindow;
+  mockWindow.globalThis = mockWindow;
+
+  const sandbox = vm.createContext({
+    window: mockWindow,
+    globalThis: mockWindow,
+    document: mockDocument,
+    location: mockWindow.location,
+    navigator: {},
+    URLSearchParams,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    queueMicrotask,
+    fetch: mockWindow.fetch,
+    console,
+  });
+
+  vm.runInContext(appJs, sandbox);
+  await new Promise((r) => setTimeout(r, 30));
+
+  try {
+    const ov = mockWindow.__AGUsageMonitorOverlay;
+    assert.ok(ov, 'Overlay registered');
+    const capsuleHost = mockDocument.getElementById('ag-usage-monitor-capsule');
+    const portalHost = mockDocument.getElementById('ag-usage-monitor-portal');
+
+    // 1. Capsule docks inside rightCluster immediately before autoWrap (to the left of Auto), ignoring SVG <title>
+    assert.equal(capsuleHost.getAttribute('data-dock'), 'composer');
+    assert.equal(capsuleHost.parentNode, rightCluster);
+    assert.equal(capsuleHost.nextElementSibling, autoWrap, 'Capsule sits immediately to the left of Auto wrapper');
+
+    // 2. Switching mode label from "Auto" to "Ask" preserves composer docking next to that mode button
+    autoLabel.textContent = 'Ask';
+    assert.equal(ov.ensureAlive(), true);
+    assert.equal(capsuleHost.getAttribute('data-dock'), 'composer');
+    assert.equal(capsuleHost.nextElementSibling, autoWrap);
+
+    // 3. Opening popover when docked at bottom opens UPWARD (.is-above) above capsuleBtn.top (810)
+    ov.open();
+    const popoverEl = portalHost.shadowRoot.querySelector('.wm-popover-panel');
+    assert.ok(popoverEl.classList.contains('is-above'), 'Popover gets upward is-above class');
+    const popTop = parseInt(popoverEl.style.top, 10);
+    assert.ok(Number.isFinite(popTop) && popTop < 810 - 200, `Popover opens above composer (top=${popTop})`);
+
+    // 4. Live hot-switch inside SettingsView from composer -> dual moves capsule back to topbar immediately
+    const pillTabs = popoverEl.querySelectorAll('.pill-tab');
+    pillTabs[pillTabs.length - 1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    const allPanes = popoverEl.querySelectorAll('.view-pane');
+    const settingsPane = allPanes[allPanes.length - 1];
+    const mountSelectEl = settingsPane.querySelectorAll('.custom-select')[0];
+    mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    mountSelectEl.querySelectorAll('.select-option')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(mockSettings.windowMountMode, 'dual');
+    assert.equal(capsuleHost.getAttribute('data-dock'), 'flow');
+    assert.equal(capsuleHost.parentNode, titleRight, 'Capsule immediately hot-switched back to topbar');
+    assert.equal(popoverEl.classList.contains('is-above'), false, 'Popover returns to downward mode in topbar');
+
+    // 5. Also verify flat ml-auto toolbar layout transfers margin-left: auto to capsuleHost and restores on switch
+    toolbarRow.removeChild(rightCluster);
+    autoWrap.className = 'relative ml-auto';
+    autoWrap.style.marginLeft = 'auto';
+    toolbarRow.appendChild(autoWrap);
+    toolbarRow.appendChild(micBtn);
+    toolbarRow.appendChild(sendBtn);
+
+    mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    mountSelectEl.querySelectorAll('.select-option')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(mockSettings.windowMountMode, 'composer');
+    assert.equal(capsuleHost.getAttribute('data-dock'), 'composer');
+    assert.equal(capsuleHost.getAttribute('data-composer-push'), '1', 'ml-auto transferred to capsuleHost');
+    assert.equal(autoWrap.style.marginLeft, '0px', 'Host Auto wrapper marginLeft zeroed while capsule absorbs auto push');
+    assert.equal(capsuleHost.nextElementSibling, autoWrap);
+
+    mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    mountSelectEl.querySelectorAll('.select-option')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(autoWrap.style.marginLeft, 'auto', 'Host Auto wrapper marginLeft cleanly restored when switching back to dual');
+  } finally {
+    mockWindow.__AGUsageMonitorOverlay?.dispose();
+  }
+});
+
+test('Antigravity IDE composer mount mode (输入框挂载) docks inside extensionView iframe (without Auto button) and coordinates workbench.html disposal', async () => {
+  // 1. Verify strict target classification for IDE extension chat iframes vs unrelated localhost iframes
+  assert.equal(
+    isIdeExtensionChatTarget({
+      type: 'iframe',
+      url: 'http://127.0.0.1:41362/c/a4206937-54dd-4d4e-a161-813719bf7107?extensionView=true',
+    }),
+    true
+  );
+  assert.equal(
+    isIdeExtensionChatTarget(
+      { type: 'iframe', url: 'http://127.0.0.1:41362/?panel=chat' },
+      '127.0.0.1:41362'
+    ),
+    true
+  );
+  assert.equal(
+    isIdeExtensionChatTarget(
+      { type: 'iframe', url: 'http://127.0.0.1:53199/sidecar/panel' },
+      '127.0.0.1:41362'
+    ),
+    false,
+    'Unrelated localhost sidecar/preview iframe without extensionView or LS hub port must be excluded'
+  );
+
+  // 2. Verify compiled app.js inside Antigravity IDE extensionView chat iframe (NO Auto button, only [+] [Model] ... [->])
+  const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+
+  class IdeChatMockNode {
+    constructor(tag = 'div', rect = null) {
+      this.tagName = String(tag).toUpperCase();
+      this.id = '';
+      this.className = '';
+      this._text = '';
+      this._rect = rect || { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+      this.dataset = {};
+      const vars = new Map();
+      this.style = {
+        display: '',
+        visibility: '',
+        opacity: '',
+        marginLeft: '',
+        top: '',
+        right: '',
+        left: '',
+        height: '',
+        maxHeight: '',
+        setProperty(k, v) {
+          vars.set(k, String(v));
+        },
+        removeProperty(k) {
+          vars.delete(k);
+        },
+        getPropertyValue(k) {
+          return vars.get(k) || '';
+        },
+      };
+      this.attributes = new Map();
+      this.children = [];
+      this.parentNode = null;
+      this.shadowRoot = null;
+      this._listeners = new Map();
+      const self = this;
+      this.classList = {
+        _set() {
+          return new Set(String(self.className || '').split(/\s+/).filter(Boolean));
+        },
+        add(...tokens) {
+          const s = this._set();
+          for (const t of tokens) if (t) s.add(t);
+          self.className = Array.from(s).join(' ');
+        },
+        contains(tok) {
+          return this._set().has(tok);
+        },
+        toggle(tok, force) {
+          const s = this._set();
+          const should = force === undefined ? !s.has(tok) : Boolean(force);
+          if (should) s.add(tok);
+          else s.delete(tok);
+          self.className = Array.from(s).join(' ');
+        },
+      };
+    }
+    get textContent() {
+      if (this.children.length === 0) return this._text;
+      return this._text + this.children.map((c) => c.textContent).join('');
+    }
+    set textContent(v) {
+      this._text = String(v ?? '');
+      this.children = [];
+    }
+    get parentElement() {
+      return this.parentNode;
+    }
+    get firstChild() {
+      return this.children[0] || null;
+    }
+    get firstElementChild() {
+      return this.children[0] || null;
+    }
+    get lastChild() {
+      return this.children[this.children.length - 1] || null;
+    }
+    get lastElementChild() {
+      return this.children[this.children.length - 1] || null;
+    }
+    get nextElementSibling() {
+      if (!this.parentNode) return null;
+      const idx = this.parentNode.children.indexOf(this);
+      return idx >= 0 ? this.parentNode.children[idx + 1] || null : null;
+    }
+    get isConnected() {
+      let cur = this;
+      while (cur) {
+        if (cur.isDocumentRoot) return true;
+        cur = cur.parentNode || cur.host || null;
+      }
+      return false;
+    }
+    setAttribute(k, v) {
+      const s = String(v);
+      this.attributes.set(k, s);
+      if (k === 'id') this.id = s;
+      if (k === 'class') this.className = s;
+    }
+    getAttribute(k) {
+      return this.attributes.has(k) ? this.attributes.get(k) : null;
+    }
+    hasAttribute(k) {
+      return this.attributes.has(k);
+    }
+    removeAttribute(k) {
+      this.attributes.delete(k);
+    }
+    appendChild(child) {
+      if (child.parentNode) child.parentNode.removeChild(child);
+      child.parentNode = this;
+      this.children.push(child);
+      return child;
+    }
+    insertBefore(node, refNode) {
+      if (!refNode) return this.appendChild(node);
+      if (node.parentNode) node.parentNode.removeChild(node);
+      const idx = this.children.indexOf(refNode);
+      node.parentNode = this;
+      if (idx < 0) this.children.push(node);
+      else this.children.splice(idx, 0, node);
+      return node;
+    }
+    removeChild(child) {
+      const idx = this.children.indexOf(child);
+      if (idx >= 0) {
+        this.children.splice(idx, 1);
+        child.parentNode = null;
+      }
+      return child;
+    }
+    remove() {
+      if (this.parentNode) this.parentNode.removeChild(this);
+    }
+    attachShadow() {
+      const sr = new IdeChatMockNode('#shadow-root');
+      sr.host = this;
+      this.shadowRoot = sr;
+      return sr;
+    }
+    contains(other) {
+      let cur = other;
+      while (cur) {
+        if (cur === this) return true;
+        cur = cur.parentNode;
+      }
+      return false;
+    }
+    addEventListener(type, fn) {
+      if (!this._listeners.has(type)) this._listeners.set(type, []);
+      this._listeners.get(type).push(fn);
+    }
+    removeEventListener(type, fn) {
+      const arr = this._listeners.get(type);
+      if (!arr) return;
+      const i = arr.indexOf(fn);
+      if (i >= 0) arr.splice(i, 1);
+    }
+    dispatchEvent(ev) {
+      for (const fn of [...(this._listeners.get(ev.type) || [])]) fn(ev);
+    }
+    getBoundingClientRect() {
+      if (this.id === 'ag-usage-monitor-capsule' || this.classList.contains('wm-capsule-btn')) {
+        return { left: 680, right: 830, top: 824, bottom: 850, width: 150, height: 26 };
+      }
+      return this._rect;
+    }
+    matches(sel) {
+      if (sel === 'button') return this.tagName === 'BUTTON';
+      if (sel === 'textarea') return this.tagName === 'TEXTAREA';
+      if (sel === '[contenteditable]') return this.hasAttribute('contenteditable');
+      if (sel === '[role="button"]') return this.getAttribute('role') === 'button';
+      if (sel === '[role="textbox"]') return this.getAttribute('role') === 'textbox';
+      if (sel === '[aria-haspopup]') return this.hasAttribute('aria-haspopup');
+      if (sel === '[data-lexical-editor]') return this.hasAttribute('data-lexical-editor');
+      if (sel.startsWith('.')) return this.classList.contains(sel.slice(1));
+      return false;
+    }
+    querySelectorAll(sel) {
+      const parts = sel.split(',').map((s) => s.trim()).filter(Boolean);
+      const out = [];
+      const walk = (n) => {
+        for (const c of n.children) {
+          if (parts.some((p) => c.matches(p))) out.push(c);
+          walk(c);
+        }
+      };
+      walk(this);
+      return out;
+    }
+    querySelector(sel) {
+      return this.querySelectorAll(sel)[0] || null;
+    }
+  }
+
+  const docRoot = new IdeChatMockNode('html', { left: 0, right: 980, top: 0, bottom: 900, width: 980, height: 900 });
+  docRoot.isDocumentRoot = true;
+  const head = new IdeChatMockNode('head');
+  const body = new IdeChatMockNode('body', { left: 0, right: 980, top: 0, bottom: 900, width: 980, height: 900 });
+  docRoot.appendChild(head);
+  docRoot.appendChild(body);
+
+  // Header inside IDE chat pane (must NEVER be docked into inside extensionView iframe!)
+  const paneHeader = new IdeChatMockNode('header', { left: 0, right: 980, top: 0, bottom: 36, width: 980, height: 36 });
+  paneHeader.className = '@container/titlebar flex h-9 w-full items-center justify-between';
+  body.appendChild(paneHeader);
+
+  // Antigravity IDE Composer Card: outer role="button" focus wrapper + Lexical/Monaco editor + [+] [Gemini 4 Carbon High ^] ... [->]
+  const outerFocusCard = new IdeChatMockNode('div', { left: 130, right: 882, top: 770, bottom: 862, width: 752, height: 92 });
+  outerFocusCard.setAttribute('role', 'button');
+  const editorEl = new IdeChatMockNode('div', { left: 146, right: 866, top: 782, bottom: 816, width: 720, height: 34 });
+  editorEl.setAttribute('contenteditable', 'true');
+  editorEl.setAttribute('data-lexical-editor', 'true');
+
+  const toolbarRow = new IdeChatMockNode('div', { left: 146, right: 866, top: 822, bottom: 852, width: 720, height: 30 });
+  toolbarRow.className = 'flex items-center justify-between';
+  const leftCluster = new IdeChatMockNode('div', { left: 146, right: 340, top: 822, bottom: 852, width: 194, height: 30 });
+  const plusBtn = new IdeChatMockNode('button', { left: 146, right: 172, top: 824, bottom: 850, width: 26, height: 26 });
+  plusBtn.textContent = '+';
+  const modelBtn = new IdeChatMockNode('div', { left: 178, right: 336, top: 824, bottom: 850, width: 158, height: 26 });
+  modelBtn.setAttribute('aria-haspopup', 'menu');
+  modelBtn.textContent = 'Gemini 4 Carbon High';
+  leftCluster.appendChild(plusBtn);
+  leftCluster.appendChild(modelBtn);
+
+  const rightCluster = new IdeChatMockNode('div', { left: 836, right: 866, top: 822, bottom: 852, width: 30, height: 30 });
+  const sendBtn = new IdeChatMockNode('button', { left: 838, right: 866, top: 823, bottom: 851, width: 28, height: 28 });
+  const arrowIcon = new IdeChatMockNode('span');
+  arrowIcon.className = 'codicon codicon-arrow-right';
+  arrowIcon.textContent = 'arrow_forward';
+  sendBtn.appendChild(arrowIcon);
+  rightCluster.appendChild(sendBtn);
+
+  toolbarRow.appendChild(leftCluster);
+  toolbarRow.appendChild(rightCluster);
+  outerFocusCard.appendChild(editorEl);
+  outerFocusCard.appendChild(toolbarRow);
+  body.appendChild(outerFocusCard);
+
+  const ideChatSettings = {
+    windowMountMode: 'composer',
+    enableWindowOverlay: true,
+    showTopbarMultiSession: true,
+    topbarCapsuleSlots: ['context', 'tps', 'quota_auto'],
+  };
+
+  const mockDoc = {
+    readyState: 'complete',
+    hidden: false,
+    documentElement: docRoot,
+    head,
+    body,
+    createElement: (tag) => new IdeChatMockNode(tag),
+    createElementNS: (_ns, tag) => new IdeChatMockNode(tag),
+    createTextNode: (txt) => {
+      const t = new IdeChatMockNode('#text');
+      t.textContent = String(txt);
+      return t;
+    },
+    getElementById: (id) => {
+      const walk = (n) => {
+        if (n.id === id) return n;
+        for (const c of n.children) {
+          const hit = walk(c);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      return walk(docRoot);
+    },
+    querySelector: (sel) => docRoot.querySelector(sel),
+    querySelectorAll: (sel) => docRoot.querySelectorAll(sel),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  const chatConvId = 'a4206937-54dd-4d4e-a161-813719bf7107';
+  const buildIdeChatTelemetry = () => ({
+    uiBundleVersion: 'ver-ide-comp-1',
+    settings: { ...ideChatSettings },
+    cloudStatus: { updateAvailable: false, currentPluginVersion: '1.4.5' },
+    account: { tierName: 'Google AI Ultra', planName: 'Pro' },
+    runningConversations: [],
+    conversations: [],
+    activeConversation: {
+      cascadeId: chatConvId,
+      title: 'IDE Composer Chat',
+      isRunning: false,
+      stepCount: 4,
+      latestTokPerSec: 55.2,
+      latestTtftSec: 1.1,
+      context: { totalTokens: 48000, limitTokens: 256000 },
+      recentSteps: [],
+      modelBreakdown: [],
+    },
+    consumption: { session: {}, account: {}, trendSeries: [], monthlySeries: [] },
+    quotas: { pools: [], weekly: {} },
+    modelBreakdown: [],
+  });
+  const mockWin = {
+    innerWidth: 980,
+    innerHeight: 900,
+    location: {
+      pathname: `/c/${chatConvId}`,
+      search: '?extensionView=true&extensionVariant=vs-code',
+      reload() {},
+    },
+    document: mockDoc,
+    __AGUsageMonitorBridge: {
+      port: 49153,
+      token: 'ide-chat-tok',
+      bundleVersion: 'ver-ide-comp-1',
+      mountMode: 'composer',
+      hostRouteCascadeId: chatConvId,
+      isIdeChatFrame: true,
+      stylesCss,
+      initialTelemetry: buildIdeChatTelemetry(),
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    getComputedStyle: () => ({
+      display: 'flex',
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      getPropertyValue: (k) => (k === '--background' ? '0 0% 9%' : ''),
+    }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => buildIdeChatTelemetry(),
+    }),
+  };
+  mockWin.window = mockWin;
+  mockWin.globalThis = mockWin;
+
+  const chatSandbox = vm.createContext({
+    window: mockWin,
+    globalThis: mockWin,
+    document: mockDoc,
+    location: mockWin.location,
+    navigator: {},
+    URLSearchParams,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    queueMicrotask,
+    fetch: mockWin.fetch,
+    console,
+  });
+
+  vm.runInContext(appJs, chatSandbox);
+  await new Promise((r) => setTimeout(r, 30));
+
+  try {
+    const ov = mockWin.__AGUsageMonitorOverlay;
+    assert.ok(ov, 'Overlay initialized inside IDE extensionView iframe');
+    const capsuleHost = mockDoc.getElementById('ag-usage-monitor-capsule');
+
+    // Tier 3: Docks inside rightCluster immediately to the left of [->] send button even with outer role="button" card and no Auto button!
+    assert.equal(ov.getDockKind(), 'composer');
+    assert.equal(capsuleHost.parentNode, rightCluster);
+    assert.equal(capsuleHost.nextElementSibling, sendBtn, 'Capsule docks immediately left of IDE send button');
+    assert.equal(capsuleHost.style.display, '');
+
+    // Tier 4: When input is cleared and sendBtn unmounts temporarily, capsule docks cleanly into empty rightCluster
+    rightCluster.removeChild(sendBtn);
+    assert.equal(ov.ensureAlive(), true);
+    assert.equal(ov.getDockKind(), 'composer');
+    assert.equal(capsuleHost.parentNode, rightCluster, 'Stays right-aligned in composer toolbar when send button unmounts');
+
+    // Re-adding sendBtn re-anchors capsule immediately before sendBtn
+    rightCluster.appendChild(sendBtn);
+    assert.equal(ov.ensureAlive(), true);
+    assert.equal(capsuleHost.nextElementSibling, sendBtn);
+
+    // Switching mount mode to 'dual' inside extensionView iframe hides iframe capsule immediately (no header/fixed fallback!)
+    ov.applyMountMode('dual');
+    assert.equal(ov.getDockKind(), 'pending-composer');
+    assert.equal(capsuleHost.style.display, 'none');
+    assert.notEqual(capsuleHost.parentNode, paneHeader);
+
+    // Switching back to 'composer' restores capsule inside composer immediately
+    ov.applyMountMode('composer');
+    assert.equal(ov.getDockKind(), 'composer');
+    assert.equal(capsuleHost.style.display, '');
+    assert.equal(capsuleHost.nextElementSibling, sendBtn);
+  } finally {
+    mockWin.__AGUsageMonitorOverlay?.dispose();
+  }
+
+  // 3. Verify coordinated WB-1 (workbench.html) <-> CHAT-1 (extensionView iframe) orchestration in window-bridge.mjs
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-ide-comp-bridge-'));
+  const roamingDir = path.join(tmpDir, 'Roaming');
+  fs.mkdirSync(path.join(roamingDir, 'Antigravity IDE'), { recursive: true });
+
+  const wbCtx = vm.createContext({
+    window: { innerWidth: 1440, innerHeight: 900, location: { pathname: '/' } },
+    document: { hidden: false, querySelector: () => null },
+  });
+  wbCtx.window.window = wbCtx.window;
+  wbCtx.window.document = wbCtx.document;
+
+  const chatFrameCtx = vm.createContext({
+    window: {
+      innerWidth: 960,
+      innerHeight: 880,
+      location: { pathname: `/c/${chatConvId}`, search: '?extensionView=true' },
+    },
+    document: { hidden: false, querySelector: () => null },
+  });
+  chatFrameCtx.window.window = chatFrameCtx.window;
+  chatFrameCtx.window.document = chatFrameCtx.document;
+
+  const ctxByTarget = new Map([
+    ['WB-1', wbCtx],
+    ['CHAT-1', chatFrameCtx],
+  ]);
+
+  class CoordinatedMockWS {
+    constructor(url) {
+      this.targetId = decodeURIComponent(url.split('/').pop());
+      this.listeners = new Map();
+      queueMicrotask(() => this._emit('open', {}));
+    }
+    addEventListener(type, fn) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(fn);
+    }
+    send(raw) {
+      const msg = JSON.parse(raw);
+      if (msg.method === 'Runtime.evaluate') {
+        const ctx = ctxByTarget.get(this.targetId);
+        const value = vm.runInContext(msg.params.expression, ctx);
+        queueMicrotask(() =>
+          this._emit('message', {
+            data: JSON.stringify({ id: msg.id, result: { result: { value } } }),
+          })
+        );
+      }
+    }
+    close() {}
+    _emit(type, ev) {
+      for (const fn of this.listeners.get(type) || []) fn(ev);
+    }
+  }
+
+  const cdpSrv = http.createServer((req, res) => {
+    if (req.url === '/json/list') {
+      const p = cdpSrv.address().port;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify([
+          {
+            id: 'WB-1',
+            type: 'page',
+            url: 'vscode-file://vscode-app/c:/Antigravity%20IDE/resources/app/out/vs/code/electron-browser/workbench/workbench.html',
+            webSocketDebuggerUrl: `ws://127.0.0.1:${p}/devtools/page/WB-1`,
+          },
+          {
+            id: 'WV-1',
+            parentId: 'WB-1',
+            type: 'iframe',
+            url: 'vscode-webview://1234/index.html?purpose=webviewView',
+          },
+          {
+            id: 'CHAT-1',
+            parentId: 'WV-1',
+            type: 'iframe',
+            url: `http://127.0.0.1:41362/c/${chatConvId}?extensionView=true`,
+            webSocketDebuggerUrl: `ws://127.0.0.1:${p}/devtools/page/CHAT-1`,
+          },
+        ])
+      );
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise((resolve) => cdpSrv.listen(0, '127.0.0.1', resolve));
+  fs.writeFileSync(
+    path.join(roamingDir, 'Antigravity IDE', 'DevToolsActivePort'),
+    `${cdpSrv.address().port}\n/devtools/browser/ide-comp`,
+    'utf8'
+  );
+
+  let activeMountMode = 'dual';
+  const mockCoordAppJs = `
+    (() => {
+      const br = window.__AGUsageMonitorBridge;
+      let alive = true;
+      let mode = br.initialTelemetry?.settings?.windowMountMode || 'dual';
+      const computeDock = () => {
+        if (br.isIdeChatFrame) {
+          return mode === 'composer' && window.innerWidth > 80 ? 'composer' : 'pending-composer';
+        }
+        return 'ide-titlebar';
+      };
+      window.__AGUsageMonitorOverlay = {
+        bundleVersion: br.bundleVersion,
+        ensureAlive: () => alive,
+        getDockKind: () => computeDock(),
+        getMountMode: () => mode,
+        applyMountMode: (next) => { mode = next; return alive; },
+        dispose: () => { alive = false; },
+      };
+    })();
+  `;
+
+  const bridgeCtrl = createWindowBridgeController({
+    handleApiRequest: async () => ({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        settings: {
+          windowMountMode: activeMountMode,
+          enableWindowOverlay: activeMountMode !== 'sidebar',
+        },
+      }),
+    }),
+    readAssetFn: async (rel) => (rel === 'styles.css' ? ':host{}' : mockCoordAppJs),
+    getSettingsFn: () => ({
+      windowMountMode: activeMountMode,
+      enableWindowOverlay: activeMountMode !== 'sidebar',
+    }),
+    getBundleVersionFn: () => 'coord-v1',
+    env: { APPDATA: roamingDir, LOCALAPPDATA: tmpDir },
+    platform: 'win32',
+    homeDir: tmpDir,
+    WebSocketImpl: CoordinatedMockWS,
+  });
+
+  try {
+    // Phase A: 'dual' mode -> WB-1 injected, CHAT-1 NOT injected
+    await bridgeCtrl.syncAllWindows();
+    assert.equal(Boolean(wbCtx.window.__AGUsageMonitorOverlay), true, 'WB-1 mounted in dual mode');
+    assert.equal(Boolean(chatFrameCtx.window.__AGUsageMonitorOverlay), false, 'CHAT-1 untouched in dual mode');
+
+    // Phase B: Switch to 'composer' mode -> CHAT-1 mounted in composer, WB-1 disposed (zero duplicate capsules!)
+    activeMountMode = 'composer';
+    await bridgeCtrl.notifySettingChanged(true);
+    assert.equal(Boolean(chatFrameCtx.window.__AGUsageMonitorOverlay), true, 'CHAT-1 mounted in composer mode');
+    assert.equal(chatFrameCtx.window.__AGUsageMonitorOverlay.getDockKind(), 'composer');
+    assert.equal(Boolean(wbCtx.window.__AGUsageMonitorOverlay), false, 'WB-1 titlebar capsule disposed while CHAT-1 composer is active');
+
+    // Verify dynamic Origin whitelist allows CHAT-1's http://127.0.0.1:41362 origin while rejecting unassociated http://127.0.0.1:59999
+    const { port, token } = bridgeCtrl.getBridgeInfo();
+    const chatOriginOk = await fetch(`http://127.0.0.1:${port}/api/telemetry`, {
+      headers: { Origin: 'http://127.0.0.1:41362', 'X-Usage-Monitor-Token': token },
+    });
+    assert.equal(chatOriginOk.status, 200);
+    const randomHttpOrigin = await fetch(`http://127.0.0.1:${port}/api/telemetry`, {
+      headers: { Origin: 'http://127.0.0.1:59999', 'X-Usage-Monitor-Token': token },
+    });
+    assert.equal(randomHttpOrigin.status, 403);
+
+    // Phase C: Chat pane collapsed (innerWidth = 0) -> WB-1 automatically mounts back as fallback!
+    chatFrameCtx.window.innerWidth = 0;
+    await bridgeCtrl.syncAllWindows();
+    assert.equal(Boolean(wbCtx.window.__AGUsageMonitorOverlay), true, 'WB-1 mounts as fallback when IDE chat pane is collapsed');
+
+    // Chat pane reopened -> WB-1 disposed again
+    chatFrameCtx.window.innerWidth = 960;
+    await bridgeCtrl.syncAllWindows();
+    assert.equal(Boolean(wbCtx.window.__AGUsageMonitorOverlay), false);
+
+    // Phase D: Switch back to 'dual' mode -> CHAT-1 disposed, WB-1 mounted
+    activeMountMode = 'dual';
+    await bridgeCtrl.notifySettingChanged(true);
+    assert.equal(Boolean(chatFrameCtx.window.__AGUsageMonitorOverlay), false, 'CHAT-1 disposed on switch back to dual');
+    assert.equal(Boolean(wbCtx.window.__AGUsageMonitorOverlay), true, 'WB-1 mounted on switch back to dual');
+
+    // Phase E: Switch to 'sidebar' -> both disposed
+    activeMountMode = 'sidebar';
+    await bridgeCtrl.notifySettingChanged(false);
+    assert.equal(Boolean(chatFrameCtx.window.__AGUsageMonitorOverlay), false);
+    assert.equal(Boolean(wbCtx.window.__AGUsageMonitorOverlay), false);
+  } finally {
+    await bridgeCtrl.stop({ disposeWindows: true });
+    await new Promise((resolve) => cdpSrv.close(resolve));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

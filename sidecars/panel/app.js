@@ -565,6 +565,9 @@ function formatCnyApprox(usdAmount, rate = 7.2) {
 function formatDateSpanBadge(startMs, endMs) {
   const s = startMs && Number.isFinite(startMs) ? new Date(startMs) : new Date();
   const e = endMs && Number.isFinite(endMs) ? new Date(endMs) : new Date();
+  if (s.getFullYear() !== e.getFullYear()) {
+    return `${s.getFullYear()}年${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getFullYear()}年${e.getMonth() + 1}月${e.getDate()}日`;
+  }
   return `${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getMonth() + 1}月${e.getDate()}日`;
 }
 
@@ -630,6 +633,270 @@ function formatElapsedSec(seconds) {
   const h = Math.floor(m / 60);
   const remM = m % 60;
   return `${h}h ${remM}m`;
+}
+
+/**
+ * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'compact'|'full'}
+ */
+function normalizeOrchestratorIdDisplayMode(mode) {
+  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+}
+
+/**
+ * 统一解析步骤、会话摘要或模型汇总行面向用户的模型显示文本与悬停提示。
+ *
+ * 规则：
+ * - Orchestrator 系列（`Orchestrator (Carbon)`、`Orchestrator (Argon)`、`gemini-flash-worker-agy` / `M669`）
+ *   独立遵循 `orchestratorIdMode`（`'compact'` 显示 `orchestrator-carbon` / `orchestrator-argon` / `worker-agy-hydrogen`；
+ *   `'full'` 显示带括号标注的完整上游 ID），不受普通模型“精简代号 / 原始模型 ID”切换影响；
+ * - 其余普通模型继续按 `showUpstreamModel` 与视图选项切换。
+ *
+ * @param {object|null|undefined} target
+ * @param {{ showUpstreamModel?: boolean, orchestratorIdMode?: string }|boolean} [settings]
+ * @param {{ preferLabelInShort?: boolean, fallback?: string }} [options]
+ * @returns {{ text: string, title: string, isOrchestratorSeries: boolean }}
+ */
+function resolveModelDisplayInfo(target, settings = {}, options = {}) {
+  const showUpstream =
+    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+  const orchestratorMode = normalizeOrchestratorIdDisplayMode(
+    typeof settings === 'object' && settings ? settings.orchestratorIdMode : 'compact'
+  );
+  const preferLabelInShort = Boolean(options?.preferLabelInShort);
+  const fallback = options?.fallback ?? '模型未知';
+
+  if (!target || typeof target !== 'object') {
+    return { text: fallback, title: fallback, isOrchestratorSeries: false };
+  }
+
+  const shortText = String(
+    target.activeModelShort ?? target.modelShort ?? target.shortName ?? ''
+  ).trim();
+  const labelText = String(
+    target.activeModelLabel ?? target.modelLabel ?? target.label ?? ''
+  ).trim();
+  const upstreamText = String(
+    target.activeModelUpstream ?? target.modelUpstream ?? target.upstreamName ?? ''
+  ).trim();
+  const responseText = String(target.responseModel ?? '').trim();
+  const modelKeyText = String(target.modelKey ?? '').trim();
+
+  const isCompaction =
+    Boolean(target.isCompactionStep) ||
+    /·压缩\s*$/.test(shortText) ||
+    /·压缩\s*$/.test(upstreamText) ||
+    /·压缩\s*$/.test(labelText);
+
+  const combined = `${modelKeyText} ${shortText} ${labelText} ${upstreamText} ${responseText}`;
+  const isOrchWorker =
+    /\bMODEL_PLACEHOLDER_M669\b|\b[a-z0-9.-]*worker-agy\b|\bworker-agy-hydrogen\b|\bOrchestrator\s+Worker\b/i.test(
+      combined
+    );
+  const isOrchSeries =
+    isOrchWorker ||
+    /\bgemini-pro-orchestrator(?:-argon)?\b|\borchestrator-(?:carbon|argon)\b|\borch-(?:carbon|argon)(?:·压缩)?(?=\s|$)|Orchestrator\s*\((?:Carbon|Argon)\)|\bMODEL_PLACEHOLDER_M(?:667|681)\b/i.test(
+      combined
+    );
+
+  if (isOrchSeries) {
+    let compactId = 'orchestrator-carbon';
+    let fullId = 'gemini-pro-orchestrator (carbon-4)';
+    if (isOrchWorker) {
+      compactId = 'worker-agy-hydrogen';
+      fullId = 'gemini-flash-worker-agy (hydrogen-4)';
+    } else if (/\bargon\b|\bMODEL_PLACEHOLDER_M681\b|\borch-argon\b/i.test(combined)) {
+      compactId = 'orchestrator-argon';
+      fullId = 'gemini-pro-orchestrator-argon (argon-4)';
+    }
+    const suffix = isCompaction ? '·压缩' : '';
+    const text = `${orchestratorMode === 'full' ? fullId : compactId}${suffix}`;
+    const multiUpstream =
+      Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
+        ? target.upstreamModels.join(' / ')
+        : '';
+    const title = multiUpstream || `${fullId}${suffix}`;
+    return { text, title, isOrchestratorSeries: true };
+  }
+
+  const standardText =
+    (showUpstream
+      ? upstreamText || responseText || shortText || labelText
+      : preferLabelInShort
+        ? labelText || shortText
+        : shortText || labelText) || fallback;
+  const standardTitle =
+    showUpstream && Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
+      ? target.upstreamModels.join(' / ')
+      : standardText;
+  return { text: standardText, title: standardTitle, isOrchestratorSeries: false };
+}
+
+/**
+ * 按当前显示策略 (`resolveModelDisplayInfo`) 解析出的最终展示名称对模型统计列表执行二次去重归并，
+ * 确保当多个外层模型槽位映射到同一展示名（例如切换至“原始模型 ID”后共享同一 `upstreamName`）时，
+ * 不会在排行榜或总览中出现重复同名行，同时完整累加 Token、调用次数、未定价计数与速度/首字加权均值。
+ *
+ * @param {object[]} [models=[]]
+ * @param {object|boolean} [settings={}]
+ * @param {{ preferLabelInShort?: boolean, fallback?: string }} [options={}]
+ * @returns {object[]}
+ */
+function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
+  if (!Array.isArray(models) || models.length === 0) return [];
+  const showUpstream =
+    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+  const byDisplay = new Map();
+
+  for (const m of models) {
+    if (!m || typeof m !== 'object') continue;
+    const disp = resolveModelDisplayInfo(m, settings, options);
+    const key = String(disp.text || options?.fallback || '—').trim() || '—';
+
+    const calls = Math.max(0, Number(m.calls || 0));
+    const inTok = Math.max(0, Number(m.inputTokens || 0));
+    const cacheTok = Math.max(0, Number(m.cacheReadTokens || 0));
+    const outTok = Math.max(0, Number(m.outputTokens || 0));
+    const thinkTok = Math.max(0, Number(m.thinkingTokens || 0));
+    const respTok =
+      m.responseTokens != null
+        ? Math.max(0, Number(m.responseTokens))
+        : Math.max(0, outTok - thinkTok);
+    const totTok = Math.max(0, Number(m.totalTokens ?? inTok + cacheTok + outTok));
+    const costUsd = Number.isFinite(Number(m.costUsd)) ? Math.max(0, Number(m.costUsd)) : 0;
+    const unpricedCalls = Math.max(0, Number(m.unpricedCalls || 0));
+
+    const speedSampleCount = Math.max(0, Number(m.speedSummary?.sampleCount || 0));
+    const speedExcludedCount = Math.max(0, Number(m.speedSummary?.excludedCount || 0));
+    const speedWeight = speedSampleCount > 0 ? speedSampleCount : Math.max(1, outTok || calls || 1);
+    const hasSpeed = m.avgTokPerSec != null && Number.isFinite(Number(m.avgTokPerSec)) && Number(m.avgTokPerSec) > 0;
+
+    const ttftSampleCount = Math.max(0, Number(m.ttftSampleCount || 0));
+    const ttftWeight = ttftSampleCount > 0 ? ttftSampleCount : Math.max(1, calls || 1);
+    const hasTtft = m.avgTtftSec != null && Number.isFinite(Number(m.avgTtftSec)) && Number(m.avgTtftSec) >= 0;
+
+    let acc = byDisplay.get(key);
+    if (!acc) {
+      acc = {
+        baseItem: m,
+        mergedCount: 1,
+        displayText: key,
+        firstTitle: disp.title || key,
+        titleSet: new Set(disp.title ? [disp.title] : []),
+        upstreamSet: new Set(
+          Array.isArray(m.upstreamModels) ? m.upstreamModels.filter(Boolean) : []
+        ),
+        sourceLabels: m.label ? [m.label] : [],
+        calls,
+        inputTokens: inTok,
+        cacheReadTokens: cacheTok,
+        outputTokens: outTok,
+        thinkingTokens: thinkTok,
+        responseTokens: respTok,
+        totalTokens: totTok,
+        costUsd,
+        unpricedCalls,
+        speedWeightedSum: hasSpeed ? Number(m.avgTokPerSec) * speedWeight : 0,
+        speedWeight: hasSpeed ? speedWeight : 0,
+        speedSampleCount,
+        speedExcludedCount,
+        ttftWeightedSum: hasTtft ? Number(m.avgTtftSec) * ttftWeight : 0,
+        ttftWeight: hasTtft ? ttftWeight : 0,
+        ttftSampleCount,
+      };
+      if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
+      byDisplay.set(key, acc);
+      continue;
+    }
+
+    acc.mergedCount += 1;
+    if (disp.title) acc.titleSet.add(disp.title);
+    if (Array.isArray(m.upstreamModels)) {
+      for (const u of m.upstreamModels) {
+        if (u) acc.upstreamSet.add(u);
+      }
+    }
+    if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
+    if (m.label && !acc.sourceLabels.includes(m.label)) {
+      acc.sourceLabels.push(m.label);
+    }
+
+    acc.calls += calls;
+    acc.inputTokens += inTok;
+    acc.cacheReadTokens += cacheTok;
+    acc.outputTokens += outTok;
+    acc.thinkingTokens += thinkTok;
+    acc.responseTokens += respTok;
+    acc.totalTokens += totTok;
+    acc.costUsd += costUsd;
+    acc.unpricedCalls += unpricedCalls;
+
+    if (hasSpeed) {
+      acc.speedWeightedSum += Number(m.avgTokPerSec) * speedWeight;
+      acc.speedWeight += speedWeight;
+    }
+    acc.speedSampleCount += speedSampleCount;
+    acc.speedExcludedCount += speedExcludedCount;
+
+    if (hasTtft) {
+      acc.ttftWeightedSum += Number(m.avgTtftSec) * ttftWeight;
+      acc.ttftWeight += ttftWeight;
+    }
+    acc.ttftSampleCount += ttftSampleCount;
+  }
+
+  return Array.from(byDisplay.values()).map((acc) => {
+    if (acc.mergedCount === 1) {
+      return {
+        ...acc.baseItem,
+        displayText: acc.displayText,
+        displayTitle: acc.firstTitle,
+        sourceLabels: acc.sourceLabels,
+      };
+    }
+    const promptTok = acc.inputTokens + acc.cacheReadTokens;
+    const cacheHitPct = promptTok > 0 ? +((acc.cacheReadTokens / promptTok) * 100).toFixed(1) : 0;
+    const avgTokPerSec =
+      acc.speedWeight > 0 ? +(acc.speedWeightedSum / acc.speedWeight).toFixed(1) : null;
+    const avgTtftSec =
+      acc.ttftWeight > 0 ? +(acc.ttftWeightedSum / acc.ttftWeight).toFixed(1) : null;
+    const upstreamModels = Array.from(acc.upstreamSet);
+    const displayTitle =
+      showUpstream && upstreamModels.length > 1
+        ? upstreamModels.join(' / ')
+        : Array.from(acc.titleSet).join(' / ') || acc.displayText;
+
+    return {
+      ...acc.baseItem,
+      calls: acc.calls,
+      inputTokens: acc.inputTokens,
+      cacheReadTokens: acc.cacheReadTokens,
+      outputTokens: acc.outputTokens,
+      thinkingTokens: acc.thinkingTokens,
+      responseTokens: acc.responseTokens,
+      totalTokens: acc.totalTokens,
+      costUsd: +acc.costUsd.toFixed(6),
+      unpricedCalls: acc.unpricedCalls,
+      cacheHitPct,
+      avgTokPerSec,
+      avgTtftSec,
+      ttftSampleCount: acc.ttftSampleCount,
+      speedSummary: acc.baseItem.speedSummary
+        ? {
+            ...acc.baseItem.speedSummary,
+            sampleCount: acc.speedSampleCount,
+            excludedCount: acc.speedExcludedCount,
+            avgTokPerSec,
+          }
+        : undefined,
+      upstreamModels,
+      displayText: acc.displayText,
+      displayTitle,
+      sourceLabels: acc.sourceLabels,
+    };
+  });
 }
 
 // --- src/core/httpClient.js ---
@@ -869,8 +1136,13 @@ const uiStore = createReactiveStore({
  */
 
 
+const CASCADE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * 在主窗口双栖模式下，从宿主页面路径 `/c/<uuid>` 提取当前正在浏览的会话 ID。
+ * 在主窗口双栖模式下，提取当前正在浏览的会话 ID：
+ * 1. 优先解析 Antigravity 2.0 路由路径 `/c/<uuid>`；
+ * 2. 在 Antigravity IDE (`workbench.html`) 无路径路由时，回退读取活跃对话视图
+ *    `[data-testid="conversation-view"][data-cascade-id]` 或侧栏选中项。
  *
  * @returns {string}
  */
@@ -878,7 +1150,63 @@ function extractHostRouteCascadeId() {
   if (typeof window === 'undefined' || !isWindowOverlayMode()) return '';
   const pathname = String(window.location?.pathname || '');
   const m = pathname.match(/^\/c\/([a-f0-9-]{36})(?:\/|$)/i);
-  return m ? m[1] : '';
+  if (m && CASCADE_UUID_RE.test(m[1])) {
+    return m[1];
+  }
+  const extBridgeRouteId = String(window.__AGUsageMonitorBridge?.hostRouteCascadeId || '').trim();
+  if (extBridgeRouteId && CASCADE_UUID_RE.test(extBridgeRouteId)) {
+    return extBridgeRouteId;
+  }
+  try {
+    if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
+      return '';
+    }
+    const selectedRow = document.querySelector(
+      '[data-testid^="conversation-row-"][data-selected="true"][data-cascade-id]'
+    );
+    const selectedRowId = String(selectedRow?.getAttribute?.('data-cascade-id') || '').trim();
+
+    if (typeof document.querySelectorAll === 'function') {
+      const views = document.querySelectorAll('[data-testid="conversation-view"][data-cascade-id]');
+      const visibleIds = [];
+      let focusedId = '';
+      const activeEl = document.activeElement || null;
+      for (const viewEl of views) {
+        const cid = String(viewEl?.getAttribute?.('data-cascade-id') || '').trim();
+        if (!CASCADE_UUID_RE.test(cid)) continue;
+        if (viewEl.hasAttribute?.('hidden')) continue;
+        if (viewEl.getBoundingClientRect) {
+          const r = viewEl.getBoundingClientRect();
+          if (r.width <= 0 && r.height <= 0) continue;
+        }
+        visibleIds.push(cid);
+        if (activeEl && viewEl.contains?.(activeEl)) {
+          focusedId = cid;
+        }
+      }
+      if (focusedId) return focusedId;
+      if (
+        selectedRowId &&
+        CASCADE_UUID_RE.test(selectedRowId) &&
+        visibleIds.some((id) => id.toLowerCase() === selectedRowId.toLowerCase())
+      ) {
+        return selectedRowId;
+      }
+      if (visibleIds.length > 0) return visibleIds[0];
+    }
+
+    const singleView = document.querySelector('[data-testid="conversation-view"][data-cascade-id]');
+    const singleViewId = String(singleView?.getAttribute?.('data-cascade-id') || '').trim();
+    if (CASCADE_UUID_RE.test(singleViewId)) {
+      return singleViewId;
+    }
+    if (CASCADE_UUID_RE.test(selectedRowId)) {
+      return selectedRowId;
+    }
+  } catch {
+    // 忽略宿主 DOM 查询异常
+  }
+  return '';
 }
 
 const initialConversationId =
@@ -951,19 +1279,67 @@ function normalizeClientUpdateMode(mode, legacyAutoUpdate) {
   return 'manual';
 }
 
+function normalizeClientOrchestratorIdMode(mode) {
+  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+}
+
+/**
+ * 归一化前端面板挂载方式（`'dual'` | `'composer'` | `'sidebar'`），兼容旧版 `enableWindowOverlay` 布尔字段。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyEnableOverlay]
+ * @returns {'dual'|'composer'|'sidebar'}
+ */
+function normalizeClientWindowMountMode(mode, legacyEnableOverlay) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'composer' || m === 'input') return 'composer';
+  if (m === 'sidebar' || m === 'off') return 'sidebar';
+  if (m === 'dual' || m === 'topbar') return 'dual';
+  if (legacyEnableOverlay === false) return 'sidebar';
+  return 'dual';
+}
+
 function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
   if (prev === next) return true;
 
-  // 1. 比对系统设置项（模型显示策略、周预算模式与额度、插件更新策略、双栖与顶栏槽位配置）
+  // 1. 比对系统设置项（模型显示策略、Orchestrator ID 显示风格、周预算模式与额度、插件更新策略、双栖与顶栏槽位配置）
   const pAct = prev.activeConversation;
   const nAct = next.activeConversation;
   if (prev.settings?.showUpstreamModel !== next.settings?.showUpstreamModel) return false;
+  const prevOrchIdMode = String(prev.settings?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+  const nextOrchIdMode = String(next.settings?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+  if (prevOrchIdMode !== nextOrchIdMode) {
+    return false;
+  }
   if (prev.settings?.weeklyLimitMode !== next.settings?.weeklyLimitMode) return false;
   if (prev.settings?.weeklyTokenBudget !== next.settings?.weeklyTokenBudget) return false;
   if (prev.settings?.weeklyCostBudget !== next.settings?.weeklyCostBudget) return false;
   if ((prev.settings?.pluginUpdateMode ?? '') !== (next.settings?.pluginUpdateMode ?? '')) return false;
   if (prev.settings?.autoUpdatePlugin !== next.settings?.autoUpdatePlugin) return false;
+  const rawPrevMount = String(prev.settings?.windowMountMode ?? '').trim().toLowerCase();
+  const prevMountMode =
+    rawPrevMount === 'composer' || rawPrevMount === 'input'
+      ? 'composer'
+      : rawPrevMount === 'sidebar' || rawPrevMount === 'off'
+        ? 'sidebar'
+        : rawPrevMount === 'dual' || rawPrevMount === 'topbar'
+          ? 'dual'
+          : prev.settings?.enableWindowOverlay === false
+            ? 'sidebar'
+            : 'dual';
+  const rawNextMount = String(next.settings?.windowMountMode ?? '').trim().toLowerCase();
+  const nextMountMode =
+    rawNextMount === 'composer' || rawNextMount === 'input'
+      ? 'composer'
+      : rawNextMount === 'sidebar' || rawNextMount === 'off'
+        ? 'sidebar'
+        : rawNextMount === 'dual' || rawNextMount === 'topbar'
+          ? 'dual'
+          : next.settings?.enableWindowOverlay === false
+            ? 'sidebar'
+            : 'dual';
+  if (prevMountMode !== nextMountMode) return false;
   if (prev.settings?.enableWindowOverlay !== next.settings?.enableWindowOverlay) return false;
   if ((prev.settings?.showTopbarMultiSession !== false) !== (next.settings?.showTopbarMultiSession !== false)) {
     return false;
@@ -1113,8 +1489,12 @@ function isEquivalentTelemetry(prev, next) {
         bs?.tokPerSec !== as?.tokPerSec ||
         bs?.ttftSec !== as?.ttftSec ||
         bs?.outputTokens !== as?.outputTokens ||
+        bs?.thinkingTokens !== as?.thinkingTokens ||
+        bs?.responseTokens !== as?.responseTokens ||
         bs?.inputTokens !== as?.inputTokens ||
         bs?.cacheReadTokens !== as?.cacheReadTokens ||
+        bs?.contextTokens !== as?.contextTokens ||
+        bs?.cacheHitPct !== as?.cacheHitPct ||
         bs?.selectedSpeedReason !== as?.selectedSpeedReason
       ) {
         return false;
@@ -1153,8 +1533,12 @@ function isEquivalentTelemetry(prev, next) {
       before.tokPerSec !== after.tokPerSec ||
       before.ttftSec !== after.ttftSec ||
       before.outputTokens !== after.outputTokens ||
+      before.thinkingTokens !== after.thinkingTokens ||
+      before.responseTokens !== after.responseTokens ||
       before.inputTokens !== after.inputTokens ||
       before.cacheReadTokens !== after.cacheReadTokens ||
+      before.contextTokens !== after.contextTokens ||
+      before.cacheHitPct !== after.cacheHitPct ||
       before.selectedSpeedReason !== after.selectedSpeedReason
     ) {
       return false;
@@ -1291,7 +1675,13 @@ function isEquivalentTelemetry(prev, next) {
       pPools[i]?.resetTime !== nPools[i]?.resetTime ||
       pPools[i]?.weeklyUsedPct !== nPools[i]?.weeklyUsedPct ||
       pPools[i]?.weeklyRemainingPct !== nPools[i]?.weeklyRemainingPct ||
-      pPools[i]?.weeklyResetTime !== nPools[i]?.weeklyResetTime
+      pPools[i]?.weeklyResetTime !== nPools[i]?.weeklyResetTime ||
+      pPools[i]?.cycle5h?.tokens !== nPools[i]?.cycle5h?.tokens ||
+      pPools[i]?.cycle5h?.costUsd !== nPools[i]?.cycle5h?.costUsd ||
+      pPools[i]?.cycle5h?.calls !== nPools[i]?.cycle5h?.calls ||
+      pPools[i]?.cycleWeekly?.tokens !== nPools[i]?.cycleWeekly?.tokens ||
+      pPools[i]?.cycleWeekly?.costUsd !== nPools[i]?.cycleWeekly?.costUsd ||
+      pPools[i]?.cycleWeekly?.calls !== nPools[i]?.cycleWeekly?.calls
     ) {
       return false;
     }
@@ -1475,6 +1865,20 @@ async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
     safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
+    safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'windowMountMode')) {
+    const normMount = normalizeClientWindowMountMode(
+      safePatch.windowMountMode,
+      safePatch.enableWindowOverlay
+    );
+    safePatch.windowMountMode = normMount;
+    safePatch.enableWindowOverlay = normMount !== 'sidebar';
+  } else if (Object.prototype.hasOwnProperty.call(safePatch, 'enableWindowOverlay')) {
+    safePatch.enableWindowOverlay = Boolean(safePatch.enableWindowOverlay);
+    safePatch.windowMountMode = safePatch.enableWindowOverlay ? 'dual' : 'sidebar';
   }
   const prevTelemetry = telemetryStore.getState().telemetry;
   if (prevTelemetry?.settings) {
@@ -1806,9 +2210,44 @@ const TopLongPillNav = defineComponent({
 // --- src/components/ui/CustomSelect.js ---
 /**
  * @fileoverview Bespoke CustomSelect dropdown component replacing native <select> / <option>.
- * Supports incremental option patching while open without losing focus or closing the menu.
+ * Supports both single-select and multi-select (`multiple: true`) modes, with incremental
+ * option patching while open without losing focus or closing the menu.
  */
 
+
+function normalizeMultiSelection(rawValue, options = [], allValue = '') {
+  const arr = Array.isArray(rawValue)
+    ? rawValue
+    : rawValue !== undefined && rawValue !== null && rawValue !== ''
+      ? [rawValue]
+      : [];
+  const clean = [];
+  const seen = new Set();
+  for (const item of arr) {
+    const str = String(item ?? '');
+    if (!str || seen.has(str)) continue;
+    seen.add(str);
+    clean.push(str);
+  }
+  if (allValue && (clean.length === 0 || clean.includes(allValue))) {
+    return [allValue];
+  }
+  if (options.length > 0) {
+    const validSet = new Set(options.map((o) => String(o.value)));
+    const filtered = clean.filter((v) => validSet.has(v));
+    if (filtered.length > 0) return filtered;
+    return allValue ? [allValue] : [];
+  }
+  return clean;
+}
+
+function sameStringArray(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
 
 const CustomSelect = defineComponent({
   name: 'CustomSelect',
@@ -1845,8 +2284,22 @@ const CustomSelect = defineComponent({
       hidden: true,
     });
 
-    const initialClass = ['custom-select', getProps().className].filter(Boolean).join(' ');
+    const initialClass = [
+      'custom-select',
+      getProps().multiple ? 'is-multi' : '',
+      getProps().className,
+    ]
+      .filter(Boolean)
+      .join(' ');
     const rootEl = h('div', { className: initialClass }, [triggerBtn, menuEl]);
+
+    function getSelectedSet() {
+      const { multiple, modelValue, options = [], allValue = '' } = getProps();
+      if (!multiple) {
+        return new Set(modelValue !== undefined && modelValue !== null ? [modelValue] : []);
+      }
+      return new Set(normalizeMultiSelection(modelValue, options, allValue));
+    }
 
     function toggleOpen(nextOpen) {
       isOpen = Boolean(nextOpen);
@@ -1856,10 +2309,10 @@ const CustomSelect = defineComponent({
       patchSvgIcon(chevronIcon, isOpen ? 'chevron-up' : 'chevron-down');
       if (isOpen) {
         const opts = getProps().options || [];
-        const currentVal = getProps().modelValue;
+        const selSet = getSelectedSet();
         focusedIndex = Math.max(
           0,
-          opts.findIndex((o) => o.value === currentVal)
+          opts.findIndex((o) => selSet.has(o.value))
         );
         renderMenuOptions();
       }
@@ -1867,11 +2320,47 @@ const CustomSelect = defineComponent({
 
     function chooseOption(option) {
       if (!option) return;
-      const prevVal = getProps().modelValue;
-      toggleOpen(false);
-      if (option.value !== prevVal) {
-        setProps({ modelValue: option.value });
-        emit('update:modelValue', option.value);
+      const { multiple, options = [], allValue = '', collapseAll = false } = getProps();
+      if (!multiple) {
+        const prevVal = getProps().modelValue;
+        toggleOpen(false);
+        if (option.value !== prevVal) {
+          setProps({ modelValue: option.value });
+          emit('update:modelValue', option.value);
+        }
+        return;
+      }
+
+      const prevList = normalizeMultiSelection(getProps().modelValue, options, allValue);
+      const val = String(option.value);
+      let nextList;
+      if (allValue && val === allValue) {
+        nextList = [allValue];
+      } else {
+        const base = prevList.filter((v) => v !== allValue);
+        if (base.includes(val)) {
+          const rest = base.filter((v) => v !== val);
+          nextList = rest.length > 0 ? rest : allValue ? [allValue] : [val];
+        } else {
+          const addedSet = new Set([...base, val]);
+          const ordered = options
+            .filter((o) => String(o.value) !== allValue && addedSet.has(String(o.value)))
+            .map((o) => String(o.value));
+          nextList = ordered.length > 0 ? ordered : [...base, val];
+          if (collapseAll && allValue) {
+            const nonAllTotal = options.filter((o) => String(o.value) !== allValue).length;
+            if (nonAllTotal > 0 && nextList.length >= nonAllTotal) {
+              nextList = [allValue];
+            }
+          }
+        }
+      }
+
+      if (!sameStringArray(prevList, nextList)) {
+        setProps({ modelValue: nextList });
+        emit('update:modelValue', nextList);
+      } else {
+        renderMenuOptions();
       }
     }
 
@@ -1897,7 +2386,7 @@ const CustomSelect = defineComponent({
           renderMenuOptions();
           menuEl.children[focusedIndex]?.scrollIntoView?.({ block: 'nearest' });
         }
-      } else if (e.key === 'Enter' && isOpen) {
+      } else if ((e.key === 'Enter' || (e.key === ' ' && isOpen && getProps().multiple)) && isOpen) {
         e.preventDefault();
         const target = opts[focusedIndex];
         if (target) chooseOption(target);
@@ -1908,14 +2397,20 @@ const CustomSelect = defineComponent({
     }
 
     function renderMenuOptions() {
-      const { options = [], modelValue } = getProps();
+      const { options = [], multiple = false } = getProps();
+      const selSet = getSelectedSet();
+      patchAttr(menuEl, 'aria-multiselectable', multiple ? 'true' : null);
       patchKeyedList(menuEl, options, {
         keyFn: (opt) => opt.value,
         sigFn: (opt, idx) =>
-          `${opt.value}::${opt.label}::${opt.meta || ''}::${opt.value === modelValue}::${idx === focusedIndex}`,
+          `${multiple}::${opt.value}::${opt.label}::${opt.meta || ''}::${selSet.has(opt.value)}::${idx === focusedIndex}`,
         createRow: (opt) => {
+          const checkboxIcon = createSvgIcon('check', { size: 10 });
+          const checkboxBox = h('span', { className: 'select-checkbox', hidden: true }, [
+            checkboxIcon,
+          ]);
           const textSpan = h('span', { className: 'select-option-text' });
-          const metaSpan = h('span', { className: 'text-muted' });
+          const metaSpan = h('span', { className: 'text-muted select-option-meta' });
           const checkIcon = createSvgIcon('check', { size: 12 });
           const btn = h(
             'button',
@@ -1925,21 +2420,26 @@ const CustomSelect = defineComponent({
               className: 'select-option',
               onClick: (e) => {
                 e.stopPropagation();
-                const latestOpt = (getProps().options || []).find((o) => o.value === opt.value) || opt;
+                const latestOpt =
+                  (getProps().options || []).find((o) => o.value === opt.value) || opt;
                 chooseOption(latestOpt);
               },
             },
-            [textSpan, metaSpan, checkIcon]
+            [checkboxBox, textSpan, metaSpan, checkIcon]
           );
-          return { el: btn, refs: { textSpan, metaSpan, checkIcon } };
+          return { el: btn, refs: { checkboxBox, checkboxIcon, textSpan, metaSpan, checkIcon } };
         },
         updateRow: (refs, opt, idx, el) => {
-          const selected = opt.value === modelValue;
+          const isMulti = Boolean(getProps().multiple);
+          const selected = selSet.has(opt.value);
           const focused = idx === focusedIndex;
+          patchAttr(refs.checkboxBox, 'hidden', !isMulti);
+          patchClasses(refs.checkboxBox, { 'is-checked': selected });
+          patchAttr(refs.checkboxIcon, 'hidden', !selected);
           patchText(refs.textSpan, opt.label);
           patchText(refs.metaSpan, opt.meta || '');
           patchAttr(refs.metaSpan, 'hidden', !opt.meta);
-          patchAttr(refs.checkIcon, 'hidden', !selected);
+          patchAttr(refs.checkIcon, 'hidden', isMulti || !selected);
           patchClasses(el, {
             'is-selected': selected,
             'is-focused': focused,
@@ -1951,17 +2451,51 @@ const CustomSelect = defineComponent({
     }
 
     function syncTriggerAndMenu() {
-      const { options = [], modelValue, placeholder = '请选择', icon } = getProps();
+      const {
+        options = [],
+        modelValue,
+        placeholder = '请选择',
+        icon,
+        multiple = false,
+        allValue = '',
+        multiUnit = '项',
+      } = getProps();
+      patchClasses(rootEl, { 'is-multi': Boolean(multiple) });
       patchAttr(leadIcon, 'hidden', !icon);
       if (icon) {
         patchSvgIcon(leadIcon, icon);
       }
-      const matchedOpt = options.find((o) => o.value === modelValue);
-      const selectedOpt = matchedOpt || (!modelValue ? options[0] : undefined);
-      const fallbackText = modelValue ? `${placeholder} (${String(modelValue).slice(0, 8)})` : placeholder;
-      const labelText = selectedOpt ? selectedOpt.label : fallbackText;
+
+      let labelText = placeholder;
+      let titleText = placeholder;
+
+      if (multiple) {
+        const vals = normalizeMultiSelection(modelValue, options, allValue);
+        if ((allValue && vals.includes(allValue)) || vals.length === 0) {
+          const allOpt = options.find((o) => String(o.value) === allValue);
+          labelText = allOpt ? allOpt.label : placeholder;
+          titleText = labelText;
+        } else if (vals.length === 1) {
+          const singleOpt = options.find((o) => String(o.value) === vals[0]);
+          labelText = singleOpt ? singleOpt.label : vals[0];
+          titleText = labelText;
+        } else {
+          const names = vals.map((v) => options.find((o) => String(o.value) === v)?.label || v);
+          labelText = `已选 ${vals.length} ${multiUnit}`;
+          titleText = `已选 (${vals.length})：${names.join('、')}`;
+        }
+      } else {
+        const matchedOpt = options.find((o) => o.value === modelValue);
+        const selectedOpt = matchedOpt || (!modelValue ? options[0] : undefined);
+        const fallbackText = modelValue
+          ? `${placeholder} (${String(modelValue).slice(0, 8)})`
+          : placeholder;
+        labelText = selectedOpt ? selectedOpt.label : fallbackText;
+        titleText = labelText;
+      }
+
       patchText(triggerLabel, labelText);
-      patchAttr(triggerBtn, 'title', labelText);
+      patchAttr(triggerBtn, 'title', titleText);
       if (isOpen) {
         renderMenuOptions();
       }
@@ -2745,13 +3279,16 @@ function createFourSegmentBar() {
 
 // --- src/components/charts/TrendAreaChart.js ---
 /**
- * @fileoverview 交互式 SVG 三次贝塞尔平滑曲线趋势图组件 (TrendAreaChart).
- * 支持：
- * 1. 自适应整点小时（<=72h）与自然日（>72h）高精度分桶序列渲染；
- * 2. 鼠标悬停/滑动十字准星探针、高亮圆点与自适应防溢出的悬浮详情卡片（精确日期/小时区间、Token 拆分、费用与调用次数）；
- * 3. 与 SVG 垂直网格线像素级对齐的多刻度底部时间轴（彻底告别首/中/末简单对半切分）。
+ * @fileoverview 交互式历史用量趋势图组件 (TrendAreaChart).
+ * 支持双模式自适应切换：
+ * 1. <= 90 天（或整点小时分桶）：渲染三次贝塞尔平滑曲线面积图、峰值气泡与对齐多刻度时间轴；
+ * 2. > 90 天（自然日分桶）：自动切换为类 GitHub 贡献日历的小格子热力排列（一格一天，7 行星期 × 周列、月份刻度、分位数 5 档热力色阶与底部图例）；
+ * 3. 两种模式共享自适应防溢出的悬浮详情卡片（精确日期/小时区间、Token 拆分、费用与调用次数）。
  */
 
+
+/** 超过该自然日天数（> 90 天）时，趋势图切换为类 GitHub 每日小格子热力图 */
+const HEATMAP_DAYS_THRESHOLD = 90;
 
 let chartUidCounter = 0;
 
@@ -2803,7 +3340,128 @@ function computeTickIndices(slots) {
 }
 
 /**
- * 创建交互式 SVG 历史趋势平滑面积图组件。
+ * 基于非零活跃日的分位数阈值计算热力图 5 档色阶（0 ~ 4），避免单日极端峰值压缩其余活跃日的层次对比。
+ *
+ * @param {number[]} nonZeroValues 已升序排列的正数 Token 列表
+ * @param {number} maxTokens
+ * @returns {{ q1: number, q2: number, q3: number, maxTokens: number, count: number }}
+ */
+function computeHeatmapThresholds(nonZeroValues, maxTokens) {
+  const n = nonZeroValues.length;
+  if (n === 0 || maxTokens <= 0) {
+    return { q1: 0, q2: 0, q3: 0, maxTokens: 0, count: 0 };
+  }
+  if (n < 4) {
+    return {
+      q1: maxTokens * 0.25,
+      q2: maxTokens * 0.5,
+      q3: maxTokens * 0.75,
+      maxTokens,
+      count: n,
+    };
+  }
+  return {
+    q1: nonZeroValues[Math.floor((n - 1) * 0.25)],
+    q2: nonZeroValues[Math.floor((n - 1) * 0.5)],
+    q3: nonZeroValues[Math.floor((n - 1) * 0.75)],
+    maxTokens,
+    count: n,
+  };
+}
+
+function resolveHeatmapLevel(tokens, thresholds) {
+  if (tokens <= 0 || thresholds.maxTokens <= 0) return 0;
+  if (tokens >= thresholds.maxTokens || tokens > thresholds.q3) return 4;
+  if (tokens > thresholds.q2) return 3;
+  if (tokens > thresholds.q1) return 2;
+  return 1;
+}
+
+/**
+ * 解析日期槽位的年份与月份信息（兼容真实时间戳 `startMs` 与测试简写 `label`）。
+ *
+ * @param {object} slot
+ * @returns {{ year: number, month: number, day: number }}
+ */
+function parseSlotCalendarParts(slot) {
+  const sMs = Number(slot?.startMs);
+  if (Number.isFinite(sMs) && sMs > 0) {
+    const d = new Date(sMs);
+    return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+  }
+  const m = String(slot?.label || '').match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (m) {
+    return { year: new Date().getFullYear(), month: Number(m[1]), day: Number(m[2]) };
+  }
+  return { year: new Date().getFullYear(), month: 0, day: 0 };
+}
+
+/**
+ * 构建热力图顶部与周列对齐的月份刻度标签（自动跳过首尾过窄残月，防止相邻月份文字重叠）。
+ *
+ * @param {Array<object>} slots
+ * @param {number} firstDow 首日对应的星期行索引（0 = 周一 .. 6 = 周日）
+ * @param {number} totalWeeks 总周列数
+ * @returns {Array<{ col: number, text: string }>}
+ */
+function buildHeatmapMonthTicks(slots, firstDow, totalWeeks) {
+  if (!slots.length || totalWeeks <= 0) return [];
+  const firstParts = parseSlotCalendarParts(slots[0]);
+  const lastParts = parseSlotCalendarParts(slots[slots.length - 1]);
+  const crossYear = firstParts.year !== lastParts.year;
+
+  const candidates = [];
+  let prevMonthKey = '';
+
+  for (let col = 0; col < totalWeeks; col++) {
+    let chosenParts = null;
+    for (let row = 0; row < 7; row++) {
+      const idx = col * 7 + row - firstDow;
+      if (idx < 0 || idx >= slots.length) continue;
+      const parts = parseSlotCalendarParts(slots[idx]);
+      if (!parts.month) continue;
+      const mKey = `${parts.year}-${parts.month}`;
+      if (col === 0 && !chosenParts) {
+        chosenParts = parts;
+        prevMonthKey = mKey;
+        break;
+      }
+      if (mKey !== prevMonthKey) {
+        chosenParts = parts;
+        prevMonthKey = mKey;
+        break;
+      }
+    }
+    if (chosenParts && chosenParts.month > 0) {
+      candidates.push({ col, year: chosenParts.year, month: chosenParts.month });
+    }
+  }
+
+  const baseMinGap = totalWeeks > 40 ? 4 : 3;
+  if (
+    candidates.length >= 2 &&
+    candidates[0].col === 0 &&
+    candidates[1].col - candidates[0].col < baseMinGap
+  ) {
+    candidates.shift();
+  }
+
+  const ticks = [];
+  let nextAllowedCol = 0;
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (totalWeeks > 16 && c.col >= totalWeeks - 1) continue;
+    if (ticks.length > 0 && c.col < nextAllowedCol) continue;
+    const showYear = crossYear && (c.month === 1 || ticks.length === 0);
+    const text = showYear ? `${String(c.year).slice(-2)}年${c.month}月` : `${c.month}月`;
+    ticks.push({ col: c.col, text });
+    nextAllowedCol = c.col + (showYear ? baseMinGap + 1 : baseMinGap);
+  }
+  return ticks;
+}
+
+/**
+ * 创建交互式历史趋势组件（<=90 天为 SVG 平滑曲线图，>90 天自动切换为类 GitHub 每日小格子热力图）。
  *
  * @returns {{
  *   el: HTMLElement,
@@ -2811,17 +3469,22 @@ function computeTickIndices(slots) {
  * }}
  */
 function createTrendAreaChart() {
-  const VIEW_W = 460;
+  const DEFAULT_VIEW_W = 460;
   const VIEW_H = 120;
-  const LEFT_X = 14;
-  const RIGHT_X = 446;
   const TOP_Y = 24;
   const BOTTOM_Y = 102;
-  const SPAN_X = RIGHT_X - LEFT_X;
   const SPAN_Y = BOTTOM_Y - TOP_Y;
 
+  let viewW = DEFAULT_VIEW_W;
+
+  function resolvePlotBounds(w) {
+    const leftX = 1;
+    const rightX = Math.max(leftX + 20, w - 1);
+    return { leftX, rightX, spanX: rightX - leftX };
+  }
+
   const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${VIEW_W} ${VIEW_H}`);
+  svg.setAttribute('viewBox', `0 0 ${viewW} ${VIEW_H}`);
   svg.setAttribute('class', 'trend-svg');
   svg.setAttribute('aria-hidden', 'true');
 
@@ -2850,16 +3513,18 @@ function createTrendAreaChart() {
   defs.appendChild(grad);
   svg.appendChild(defs);
 
-  // 背景水平与垂直参考网格线
+  // 背景水平与垂直参考网格线（水平网格全宽贴边铺满 0..viewW）
   const hGridGroup = document.createElementNS(SVG_NS, 'g');
   hGridGroup.setAttribute('class', 'trend-grid');
+  const hGridLines = [];
   for (const y of [TOP_Y, Math.round((TOP_Y + BOTTOM_Y) / 2), BOTTOM_Y]) {
     const line = document.createElementNS(SVG_NS, 'line');
-    line.setAttribute('x1', String(LEFT_X));
+    line.setAttribute('x1', '0');
     line.setAttribute('y1', String(y));
-    line.setAttribute('x2', String(RIGHT_X));
+    line.setAttribute('x2', String(viewW));
     line.setAttribute('y2', String(y));
     hGridGroup.appendChild(line);
+    hGridLines.push(line);
   }
   svg.appendChild(hGridGroup);
 
@@ -2901,7 +3566,7 @@ function createTrendAreaChart() {
 
   const peakPill = h('span', { className: 'trend-peak-pill text-mono', text: '0' });
 
-  // 悬停详情浮层卡片
+  // 共享悬停详情浮层卡片（曲线图与热力格子图共用）
   const tipTimeEl = h('span', { className: 'trend-tip-time text-mono' });
   const tipCallsEl = h('span', { className: 'trend-tip-calls text-mono' });
   const tipTokensEl = h('strong', { className: 'trend-tip-tokens text-mono' });
@@ -2918,38 +3583,56 @@ function createTrendAreaChart() {
     ]
   );
 
-  // 底部对齐刻度轴
+  // 底部对齐刻度轴（曲线模式）
   const xAxisEl = h('div', { className: 'trend-x-axis' });
+  const plotStage = h('div', { className: 'trend-plot-stage' }, [peakPill, svg]);
 
-  const plotStage = h('div', { className: 'trend-plot-stage' }, [peakPill, tooltipEl, svg]);
-  const chartWrap = h('div', { className: 'trend-chart-wrap' }, [plotStage, xAxisEl]);
+  // 类 GitHub 每日小格子热力图容器（> 90 天模式）
+  const weekdayLabels = ['一', '', '三', '', '五', '', '日'];
+  const hmWeekdaysEl = h('div', { className: 'trend-hm-weekdays', 'aria-hidden': 'true' }, [
+    h('span', { className: 'trend-hm-month-spacer' }),
+    ...weekdayLabels.map((txt) => h('span', { className: 'trend-hm-wday', text: txt })),
+  ]);
+  const hmMonthsEl = h('div', { className: 'trend-hm-months' });
+  const hmGridEl = h('div', { className: 'trend-hm-grid', role: 'grid', 'aria-label': '每日用量热力格子图' });
+  const hmTrackEl = h('div', { className: 'trend-hm-track' }, [hmMonthsEl, hmGridEl]);
+  const hmScrollEl = h('div', { className: 'trend-hm-scroll' }, [hmTrackEl]);
+  const hmBodyEl = h('div', { className: 'trend-heatmap-body' }, [hmWeekdaysEl, hmScrollEl]);
+
+  const hmSummaryEl = h('span', { className: 'trend-hm-summary text-mono', text: '' });
+  const hmLegendEl = h('span', { className: 'trend-hm-legend', 'aria-hidden': 'true' }, [
+    h('span', { text: '少' }),
+    h('span', { className: 'trend-hm-swatch lv-0' }),
+    h('span', { className: 'trend-hm-swatch lv-1' }),
+    h('span', { className: 'trend-hm-swatch lv-2' }),
+    h('span', { className: 'trend-hm-swatch lv-3' }),
+    h('span', { className: 'trend-hm-swatch lv-4' }),
+    h('span', { text: '多' }),
+  ]);
+  const hmFooterEl = h('div', { className: 'trend-hm-footer' }, [hmSummaryEl, hmLegendEl]);
+  const heatmapStage = h('div', { className: 'trend-heatmap-stage', hidden: true }, [
+    hmBodyEl,
+    hmFooterEl,
+  ]);
+
+  const chartWrap = h('div', { className: 'trend-chart-wrap' }, [
+    plotStage,
+    xAxisEl,
+    heatmapStage,
+    tooltipEl,
+  ]);
 
   let currentSlots = [];
   let currentPts = [];
+  let currentIsHeatmap = false;
+  let currentHeatmapWeeks = 0;
+  let currentCellEls = [];
   let tickElsByIdx = new Map();
   let hoveredIdx = -1;
+  let hoveredCellEl = null;
   let lastRenderSig = '';
 
-  function showHoverAtIndex(idx) {
-    if (idx < 0 || idx >= currentSlots.length || !currentPts[idx]) {
-      clearHover();
-      return;
-    }
-    hoveredIdx = idx;
-    const slot = currentSlots[idx];
-    const pt = currentPts[idx];
-
-    patchAttr(hoverLine, 'hidden', false);
-    patchAttr(hoverLine, 'x1', pt.x.toFixed(1));
-    patchAttr(hoverLine, 'x2', pt.x.toFixed(1));
-
-    patchAttr(hoverDot, 'hidden', false);
-    patchAttr(hoverDot, 'cx', pt.x.toFixed(1));
-    patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
-
-    patchAttr(peakPill, 'hidden', true);
-    patchAttr(tooltipEl, 'hidden', false);
-
+  function populateTooltipContent(slot) {
     patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
     patchText(tipCallsEl, `${Math.max(0, Math.floor(Number(slot.calls) || 0))} 次`);
     const slotTok = safeSlotTokens(slot.tokens);
@@ -2974,16 +3657,86 @@ function createTrendAreaChart() {
         `入 ${formatTokensPrecise(safeSlotTokens(slot.inputTokens))} · 缓 ${formatTokensPrecise(safeSlotTokens(slot.cacheReadTokens))} · 出 ${formatTokensPrecise(safeSlotTokens(slot.outputTokens))}`
       );
     }
+  }
 
-    const rawPct = (pt.x / VIEW_W) * 100;
-    const clampedPct = Math.max(2, Math.min(98, rawPct));
-    const shiftX = rawPct < 28 ? '0%' : rawPct > 72 ? '-100%' : '-50%';
+  function showLineHoverAtIndex(idx) {
+    if (currentIsHeatmap || idx < 0 || idx >= currentSlots.length || !currentPts[idx]) {
+      clearHover();
+      return;
+    }
+    hoveredIdx = idx;
+    const slot = currentSlots[idx];
+    const pt = currentPts[idx];
+
+    patchAttr(hoverLine, 'hidden', false);
+    patchAttr(hoverLine, 'x1', pt.x.toFixed(1));
+    patchAttr(hoverLine, 'x2', pt.x.toFixed(1));
+
+    patchAttr(hoverDot, 'hidden', false);
+    patchAttr(hoverDot, 'cx', pt.x.toFixed(1));
+    patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
+
+    patchAttr(peakPill, 'hidden', true);
+    patchClasses(tooltipEl, { 'is-hm-bottom': false, 'is-hm-top': false });
+    patchAttr(tooltipEl, 'hidden', false);
+    populateTooltipContent(slot);
+
+    const rawPct = (pt.x / viewW) * 100;
+    const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
-    patchStyleVar(tooltipEl, '--tip-shift', shiftX);
+    patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
 
     for (const [tIdx, el] of tickElsByIdx.entries()) {
       patchClasses(el, { 'is-hovered': tIdx === idx });
     }
+  }
+
+  function showHeatmapHoverAtIndex(idx, cellEl) {
+    if (!currentIsHeatmap || idx < 0 || idx >= currentSlots.length) {
+      clearHover();
+      return;
+    }
+    const targetCell = cellEl || currentCellEls[idx] || null;
+    if (!targetCell) {
+      clearHover();
+      return;
+    }
+    hoveredIdx = idx;
+    if (hoveredCellEl && hoveredCellEl !== targetCell) {
+      patchClasses(hoveredCellEl, { 'is-hovered': false });
+    }
+    hoveredCellEl = targetCell;
+    patchClasses(targetCell, { 'is-hovered': true });
+
+    const slot = currentSlots[idx];
+    const row = Number(targetCell.getAttribute('data-hm-row') || 0);
+    const col = Number(targetCell.getAttribute('data-hm-col') || 0);
+
+    // 上半区（周一~周四）浮层停靠底部，下半区（周五~周日）停靠顶部，互不遮挡被悬停格子且永不越界裁剪
+    patchClasses(tooltipEl, {
+      'is-hm-bottom': row <= 3,
+      'is-hm-top': row > 3,
+    });
+    patchAttr(tooltipEl, 'hidden', false);
+    populateTooltipContent(slot);
+
+    const wrapRect = chartWrap.getBoundingClientRect();
+    const cellRect = targetCell.getBoundingClientRect();
+    let rawPct = 50;
+    if (
+      wrapRect &&
+      wrapRect.width > 0 &&
+      cellRect &&
+      cellRect.width > 0 &&
+      cellRect.width < wrapRect.width
+    ) {
+      rawPct = ((cellRect.left + cellRect.width / 2 - wrapRect.left) / wrapRect.width) * 100;
+    } else if (currentHeatmapWeeks > 0) {
+      rawPct = ((col + 0.5) / currentHeatmapWeeks) * 100;
+    }
+    const clampedPct = Math.max(1, Math.min(99, rawPct));
+    patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
   }
 
   function clearHover() {
@@ -2991,30 +3744,132 @@ function createTrendAreaChart() {
     patchAttr(hoverLine, 'hidden', true);
     patchAttr(hoverDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
-    patchAttr(peakPill, 'hidden', false);
+    patchClasses(tooltipEl, { 'is-hm-bottom': false, 'is-hm-top': false });
+    if (!currentIsHeatmap) {
+      patchAttr(peakPill, 'hidden', false);
+    }
+    if (hoveredCellEl) {
+      patchClasses(hoveredCellEl, { 'is-hovered': false });
+      hoveredCellEl = null;
+    }
     for (const el of tickElsByIdx.values()) {
       patchClasses(el, { 'is-hovered': false });
     }
   }
 
+  function syncViewWidth() {
+    const measured = Math.round(
+      plotStage.clientWidth ||
+        svg.clientWidth ||
+        plotStage.getBoundingClientRect?.()?.width ||
+        0
+    );
+    if (measured >= 160 && measured !== viewW) {
+      viewW = measured;
+      svg.setAttribute('viewBox', `0 0 ${viewW} ${VIEW_H}`);
+      for (const line of hGridLines) {
+        line.setAttribute('x1', '0');
+        line.setAttribute('x2', String(viewW));
+      }
+      return true;
+    }
+    return false;
+  }
+
   function handlePointerMove(e) {
-    if (!currentSlots.length) return;
+    if (currentIsHeatmap || !currentSlots.length) return;
     const rect = svg.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
-    const relX = ((e.clientX - rect.left) / rect.width) * VIEW_W;
-    const ratio = (relX - LEFT_X) / Math.max(1, SPAN_X);
+    const relX = ((e.clientX - rect.left) / rect.width) * viewW;
+    const { leftX, spanX } = resolvePlotBounds(viewW);
+    const ratio = (relX - leftX) / Math.max(1, spanX);
     const idx = Math.max(
       0,
       Math.min(currentSlots.length - 1, Math.round(ratio * (currentSlots.length - 1)))
     );
-    showHoverAtIndex(idx);
+    showLineHoverAtIndex(idx);
+  }
+
+  function findHeatmapCellFromEvent(e) {
+    let cur = e?.target || null;
+    while (cur && cur !== hmGridEl) {
+      const idxAttr = cur.getAttribute?.('data-slot-idx');
+      if (idxAttr !== null && idxAttr !== undefined && idxAttr !== '') {
+        return { idx: Number(idxAttr), cellEl: cur };
+      }
+      cur = cur.parentNode || null;
+    }
+    return null;
+  }
+
+  function handleHeatmapPointer(e) {
+    if (!currentIsHeatmap || !currentSlots.length) return;
+    const hit = findHeatmapCellFromEvent(e);
+    if (!hit || !Number.isFinite(hit.idx)) {
+      clearHover();
+      return;
+    }
+    if (hit.idx !== hoveredIdx || hit.cellEl !== hoveredCellEl) {
+      showHeatmapHoverAtIndex(hit.idx, hit.cellEl);
+    }
+  }
+
+  function handleHeatmapWheel(e) {
+    if (!currentIsHeatmap) return;
+    const maxScrollLeft = (hmScrollEl.scrollWidth || 0) - (hmScrollEl.clientWidth || 0);
+    if (maxScrollLeft <= 2) return;
+    const dy = Number(e.deltaY || 0);
+    const dx = Number(e.deltaX || 0);
+    if (Math.abs(dy) > Math.abs(dx) && dy !== 0) {
+      const prev = hmScrollEl.scrollLeft || 0;
+      const next = Math.max(0, Math.min(maxScrollLeft, prev + dy));
+      if (next !== prev) {
+        hmScrollEl.scrollLeft = next;
+        e.preventDefault?.();
+      }
+    }
   }
 
   plotStage.addEventListener('mousemove', handlePointerMove);
   plotStage.addEventListener('mouseleave', clearHover);
 
+  hmGridEl.addEventListener('mouseover', handleHeatmapPointer);
+  hmGridEl.addEventListener('mousemove', handleHeatmapPointer);
+  hmGridEl.addEventListener('click', handleHeatmapPointer);
+  hmGridEl.addEventListener('mouseleave', clearHover);
+  hmScrollEl.addEventListener('wheel', handleHeatmapWheel);
+
+  let resizeObs = null;
+  let onWinResize = null;
+  if (typeof ResizeObserver === 'function') {
+    resizeObs = new ResizeObserver(() => {
+      if (!currentIsHeatmap && syncViewWidth() && currentSlots.length > 0) {
+        lastRenderSig = '';
+        update(currentSlots);
+      }
+    });
+    resizeObs.observe(plotStage);
+  } else if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    onWinResize = () => {
+      if (!currentIsHeatmap && syncViewWidth() && currentSlots.length > 0) {
+        lastRenderSig = '';
+        update(currentSlots);
+      }
+    };
+    window.addEventListener('resize', onWinResize);
+  }
+
+  function destroy() {
+    resizeObs?.disconnect();
+    resizeObs = null;
+    if (onWinResize && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('resize', onWinResize);
+      onWinResize = null;
+    }
+  }
+
   /**
-   * 根据最新时间分桶序列重绘平滑曲线、渐变区域、峰值气泡与底部对齐刻度。
+   * 根据最新时间分桶序列重绘平滑曲线（<=90天/小时级）或类 GitHub 每日小格子热力图（>90天）。
    */
   function update(series = []) {
     const slots =
@@ -3028,30 +3883,146 @@ function createTrendAreaChart() {
           ];
     currentSlots = slots;
 
+    const isHourly =
+      slots[0]?.granularity === 'hour' || String(slots[0]?.label || '').includes(':');
+    const useHeatmap = !isHourly && slots.length > HEATMAP_DAYS_THRESHOLD;
+    const modeChanged = useHeatmap !== currentIsHeatmap;
+    currentIsHeatmap = useHeatmap;
+
+    if (modeChanged) {
+      clearHover();
+    }
+    patchClasses(chartWrap, { 'is-heatmap': useHeatmap });
+    patchAttr(plotStage, 'hidden', useHeatmap);
+    patchAttr(xAxisEl, 'hidden', useHeatmap);
+    patchAttr(heatmapStage, 'hidden', !useHeatmap);
+
+    if (!useHeatmap) {
+      syncViewWidth();
+    }
+
     let maxTokens = 0;
     let peakIdx = 0;
+    let activeDays = 0;
+    const nonZeroVals = [];
+
     for (let i = 0; i < slots.length; i++) {
       const t = safeSlotTokens(slots[i]?.tokens);
+      if (t > 0) {
+        activeDays++;
+        nonZeroVals.push(t);
+      }
       if (t >= maxTokens) {
         maxTokens = t;
         peakIdx = i;
       }
     }
 
+    const sig =
+      `${useHeatmap ? 'hm' : `line:${viewW}`}|` +
+      slots
+        .map(
+          (s) =>
+            `${s?.startMs || ''}:${s?.label || ''}:${s?.fullLabel || ''}:${safeSlotTokens(s?.tokens)}:${Number(s?.costUsd || 0)}:${Number(s?.calls || 0)}`
+        )
+        .join('|');
+
+    if (useHeatmap) {
+      currentPts = [];
+      if (sig !== lastRenderSig) {
+        lastRenderSig = sig;
+        nonZeroVals.sort((a, b) => a - b);
+        const thresholds = computeHeatmapThresholds(nonZeroVals, maxTokens);
+
+        const firstStartMs = Number(slots[0]?.startMs);
+        const firstDow =
+          Number.isFinite(firstStartMs) && firstStartMs > 0
+            ? (new Date(firstStartMs).getDay() + 6) % 7
+            : 0;
+        const totalCells = firstDow + slots.length;
+        const totalWeeks = Math.max(1, Math.ceil(totalCells / 7));
+        currentHeatmapWeeks = totalWeeks;
+
+        patchStyleVar(hmBodyEl, '--hm-weeks', String(totalWeeks));
+        patchStyleVar(hmBodyEl, '--hm-gap', totalWeeks > 42 ? '1.5px' : '2px');
+
+        // 重建顶部对齐月份标签
+        while (hmMonthsEl.firstChild) hmMonthsEl.removeChild(hmMonthsEl.firstChild);
+        const monthTicks = buildHeatmapMonthTicks(slots, firstDow, totalWeeks);
+        for (const mt of monthTicks) {
+          const mEl = h('span', { className: 'trend-hm-month text-mono', text: mt.text });
+          patchStyleVar(mEl, '--hm-col', String(mt.col));
+          hmMonthsEl.appendChild(mEl);
+        }
+
+        // 重建 7 行 × N 周列的每日小格子（一格一天）
+        while (hmGridEl.firstChild) hmGridEl.removeChild(hmGridEl.firstChild);
+        hoveredCellEl = null;
+        currentCellEls = new Array(slots.length);
+
+        for (let pad = 0; pad < firstDow; pad++) {
+          hmGridEl.appendChild(
+            h('span', { className: 'trend-hm-cell is-pad', 'aria-hidden': 'true' })
+          );
+        }
+
+        for (let i = 0; i < slots.length; i++) {
+          const slot = slots[i];
+          const tok = safeSlotTokens(slot?.tokens);
+          const lv = resolveHeatmapLevel(tok, thresholds);
+          const gridPos = firstDow + i;
+          const col = Math.floor(gridPos / 7);
+          const row = gridPos % 7;
+          const cellEl = h('span', {
+            className: `trend-hm-cell lv-${lv}`,
+            'data-slot-idx': String(i),
+            'data-hm-col': String(col),
+            'data-hm-row': String(row),
+            role: 'gridcell',
+          });
+          hmGridEl.appendChild(cellEl);
+          currentCellEls[i] = cellEl;
+        }
+
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(() => {
+            if (hmScrollEl.scrollWidth > hmScrollEl.clientWidth) {
+              hmScrollEl.scrollLeft = hmScrollEl.scrollWidth;
+            }
+          });
+        }
+      }
+
+      const peakSlot = slots[peakIdx];
+      const summaryText =
+        maxTokens > 0 && peakSlot?.label
+          ? `活跃 ${activeDays}/${slots.length} 天 · 峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
+          : `活跃 0/${slots.length} 天`;
+      patchText(hmSummaryEl, summaryText);
+
+      if (hoveredIdx >= slots.length) {
+        clearHover();
+      } else if (hoveredIdx >= 0) {
+        showHeatmapHoverAtIndex(hoveredIdx, currentCellEls[hoveredIdx]);
+      }
+      return;
+    }
+
+    // --- <= 90 天（或整点小时级）：渲染平滑面积曲线图（1:1 贴边对齐） ---
+    currentCellEls = [];
+    const { leftX, rightX, spanX } = resolvePlotBounds(viewW);
     const denom = Math.max(1, maxTokens);
     const isSingle = slots.length === 1;
     const pts = slots.map((s, idx) => {
       const tok = safeSlotTokens(s?.tokens);
-      const x = isSingle ? (LEFT_X + RIGHT_X) / 2 : LEFT_X + (idx / Math.max(1, slots.length - 1)) * SPAN_X;
+      const x = isSingle
+        ? (leftX + rightX) / 2
+        : leftX + (idx / Math.max(1, slots.length - 1)) * spanX;
       const ratio = maxTokens > 0 ? tok / denom : 0;
       const y = BOTTOM_Y - ratio * SPAN_Y;
       return { x, y, tokens: tok };
     });
     currentPts = pts;
-
-    const sig = slots
-      .map((s) => `${s?.label || ''}:${s?.fullLabel || ''}:${safeSlotTokens(s?.tokens)}:${Number(s?.costUsd || 0)}:${Number(s?.calls || 0)}`)
-      .join('|');
 
     if (sig !== lastRenderSig) {
       lastRenderSig = sig;
@@ -3059,8 +4030,8 @@ function createTrendAreaChart() {
       let areaD;
       if (isSingle) {
         const yStr = pts[0].y.toFixed(1);
-        lineD = `M ${LEFT_X.toFixed(1)} ${yStr} L ${RIGHT_X.toFixed(1)} ${yStr}`;
-        areaD = `${lineD} L ${RIGHT_X.toFixed(1)} ${BOTTOM_Y} L ${LEFT_X.toFixed(1)} ${BOTTOM_Y} Z`;
+        lineD = `M ${leftX.toFixed(1)} ${yStr} L ${rightX.toFixed(1)} ${yStr}`;
+        areaD = `${lineD} L ${rightX.toFixed(1)} ${BOTTOM_Y} L ${leftX.toFixed(1)} ${BOTTOM_Y} Z`;
       } else {
         lineD = buildSmoothSplinePath(pts);
         areaD = `${lineD} L ${pts[pts.length - 1].x.toFixed(1)} ${BOTTOM_Y} L ${pts[0].x.toFixed(1)} ${BOTTOM_Y} Z`;
@@ -3068,7 +4039,7 @@ function createTrendAreaChart() {
       patchAttr(linePath, 'd', lineD);
       patchAttr(areaPath, 'd', areaD);
 
-      // 渲染与底部刻度对齐的垂直参考网格线及底部 X 轴标签
+      // 渲染与底部刻度对齐的垂直参考网格线及底部 X 轴标签（起止标签严格左右贴边）
       const tickIndices = computeTickIndices(slots);
       while (vGridGroup.firstChild) vGridGroup.removeChild(vGridGroup.firstChild);
       while (xAxisEl.firstChild) xAxisEl.removeChild(xAxisEl.firstChild);
@@ -3091,14 +4062,14 @@ function createTrendAreaChart() {
 
         const isFirst = !isSingle && i === 0;
         const isLast = !isSingle && i === tickIndices.length - 1;
-        const pct = (pt.x / VIEW_W) * 100;
+        const pct = isFirst ? 0 : isLast ? 100 : (pt.x / viewW) * 100;
         const tickEl = h('span', {
           className: `trend-x-tick text-mono${isFirst ? ' is-start' : isLast ? ' is-end' : ''}`,
           text: slot.label || '',
           title: slot.fullLabel || slot.label || '',
         });
         patchStyleVar(tickEl, '--tick-x', `${pct.toFixed(2)}%`);
-        tickEl.onclick = () => showHoverAtIndex(tIdx);
+        tickEl.onclick = () => showLineHoverAtIndex(tIdx);
         xAxisEl.appendChild(tickEl);
         tickElsByIdx.set(tIdx, tickEl);
       }
@@ -3118,7 +4089,7 @@ function createTrendAreaChart() {
       }
     }
 
-    const peakPt = pts[peakIdx] || { x: 230, y: BOTTOM_Y };
+    const peakPt = pts[peakIdx] || { x: viewW / 2, y: BOTTOM_Y };
     patchAttr(peakDot, 'cx', peakPt.x.toFixed(1));
     patchAttr(peakDot, 'cy', peakPt.y.toFixed(1));
 
@@ -3128,17 +4099,2201 @@ function createTrendAreaChart() {
         ? `峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
         : formatTokensPrecise(maxTokens);
     patchText(peakPill, peakText);
-    const pctLeft = Math.max(12, Math.min(88, (peakPt.x / VIEW_W) * 100));
+    const pctLeft = Math.max(12, Math.min(88, (peakPt.x / viewW) * 100));
     patchStyleVar(peakPill, '--peak-x', `${pctLeft.toFixed(1)}%`);
 
     if (hoveredIdx >= slots.length) {
       clearHover();
     } else if (hoveredIdx >= 0) {
-      showHoverAtIndex(hoveredIdx);
+      showLineHoverAtIndex(hoveredIdx);
     }
   }
 
-  return { el: chartWrap, update };
+  return { el: chartWrap, update, destroy };
+}
+
+// --- src/components/charts/SessionStepCharts.js ---
+/**
+ * @fileoverview 当前会话步骤级线性走势图与模型趋势拟合图组件 (SessionStepCharts).
+ *
+ * 包含两部分能力：
+ * 1. `createSessionLineChart`：查看当前会话（支持主代理 / 子代理 / 全部汇总）所有模型的步进变化，
+ *    支持切换 `总Token`（累计调用总量）、`上下文`（单步上下文体积）、`TPS`、`首字`、`费用` 五大维度；
+ * 2. `createModelFitChart`：查看指定模型或全部模型的 `TPS`、`首字`、`缓存`、`费用` 散点与鲁棒局部加权线性回归（LOWESS + OLS 基准）拟合曲线，
+ *    内置视图级模型锁定状态机，进入视图时自动锚定当前调用模型，停留在视图期间绝不随轮询跳变。
+ */
+
+
+let sessionChartUid = 0;
+
+/** 多模型节点与多曲线对比语义调色板（全部取自 tokens.css 语义变量，兼顾设计一致性与交叉曲线区分度） */
+const MODEL_COLOR_VARS = Object.freeze([
+  'var(--ctx-cached)',
+  'var(--ctx-skills)',
+  'var(--ctx-user-input)',
+  'var(--ctx-checkpoint)',
+  'var(--ctx-tool-results)',
+  'var(--ctx-subagent-msg)',
+]);
+
+/**
+ * 提取步骤所属的基础模型分组键（与后端 `usage-aggregator.mjs` 中 `modelBreakdown[].label` 严格一致），
+ * 且不受“精简代号 / 原始模型 ID”或“自动压缩”后缀切换影响。
+ *
+ * @param {object|null|undefined} step
+ * @returns {string}
+ */
+function getStepModelGroupKey(step) {
+  if (!step || typeof step !== 'object') return '模型未知';
+  const rawLabel = String(step.modelLabel || step.label || '')
+    .replace(/\s*\[自动压缩\]\s*$/u, '')
+    .replace(/\s*\((?:Max|XHigh|High|Medium|Low|Thinking|Extra Low|Tiered)\)\s*$/i, '')
+    .trim();
+  if (rawLabel) return rawLabel;
+  const rawShort = String(step.modelShort || step.shortName || '')
+    .replace(/·压缩\s*$/u, '')
+    .trim();
+  return rawShort || '模型未知';
+}
+
+/**
+ * 将逆序或混合代理的步骤列表归一化为严格时间升序序列（最旧 -> 最新）。
+ *
+ * @param {Array<object>} steps
+ * @param {boolean} isMergedAllAgents
+ * @returns {Array<object>}
+ */
+function toChronologicalSteps(steps, isMergedAllAgents = false) {
+  if (!Array.isArray(steps) || steps.length === 0) return [];
+  const copy = steps.slice();
+  if (isMergedAllAgents) {
+    copy.sort(
+      (a, b) =>
+        (Number(a?.createdAtMs) || 0) - (Number(b?.createdAtMs) || 0) ||
+        (Number(a?.agentIndex) || 0) - (Number(b?.agentIndex) || 0) ||
+        (Number(a?.stepIndex) || 0) - (Number(b?.stepIndex) || 0)
+    );
+    return copy;
+  }
+  copy.sort(
+    (a, b) =>
+      (Number(a?.stepIndex) || 0) - (Number(b?.stepIndex) || 0) ||
+      (Number(a?.createdAtMs) || 0) - (Number(b?.createdAtMs) || 0)
+  );
+  return copy;
+}
+
+function clampValue(v, minVal = 0, maxVal = Infinity) {
+  if (!Number.isFinite(v)) return minVal;
+  return Math.max(minVal, Math.min(maxVal, v));
+}
+
+/**
+ * 双侧 95% 置信区间对应的 Student-t 临界值近似表（t_{0.975, df}）。
+ *
+ * @param {number} df 残差自由度
+ * @returns {number}
+ */
+function tCritical95(df) {
+  if (!Number.isFinite(df) || df <= 1.5) return 3.182;
+  if (df <= 2.5) return 3.182 + (2.5 - df) * 0.9;
+  if (df <= 3.5) return 2.776 + (3.5 - df) * 0.406;
+  if (df <= 4.5) return 2.571 + (4.5 - df) * 0.205;
+  if (df <= 6) return 2.447;
+  if (df <= 8) return 2.306;
+  if (df <= 10) return 2.228;
+  if (df <= 15) return 2.131;
+  if (df <= 20) return 2.086;
+  if (df <= 30) return 2.042;
+  if (df <= 60) return 2.0;
+  if (df <= 120) return 1.98;
+  return 1.96;
+}
+
+/**
+ * 计算普通最小二乘线性回归（OLS: y = intercept + slope * x）。
+ *
+ * @param {number[]} ys 样本纵坐标序列
+ * @param {{ minVal?: number, maxVal?: number, xs?: number[] }} [options]
+ * @returns {{ values: number[], slope: number, intercept: number, mean: number, r: number, r2: number }}
+ */
+function computeLinearFit(ys, { minVal = 0, maxVal = Infinity, xs = null } = {}) {
+  const n = Array.isArray(ys) ? ys.length : 0;
+  if (n === 0) {
+    return { values: [], slope: 0, intercept: 0, mean: 0, r: 0, r2: 0 };
+  }
+  const xArr =
+    Array.isArray(xs) && xs.length === n ? xs : Array.from({ length: n }, (_, idx) => idx);
+  const meanY = ys.reduce((acc, v) => acc + v, 0) / n;
+  if (n === 1) {
+    const c = clampValue(ys[0], minVal, maxVal);
+    return { values: [c], slope: 0, intercept: c, mean: c, r: 0, r2: 0 };
+  }
+  const meanX = xArr.reduce((acc, v) => acc + v, 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xArr[i] - meanX;
+    const dy = ys[i] - meanY;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+  }
+  const slope = sxx > 1e-12 ? sxy / sxx : 0;
+  const intercept = meanY - slope * meanX;
+  const r =
+    sxx > 1e-12 && syy > 1e-12 ? clampValue(sxy / Math.sqrt(sxx * syy), -1, 1) : 0;
+  const values = xArr.map((x) => clampValue(intercept + slope * x, minVal, maxVal));
+  return { values, slope, intercept, mean: meanY, r, r2: r * r };
+}
+
+/**
+ * 学术论文级回归与 95% 置信带计算引擎（Cleveland & Devlin 高斯局部加权线性回归 LOESS + 精确帽子矩阵标准误，
+ * 小样本 n <= 5 时自动采用精确 OLS 线性回归与双曲 t 分布 95% 置信区间，等同于 R `ggplot2::geom_smooth(se = TRUE)`）。
+ *
+ * @param {number[]} xs 严格递增或单调的样本横坐标序列
+ * @param {number[]} ys 样本纵坐标序列
+ * @param {{ minVal?: number, maxVal?: number, gridSize?: number, span?: number }} [options]
+ */
+function computePublicationFit(
+  xs,
+  ys,
+  { minVal = 0, maxVal = Infinity, gridSize = 64, span = 0.5 } = {}
+) {
+  const n = Math.min(Array.isArray(xs) ? xs.length : 0, Array.isArray(ys) ? ys.length : 0);
+  if (n === 0) {
+    return {
+      method: 'OLS',
+      mean: 0,
+      sd: 0,
+      slope: 0,
+      intercept: 0,
+      r: 0,
+      r2: 0,
+      sampleFits: [],
+      sampleCiLow: [],
+      sampleCiHigh: [],
+      sampleCiHalf: [],
+      grid: [],
+    };
+  }
+
+  const ols = computeLinearFit(ys, { minVal, maxVal, xs });
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    const dy = ys[i] - ols.mean;
+    syy += dy * dy;
+  }
+  const sd = n > 1 ? Math.sqrt(syy / (n - 1)) : 0;
+
+  if (n === 1) {
+    const val = clampValue(ys[0], minVal, maxVal);
+    return {
+      method: 'OLS',
+      mean: val,
+      sd: 0,
+      slope: 0,
+      intercept: val,
+      r: 0,
+      r2: 0,
+      sampleFits: [val],
+      sampleCiLow: [val],
+      sampleCiHigh: [val],
+      sampleCiHalf: [0],
+      grid: [{ x: xs[0], fit: val, ciLow: val, ciHigh: val }],
+    };
+  }
+
+  const xMin = xs[0];
+  const xMax = xs[n - 1];
+  const xSpan = Math.max(1e-9, xMax - xMin);
+  const M = Math.max(2, gridSize);
+  const gridXs = Array.from({ length: M }, (_, k) => xMin + (k / (M - 1)) * xSpan);
+
+  // 小样本（n <= 5）：采用精确 OLS 线性回归与 Student-t 双曲 95% CI 置信带
+  if (n <= 5) {
+    const meanX = xs.reduce((a, b) => a + b, 0) / n;
+    let sxx = 0;
+    let sse = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = xs[i] - meanX;
+      sxx += dx * dx;
+      const resid = ys[i] - (ols.intercept + ols.slope * xs[i]);
+      sse += resid * resid;
+    }
+    const df = n - 2;
+    const seResid = df >= 1 ? Math.sqrt(sse / df) : 0;
+    const tCrit = df >= 1 ? tCritical95(df) : 0;
+
+    const evalOlsAt = (x0) => {
+      const rawFit = ols.intercept + ols.slope * x0;
+      const sePred =
+        seResid > 0
+          ? seResid * Math.sqrt(1 / n + (sxx > 1e-12 ? ((x0 - meanX) * (x0 - meanX)) / sxx : 0))
+          : 0;
+      const half = tCrit * sePred;
+      return {
+        fit: clampValue(rawFit, minVal, maxVal),
+        ciLow: clampValue(rawFit - half, minVal, maxVal),
+        ciHigh: clampValue(rawFit + half, minVal, maxVal),
+        half,
+      };
+    };
+
+    const sampleEval = xs.map(evalOlsAt);
+    const grid = gridXs.map((gx) => {
+      const g = evalOlsAt(gx);
+      return { x: gx, fit: g.fit, ciLow: g.ciLow, ciHigh: g.ciHigh };
+    });
+
+    return {
+      method: 'OLS',
+      mean: ols.mean,
+      sd,
+      slope: ols.slope,
+      intercept: ols.intercept,
+      r: ols.r,
+      r2: ols.r2,
+      sampleFits: sampleEval.map((e) => e.fit),
+      sampleCiLow: sampleEval.map((e) => e.ciLow),
+      sampleCiHigh: sampleEval.map((e) => e.ciHigh),
+      sampleCiHalf: sampleEval.map((e) => e.half),
+      grid,
+    };
+  }
+
+  // n >= 6：Cleveland 高斯局部加权一阶线性回归（LOESS）+ 精确帽子矩阵杠杆度 95% CI 置信带
+  const q = Math.max(5, Math.min(n, Math.ceil(span * n)));
+  const distBuf = new Float64Array(n);
+  const wBuf = new Float64Array(n);
+
+  function evalLoessPoint(x0, diagIdx = -1) {
+    for (let j = 0; j < n; j++) {
+      distBuf[j] = Math.abs(xs[j] - x0);
+    }
+    const sortedDists = Array.from(distBuf).sort((a, b) => a - b);
+    let h = sortedDists[q - 1];
+    if (h <= 1e-9) {
+      h = Math.max(sortedDists[n - 1], xSpan * 0.05, 1e-6);
+    }
+    const maxDist = h * 1.0001;
+
+    let sw = 0;
+    let swx = 0;
+    for (let j = 0; j < n; j++) {
+      const u = distBuf[j] / maxDist;
+      const w = u >= 1 ? 0 : (1 - u * u * u) ** 3;
+      wBuf[j] = w;
+      sw += w;
+      swx += w * xs[j];
+    }
+
+    if (sw <= 1e-12) {
+      const fallbackVal = ols.intercept + ols.slope * x0;
+      return { rawFit: fallbackVal, leverageNormSq: 1 / n, diagHat: 1 / n };
+    }
+
+    const mx = swx / sw;
+    let sxxW = 0;
+    for (let j = 0; j < n; j++) {
+      const w = wBuf[j];
+      if (w <= 0) continue;
+      const dx = xs[j] - mx;
+      sxxW += w * dx * dx;
+    }
+
+    const dx0 = x0 - mx;
+    const useSlope = sxxW > 1e-12;
+    let rawFit = 0;
+    let leverageNormSq = 0;
+    let diagHat = 0;
+
+    for (let j = 0; j < n; j++) {
+      const w = wBuf[j];
+      if (w <= 0) continue;
+      const lj = w / sw + (useSlope ? (w * (xs[j] - mx) * dx0) / sxxW : 0);
+      rawFit += lj * ys[j];
+      leverageNormSq += lj * lj;
+      if (j === diagIdx) diagHat = lj;
+    }
+
+    return { rawFit, leverageNormSq, diagHat };
+  }
+
+  const rawSampleFits = new Float64Array(n);
+  const sampleLevSq = new Float64Array(n);
+  let sse = 0;
+  let traceL = 0;
+
+  for (let i = 0; i < n; i++) {
+    const res = evalLoessPoint(xs[i], i);
+    rawSampleFits[i] = res.rawFit;
+    sampleLevSq[i] = res.leverageNormSq;
+    traceL += res.diagHat;
+    const diff = ys[i] - res.rawFit;
+    sse += diff * diff;
+  }
+
+  const dfRes = Math.max(1, n - traceL);
+  const sigmaHat = Math.sqrt(sse / dfRes);
+  const tCrit = tCritical95(dfRes);
+
+  const sampleFits = new Array(n);
+  const sampleCiLow = new Array(n);
+  const sampleCiHigh = new Array(n);
+  const sampleCiHalf = new Array(n);
+  let clampedSse = 0;
+
+  for (let i = 0; i < n; i++) {
+    const fitVal = clampValue(rawSampleFits[i], minVal, maxVal);
+    const half = tCrit * sigmaHat * Math.sqrt(sampleLevSq[i]);
+    sampleFits[i] = fitVal;
+    sampleCiLow[i] = clampValue(rawSampleFits[i] - half, minVal, maxVal);
+    sampleCiHigh[i] = clampValue(rawSampleFits[i] + half, minVal, maxVal);
+    sampleCiHalf[i] = half;
+    const d = ys[i] - fitVal;
+    clampedSse += d * d;
+  }
+
+  const grid = gridXs.map((gx) => {
+    const res = evalLoessPoint(gx, -1);
+    const half = tCrit * sigmaHat * Math.sqrt(res.leverageNormSq);
+    return {
+      x: gx,
+      fit: clampValue(res.rawFit, minVal, maxVal),
+      ciLow: clampValue(res.rawFit - half, minVal, maxVal),
+      ciHigh: clampValue(res.rawFit + half, minVal, maxVal),
+    };
+  });
+
+  const r2Loess = syy > 1e-12 ? clampValue(1 - clampedSse / syy, 0, 1) : 1;
+
+  return {
+    method: 'LOESS',
+    mean: ols.mean,
+    sd,
+    slope: ols.slope,
+    intercept: ols.intercept,
+    r: ols.r,
+    r2: r2Loess,
+    sampleFits,
+    sampleCiLow,
+    sampleCiHigh,
+    sampleCiHalf,
+    grid,
+  };
+}
+
+/**
+ * 计算样本点上的平滑回归拟合值序列（供单元测试与轻量调用直接读取）。
+ *
+ * @param {number[]} ys
+ * @param {{ minVal?: number, maxVal?: number, xs?: number[] }} [bounds]
+ * @returns {number[]}
+ */
+function computeLoessFit(ys, { minVal = 0, maxVal = Infinity, xs = null } = {}) {
+  const n = Array.isArray(ys) ? ys.length : 0;
+  if (n === 0) return [];
+  const xArr =
+    Array.isArray(xs) && xs.length === n ? xs : Array.from({ length: n }, (_, idx) => idx);
+  return computePublicationFit(xArr, ys, { minVal, maxVal }).sampleFits;
+}
+
+/**
+ * Heckbert 科学坐标轴刻度取整算法，生成科研图表风格的均匀整洁刻度。
+ */
+function niceStepNumber(range, round) {
+  if (!Number.isFinite(range) || range <= 0) return 1;
+  const exponent = Math.floor(Math.log10(range));
+  const fraction = range / 10 ** exponent;
+  let niceFraction;
+  if (round) {
+    if (fraction < 1.5) niceFraction = 1;
+    else if (fraction < 3) niceFraction = 2;
+    else if (fraction < 7) niceFraction = 5;
+    else niceFraction = 10;
+  } else if (fraction <= 1) niceFraction = 1;
+  else if (fraction <= 2) niceFraction = 2;
+  else if (fraction <= 5) niceFraction = 5;
+  else niceFraction = 10;
+  return niceFraction * 10 ** exponent;
+}
+
+function computeNiceYScale(dataMin, dataMax, { minBound = 0, maxBound = Infinity, tickCount = 4 } = {}) {
+  let lo = Number.isFinite(dataMin) ? dataMin : 0;
+  let hi = Number.isFinite(dataMax) ? dataMax : 1;
+  if (minBound === 0 && lo >= 0 && hi > 0 && lo <= hi * 0.32) {
+    lo = 0;
+  }
+  if (hi - lo <= 1e-9) {
+    const pad = lo > 0 ? lo * 0.15 : 1;
+    lo = Math.max(minBound, lo - pad);
+    hi = Math.min(maxBound, hi + pad);
+    if (hi - lo <= 1e-9) {
+      lo = Math.max(minBound, hi - 1);
+    }
+  } else {
+    const pad = (hi - lo) * 0.05;
+    lo = Math.max(minBound, lo - (lo === 0 ? 0 : pad));
+    hi = Math.min(maxBound, hi + pad);
+  }
+
+  const rawRange = niceStepNumber(hi - lo, false);
+  const step = niceStepNumber(rawRange / Math.max(2, tickCount - 1), true);
+  let graphMin = Math.max(minBound, Math.floor(lo / step) * step);
+  let graphMax = Math.min(maxBound, Math.ceil(hi / step) * step);
+  if (graphMax - graphMin <= 1e-9) {
+    graphMax = graphMin + step;
+  }
+
+  const ticks = [];
+  for (let v = graphMin; v <= graphMax + step * 0.25; v += step) {
+    const clamped = clampValue(+v.toPrecision(10), minBound, maxBound);
+    if (ticks.length === 0 || Math.abs(clamped - ticks[ticks.length - 1]) > step * 1e-4) {
+      ticks.push(clamped);
+    }
+    if (ticks.length >= 8) break;
+  }
+  return {
+    min: ticks[0] ?? graphMin,
+    max: ticks[ticks.length - 1] ?? graphMax,
+    step,
+    ticks,
+  };
+}
+
+function computeNiceXStepTicks(xs) {
+  const n = xs.length;
+  if (n === 0) return [];
+  if (n <= 5) {
+    return Array.from(new Set(xs.map((x) => Math.round(x))));
+  }
+  const xMin = xs[0];
+  const xMax = xs[n - 1];
+  const span = xMax - xMin;
+  if (span <= 5) {
+    return Array.from(new Set(xs.map((x) => Math.round(x))));
+  }
+  const step = Math.max(1, Math.round(niceStepNumber(span / 4.5, true)));
+  const firstTick = Math.ceil(xMin / step) * step;
+  const ticks = [];
+  if (firstTick - xMin > step * 0.45) {
+    ticks.push(Math.round(xMin));
+  }
+  for (let v = firstTick; v <= xMax + 1e-6; v += step) {
+    ticks.push(Math.round(v));
+    if (ticks.length >= 7) break;
+  }
+  if (ticks.length === 0) {
+    return [Math.round(xMin), Math.round(xMax)];
+  }
+  return ticks;
+}
+
+function formatYAxisTick(metric, val, step) {
+  if (!Number.isFinite(val)) return '';
+  if (Math.abs(val) < 1e-9) {
+    return metric === 'cost' ? '$0' : metric === 'cache' ? '0%' : metric === 'ttft' ? '0s' : '0';
+  }
+  if (metric === 'tps') {
+    return step >= 1 ? `${Math.round(val)}` : val.toFixed(1);
+  }
+  if (metric === 'ttft') {
+    return step >= 1 ? `${Math.round(val)}s` : `${val.toFixed(1)}s`;
+  }
+  if (metric === 'cache') {
+    return step >= 1 ? `${Math.round(val)}%` : `${val.toFixed(1)}%`;
+  }
+  if (metric === 'cost') {
+    if (step >= 1) return `$${Math.round(val)}`;
+    if (step >= 0.1) return `$${val.toFixed(1)}`;
+    if (step >= 0.01) return `$${val.toFixed(2)}`;
+    return `$${val.toFixed(3)}`;
+  }
+  return String(val);
+}
+
+function buildPolylinePath(points) {
+  if (!points.length) return '';
+  let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  for (let i = 1; i < points.length; i++) {
+    d += ` L ${points[i].x.toFixed(1)} ${points[i].y.toFixed(1)}`;
+  }
+  return d;
+}
+
+function buildSplinePath(points) {
+  if (!points.length) return '';
+  if (points.length === 1) {
+    return `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  }
+  let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i];
+    const p1 = points[i + 1];
+    const cpx1 = p0.x + (p1.x - p0.x) * 0.38;
+    const cpx2 = p1.x - (p1.x - p0.x) * 0.38;
+    d += ` C ${cpx1.toFixed(1)} ${p0.y.toFixed(1)}, ${cpx2.toFixed(1)} ${p1.y.toFixed(1)}, ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+function computeStepTickIndices(count) {
+  if (count <= 0) return [];
+  if (count <= 6) return Array.from({ length: count }, (_, i) => i);
+  const maxTicks = 6;
+  const set = new Set();
+  for (let k = 0; k < maxTicks; k++) {
+    set.add(Math.round((k / (maxTicks - 1)) * (count - 1)));
+  }
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+function formatStepAxisTag(st, showAgentPrefix) {
+  const num = `#${Number(st?.stepIndex ?? 0)}`;
+  if (!showAgentPrefix) return num;
+  const badge = st?.agentBadge || (st?.isSubagent ? '子' : '主');
+  return `${badge}${num}`;
+}
+
+function formatChartMetricValue(metric, val) {
+  if (!Number.isFinite(val)) return '—';
+  switch (metric) {
+    case 'totalTokens':
+    case 'context':
+      return `${formatTokensPrecise(val)} tok`;
+    case 'tps':
+      return `${val.toFixed(1)} tok/s`;
+    case 'ttft':
+      return `${val.toFixed(1)}s`;
+    case 'cache':
+      return `${val.toFixed(1)}%`;
+    case 'cost':
+      return formatUsd(val, { precise: true });
+    default:
+      return String(val);
+  }
+}
+
+function formatChartMetricCompact(metric, val) {
+  if (!Number.isFinite(val)) return '—';
+  switch (metric) {
+    case 'totalTokens':
+    case 'context':
+      return formatTokens(val);
+    case 'tps':
+      return `${val.toFixed(1)} tok/s`;
+    case 'ttft':
+      return `${val.toFixed(1)}s`;
+    case 'cache':
+      return `${val.toFixed(1)}%`;
+    case 'cost':
+      return formatUsd(val, { precise: true });
+    default:
+      return String(val);
+  }
+}
+
+/**
+ * 创建会话全模型线性走势图（支持 `totalTokens` | `context` | `tps` | `ttft` | `cost`，全宽 1:1 贴边对齐）。
+ */
+function createSessionLineChart() {
+  const DEFAULT_VIEW_W = 460;
+  const VIEW_H = 106;
+  const TOP_Y = 18;
+  const BOTTOM_Y = 94;
+  const SPAN_Y = BOTTOM_Y - TOP_Y;
+
+  let viewW = DEFAULT_VIEW_W;
+
+  function resolvePlotBounds(w) {
+    const leftX = 1;
+    const rightX = Math.max(leftX + 20, w - 1);
+    return { leftX, rightX, spanX: rightX - leftX };
+  }
+
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${viewW} ${VIEW_H}`);
+  svg.setAttribute('class', 'sstep-svg');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const gradId = `sstep-line-grad-${++sessionChartUid}`;
+  const defs = document.createElementNS(SVG_NS, 'defs');
+  const grad = document.createElementNS(SVG_NS, 'linearGradient');
+  grad.setAttribute('id', gradId);
+  grad.setAttribute('x1', '0');
+  grad.setAttribute('y1', '0');
+  grad.setAttribute('x2', '0');
+  grad.setAttribute('y2', '1');
+  const stop1 = document.createElementNS(SVG_NS, 'stop');
+  stop1.setAttribute('offset', '0%');
+  stop1.setAttribute('stop-color', 'var(--ctx-cached)');
+  stop1.setAttribute('stop-opacity', '0.28');
+  const stop2 = document.createElementNS(SVG_NS, 'stop');
+  stop2.setAttribute('offset', '100%');
+  stop2.setAttribute('stop-color', 'var(--ctx-cached)');
+  stop2.setAttribute('stop-opacity', '0.0');
+  grad.appendChild(stop1);
+  grad.appendChild(stop2);
+  defs.appendChild(grad);
+  svg.appendChild(defs);
+
+  const gridGroup = document.createElementNS(SVG_NS, 'g');
+  gridGroup.setAttribute('class', 'trend-grid');
+  const gridLines = [];
+  for (const y of [TOP_Y, Math.round((TOP_Y + BOTTOM_Y) / 2), BOTTOM_Y]) {
+    const line = document.createElementNS(SVG_NS, 'line');
+    line.setAttribute('x1', '0');
+    line.setAttribute('y1', String(y));
+    line.setAttribute('x2', String(viewW));
+    line.setAttribute('y2', String(y));
+    gridGroup.appendChild(line);
+    gridLines.push(line);
+  }
+  svg.appendChild(gridGroup);
+
+  const areaPath = document.createElementNS(SVG_NS, 'path');
+  areaPath.setAttribute('fill', `url(#${gradId})`);
+  svg.appendChild(areaPath);
+
+  const multiAreaGroup = document.createElementNS(SVG_NS, 'g');
+  multiAreaGroup.setAttribute('class', 'sstep-multi-area-group');
+  svg.appendChild(multiAreaGroup);
+
+  const linePath = document.createElementNS(SVG_NS, 'path');
+  linePath.setAttribute('class', 'trend-line');
+  linePath.setAttribute('fill', 'none');
+  svg.appendChild(linePath);
+
+  const multiLineGroup = document.createElementNS(SVG_NS, 'g');
+  multiLineGroup.setAttribute('class', 'sstep-multi-line-group');
+  svg.appendChild(multiLineGroup);
+
+  const dotsGroup = document.createElementNS(SVG_NS, 'g');
+  svg.appendChild(dotsGroup);
+
+  const hoverLine = document.createElementNS(SVG_NS, 'line');
+  hoverLine.setAttribute('class', 'trend-hover-line');
+  hoverLine.setAttribute('y1', '10');
+  hoverLine.setAttribute('y2', String(BOTTOM_Y));
+  hoverLine.setAttribute('hidden', 'true');
+  svg.appendChild(hoverLine);
+
+  const hoverDot = document.createElementNS(SVG_NS, 'circle');
+  hoverDot.setAttribute('r', '3.4');
+  hoverDot.setAttribute('class', 'trend-hover-dot');
+  hoverDot.setAttribute('hidden', 'true');
+  svg.appendChild(hoverDot);
+
+  const emptyHintEl = h('div', {
+    className: 'sstep-empty-hint text-muted',
+    text: '当前范围暂无可绘制的调用步骤',
+    hidden: true,
+  });
+
+  const peakPill = h('span', { className: 'trend-peak-pill text-mono', hidden: true });
+
+  const tipHeadLeft = h('span', { className: 'trend-tip-time text-mono' });
+  const tipHeadRight = h('span', { className: 'trend-tip-calls text-mono' });
+  const tipMainLeft = h('strong', { className: 'trend-tip-tokens text-mono' });
+  const tipMainRight = h('span', { className: 'trend-tip-cost text-mono' });
+  const tipSub = h('div', { className: 'trend-tip-sub text-mono', hidden: true });
+  const tooltipEl = h('div', { className: 'trend-tooltip', hidden: true }, [
+    h('div', { className: 'trend-tip-head' }, [tipHeadLeft, tipHeadRight]),
+    h('div', { className: 'trend-tip-main' }, [tipMainLeft, tipMainRight]),
+    tipSub,
+  ]);
+
+  const xAxisEl = h('div', { className: 'trend-x-axis' });
+  const modelLegendEl = h('div', { className: 'sstep-model-legend', hidden: true });
+  const plotStage = h('div', { className: 'sstep-plot-stage' }, [
+    peakPill,
+    emptyHintEl,
+    tooltipEl,
+    svg,
+  ]);
+  const rootEl = h('div', { className: 'sstep-chart-wrap' }, [
+    plotStage,
+    xAxisEl,
+    modelLegendEl,
+  ]);
+
+  let currentPoints = [];
+  let currentMetric = 'totalTokens';
+  let hoveredIdx = -1;
+  let tickElsByIdx = new Map();
+  let lastSig = '';
+  let lastUpdateParams = null;
+
+  function syncViewWidth() {
+    const measured = Math.round(
+      plotStage.clientWidth ||
+        svg.clientWidth ||
+        plotStage.getBoundingClientRect?.()?.width ||
+        0
+    );
+    if (measured >= 160 && measured !== viewW) {
+      viewW = measured;
+      svg.setAttribute('viewBox', `0 0 ${viewW} ${VIEW_H}`);
+      for (const line of gridLines) {
+        line.setAttribute('x1', '0');
+        line.setAttribute('x2', String(viewW));
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function showHoverAt(idx) {
+    if (idx < 0 || idx >= currentPoints.length) {
+      clearHover();
+      return;
+    }
+    hoveredIdx = idx;
+    const pt = currentPoints[idx];
+    patchAttr(hoverLine, 'hidden', false);
+    patchAttr(hoverLine, 'x1', pt.x.toFixed(1));
+    patchAttr(hoverLine, 'x2', pt.x.toFixed(1));
+
+    patchAttr(hoverDot, 'hidden', false);
+    patchAttr(hoverDot, 'cx', pt.x.toFixed(1));
+    patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
+    patchStyleVar(hoverDot, '--hover-dot-color', pt.hoverColor || 'var(--ctx-cached)');
+
+    patchAttr(peakPill, 'hidden', true);
+    patchAttr(tooltipEl, 'hidden', false);
+
+    patchText(tipHeadLeft, pt.stepTag);
+    patchText(tipHeadRight, pt.modelText);
+    patchText(tipMainLeft, pt.valid ? formatChartMetricValue(currentMetric, pt.value) : '未纳入');
+    patchText(tipMainRight, pt.secondaryRight || '');
+    patchAttr(tipSub, 'hidden', !pt.subDetail);
+    if (pt.subDetail) {
+      patchText(tipSub, pt.subDetail);
+    }
+
+    const rawPct = (pt.x / viewW) * 100;
+    const clampedPct = Math.max(1, Math.min(99, rawPct));
+    patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+
+    for (const [tIdx, el] of tickElsByIdx.entries()) {
+      patchClasses(el, { 'is-hovered': tIdx === idx });
+    }
+  }
+
+  function clearHover() {
+    hoveredIdx = -1;
+    patchAttr(hoverLine, 'hidden', true);
+    patchAttr(hoverDot, 'hidden', true);
+    patchAttr(tooltipEl, 'hidden', true);
+    if (currentPoints.some((p) => p.valid)) {
+      patchAttr(peakPill, 'hidden', false);
+    }
+    for (const el of tickElsByIdx.values()) {
+      patchClasses(el, { 'is-hovered': false });
+    }
+  }
+
+  plotStage.addEventListener('mousemove', (e) => {
+    if (!currentPoints.length) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const relX = ((e.clientX - rect.left) / rect.width) * viewW;
+    const { leftX, spanX } = resolvePlotBounds(viewW);
+    const ratio = (relX - leftX) / Math.max(1, spanX);
+    const idx = Math.max(
+      0,
+      Math.min(currentPoints.length - 1, Math.round(ratio * (currentPoints.length - 1)))
+    );
+    showHoverAt(idx);
+  });
+  plotStage.addEventListener('mouseleave', clearHover);
+
+  let resizeObs = null;
+  let onWinResize = null;
+  if (typeof ResizeObserver === 'function') {
+    resizeObs = new ResizeObserver(() => {
+      if (syncViewWidth() && lastUpdateParams) {
+        lastSig = '';
+        update(lastUpdateParams);
+      }
+    });
+    resizeObs.observe(plotStage);
+  } else if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    onWinResize = () => {
+      if (syncViewWidth() && lastUpdateParams) {
+        lastSig = '';
+        update(lastUpdateParams);
+      }
+    };
+    window.addEventListener('resize', onWinResize);
+  }
+
+  function destroy() {
+    resizeObs?.disconnect();
+    resizeObs = null;
+    if (onWinResize && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('resize', onWinResize);
+      onWinResize = null;
+    }
+  }
+
+  /**
+   * @param {{
+   *   steps: Array<object>,
+   *   modelGroupKey?: string,
+   *   modelGroupKeys?: string[]|null,
+   *   modelColorByGroup?: Map<string, string>|null,
+   *   metric: 'totalTokens'|'context'|'tps'|'ttft'|'cost',
+   *   showAgentPrefix?: boolean,
+   *   displaySettings?: object,
+   * }} params
+   * @returns {{ summaryBadge: string }}
+   */
+  function update({
+    steps = [],
+    modelGroupKey = '__all__',
+    modelGroupKeys = null,
+    modelColorByGroup = null,
+    metric = 'totalTokens',
+    showAgentPrefix = false,
+    displaySettings = {},
+  } = {}) {
+    lastUpdateParams = {
+      steps,
+      modelGroupKey,
+      modelGroupKeys,
+      modelColorByGroup,
+      metric,
+      showAgentPrefix,
+      displaySettings,
+    };
+    currentMetric = metric;
+    syncViewWidth();
+
+    const accentColor = 'var(--ctx-cached)';
+    patchAttr(stop1, 'stop-color', accentColor);
+    patchAttr(stop2, 'stop-color', accentColor);
+    patchStyleVar(rootEl, '--sstep-accent', accentColor);
+
+    const rawKeys =
+      Array.isArray(modelGroupKeys) && modelGroupKeys.length > 0
+        ? modelGroupKeys
+        : [modelGroupKey || '__all__'];
+    const isPooledAll = rawKeys.includes('__all__');
+    const targetKeys = isPooledAll
+      ? ['__all__']
+      : Array.from(new Set(rawKeys.map((k) => String(k || '')).filter(Boolean)));
+    const targetKeySet = new Set(targetKeys);
+    const isMultiCompare = !isPooledAll && targetKeys.length >= 2;
+
+    const matchedSteps = isPooledAll
+      ? steps
+      : steps.filter((st) => st && targetKeySet.has(getStepModelGroupKey(st)));
+
+    if (!matchedSteps.length) {
+      currentPoints = [];
+      lastSig = 'empty';
+      patchAttr(areaPath, 'd', '');
+      patchAttr(linePath, 'd', '');
+      while (multiAreaGroup.firstChild) multiAreaGroup.removeChild(multiAreaGroup.firstChild);
+      while (multiLineGroup.firstChild) multiLineGroup.removeChild(multiLineGroup.firstChild);
+      while (dotsGroup.firstChild) dotsGroup.removeChild(dotsGroup.firstChild);
+      while (xAxisEl.firstChild) xAxisEl.removeChild(xAxisEl.firstChild);
+      patchAttr(modelLegendEl, 'hidden', true);
+      patchAttr(peakPill, 'hidden', true);
+      patchAttr(emptyHintEl, 'hidden', false);
+      clearHover();
+      return { summaryBadge: '0 步' };
+    }
+
+    const modelColorMap = new Map();
+    const modelLabelByGroup = new Map();
+    if (isMultiCompare) {
+      for (let i = 0; i < targetKeys.length; i++) {
+        const gk = targetKeys[i];
+        const colorVar =
+          modelColorByGroup?.get(gk) || MODEL_COLOR_VARS[i % MODEL_COLOR_VARS.length];
+        modelColorMap.set(gk, colorVar);
+        const disp = resolveModelDisplayInfo({ modelLabel: gk, label: gk }, displaySettings, {
+          fallback: gk,
+        });
+        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+      }
+    }
+    for (const st of matchedSteps) {
+      const gk = getStepModelGroupKey(st);
+      if (!modelColorMap.has(gk)) {
+        const colorVar =
+          modelColorByGroup?.get(gk) ||
+          MODEL_COLOR_VARS[modelColorMap.size % MODEL_COLOR_VARS.length];
+        modelColorMap.set(gk, colorVar);
+      }
+      if (!modelLabelByGroup.has(gk)) {
+        const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
+        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+      }
+    }
+
+    let runningTokens = 0;
+    let runningCost = 0;
+    let validSum = 0;
+    let validCount = 0;
+    const perModelRunningTokens = new Map();
+    const perModelRunningCost = new Map();
+    const perModelPrevCtx = new Map();
+    const perModelStats = new Map();
+
+    const rawItems = matchedSteps.map((st, idx) => {
+      const gk = getStepModelGroupKey(st);
+      const inTok = Math.max(0, Number(st.inputTokens || 0));
+      const cacheTok = Math.max(0, Number(st.cacheReadTokens || 0));
+      const outTok = Math.max(0, Number(st.outputTokens || 0));
+      const stepTotalTok = inTok + cacheTok + outTok;
+      runningTokens += stepTotalTok;
+      const modelCumTok = (perModelRunningTokens.get(gk) || 0) + stepTotalTok;
+      perModelRunningTokens.set(gk, modelCumTok);
+
+      const stepCost = Number.isFinite(Number(st.costUsd)) ? Math.max(0, Number(st.costUsd)) : null;
+      if (stepCost !== null) {
+        runningCost += stepCost;
+        perModelRunningCost.set(gk, (perModelRunningCost.get(gk) || 0) + stepCost);
+      }
+      const modelCumCost = perModelRunningCost.get(gk) || 0;
+
+      const ctxTok = Math.max(0, Number(st.contextTokens ?? stepTotalTok));
+      const hasPrevModelCtx = perModelPrevCtx.has(gk);
+      const prevSameModelCtx = hasPrevModelCtx ? perModelPrevCtx.get(gk) : ctxTok;
+      perModelPrevCtx.set(gk, ctxTok);
+
+      const prevGlobalCtx =
+        idx > 0
+          ? Math.max(
+              0,
+              Number(
+                matchedSteps[idx - 1].contextTokens ??
+                  Number(matchedSteps[idx - 1].inputTokens || 0) +
+                    Number(matchedSteps[idx - 1].cacheReadTokens || 0) +
+                    Number(matchedSteps[idx - 1].outputTokens || 0)
+              )
+            )
+          : ctxTok;
+      const hasPrevCtx = isMultiCompare ? hasPrevModelCtx : idx > 0;
+      const ctxDelta = isMultiCompare ? ctxTok - prevSameModelCtx : idx > 0 ? ctxTok - prevGlobalCtx : 0;
+
+      const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: '—' });
+      const stepTag = formatStepAxisTag(st, showAgentPrefix);
+
+      let valid = true;
+      let value = 0;
+      let secondaryRight = '';
+      let subDetail = '';
+
+      if (metric === 'totalTokens') {
+        value = isMultiCompare ? modelCumTok : runningTokens;
+        secondaryRight = `本步 +${formatTokens(stepTotalTok)}`;
+        subDetail = `入 ${formatTokens(inTok)} · 缓 ${formatTokens(cacheTok)} · 出 ${formatTokens(outTok)}`;
+      } else if (metric === 'context') {
+        value = ctxTok;
+        if (hasPrevCtx) {
+          const sign = ctxDelta >= 0 ? '+' : '-';
+          secondaryRight = `${sign}${formatTokens(Math.abs(ctxDelta))}`;
+        } else {
+          secondaryRight = `缓存 ${Number(st.cacheHitPct ?? 0)}%`;
+        }
+        subDetail = st.isCompactionStep
+          ? '上下文自动压缩检查点'
+          : `缓存命中 ${Number(st.cacheHitPct ?? 0)}% · 输出 +${formatTokens(outTok)}`;
+      } else if (metric === 'tps') {
+        valid = !st.isCompactionStep && Number.isFinite(st.tokPerSec) && st.tokPerSec > 0;
+        value = valid ? Number(st.tokPerSec) : 0;
+        secondaryRight = Number.isFinite(st.ttftSec) ? `首字 ${st.ttftSec.toFixed(1)}s` : '';
+        subDetail = valid
+          ? `输出 ${formatTokens(outTok)} · 上下文 ${formatTokens(ctxTok)}`
+          : speedReasonText(st.selectedSpeedReason) || (st.isCompactionStep ? '上下文压缩步' : '无测速样本');
+      } else if (metric === 'ttft') {
+        valid = !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0;
+        value = valid ? Number(st.ttftSec) : 0;
+        secondaryRight = Number.isFinite(st.tokPerSec) ? `${st.tokPerSec.toFixed(1)} tok/s` : '';
+        subDetail = valid
+          ? `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(st.cacheHitPct ?? 0)}%`
+          : st.isCompactionStep
+            ? '上下文压缩步'
+            : '无首字计时样本';
+      } else if (metric === 'cost') {
+        valid = stepCost !== null;
+        value = valid ? stepCost : 0;
+        const shownCumCost = isMultiCompare ? modelCumCost : runningCost;
+        secondaryRight = `累计 ${formatUsd(shownCumCost, { precise: shownCumCost > 0 && shownCumCost < 0.1 })}`;
+        subDetail = `缓存 ${Number(st.cacheHitPct ?? 0)}% · 本步 ${formatTokens(stepTotalTok)}`;
+      }
+
+      if (valid) {
+        validSum += value;
+        validCount += 1;
+        let stStat = perModelStats.get(gk);
+        if (!stStat) {
+          stStat = { count: 0, sum: 0, max: 0, last: 0, cumTok: 0, cumCost: 0 };
+          perModelStats.set(gk, stStat);
+        }
+        stStat.count += 1;
+        stStat.sum += value;
+        if (value > stStat.max) stStat.max = value;
+        stStat.last = value;
+        stStat.cumTok = modelCumTok;
+        stStat.cumCost = modelCumCost;
+      }
+
+      const dotColor = modelColorMap.get(gk) || accentColor;
+      return {
+        idx,
+        st,
+        stepTag,
+        modelGroupKey: gk,
+        modelText: disp.text,
+        dotColor,
+        hoverColor: isMultiCompare ? dotColor : accentColor,
+        valid,
+        value,
+        secondaryRight,
+        subDetail,
+      };
+    });
+
+    let maxVal = 0;
+    let peakIdx = -1;
+    for (let i = 0; i < rawItems.length; i++) {
+      if (rawItems[i].valid && rawItems[i].value >= maxVal) {
+        maxVal = rawItems[i].value;
+        peakIdx = i;
+      }
+    }
+
+    const { leftX, rightX, spanX } = resolvePlotBounds(viewW);
+    const denom = maxVal > 0 ? maxVal : 1;
+    const isSingle = rawItems.length === 1;
+    const points = rawItems.map((item, i) => {
+      const x = isSingle
+        ? (leftX + rightX) / 2
+        : leftX + (i / Math.max(1, rawItems.length - 1)) * spanX;
+      const ratio = item.valid && maxVal > 0 ? item.value / denom : 0;
+      const y = item.valid ? BOTTOM_Y - ratio * SPAN_Y : BOTTOM_Y;
+      return { ...item, x, y };
+    });
+    currentPoints = points;
+
+    const validPoints = points.filter((p) => p.valid);
+    patchAttr(emptyHintEl, 'hidden', validPoints.length > 0);
+
+    const colorSig = Array.from(modelColorMap.entries())
+      .map(([k, v]) => `${k}=${v}`)
+      .join(',');
+    const sig =
+      `${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
+      points
+        .map((p) => `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}`)
+        .join('|');
+
+    if (sig !== lastSig) {
+      lastSig = sig;
+      while (multiAreaGroup.firstChild) multiAreaGroup.removeChild(multiAreaGroup.firstChild);
+      while (multiLineGroup.firstChild) multiLineGroup.removeChild(multiLineGroup.firstChild);
+      while (dotsGroup.firstChild) dotsGroup.removeChild(dotsGroup.firstChild);
+
+      if (isMultiCompare) {
+        patchAttr(linePath, 'd', '');
+        patchAttr(areaPath, 'd', '');
+
+        for (const gk of targetKeys) {
+          const seriesColor = modelColorMap.get(gk) || accentColor;
+          const seriesPts = points.filter((p) => p.modelGroupKey === gk && p.valid);
+          if (seriesPts.length === 0) continue;
+
+          if (seriesPts.length === 1) {
+            const singleDot = document.createElementNS(SVG_NS, 'circle');
+            singleDot.setAttribute('cx', seriesPts[0].x.toFixed(1));
+            singleDot.setAttribute('cy', seriesPts[0].y.toFixed(1));
+            singleDot.setAttribute('r', '3.1');
+            singleDot.setAttribute('class', 'sstep-series-single-dot');
+            patchStyleVar(singleDot, '--sstep-series-color', seriesColor);
+            multiLineGroup.appendChild(singleDot);
+          } else {
+            const seriesLineD = buildSplinePath(seriesPts);
+            const firstX = seriesPts[0].x.toFixed(1);
+            const lastX = seriesPts[seriesPts.length - 1].x.toFixed(1);
+
+            const mArea = document.createElementNS(SVG_NS, 'path');
+            mArea.setAttribute('class', 'sstep-multi-area');
+            mArea.setAttribute(
+              'd',
+              `${seriesLineD} L ${lastX} ${BOTTOM_Y} L ${firstX} ${BOTTOM_Y} Z`
+            );
+            patchStyleVar(mArea, '--sstep-series-color', seriesColor);
+            multiAreaGroup.appendChild(mArea);
+
+            const mLine = document.createElementNS(SVG_NS, 'path');
+            mLine.setAttribute('class', 'sstep-fit-line');
+            mLine.setAttribute('fill', 'none');
+            mLine.setAttribute('d', seriesLineD);
+            patchStyleVar(mLine, '--sstep-fit-accent', seriesColor);
+            multiLineGroup.appendChild(mLine);
+
+            if (seriesPts.length <= 36) {
+              for (const pt of seriesPts) {
+                const dot = document.createElementNS(SVG_NS, 'circle');
+                dot.setAttribute('cx', pt.x.toFixed(1));
+                dot.setAttribute('cy', pt.y.toFixed(1));
+                dot.setAttribute('r', seriesPts.length > 20 ? '1.7' : '2.1');
+                dot.setAttribute('class', 'sstep-node-dot');
+                patchStyleVar(dot, '--dot-stroke', seriesColor);
+                dotsGroup.appendChild(dot);
+              }
+            }
+          }
+        }
+      } else {
+        if (validPoints.length === 0) {
+          patchAttr(linePath, 'd', '');
+          patchAttr(areaPath, 'd', '');
+        } else if (validPoints.length === 1) {
+          const yStr = validPoints[0].y.toFixed(1);
+          const lineD = `M ${leftX.toFixed(1)} ${yStr} L ${rightX.toFixed(1)} ${yStr}`;
+          patchAttr(linePath, 'd', lineD);
+          patchAttr(
+            areaPath,
+            'd',
+            `${lineD} L ${rightX.toFixed(1)} ${BOTTOM_Y} L ${leftX.toFixed(1)} ${BOTTOM_Y} Z`
+          );
+        } else {
+          const lineD = buildSplinePath(validPoints);
+          const firstX = validPoints[0].x.toFixed(1);
+          const lastX = validPoints[validPoints.length - 1].x.toFixed(1);
+          patchAttr(linePath, 'd', lineD);
+          patchAttr(areaPath, 'd', `${lineD} L ${lastX} ${BOTTOM_Y} L ${firstX} ${BOTTOM_Y} Z`);
+        }
+
+        if (points.length <= 64) {
+          for (const pt of points) {
+            const dot = document.createElementNS(SVG_NS, 'circle');
+            dot.setAttribute('cx', pt.x.toFixed(1));
+            dot.setAttribute('cy', pt.y.toFixed(1));
+            if (pt.valid) {
+              dot.setAttribute('r', points.length > 36 ? '1.8' : '2.3');
+              dot.setAttribute('class', 'sstep-node-dot');
+              patchStyleVar(
+                dot,
+                '--dot-stroke',
+                modelColorMap.size > 1 ? pt.dotColor : accentColor
+              );
+            } else {
+              dot.setAttribute('r', '1.6');
+              dot.setAttribute('class', 'sstep-node-dot is-skipped');
+            }
+            dotsGroup.appendChild(dot);
+          }
+        }
+      }
+
+      const tickIndices = computeStepTickIndices(points.length);
+      while (xAxisEl.firstChild) xAxisEl.removeChild(xAxisEl.firstChild);
+      tickElsByIdx = new Map();
+      for (let i = 0; i < tickIndices.length; i++) {
+        const tIdx = tickIndices[i];
+        const pt = points[tIdx];
+        if (!pt) continue;
+        const isFirst = !isSingle && i === 0;
+        const isLast = !isSingle && i === tickIndices.length - 1;
+        const pct = isFirst ? 0 : isLast ? 100 : (pt.x / viewW) * 100;
+        const tickEl = h('span', {
+          className: `trend-x-tick text-mono${isFirst ? ' is-start' : isLast ? ' is-end' : ''}`,
+          text: pt.stepTag,
+          title: `${pt.stepTag} · ${pt.modelText}`,
+        });
+        patchStyleVar(tickEl, '--tick-x', `${pct.toFixed(2)}%`);
+        tickEl.onclick = () => showHoverAt(tIdx);
+        xAxisEl.appendChild(tickEl);
+        tickElsByIdx.set(tIdx, tickEl);
+      }
+
+      while (modelLegendEl.firstChild) modelLegendEl.removeChild(modelLegendEl.firstChild);
+      if (isMultiCompare) {
+        patchAttr(modelLegendEl, 'hidden', false);
+        for (const gk of targetKeys) {
+          const colorVar = modelColorMap.get(gk) || accentColor;
+          const swatch = h('span', { className: 'sstep-legend-line' });
+          patchStyleVar(swatch, '--swatch-bg', colorVar);
+          const stStat = perModelStats.get(gk);
+          const baseLabel = modelLabelByGroup.get(gk) || gk;
+          let summarySuffix = '无样本';
+          if (stStat && stStat.count > 0) {
+            if (metric === 'totalTokens') {
+              summarySuffix = formatTokens(stStat.cumTok);
+            } else if (metric === 'context') {
+              summarySuffix = `峰 ${formatTokens(stStat.max)}`;
+            } else if (metric === 'tps' || metric === 'ttft') {
+              summarySuffix = formatChartMetricCompact(metric, stStat.sum / stStat.count);
+            } else if (metric === 'cost') {
+              summarySuffix = formatUsd(stStat.cumCost, {
+                precise: stStat.cumCost > 0 && stStat.cumCost < 0.1,
+              });
+            }
+          }
+          modelLegendEl.appendChild(
+            h('span', { className: 'sstep-legend-item' }, [
+              swatch,
+              h('span', { text: `${baseLabel} (${summarySuffix})` }),
+            ])
+          );
+        }
+      } else {
+        const showPooledDotLegend = points.length <= 64 && modelColorMap.size > 1;
+        patchAttr(modelLegendEl, 'hidden', !showPooledDotLegend);
+        if (showPooledDotLegend) {
+          for (const [gk, colorVar] of modelColorMap.entries()) {
+            const swatch = h('span', { className: 'sstep-legend-dot' });
+            patchStyleVar(swatch, '--swatch-bg', colorVar);
+            modelLegendEl.appendChild(
+              h('span', { className: 'sstep-legend-item' }, [
+                swatch,
+                h('span', { text: modelLabelByGroup.get(gk) || gk }),
+              ])
+            );
+          }
+        }
+      }
+    }
+
+    if (peakIdx >= 0 && validPoints.length > 0) {
+      const peakPt = points[peakIdx];
+      patchText(
+        peakPill,
+        `峰值 ${peakPt.stepTag} · ${formatChartMetricCompact(metric, peakPt.value)}`
+      );
+      patchStyleVar(peakPill, '--sstep-accent', isMultiCompare ? peakPt.dotColor : accentColor);
+      const pctLeft = Math.max(14, Math.min(86, (peakPt.x / viewW) * 100));
+      patchStyleVar(peakPill, '--peak-x', `${pctLeft.toFixed(1)}%`);
+      if (hoveredIdx < 0) patchAttr(peakPill, 'hidden', false);
+    } else {
+      patchAttr(peakPill, 'hidden', true);
+    }
+
+    if (hoveredIdx >= points.length) {
+      clearHover();
+    } else if (hoveredIdx >= 0) {
+      showHoverAt(hoveredIdx);
+    }
+
+    let summaryBadge = `${matchedSteps.length}步`;
+    const activeCompareCount = isMultiCompare ? targetKeys.length : 1;
+    const multiPrefix = isMultiCompare ? `${activeCompareCount} 模型 · ` : '';
+    if (metric === 'totalTokens') {
+      summaryBadge = `${multiPrefix}累计 ${formatTokens(runningTokens)}`;
+    } else if (metric === 'context') {
+      const lastCtx = points[points.length - 1]?.value || 0;
+      summaryBadge = isMultiCompare
+        ? `${multiPrefix}峰值 ${formatTokens(maxVal)}`
+        : `当前 ${formatTokens(lastCtx)}`;
+    } else if (metric === 'tps') {
+      summaryBadge =
+        validCount > 0
+          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)} tok/s`
+          : '暂无有效样本';
+    } else if (metric === 'ttft') {
+      summaryBadge =
+        validCount > 0
+          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)}s`
+          : '暂无有效样本';
+    } else if (metric === 'cost') {
+      summaryBadge = `${multiPrefix}累计 ${formatUsd(runningCost, { precise: runningCost > 0 && runningCost < 0.1 })}`;
+    }
+
+    return { summaryBadge };
+  }
+
+  return { el: rootEl, update, destroy };
+}
+
+/**
+ * 创建学术论文风格散点回归与 95% 置信带拟合图（全宽 1:1 贴边对齐 + 项目统一冷蓝灰设计语言）：
+ * - 全宽水平参考网格与底部线性步序刻度轴（内嵌左对齐 Y 轴刻度标签，零左右缩进留白）；
+ * - 半透明冷蓝灰实心观测散点（自然呈现重叠密度）；
+ * - 围绕回归曲线的 95% CI 置信区间阴影带（绝不向 y=0 做面积图填充）；
+ * - 高斯局部线性回归曲线（LOESS, n >= 6）或精确线性回归（OLS, n <= 5），配相关系数 r 与拟合优度 R²。
+ */
+function createModelFitChart() {
+  const DEFAULT_VIEW_W = 460;
+  const VIEW_H = 136;
+  const TOP_Y = 16;
+  const BOTTOM_Y = 116;
+  const SPAN_Y = BOTTOM_Y - TOP_Y;
+
+  let viewW = DEFAULT_VIEW_W;
+
+  function resolveFitBounds(w) {
+    const plotLeft = 2;
+    const plotRight = Math.max(plotLeft + 20, w - 2);
+    return { plotLeft, plotRight, plotSpanX: plotRight - plotLeft };
+  }
+
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${viewW} ${VIEW_H}`);
+  svg.setAttribute('class', 'sstep-svg sstep-fit-svg');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const gridGroup = document.createElementNS(SVG_NS, 'g');
+  gridGroup.setAttribute('class', 'sstep-sci-grid');
+  svg.appendChild(gridGroup);
+
+  const axesGroup = document.createElementNS(SVG_NS, 'g');
+  axesGroup.setAttribute('class', 'sstep-sci-axes');
+  svg.appendChild(axesGroup);
+
+  const multiBandGroup = document.createElementNS(SVG_NS, 'g');
+  multiBandGroup.setAttribute('class', 'sstep-multi-band-group');
+  svg.appendChild(multiBandGroup);
+
+  const scatterGroup = document.createElementNS(SVG_NS, 'g');
+  scatterGroup.setAttribute('class', 'sstep-scatter-group');
+  svg.appendChild(scatterGroup);
+
+  const multiCurveGroup = document.createElementNS(SVG_NS, 'g');
+  multiCurveGroup.setAttribute('class', 'sstep-multi-curve-group');
+  svg.appendChild(multiCurveGroup);
+
+  const ciBandPath = document.createElementNS(SVG_NS, 'path');
+  ciBandPath.setAttribute('class', 'sstep-ci-band');
+  svg.appendChild(ciBandPath);
+
+  const olsLine = document.createElementNS(SVG_NS, 'line');
+  olsLine.setAttribute('class', 'sstep-ols-line');
+  olsLine.setAttribute('hidden', 'true');
+  svg.appendChild(olsLine);
+
+  const fitPath = document.createElementNS(SVG_NS, 'path');
+  fitPath.setAttribute('class', 'sstep-fit-line');
+  fitPath.setAttribute('fill', 'none');
+  svg.appendChild(fitPath);
+
+  const hoverLine = document.createElementNS(SVG_NS, 'line');
+  hoverLine.setAttribute('class', 'trend-hover-line');
+  hoverLine.setAttribute('y1', String(TOP_Y));
+  hoverLine.setAttribute('y2', String(BOTTOM_Y));
+  hoverLine.setAttribute('hidden', 'true');
+  svg.appendChild(hoverLine);
+
+  const hoverRawDot = document.createElementNS(SVG_NS, 'circle');
+  hoverRawDot.setAttribute('r', '3.0');
+  hoverRawDot.setAttribute('class', 'sstep-hover-raw-dot');
+  hoverRawDot.setAttribute('hidden', 'true');
+  svg.appendChild(hoverRawDot);
+
+  const hoverFitDot = document.createElementNS(SVG_NS, 'circle');
+  hoverFitDot.setAttribute('r', '3.1');
+  hoverFitDot.setAttribute('class', 'trend-hover-dot');
+  hoverFitDot.setAttribute('hidden', 'true');
+  svg.appendChild(hoverFitDot);
+
+  const emptyHintEl = h('div', {
+    className: 'sstep-empty-hint text-muted',
+    text: '该模型暂无有效拟合样本',
+    hidden: true,
+  });
+
+  const tipHeadLeft = h('span', { className: 'trend-tip-time text-mono' });
+  const tipHeadRight = h('span', { className: 'trend-tip-calls text-mono' });
+  const tipMainLeft = h('strong', { className: 'trend-tip-tokens text-mono' });
+  const tipMainRight = h('span', { className: 'trend-tip-cost text-mono' });
+  const tipSub = h('div', { className: 'trend-tip-sub text-mono', hidden: true });
+  const tooltipEl = h('div', { className: 'trend-tooltip', hidden: true }, [
+    h('div', { className: 'trend-tip-head' }, [tipHeadLeft, tipHeadRight]),
+    h('div', { className: 'trend-tip-main' }, [tipMainLeft, tipMainRight]),
+    tipSub,
+  ]);
+
+  const fitMethodLabelEl = h('span', { text: 'LOESS 拟合' });
+  const olsLegendWrapEl = h('span', { className: 'sstep-fit-legend-ols' }, [
+    h('span', { className: 'sstep-fit-swatch is-ols' }),
+    h('span', { text: 'OLS 线性' }),
+  ]);
+  const singleLegendEl = h('span', { className: 'sstep-fit-legend' }, [
+    h('span', { className: 'sstep-fit-swatch is-scatter' }),
+    h('span', { text: '观测值' }),
+    h('span', { className: 'sstep-fit-swatch is-curve' }),
+    fitMethodLabelEl,
+    h('span', { className: 'sstep-fit-swatch is-ci' }),
+    h('span', { text: '95% CI' }),
+    olsLegendWrapEl,
+  ]);
+  const multiLegendEl = h('div', { className: 'sstep-model-legend', hidden: true });
+  const fitStatsEl = h('span', { className: 'sstep-fit-delta text-mono text-muted' });
+
+  const fitLegendFoot = h('div', { className: 'sstep-fit-foot' }, [
+    singleLegendEl,
+    multiLegendEl,
+    fitStatsEl,
+  ]);
+
+  const plotStage = h('div', { className: 'sstep-plot-stage' }, [emptyHintEl, tooltipEl, svg]);
+  const rootEl = h('div', { className: 'sstep-chart-wrap' }, [plotStage, fitLegendFoot]);
+
+  let currentSamples = [];
+  let currentMetric = 'tps';
+  let hoveredIdx = -1;
+  let lastSig = '';
+  let lastUpdateParams = null;
+
+  function syncViewWidth() {
+    const measured = Math.round(
+      plotStage.clientWidth ||
+        svg.clientWidth ||
+        plotStage.getBoundingClientRect?.()?.width ||
+        0
+    );
+    if (measured >= 160 && measured !== viewW) {
+      viewW = measured;
+      svg.setAttribute('viewBox', `0 0 ${viewW} ${VIEW_H}`);
+      return true;
+    }
+    return false;
+  }
+
+  function showHoverAt(idx) {
+    if (idx < 0 || idx >= currentSamples.length) {
+      clearHover();
+      return;
+    }
+    hoveredIdx = idx;
+    const sp = currentSamples[idx];
+    patchAttr(hoverLine, 'hidden', false);
+    patchAttr(hoverLine, 'x1', sp.x.toFixed(1));
+    patchAttr(hoverLine, 'x2', sp.x.toFixed(1));
+
+    patchAttr(hoverFitDot, 'hidden', false);
+    patchAttr(hoverFitDot, 'cx', sp.x.toFixed(1));
+    patchAttr(hoverFitDot, 'cy', sp.fitY.toFixed(1));
+    patchStyleVar(hoverFitDot, '--hover-dot-color', sp.seriesColor || 'var(--accent-primary)');
+
+    patchAttr(hoverRawDot, 'hidden', false);
+    patchAttr(hoverRawDot, 'cx', sp.x.toFixed(1));
+    patchAttr(hoverRawDot, 'cy', sp.rawY.toFixed(1));
+
+    patchAttr(tooltipEl, 'hidden', false);
+    patchText(tipHeadLeft, sp.stepTag);
+    patchText(tipHeadRight, sp.modelText);
+    patchText(tipMainLeft, `拟合 ${formatChartMetricValue(currentMetric, sp.fitVal)}`);
+    patchText(tipMainRight, `观测 ${formatChartMetricValue(currentMetric, sp.rawVal)}`);
+
+    patchAttr(tipSub, 'hidden', false);
+    if (sp.compareHint) {
+      patchText(tipSub, sp.compareHint);
+    } else if (currentSamples.length >= 3 && sp.ciHalf > 0) {
+      patchText(
+        tipSub,
+        `95% CI [${formatChartMetricCompact(currentMetric, sp.ciLow)}, ${formatChartMetricCompact(currentMetric, sp.ciHigh)}]`
+      );
+    } else {
+      const ctxTok = Math.max(0, Number(sp.st?.contextTokens || 0));
+      patchText(
+        tipSub,
+        `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(sp.st?.cacheHitPct ?? 0)}%`
+      );
+    }
+
+    const rawPct = (sp.x / viewW) * 100;
+    const clampedPct = Math.max(1, Math.min(99, rawPct));
+    patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+  }
+
+  function clearHover() {
+    hoveredIdx = -1;
+    patchAttr(hoverLine, 'hidden', true);
+    patchAttr(hoverFitDot, 'hidden', true);
+    patchAttr(hoverRawDot, 'hidden', true);
+    patchAttr(tooltipEl, 'hidden', true);
+  }
+
+  plotStage.addEventListener('mousemove', (e) => {
+    if (!currentSamples.length) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const relX = ((e.clientX - rect.left) / rect.width) * viewW;
+    let bestIdx = 0;
+    let bestDist = Math.abs(currentSamples[0].x - relX);
+    for (let i = 1; i < currentSamples.length; i++) {
+      const d = Math.abs(currentSamples[i].x - relX);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    showHoverAt(bestIdx);
+  });
+  plotStage.addEventListener('mouseleave', clearHover);
+
+  let resizeObs = null;
+  let onWinResize = null;
+  if (typeof ResizeObserver === 'function') {
+    resizeObs = new ResizeObserver(() => {
+      if (syncViewWidth() && lastUpdateParams) {
+        lastSig = '';
+        update(lastUpdateParams);
+      }
+    });
+    resizeObs.observe(plotStage);
+  } else if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    onWinResize = () => {
+      if (syncViewWidth() && lastUpdateParams) {
+        lastSig = '';
+        update(lastUpdateParams);
+      }
+    };
+    window.addEventListener('resize', onWinResize);
+  }
+
+  function destroy() {
+    resizeObs?.disconnect();
+    resizeObs = null;
+    if (onWinResize && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('resize', onWinResize);
+      onWinResize = null;
+    }
+  }
+
+  /**
+   * 在给定横坐标 x0 处对某模型的回归网格做线性插值（仅当 x0 位于该模型观测区间内时返回拟合值）。
+   */
+  function interpolateSeriesGridFit(grid, x0) {
+    if (!Array.isArray(grid) || grid.length === 0) return null;
+    if (grid.length === 1) {
+      return Math.abs(grid[0].x - x0) < 1e-6 ? grid[0].fit : null;
+    }
+    const gMin = grid[0].x;
+    const gMax = grid[grid.length - 1].x;
+    if (x0 < gMin - 1e-6 || x0 > gMax + 1e-6) return null;
+    if (x0 <= gMin) return grid[0].fit;
+    if (x0 >= gMax) return grid[grid.length - 1].fit;
+    for (let i = 0; i < grid.length - 1; i++) {
+      const a = grid[i];
+      const b = grid[i + 1];
+      if (x0 >= a.x && x0 <= b.x) {
+        const span = b.x - a.x;
+        const t = span > 1e-9 ? (x0 - a.x) / span : 0;
+        return a.fit + t * (b.fit - a.fit);
+      }
+    }
+    return grid[grid.length - 1].fit;
+  }
+
+  /**
+   * 绘制共享的水平网格线、底部步序坐标轴及左对齐内联 Y 轴刻度标签。
+   */
+  function renderFitAxesAndGrid({ yScale, mapY, mapX, xs, isSingle, plotLeft, plotRight, metric, showAgentPrefix }) {
+    while (gridGroup.firstChild) gridGroup.removeChild(gridGroup.firstChild);
+    while (axesGroup.firstChild) axesGroup.removeChild(axesGroup.firstChild);
+
+    const xMin = xs[0];
+    const xMax = xs[xs.length - 1];
+
+    const xSpine = document.createElementNS(SVG_NS, 'line');
+    xSpine.setAttribute('x1', '0');
+    xSpine.setAttribute('y1', String(BOTTOM_Y));
+    xSpine.setAttribute('x2', String(viewW));
+    xSpine.setAttribute('y2', String(BOTTOM_Y));
+    xSpine.setAttribute('class', 'sstep-axis-spine');
+    axesGroup.appendChild(xSpine);
+
+    for (const tv of yScale.ticks) {
+      const ty = mapY(tv);
+      if (Math.abs(ty - BOTTOM_Y) > 1.5) {
+        const gLine = document.createElementNS(SVG_NS, 'line');
+        gLine.setAttribute('x1', '0');
+        gLine.setAttribute('y1', ty.toFixed(1));
+        gLine.setAttribute('x2', String(viewW));
+        gLine.setAttribute('y2', ty.toFixed(1));
+        gridGroup.appendChild(gLine);
+      }
+
+      const labelEl = document.createElementNS(SVG_NS, 'text');
+      labelEl.setAttribute('x', '0');
+      labelEl.setAttribute('y', (ty - 3.5).toFixed(1));
+      labelEl.setAttribute('text-anchor', 'start');
+      labelEl.setAttribute('class', 'sstep-axis-label is-y-inline');
+      labelEl.textContent = formatYAxisTick(metric, tv, yScale.step);
+      axesGroup.appendChild(labelEl);
+    }
+
+    const xTickEntries = [];
+    if (isSingle) {
+      xTickEntries.push({
+        xv: Math.round(xMin),
+        tickX: mapX(xMin),
+        labelX: mapX(xMin),
+        anchor: 'middle',
+      });
+    } else {
+      xTickEntries.push({
+        xv: Math.round(xMin),
+        tickX: plotLeft,
+        labelX: 0,
+        anchor: 'start',
+      });
+      const interiorTicks = computeNiceXStepTicks(xs);
+      for (const xv of interiorTicks) {
+        if (xv <= xMin || xv >= xMax) continue;
+        const tx = mapX(xv);
+        if (tx < plotLeft + 38 || tx > plotRight - 38) continue;
+        xTickEntries.push({
+          xv,
+          tickX: tx,
+          labelX: tx,
+          anchor: 'middle',
+        });
+      }
+      xTickEntries.push({
+        xv: Math.round(xMax),
+        tickX: plotRight,
+        labelX: viewW,
+        anchor: 'end',
+      });
+    }
+
+    for (const xt of xTickEntries) {
+      const tickMark = document.createElementNS(SVG_NS, 'line');
+      tickMark.setAttribute('x1', xt.tickX.toFixed(1));
+      tickMark.setAttribute('y1', String(BOTTOM_Y));
+      tickMark.setAttribute('x2', xt.tickX.toFixed(1));
+      tickMark.setAttribute('y2', (BOTTOM_Y + 3.2).toFixed(1));
+      tickMark.setAttribute('class', 'sstep-axis-tick');
+      axesGroup.appendChild(tickMark);
+
+      const labelEl = document.createElementNS(SVG_NS, 'text');
+      labelEl.setAttribute('x', xt.labelX.toFixed(1));
+      labelEl.setAttribute('y', (BOTTOM_Y + 13.5).toFixed(1));
+      labelEl.setAttribute('text-anchor', xt.anchor);
+      labelEl.setAttribute('class', 'sstep-axis-label');
+      labelEl.textContent = showAgentPrefix ? `${xt.xv}` : `#${xt.xv}`;
+      axesGroup.appendChild(labelEl);
+    }
+  }
+
+  /**
+   * @param {{
+   *   steps: Array<object>,
+   *   modelGroupKey?: string,
+   *   modelGroupKeys?: string[]|null,
+   *   modelColorByGroup?: Map<string, string>|null,
+   *   metric: 'tps'|'ttft'|'cache'|'cost',
+   *   showAgentPrefix?: boolean,
+   *   displaySettings?: object,
+   * }} params
+   * @returns {{ sampleCount: number, summaryBadge: string }}
+   */
+  function update({
+    steps = [],
+    modelGroupKey = '__all__',
+    modelGroupKeys = null,
+    modelColorByGroup = null,
+    metric = 'tps',
+    showAgentPrefix = false,
+    displaySettings = {},
+  } = {}) {
+    lastUpdateParams = {
+      steps,
+      modelGroupKey,
+      modelGroupKeys,
+      modelColorByGroup,
+      metric,
+      showAgentPrefix,
+      displaySettings,
+    };
+    currentMetric = metric;
+    syncViewWidth();
+
+    patchStyleVar(rootEl, '--sstep-fit-accent', 'var(--ctx-cached)');
+
+    const rawKeys =
+      Array.isArray(modelGroupKeys) && modelGroupKeys.length > 0
+        ? modelGroupKeys
+        : [modelGroupKey || '__all__'];
+    const isPooledAll = rawKeys.includes('__all__');
+    const targetKeys = isPooledAll
+      ? ['__all__']
+      : Array.from(new Set(rawKeys.map((k) => String(k || '')).filter(Boolean)));
+    const targetKeySet = new Set(targetKeys);
+    const isMultiCompare = !isPooledAll && targetKeys.length >= 2;
+
+    const matchedItems = [];
+    let prevXVal = -Infinity;
+    for (let idx = 0; idx < steps.length; idx++) {
+      const st = steps[idx];
+      if (!st || typeof st !== 'object') continue;
+      let globalX = showAgentPrefix ? idx + 1 : Number(st.stepIndex ?? idx + 1);
+      if (!Number.isFinite(globalX) || globalX <= prevXVal) {
+        globalX = prevXVal === -Infinity ? idx + 1 : prevXVal + 1;
+      }
+      prevXVal = globalX;
+
+      const gk = getStepModelGroupKey(st);
+      if (!isPooledAll && !targetKeySet.has(gk)) {
+        continue;
+      }
+      let valid = false;
+      let rawVal = 0;
+      if (metric === 'tps') {
+        valid = !st.isCompactionStep && Number.isFinite(st.tokPerSec) && st.tokPerSec > 0;
+        rawVal = valid ? Number(st.tokPerSec) : 0;
+      } else if (metric === 'ttft') {
+        valid = !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0;
+        rawVal = valid ? Number(st.ttftSec) : 0;
+      } else if (metric === 'cache') {
+        valid = !st.isCompactionStep && Number.isFinite(st.cacheHitPct) && st.cacheHitPct >= 0;
+        rawVal = valid ? Number(st.cacheHitPct) : 0;
+      } else if (metric === 'cost') {
+        valid = Number.isFinite(Number(st.costUsd)) && Number(st.costUsd) >= 0;
+        rawVal = valid ? Number(st.costUsd) : 0;
+      }
+      if (valid) {
+        const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: '—' });
+        matchedItems.push({
+          st,
+          gk,
+          xVal: globalX,
+          rawVal,
+          stepTag: formatStepAxisTag(st, showAgentPrefix),
+          modelText: disp.text.replace(/·压缩\s*$/u, '').trim() || disp.text,
+        });
+      }
+    }
+
+    if (matchedItems.length === 0) {
+      currentSamples = [];
+      lastSig = 'empty';
+      patchAttr(ciBandPath, 'd', '');
+      patchAttr(fitPath, 'd', '');
+      patchAttr(olsLine, 'hidden', true);
+      while (multiBandGroup.firstChild) multiBandGroup.removeChild(multiBandGroup.firstChild);
+      while (multiCurveGroup.firstChild) multiCurveGroup.removeChild(multiCurveGroup.firstChild);
+      while (gridGroup.firstChild) gridGroup.removeChild(gridGroup.firstChild);
+      while (axesGroup.firstChild) axesGroup.removeChild(axesGroup.firstChild);
+      while (scatterGroup.firstChild) scatterGroup.removeChild(scatterGroup.firstChild);
+      patchAttr(singleLegendEl, 'hidden', false);
+      patchAttr(multiLegendEl, 'hidden', true);
+      patchAttr(emptyHintEl, 'hidden', false);
+      patchText(fitStatsEl, 'n = 0');
+      clearHover();
+      return { sampleCount: 0, summaryBadge: '0 样本' };
+    }
+
+    patchAttr(emptyHintEl, 'hidden', true);
+    const minBound = 0;
+    const maxBound = metric === 'cache' ? 100 : Infinity;
+
+    // 分支 A：多模型同图独立拟合曲线对比模式（勾选 >= 2 个模型）
+    if (isMultiCompare) {
+      const seriesList = [];
+      for (let kIdx = 0; kIdx < targetKeys.length; kIdx++) {
+        const key = targetKeys[kIdx];
+        const items = matchedItems.filter((it) => it.gk === key);
+        if (items.length === 0) continue;
+        const xs = items.map((d) => d.xVal);
+        const rawYs = items.map((d) => d.rawVal);
+        const pubFit = computePublicationFit(xs, rawYs, {
+          minVal: minBound,
+          maxVal: maxBound,
+          gridSize: 56,
+          span: 0.5,
+        });
+        const colorVar =
+          modelColorByGroup?.get(key) || MODEL_COLOR_VARS[kIdx % MODEL_COLOR_VARS.length];
+        seriesList.push({
+          key,
+          label: items[0].modelText || key,
+          colorVar,
+          items,
+          xs,
+          rawYs,
+          pubFit,
+        });
+      }
+
+      patchAttr(singleLegendEl, 'hidden', true);
+      patchAttr(multiLegendEl, 'hidden', false);
+      patchAttr(ciBandPath, 'd', '');
+      patchAttr(fitPath, 'd', '');
+      patchAttr(olsLine, 'hidden', true);
+
+      const allXs = matchedItems.map((d) => d.xVal);
+      let dataMin = Infinity;
+      let dataMax = -Infinity;
+      for (const s of seriesList) {
+        for (const v of s.rawYs) {
+          if (v < dataMin) dataMin = v;
+          if (v > dataMax) dataMax = v;
+        }
+        for (const g of s.pubFit.grid) {
+          if (g.ciLow < dataMin) dataMin = g.ciLow;
+          if (g.ciHigh > dataMax) dataMax = g.ciHigh;
+        }
+      }
+
+      const yScale = computeNiceYScale(dataMin, dataMax, {
+        minBound,
+        maxBound,
+        tickCount: 4,
+      });
+      const yRange = Math.max(1e-9, yScale.max - yScale.min);
+      const mapY = (v) =>
+        BOTTOM_Y - ((clampValue(v, yScale.min, yScale.max) - yScale.min) / yRange) * SPAN_Y;
+
+      const { plotLeft, plotRight, plotSpanX } = resolveFitBounds(viewW);
+      const xMin = allXs[0];
+      const xMax = allXs[allXs.length - 1];
+      const isSingle = matchedItems.length === 1 || xMax - xMin <= 1e-9;
+      const mapX = (xv) =>
+        isSingle
+          ? (plotLeft + plotRight) / 2
+          : plotLeft + ((xv - xMin) / (xMax - xMin)) * plotSpanX;
+
+      const combinedSamples = [];
+      for (const s of seriesList) {
+        const sSamples = s.items.map((item, i) => {
+          const x = mapX(item.xVal);
+          const rawY = mapY(item.rawVal);
+          const fitVal = s.pubFit.sampleFits[i];
+          const fitY = mapY(fitVal);
+          const peerParts = [];
+          for (const other of seriesList) {
+            if (other.key === s.key) continue;
+            const interp = interpolateSeriesGridFit(other.pubFit.grid, item.xVal);
+            if (interp !== null) {
+              peerParts.push(`${other.label} ${formatChartMetricCompact(metric, interp)}`);
+            } else {
+              peerParts.push(`${other.label} 均 ${formatChartMetricCompact(metric, other.pubFit.mean)}`);
+            }
+          }
+          return {
+            ...item,
+            x,
+            rawY,
+            fitVal,
+            fitY,
+            ciLow: s.pubFit.sampleCiLow[i],
+            ciHigh: s.pubFit.sampleCiHigh[i],
+            ciHalf: s.pubFit.sampleCiHalf[i],
+            seriesColor: s.colorVar,
+            compareHint: peerParts.length > 0 ? `同图对比：${peerParts.join(' · ')}` : '',
+          };
+        });
+        s.samples = sSamples;
+        combinedSamples.push(...sSamples);
+      }
+      combinedSamples.sort((a, b) => a.x - b.x || a.xVal - b.xVal);
+      currentSamples = combinedSamples;
+
+      const sig =
+        `multi|${viewW}|${targetKeys.join(',')}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+        seriesList
+          .map(
+            (s) =>
+              `${s.key}:${s.colorVar}:` +
+              s.samples.map((p) => `${p.xVal}:${p.rawVal.toFixed(3)}:${p.fitVal.toFixed(3)}`).join(',')
+          )
+          .join('||');
+
+      if (sig !== lastSig) {
+        lastSig = sig;
+        renderFitAxesAndGrid({
+          yScale,
+          mapY,
+          mapX,
+          xs: allXs,
+          isSingle,
+          plotLeft,
+          plotRight,
+          metric,
+          showAgentPrefix,
+        });
+
+        while (multiBandGroup.firstChild) multiBandGroup.removeChild(multiBandGroup.firstChild);
+        while (scatterGroup.firstChild) scatterGroup.removeChild(scatterGroup.firstChild);
+        while (multiCurveGroup.firstChild) multiCurveGroup.removeChild(multiCurveGroup.firstChild);
+
+        const dotRadius =
+          combinedSamples.length > 80 ? '1.8' : combinedSamples.length > 36 ? '2.1' : '2.4';
+
+        for (const s of seriesList) {
+          for (const sp of s.samples) {
+            const dot = document.createElementNS(SVG_NS, 'circle');
+            dot.setAttribute('cx', sp.x.toFixed(1));
+            dot.setAttribute('cy', sp.rawY.toFixed(1));
+            dot.setAttribute('r', dotRadius);
+            dot.setAttribute('class', 'sstep-scatter-dot is-multi');
+            patchStyleVar(dot, '--sstep-fit-accent', s.colorVar);
+            scatterGroup.appendChild(dot);
+          }
+
+          if (s.samples.length === 1) {
+            const sp = s.samples[0];
+            const segHalf = Math.min(12, plotSpanX * 0.04);
+            const x1 = Math.max(plotLeft, sp.x - segHalf).toFixed(1);
+            const x2 = Math.min(plotRight, sp.x + segHalf).toFixed(1);
+            const yStr = sp.fitY.toFixed(1);
+            const lineEl = document.createElementNS(SVG_NS, 'path');
+            lineEl.setAttribute('class', 'sstep-fit-line');
+            lineEl.setAttribute('fill', 'none');
+            lineEl.setAttribute('d', `M ${x1} ${yStr} L ${x2} ${yStr}`);
+            patchStyleVar(lineEl, '--sstep-fit-accent', s.colorVar);
+            multiCurveGroup.appendChild(lineEl);
+          } else {
+            const gridPts = s.pubFit.grid.map((g) => ({
+              x: mapX(g.x),
+              fitY: mapY(g.fit),
+              lowY: mapY(g.ciLow),
+              highY: mapY(g.ciHigh),
+            }));
+
+            if (s.samples.length >= 3) {
+              let bandD = `M ${gridPts[0].x.toFixed(1)} ${gridPts[0].highY.toFixed(1)}`;
+              for (let i = 1; i < gridPts.length; i++) {
+                bandD += ` L ${gridPts[i].x.toFixed(1)} ${gridPts[i].highY.toFixed(1)}`;
+              }
+              for (let i = gridPts.length - 1; i >= 0; i--) {
+                bandD += ` L ${gridPts[i].x.toFixed(1)} ${gridPts[i].lowY.toFixed(1)}`;
+              }
+              bandD += ' Z';
+              const bandEl = document.createElementNS(SVG_NS, 'path');
+              bandEl.setAttribute('class', 'sstep-ci-band is-multi');
+              bandEl.setAttribute('d', bandD);
+              patchStyleVar(bandEl, '--sstep-fit-accent', s.colorVar);
+              multiBandGroup.appendChild(bandEl);
+            }
+
+            const curveEl = document.createElementNS(SVG_NS, 'path');
+            curveEl.setAttribute('class', 'sstep-fit-line');
+            curveEl.setAttribute('fill', 'none');
+            curveEl.setAttribute(
+              'd',
+              buildPolylinePath(gridPts.map((p) => ({ x: p.x, y: p.fitY })))
+            );
+            patchStyleVar(curveEl, '--sstep-fit-accent', s.colorVar);
+            multiCurveGroup.appendChild(curveEl);
+          }
+        }
+
+        while (multiLegendEl.firstChild) multiLegendEl.removeChild(multiLegendEl.firstChild);
+        for (const s of seriesList) {
+          const swatch = h('span', { className: 'sstep-legend-line' });
+          patchStyleVar(swatch, '--swatch-bg', s.colorVar);
+          multiLegendEl.appendChild(
+            h('span', { className: 'sstep-legend-item' }, [
+              swatch,
+              h('span', {
+                text: `${s.label} (${formatChartMetricCompact(metric, s.pubFit.mean)})`,
+              }),
+            ])
+          );
+        }
+      }
+
+      const r2SummaryTitle = seriesList
+        .map((s) => {
+          const rSign = s.pubFit.r >= 0 ? '+' : '';
+          return `${s.label}: n=${s.samples.length}, r=${rSign}${s.pubFit.r.toFixed(2)}, R²=${s.pubFit.r2.toFixed(2)}`;
+        })
+        .join(' | ');
+      patchText(
+        fitStatsEl,
+        seriesList.length <= 2
+          ? seriesList.map((s) => `R²=${s.pubFit.r2.toFixed(2)}`).join(' · ')
+          : `${seriesList.length} 条拟合线`
+      );
+      patchAttr(fitStatsEl, 'title', r2SummaryTitle);
+
+      if (hoveredIdx >= currentSamples.length) {
+        clearHover();
+      } else if (hoveredIdx >= 0) {
+        showHoverAt(hoveredIdx);
+      }
+
+      return {
+        sampleCount: combinedSamples.length,
+        summaryBadge: `${combinedSamples.length}步 · ${seriesList.length} 模型对比`,
+      };
+    }
+
+    // 分支 B：单模型或整体合并单曲线模式
+    while (multiBandGroup.firstChild) multiBandGroup.removeChild(multiBandGroup.firstChild);
+    while (multiCurveGroup.firstChild) multiCurveGroup.removeChild(multiCurveGroup.firstChild);
+    patchAttr(singleLegendEl, 'hidden', false);
+    patchAttr(multiLegendEl, 'hidden', true);
+
+    const filtered = matchedItems;
+    const xs = filtered.map((d) => d.xVal);
+    const rawYs = filtered.map((d) => d.rawVal);
+    const pubFit = computePublicationFit(xs, rawYs, {
+      minVal: minBound,
+      maxVal: maxBound,
+      gridSize: 64,
+      span: 0.5,
+    });
+
+    patchText(fitMethodLabelEl, pubFit.method === 'LOESS' ? 'LOESS 拟合' : 'OLS 回归');
+    patchAttr(olsLegendWrapEl, 'hidden', filtered.length < 6);
+
+    let dataMin = Infinity;
+    let dataMax = -Infinity;
+    for (let i = 0; i < filtered.length; i++) {
+      if (rawYs[i] < dataMin) dataMin = rawYs[i];
+      if (rawYs[i] > dataMax) dataMax = rawYs[i];
+    }
+    for (const g of pubFit.grid) {
+      if (g.ciLow < dataMin) dataMin = g.ciLow;
+      if (g.ciHigh > dataMax) dataMax = g.ciHigh;
+    }
+
+    const yScale = computeNiceYScale(dataMin, dataMax, {
+      minBound,
+      maxBound,
+      tickCount: 4,
+    });
+    const yRange = Math.max(1e-9, yScale.max - yScale.min);
+    const mapY = (v) =>
+      BOTTOM_Y - ((clampValue(v, yScale.min, yScale.max) - yScale.min) / yRange) * SPAN_Y;
+
+    const { plotLeft, plotRight, plotSpanX } = resolveFitBounds(viewW);
+    const xMin = xs[0];
+    const xMax = xs[xs.length - 1];
+    const isSingle = filtered.length === 1 || xMax - xMin <= 1e-9;
+    const mapX = (xv) =>
+      isSingle
+        ? (plotLeft + plotRight) / 2
+        : plotLeft + ((xv - xMin) / (xMax - xMin)) * plotSpanX;
+
+    const samples = filtered.map((item, i) => {
+      const x = mapX(item.xVal);
+      const rawY = mapY(item.rawVal);
+      const fitVal = pubFit.sampleFits[i];
+      const fitY = mapY(fitVal);
+      return {
+        ...item,
+        x,
+        rawY,
+        fitVal,
+        fitY,
+        ciLow: pubFit.sampleCiLow[i],
+        ciHigh: pubFit.sampleCiHigh[i],
+        ciHalf: pubFit.sampleCiHalf[i],
+        seriesColor: 'var(--accent-primary)',
+        compareHint: '',
+      };
+    });
+    currentSamples = samples;
+
+    const sig =
+      `single|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+      samples.map((s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}`).join('|');
+
+    if (sig !== lastSig) {
+      lastSig = sig;
+      renderFitAxesAndGrid({
+        yScale,
+        mapY,
+        mapX,
+        xs,
+        isSingle,
+        plotLeft,
+        plotRight,
+        metric,
+        showAgentPrefix,
+      });
+
+      // 2. 绘制半透明冷蓝灰实心观测散点（自然呈现局部密度，不抢夺拟合曲线焦点）
+      while (scatterGroup.firstChild) scatterGroup.removeChild(scatterGroup.firstChild);
+      const dotRadius = samples.length > 80 ? '1.8' : samples.length > 36 ? '2.1' : '2.4';
+      for (const s of samples) {
+        const dot = document.createElementNS(SVG_NS, 'circle');
+        dot.setAttribute('cx', s.x.toFixed(1));
+        dot.setAttribute('cy', s.rawY.toFixed(1));
+        dot.setAttribute('r', dotRadius);
+        dot.setAttribute('class', 'sstep-scatter-dot');
+        scatterGroup.appendChild(dot);
+      }
+
+      // 3. 绘制 95% CI 置信带闭合多边形与回归拟合曲线（绝不向底部 X 轴填充面积！）
+      if (isSingle) {
+        const yStr = samples[0].fitY.toFixed(1);
+        patchAttr(fitPath, 'd', `M ${plotLeft.toFixed(1)} ${yStr} L ${plotRight.toFixed(1)} ${yStr}`);
+        patchAttr(ciBandPath, 'd', '');
+        patchAttr(olsLine, 'hidden', true);
+      } else {
+        const gridPts = pubFit.grid.map((g) => ({
+          x: mapX(g.x),
+          fitY: mapY(g.fit),
+          lowY: mapY(g.ciLow),
+          highY: mapY(g.ciHigh),
+        }));
+
+        patchAttr(
+          fitPath,
+          'd',
+          buildPolylinePath(gridPts.map((p) => ({ x: p.x, y: p.fitY })))
+        );
+
+        if (samples.length >= 3) {
+          let bandD = `M ${gridPts[0].x.toFixed(1)} ${gridPts[0].highY.toFixed(1)}`;
+          for (let i = 1; i < gridPts.length; i++) {
+            bandD += ` L ${gridPts[i].x.toFixed(1)} ${gridPts[i].highY.toFixed(1)}`;
+          }
+          for (let i = gridPts.length - 1; i >= 0; i--) {
+            bandD += ` L ${gridPts[i].x.toFixed(1)} ${gridPts[i].lowY.toFixed(1)}`;
+          }
+          bandD += ' Z';
+          patchAttr(ciBandPath, 'd', bandD);
+        } else {
+          patchAttr(ciBandPath, 'd', '');
+        }
+
+        const showOlsRef = samples.length >= 6;
+        patchAttr(olsLine, 'hidden', !showOlsRef);
+        if (showOlsRef) {
+          const olsStartVal = clampValue(pubFit.intercept + pubFit.slope * xMin, minBound, maxBound);
+          const olsEndVal = clampValue(pubFit.intercept + pubFit.slope * xMax, minBound, maxBound);
+          patchAttr(olsLine, 'x1', plotLeft.toFixed(1));
+          patchAttr(olsLine, 'y1', mapY(olsStartVal).toFixed(1));
+          patchAttr(olsLine, 'x2', plotRight.toFixed(1));
+          patchAttr(olsLine, 'y2', mapY(olsEndVal).toFixed(1));
+        }
+      }
+    }
+
+    const summaryBadge = `${samples.length}步 · 均 ${formatChartMetricCompact(metric, pubFit.mean)}`;
+    if (samples.length >= 2) {
+      const rSign = pubFit.r >= 0 ? '+' : '';
+      const slopeSign = pubFit.slope >= 0 ? '+' : '';
+      patchText(fitStatsEl, `r = ${rSign}${pubFit.r.toFixed(2)} · R² = ${pubFit.r2.toFixed(2)}`);
+      patchAttr(
+        fitStatsEl,
+        'title',
+        `OLS: y = ${slopeSign}${pubFit.slope.toFixed(3)}x + ${pubFit.intercept.toFixed(2)} · 样本标准差 SD = ±${pubFit.sd.toFixed(2)}`
+      );
+    } else {
+      patchText(fitStatsEl, `n = ${samples.length}`);
+      patchAttr(fitStatsEl, 'title', '');
+    }
+
+    if (hoveredIdx >= samples.length) {
+      clearHover();
+    } else if (hoveredIdx >= 0) {
+      showHoverAt(hoveredIdx);
+    }
+
+    return { sampleCount: samples.length, summaryBadge };
+  }
+
+  return { el: rootEl, update, destroy };
 }
 
 // --- src/components/layout/TopSessionHeader.js ---
@@ -3560,22 +6715,27 @@ function buildQuotaPoolItems(quotas, minuteTick = 0, { isPending = false } = {})
 }
 
 /**
- * 创建单个配额池的 DOM 行结构，内含 5h 限额与每周限额两个可独立显隐的子窗口进度条。
+ * 创建单个配额池的 DOM 行结构，内含 5h 限额与每周限额两个可独立显隐的子窗口进度条，
+ * 并在窗口标题右侧内联展示该配额池自身的周期消耗统计（零额外纵向行高）。
  */
 function createPoolQuotaRow() {
-  const title5h = h('span', { text: '5h 限额' });
-  const meta5h = h('span', { className: 'panel-meta text-mono', text: '--' });
+  const title5h = h('span', { className: 'quota-win-title', text: '5h' });
+  const usage5h = h('span', { className: 'quota-win-usage', hidden: true, text: '' });
+  const left5h = h('span', { className: 'quota-win-left' }, [title5h, usage5h]);
+  const meta5h = h('span', { className: 'panel-meta quota-win-meta text-mono', text: '--' });
   const fill5h = h('div', { className: 'progress-fill' });
   const row5h = h('div', { style: 'display: flex; flex-direction: column; gap: 4px;' }, [
-    h('div', { className: 'panel-header' }, [title5h, meta5h]),
+    h('div', { className: 'panel-header quota-win-head' }, [left5h, meta5h]),
     h('div', { className: 'progress-track' }, [fill5h]),
   ]);
 
-  const titleWk = h('span', { text: '每周限额' });
-  const metaWk = h('span', { className: 'panel-meta text-mono', text: '--' });
+  const titleWk = h('span', { className: 'quota-win-title', text: '周限' });
+  const usageWk = h('span', { className: 'quota-win-usage', hidden: true, text: '' });
+  const leftWk = h('span', { className: 'quota-win-left' }, [titleWk, usageWk]);
+  const metaWk = h('span', { className: 'panel-meta quota-win-meta text-mono', text: '--' });
   const fillWk = h('div', { className: 'progress-fill' });
   const rowWk = h('div', { style: 'display: flex; flex-direction: column; gap: 4px;' }, [
-    h('div', { className: 'panel-header' }, [titleWk, metaWk]),
+    h('div', { className: 'panel-header quota-win-head' }, [leftWk, metaWk]),
     h('div', { className: 'progress-track' }, [fillWk]),
   ]);
 
@@ -3586,8 +6746,39 @@ function createPoolQuotaRow() {
 
   return {
     el,
-    refs: { row5h, title5h, meta5h, fill5h, rowWk, titleWk, metaWk, fillWk },
+    refs: {
+      row5h,
+      left5h,
+      title5h,
+      usage5h,
+      meta5h,
+      fill5h,
+      rowWk,
+      leftWk,
+      titleWk,
+      usageWk,
+      metaWk,
+      fillWk,
+    },
   };
+}
+
+/**
+ * 格式化可用额度面板底部的汇总行文案（官方配额模式下展示各池周期合计，自定义预算模式下展示自然周累计）。
+ */
+function formatQuotaSummaryFooter(quotas, account) {
+  const weekly = quotas?.weekly || {};
+  const isCustomLocal = weekly.isOfficial === false;
+  const prefix = isCustomLocal ? '本周' : '周期';
+  const leftText = `${prefix}累计: ${formatTokens(weekly.tokens || 0)} (${formatUsd(weekly.costUsd || 0)})`;
+  const rightText =
+    Number(account?.aiCredits) > 0
+      ? `AI 积分: ${account.aiCredits}`
+      : `${prefix}调用: ${weekly.calls || 0} 次`;
+  const tooltip = isCustomLocal
+    ? '按本机自然周（周一 00:00 起）统计'
+    : '按各配额池独立周限重置周期分别统计并汇总';
+  return { leftText, rightText, tooltip };
 }
 
 /**
@@ -3634,7 +6825,24 @@ function syncPoolQuotaRow(refs, item, idx, rowEl) {
 
   const fallbackMetaText = isPending ? '读取中...' : '获取失败 (--%)';
 
-  patchText(refs.title5h, `5h 限额 (${poolLabel})`);
+  patchText(refs.title5h, `5h (${poolLabel})`);
+  const c5h = poolData?.cycle5h;
+  if (!isPending && has5h && c5h && (c5h.tokens != null || c5h.costUsd != null)) {
+    const tok5h = formatTokens(c5h.tokens || 0);
+    const cost5h = formatUsd(c5h.costUsd || 0);
+    const calls5h = Number(c5h.calls || 0);
+    refs.usage5h.hidden = false;
+    patchText(refs.usage5h, `· ${tok5h} (${cost5h})`);
+    patchAttr(
+      refs.left5h,
+      'title',
+      `当前 5h 周期累计 (${poolLabel})：${tok5h} Tokens · ${cost5h} · ${calls5h} 次调用`
+    );
+  } else {
+    refs.usage5h.hidden = true;
+    patchText(refs.usage5h, '');
+    patchAttr(refs.left5h, 'title', null);
+  }
   patchText(
     refs.meta5h,
     has5h
@@ -3648,10 +6856,27 @@ function syncPoolQuotaRow(refs, item, idx, rowEl) {
   });
 
   const customTitle =
-    isActivePool && fallbackWeekly?.isOfficial === false && fallbackWeekly?.title
-      ? fallbackWeekly.title
-      : `每周限额 (${poolLabel})`;
+    useCustomWeekly && fallbackWeekly?.title ? fallbackWeekly.title : `周限 (${poolLabel})`;
   patchText(refs.titleWk, customTitle);
+  const cWk = useCustomWeekly
+    ? fallbackWeekly
+    : poolData?.cycleWeekly || (isActivePool ? fallbackWeekly : null);
+  if (!isPending && hasWk && cWk && (cWk.tokens != null || cWk.costUsd != null)) {
+    const tokWk = formatTokens(cWk.tokens || 0);
+    const costWk = formatUsd(cWk.costUsd || 0);
+    const callsWk = Number(cWk.calls || 0);
+    refs.usageWk.hidden = false;
+    patchText(refs.usageWk, `· ${tokWk} (${costWk})`);
+    patchAttr(
+      refs.leftWk,
+      'title',
+      `${useCustomWeekly ? '本周自然周累计' : `当前周限周期累计 (${poolLabel})`}：${tokWk} Tokens · ${costWk} · ${callsWk} 次调用`
+    );
+  } else {
+    refs.usageWk.hidden = true;
+    patchText(refs.usageWk, '');
+    patchAttr(refs.leftWk, 'title', null);
+  }
   patchText(
     refs.metaWk,
     hasWk
@@ -3666,7 +6891,10 @@ function syncPoolQuotaRow(refs, item, idx, rowEl) {
 }
 
 function quotaPoolRowSig(item, idx) {
-  return `${idx}:${item.poolLabel}:${item.isActivePool}:${Boolean(item.isPending)}:${item.minuteTick}:${item.poolData?.usedPct}:${item.poolData?.remainingPct}:${item.poolData?.resetTime}:${item.poolData?.weeklyUsedPct}:${item.poolData?.weeklyRemainingPct}:${item.poolData?.weeklyResetTime}:${item.fallbackWeekly?.isOfficial}:${item.fallbackWeekly?.usedPct}:${item.fallbackWeekly?.remainingPct}:${item.fallbackWeekly?.resetTime}:${item.fallbackWeekly?.title}`;
+  const c5h = item.poolData?.cycle5h;
+  const cWk = item.poolData?.cycleWeekly;
+  const fw = item.fallbackWeekly;
+  return `${idx}:${item.poolLabel}:${item.isActivePool}:${Boolean(item.isPending)}:${item.minuteTick}:${item.poolData?.usedPct}:${item.poolData?.remainingPct}:${item.poolData?.resetTime}:${item.poolData?.weeklyUsedPct}:${item.poolData?.weeklyRemainingPct}:${item.poolData?.weeklyResetTime}:${c5h?.tokens}:${c5h?.costUsd}:${c5h?.calls}:${cWk?.tokens}:${cWk?.costUsd}:${cWk?.calls}:${fw?.isOfficial}:${fw?.usedPct}:${fw?.remainingPct}:${fw?.resetTime}:${fw?.title}:${fw?.tokens}:${fw?.costUsd}:${fw?.calls}`;
 }
 
 const LiveOverviewView = defineComponent({
@@ -3945,7 +7173,7 @@ const LiveOverviewView = defineComponent({
     const tierBadge = h('span', { className: 'panel-meta', text: 'Google AI · Pro' });
     const poolsListEl = h('div', { style: 'display: flex; flex-direction: column; gap: 0;' });
 
-    const wkFootLeft = h('span', { className: 'text-muted', text: '本周累计: 0 ($0.00)' });
+    const wkFootLeft = h('span', { className: 'text-muted', text: '周期累计: 0 ($0.00)' });
     const wkFootRight = h('span', { className: 'text-muted', text: '' });
 
     const quotaPanel = h('section', { className: 'panel' }, [
@@ -4244,12 +7472,10 @@ const LiveOverviewView = defineComponent({
         ensureLiveTicker();
       }
 
-      // 1. 更新 4 格实时测速矩阵（展示当前会话全局汇总指标，遵循模型名称格式设置）
-      const showUpstream = Boolean(data.settings?.showUpstreamModel);
-      const activeModelDisplay =
-        (showUpstream
-          ? active.activeModelUpstream || active.activeModelShort
-          : active.activeModelShort) || '模型未知';
+      // 1. 更新 4 格实时测速矩阵（展示当前会话全局汇总指标，遵循模型名称格式与 Orchestrator ID 格式设置）
+      const activeModelDisplay = resolveModelDisplayInfo(active, data.settings, {
+        fallback: '模型未知',
+      }).text;
       patchClasses(pulseDot, { 'is-pulsing': Boolean(active.isRunning) });
       patchText(tpsVal, formatMetric(active.latestTokPerSec, ' tok/s'));
       const reason = speedReasonText(active.latestSpeedReason);
@@ -4298,9 +7524,9 @@ const LiveOverviewView = defineComponent({
 
         const allAgentPills = agents.map((ag) => {
           const agPct = ag.context?.usedPct ?? 0;
-          const agModelDisplay =
-            (showUpstream ? ag.activeModelUpstream || ag.activeModelShort : ag.activeModelShort) ||
-            '模型未知';
+          const agModelDisplay = resolveModelDisplayInfo(ag, data.settings, {
+            fallback: '模型未知',
+          }).text;
           return {
             key: ag.agentId,
             label: `${ag.badgeText || ag.shortLabel} ${agPct}%`,
@@ -4422,7 +7648,6 @@ const LiveOverviewView = defineComponent({
         tierBadge,
         `${data.account?.tierName || 'Google AI'} · ${data.account?.planName || 'Pro'}`
       );
-      const weekly = quotas.weekly || {};
       const minuteTick = Math.floor(Date.now() / 30000);
       const poolItems = buildQuotaPoolItems(quotas, minuteTick);
 
@@ -4433,16 +7658,11 @@ const LiveOverviewView = defineComponent({
         updateRow: syncPoolQuotaRow,
       });
 
-      patchText(
-        wkFootLeft,
-        `本周累计: ${formatTokens(weekly.tokens || 0)} (${formatUsd(weekly.costUsd || 0)})`
-      );
-      patchText(
-        wkFootRight,
-        data.account?.aiCredits > 0
-          ? `AI 积分: ${data.account.aiCredits}`
-          : `本周调用: ${weekly.calls || 0} 次`
-      );
+      const footSummary = formatQuotaSummaryFooter(quotas, data.account);
+      patchText(wkFootLeft, footSummary.leftText);
+      patchText(wkFootRight, footSummary.rightText);
+      patchAttr(wkFootLeft, 'title', footSummary.tooltip);
+      patchAttr(wkFootRight, 'title', footSummary.tooltip);
 
       ensureCountdownTicker();
       viewScrollbar.refresh();
@@ -4922,13 +8142,24 @@ const ConsumptionView = defineComponent({
      * 增量更新热门模型或数据来源单行的指标文本与 4 段比例条宽度。
      */
     function updateBreakdownItemRow(refs, item, grandTotalTokens, showTokensInHeader = true) {
-      patchText(refs.nameEl, item.label || item.name || item.shortName || '—');
+      const displayLabel = item.label || item.name || item.shortName || '—';
+      patchText(refs.nameEl, displayLabel);
+      patchAttr(refs.nameEl, 'title', item.title || displayLabel);
       const total = Number(item.totalTokens || 0);
       const share = grandTotalTokens > 0 ? +((total / grandTotalTokens) * 100).toFixed(1) : 0;
       patchText(refs.pctBadge, `${share.toFixed(1)}%`);
       patchText(refs.totalTokEl, showTokensInHeader ? formatTokensPrecise(total) : '');
       patchAttr(refs.totalTokEl, 'hidden', !showTokensInHeader);
-      patchText(refs.costEl, formatUsd(item.costUsd || 0));
+      const costVal = Number(item.costUsd || 0);
+      const callsCount = Number(item.calls || 0);
+      const isAllUnpriced =
+        callsCount > 0 && Number(item.unpricedCalls || 0) >= callsCount && !(costVal > 0);
+      patchText(
+        refs.costEl,
+        formatUsd(isAllUnpriced ? null : costVal, {
+          precise: costVal > 0 && costVal < 0.1,
+        })
+      );
 
       const responseTok =
         item.responseTokens != null
@@ -5041,36 +8272,40 @@ const ConsumptionView = defineComponent({
         thinkingTokens,
       });
 
-      // 2. 同步历史趋势交互式 SVG 面积图与粒度提示
+      // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与粒度提示
       patchText(trendRangeBadge, preset?.label || rangeInfo.label || '全部时间');
       const trendSeries = cons.trendSeries || [];
       const isHourlyTrend =
         trendSeries[0]?.granularity === 'hour' ||
         (trendSeries[0]?.label || '').includes(':');
+      const isHeatmapTrend = !isHourlyTrend && trendSeries.length > HEATMAP_DAYS_THRESHOLD;
       patchText(
         trendGranularityHint,
-        `${isHourlyTrend ? '按小时' : '按日'} (${trendSeries.length || 0}点) · 悬停查看`
+        isHeatmapTrend
+          ? `按日 (${trendSeries.length}天) · 悬停查看`
+          : `${isHourlyTrend ? '按小时' : '按日'} (${trendSeries.length || 0}点) · 悬停查看`
       );
       trendChart.update(trendSeries);
 
-      // 3. 同步热门模型列表（按总 Token 数降序排列并执行键值增量对账，遵循模型名称显示格式设置）
-      const showUpstream = Boolean(slice.showUpstreamModel);
-      const models = (slice.modelBreakdown || [])
-        .slice()
-        .sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0));
+      // 3. 同步热门模型列表（按最终展示名称去重归并后按总 Token 数降序排列并执行键值增量对账）
+      const displaySettings = {
+        showUpstreamModel: Boolean(slice.showUpstreamModel),
+        orchestratorIdMode: slice.orchestratorIdMode,
+      };
+      const models = mergeModelsByDisplayName(slice.modelBreakdown || [], displaySettings, {
+        preferLabelInShort: true,
+      }).sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0));
       const modelsTotalTok = models.reduce((s, m) => s + Number(m.totalTokens || 0), 0);
 
       patchKeyedList(modelsListEl, models, {
-        keyFn: (m) => m.label || m.shortName,
+        keyFn: (m) => m.displayText || m.label || m.shortName,
         sigFn: (m) =>
-          `${showUpstream}:${m.label}:${m.upstreamName || ''}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`,
+          `${m.displayText}:${m.displayTitle}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`,
         createRow: createBreakdownItemRow,
         updateRow: (refs, m) =>
           updateBreakdownItemRow(
             refs,
-            showUpstream
-              ? { ...m, label: m.upstreamName || m.label || m.shortName }
-              : m,
+            { ...m, label: m.displayText, title: m.displayTitle },
             modelsTotalTok,
             true
           ),
@@ -5143,6 +8378,9 @@ const ConsumptionView = defineComponent({
         consumption: st.telemetry?.consumption,
         modelBreakdown: st.telemetry?.modelBreakdown,
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
+        orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
+          st.telemetry?.settings?.orchestratorIdMode
+        ),
       }),
       (slice) => {
         latestSlice = slice;
@@ -5170,6 +8408,7 @@ const ConsumptionView = defineComponent({
     onCleanup(() => {
       unsub();
       unsubView();
+      trendChart.destroy?.();
       timeFilterSwitch.destroy();
       startPicker.destroy();
       endPicker.destroy();
@@ -5185,49 +8424,212 @@ const ConsumptionView = defineComponent({
 
 // --- src/views/StepsDetailView.js ---
 /**
- * @fileoverview View 3: StepsDetailView (步骤明细与按模型汇总视图).
- * 提供“单步测速”与“按模型汇总”双子表切换：
- * - 采用 `patchKeyedList` 实现行级 DOM 增量对账与就地复用，彻底避免全表 `innerHTML` 重建引发的闪烁；
- * - 两个表格各自包裹在独立的 `CustomScrollbar` 容器中，兼具粘性表头与零原生滚动条体验；
- * - 支持在内部代号 (`modelShort`) 与实际响应模型名 (`modelUpstream`) 之间无缝切换显示。
+ * @fileoverview View 3: StepsDetailView (步骤明细与总汇总分析视图).
+ * 提供“按步查看”与“总汇总”双子视图切换：
+ * - 单步测速表采用 `patchKeyedList` 实现行级 DOM 增量对账与就地复用，支持多代理与多模型复选过滤；
+ * - 总汇总视图在顶部提供当前会话线性走势图（总Token / 上下文 / TPS / 首字 / 费用）与趋势拟合曲线图（TPS / 首字 / 缓存 / 费用），
+ *   单模型时自动隐藏模型下拉框，多模型时支持独立多选（趋势拟合勾选多模型时同图绘制多条独立颜色回归曲线对比）；
+ * - 底部以极简高密度模型卡片表达各模型总数据，全链路支持主代理 / 子代理多选汇总筛选。
  */
 
+
+/**
+ * 当多选勾选了部分代理子集（>=2 个且非全选）时，动态合并所选代理的步骤列表与模型汇总。
+ */
+function mergeSelectedAgentUnits(units) {
+  const combinedSteps = [];
+  const modelMap = new Map();
+
+  for (const ag of units) {
+    if (!ag || typeof ag !== 'object') continue;
+    if (Array.isArray(ag.recentSteps)) {
+      combinedSteps.push(...ag.recentSteps);
+    }
+    const breakdown = Array.isArray(ag.modelBreakdown) ? ag.modelBreakdown : [];
+    for (const m of breakdown) {
+      if (!m || typeof m !== 'object') continue;
+      const gk = getStepModelGroupKey(m);
+      let acc = modelMap.get(gk);
+      if (!acc) {
+        acc = {
+          label: m.label || gk,
+          shortName: m.shortName || gk,
+          rawModel: m.rawModel || '',
+          upstreamName: m.upstreamName || m.upstreamModel || '',
+          upstreamSet: new Set(Array.isArray(m.upstreamModels) ? m.upstreamModels.filter(Boolean) : []),
+          calls: 0,
+          inputTokens: 0,
+          cacheReadTokens: 0,
+          outputTokens: 0,
+          thinkingTokens: 0,
+          responseTokens: 0,
+          totalTokens: 0,
+          costUsd: 0,
+          unpricedCalls: 0,
+          _speedWeightedSum: 0,
+          _speedWeight: 0,
+          _ttftWeightedSum: 0,
+          _ttftWeight: 0,
+        };
+        if (acc.upstreamName) acc.upstreamSet.add(acc.upstreamName);
+        modelMap.set(gk, acc);
+      }
+      if (!acc.upstreamName && (m.upstreamName || m.upstreamModel)) {
+        acc.upstreamName = m.upstreamName || m.upstreamModel;
+      }
+      if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
+      if (Array.isArray(m.upstreamModels)) {
+        for (const u of m.upstreamModels) {
+          if (u) acc.upstreamSet.add(u);
+        }
+      }
+      const calls = Math.max(0, Number(m.calls || 0));
+      const inTok = Math.max(0, Number(m.inputTokens || 0));
+      const cacheTok = Math.max(0, Number(m.cacheReadTokens || 0));
+      const outTok = Math.max(0, Number(m.outputTokens || 0));
+      const thinkTok = Math.max(0, Number(m.thinkingTokens || 0));
+      const respTok =
+        m.responseTokens != null
+          ? Math.max(0, Number(m.responseTokens))
+          : Math.max(0, outTok - thinkTok);
+      const totTok = Math.max(0, Number(m.totalTokens ?? inTok + cacheTok + outTok));
+      const costUsd = Number.isFinite(Number(m.costUsd)) ? Math.max(0, Number(m.costUsd)) : 0;
+      const unpricedCalls = Math.max(0, Number(m.unpricedCalls || 0));
+
+      acc.calls += calls;
+      acc.inputTokens += inTok;
+      acc.cacheReadTokens += cacheTok;
+      acc.outputTokens += outTok;
+      acc.thinkingTokens += thinkTok;
+      acc.responseTokens += respTok;
+      acc.totalTokens += totTok;
+      acc.costUsd += costUsd;
+      acc.unpricedCalls += unpricedCalls;
+
+      if (Number.isFinite(Number(m.avgTokPerSec)) && Number(m.avgTokPerSec) > 0) {
+        const w = Math.max(1, outTok || calls || 1);
+        acc._speedWeightedSum += Number(m.avgTokPerSec) * w;
+        acc._speedWeight += w;
+      }
+      if (m.avgTtftSec != null && Number.isFinite(Number(m.avgTtftSec)) && Number(m.avgTtftSec) >= 0) {
+        const w = Math.max(1, calls || 1);
+        acc._ttftWeightedSum += Number(m.avgTtftSec) * w;
+        acc._ttftWeight += w;
+      }
+    }
+  }
+
+  combinedSteps.sort(
+    (a, b) =>
+      (Number(b?.createdAtMs) || 0) - (Number(a?.createdAtMs) || 0) ||
+      (Number(b?.agentIndex) || 0) - (Number(a?.agentIndex) || 0) ||
+      (Number(b?.stepIndex) || 0) - (Number(a?.stepIndex) || 0)
+  );
+
+  const mergedModels = Array.from(modelMap.values())
+    .map((acc) => {
+      const promptTok = acc.inputTokens + acc.cacheReadTokens;
+      return {
+        label: acc.label,
+        shortName: acc.shortName,
+        rawModel: acc.rawModel,
+        upstreamName: acc.upstreamName,
+        upstreamModels: Array.from(acc.upstreamSet),
+        calls: acc.calls,
+        inputTokens: acc.inputTokens,
+        cacheReadTokens: acc.cacheReadTokens,
+        outputTokens: acc.outputTokens,
+        thinkingTokens: acc.thinkingTokens,
+        responseTokens: acc.responseTokens,
+        totalTokens: acc.totalTokens,
+        costUsd: +acc.costUsd.toFixed(6),
+        unpricedCalls: acc.unpricedCalls,
+        avgTokPerSec:
+          acc._speedWeight > 0 ? +(acc._speedWeightedSum / acc._speedWeight).toFixed(1) : null,
+        avgTtftSec:
+          acc._ttftWeight > 0 ? +(acc._ttftWeightedSum / acc._ttftWeight).toFixed(1) : null,
+        cacheHitPct: promptTok > 0 ? +((acc.cacheReadTokens / promptTok) * 100).toFixed(1) : 0,
+      };
+    })
+    .sort((a, b) => b.totalTokens - a.totalTokens || b.calls - a.calls);
+
+  return { steps: combinedSteps, models: mergedModels };
+}
 
 const StepsDetailView = defineComponent({
   name: 'StepsDetailView',
   setup({ onCleanup }) {
-    // 方案 B：明细面板标题栏内嵌代理筛选下拉框（与顶栏代理切换条双向同步）
+    let selectedAgentScopes = [uiStore.getState().selectedAgentScope || 'all'];
+    let lastSyncedUiScope = uiStore.getState().selectedAgentScope || 'all';
+    let selectedTableModels = ['__all__'];
+    let selectedLineModels = ['__all__'];
+
+    function applyAgentScopesSelection(nextScopes) {
+      selectedAgentScopes = nextScopes;
+      const mappedSingle =
+        nextScopes.length === 1 && nextScopes[0] !== 'all' ? nextScopes[0] : 'all';
+      const prevUiScope = uiStore.getState().selectedAgentScope;
+      lastSyncedUiScope = mappedSingle;
+      if (prevUiScope !== mappedSingle) {
+        uiStore.setState({
+          selectedAgentScope: mappedSingle,
+          ...(mappedSingle === 'all' ? { ctxInspectorAgentId: 'auto' } : {}),
+        });
+      } else if (latestSlice) {
+        renderStepsData(latestSlice);
+      }
+    }
+
+    // 明细面板标题栏内嵌代理多选筛选下拉框（单选时与顶栏代理切换条双向同步，支持多代理组合筛选）
     const inlineScopeSelect = CustomSelect({
-      modelValue: uiStore.getState().selectedAgentScope,
+      multiple: true,
+      allValue: 'all',
+      collapseAll: true,
+      multiUnit: '代理',
+      modelValue: selectedAgentScopes,
       icon: 'layers',
-      placeholder: '全部代理',
+      placeholder: '全部汇总',
       className: 'steps-inline-scope-select',
-      options: [{ value: 'all', label: '全部代理' }],
-      onUpdateModelValue: (nextScope) => {
-        if (nextScope) {
-          uiStore.setState({
-            selectedAgentScope: nextScope,
-            ...(nextScope === 'all' ? { ctxInspectorAgentId: 'auto' } : {}),
-          });
-        }
+      options: [{ value: 'all', label: '全部汇总' }],
+      onUpdateModelValue: (nextScopes) => {
+        if (!Array.isArray(nextScopes) || nextScopes.length === 0) return;
+        applyAgentScopesSelection(nextScopes);
       },
     });
     inlineScopeSelect.el.setAttribute('hidden', '');
 
-    // 顶部子表分段切换器：在“按步查看”与“按模型汇总”之间切换
+    // “按步查看”标题栏内嵌模型多选筛选下拉框（仅在多模型且处于“按步查看”时展示）
+    const stepsModelSelect = CustomSelect({
+      multiple: true,
+      allValue: '__all__',
+      collapseAll: false,
+      multiUnit: '模型',
+      modelValue: selectedTableModels,
+      placeholder: '全部模型',
+      className: 'steps-inline-model-select',
+      options: [{ value: '__all__', label: '全部模型' }],
+      onUpdateModelValue: (nextModels) => {
+        if (!Array.isArray(nextModels) || nextModels.length === 0) return;
+        selectedTableModels = nextModels;
+        if (latestSlice) renderStepsData(latestSlice);
+      },
+    });
+    stepsModelSelect.el.setAttribute('hidden', '');
+
+    // 顶部子表分段切换器：在“按步查看”与“总汇总”之间切换
     const subTabSwitch = SegmentedControl({
       ariaLabel: '明细表视图切换',
       modelValue: uiStore.getState().stepsSubTab,
       options: [
         { value: 'steps', label: '按步查看 (0)' },
-        { value: 'models', label: '按模型汇总' },
+        { value: 'models', label: '总汇总' },
       ],
       onUpdateModelValue: (nextTab) => {
         uiStore.setState({ stepsSubTab: nextTab });
       },
     });
 
-    // --- 子表 1：单步明细表（列定义：步序、模型、吞吐速度、首字延迟、上下文/输出、缓存命中率、单步费用） ---
+    // --- 子视图 1：单步明细表（步序、模型、吞吐速度、首字延迟、上下文/思考/正文、缓存命中率、单步费用） ---
     const stepsTbody = h('tbody');
     const stepsTablePane = h('div', { className: 'table-viewport' }, [
       h('table', { className: 'data-table' }, [
@@ -5237,7 +8639,7 @@ const StepsDetailView = defineComponent({
             h('th', { text: '模型' }),
             h('th', { text: '速度' }),
             h('th', { text: '首字' }),
-            h('th', { text: '上下文 / 输出' }),
+            h('th', { text: '上下文 / 思考 / 正文' }),
             h('th', { text: '缓存' }),
             h('th', { text: '费用' }),
           ]),
@@ -5250,24 +8652,135 @@ const StepsDetailView = defineComponent({
       className: 'table-scroll-host',
     });
 
-    // --- 子表 2：按模型汇总表（列定义：模型名称、调用次数、有效均速、总 Token、费用） ---
-    const modelsTbody = h('tbody');
-    const modelsTablePane = h('div', { className: 'table-viewport' }, [
-      h('table', { className: 'data-table' }, [
-        h('thead', {}, [
-          h('tr', {}, [
-            h('th', { text: '模型' }),
-            h('th', { text: '次数' }),
-            h('th', { text: '均速' }),
-            h('th', { text: '总 Token' }),
-            h('th', { text: '费用' }),
-          ]),
+    // --- 子视图 2：总汇总分析面板（顶部会话线性图 + 顶部趋势拟合图 + 底部极简模型总览） ---
+    let selectedLineMetric = 'totalTokens';
+    let selectedFitMetric = 'tps';
+
+    // 拟合模型锁定状态机：进入“总汇总”时默认锚定当前调用模型，停留在视图内期间绝不随轮询跳变
+    let fitLockedCascadeId = null;
+    let fitLockedModelKeys = [];
+    let fitPinnedWhileVisible = false;
+    let fitUserPicked = false;
+
+    const lineSummaryBadge = h('span', { className: 'cons-badge text-mono', text: '0 步' });
+    const lineModelSelect = CustomSelect({
+      multiple: true,
+      allValue: '__all__',
+      collapseAll: false,
+      multiUnit: '模型',
+      modelValue: selectedLineModels,
+      placeholder: '全部模型',
+      className: 'sstep-fit-model-select sstep-line-model-select',
+      options: [{ value: '__all__', label: '全部模型' }],
+      onUpdateModelValue: (nextModels) => {
+        if (!Array.isArray(nextModels) || nextModels.length === 0) return;
+        selectedLineModels = nextModels;
+        if (latestSlice) renderStepsData(latestSlice);
+      },
+    });
+    lineModelSelect.el.setAttribute('hidden', '');
+
+    const lineMetricSwitch = SegmentedControl({
+      ariaLabel: '会话线性图指标切换',
+      modelValue: selectedLineMetric,
+      options: [
+        { value: 'totalTokens', label: '总Token' },
+        { value: 'context', label: '上下文' },
+        { value: 'tps', label: 'TPS' },
+        { value: 'ttft', label: '首字' },
+        { value: 'cost', label: '费用' },
+      ],
+      onUpdateModelValue: (nextMetric) => {
+        selectedLineMetric = nextMetric;
+        if (latestSlice) renderStepsData(latestSlice);
+      },
+    });
+    const sessionLineChart = createSessionLineChart();
+    const sessionLineCard = h('div', { className: 'sstep-card sstep-line-card' }, [
+      h('div', { className: 'sstep-card-head' }, [
+        h('div', { className: 'sstep-card-title-group' }, [
+          h('span', { className: 'sstep-card-title', text: '会话走势' }),
+          lineSummaryBadge,
         ]),
-        modelsTbody,
+        h('div', { className: 'sstep-fit-controls' }, [
+          lineModelSelect.el,
+          lineMetricSwitch.el,
+        ]),
       ]),
+      sessionLineChart.el,
+    ]);
+
+    const fitSummaryBadge = h('span', { className: 'cons-badge text-mono', text: '0 样本' });
+    const fitModelSelect = CustomSelect({
+      multiple: true,
+      allValue: '__all__',
+      collapseAll: false,
+      multiUnit: '模型',
+      modelValue: ['__all__'],
+      placeholder: '选择模型',
+      className: 'sstep-fit-model-select',
+      options: [{ value: '__all__', label: '全部模型' }],
+      onUpdateModelValue: (nextModelKeys) => {
+        if (!Array.isArray(nextModelKeys) || nextModelKeys.length === 0) return;
+        fitLockedModelKeys = nextModelKeys;
+        fitUserPicked = true;
+        fitPinnedWhileVisible = true;
+        if (latestSlice) renderStepsData(latestSlice);
+      },
+    });
+    fitModelSelect.el.setAttribute('hidden', '');
+
+    const fitMetricSwitch = SegmentedControl({
+      ariaLabel: '趋势拟合指标切换',
+      modelValue: selectedFitMetric,
+      options: [
+        { value: 'tps', label: 'TPS' },
+        { value: 'ttft', label: '首字' },
+        { value: 'cache', label: '缓存' },
+        { value: 'cost', label: '费用' },
+      ],
+      onUpdateModelValue: (nextMetric) => {
+        selectedFitMetric = nextMetric;
+        if (latestSlice) renderStepsData(latestSlice);
+      },
+    });
+    const modelFitChart = createModelFitChart();
+    const modelFitCard = h('div', { className: 'sstep-card sstep-fit-card' }, [
+      h('div', { className: 'sstep-card-head' }, [
+        h('div', { className: 'sstep-card-title-group' }, [
+          h('span', { className: 'sstep-card-title', text: '趋势拟合' }),
+          fitSummaryBadge,
+        ]),
+        h('div', { className: 'sstep-fit-controls' }, [
+          fitModelSelect.el,
+          fitMetricSwitch.el,
+        ]),
+      ]),
+      modelFitChart.el,
+    ]);
+
+    const modelsSummaryMeta = h('span', { className: 'cons-badge text-mono', text: '0 次' });
+    const modelsEmptyEl = h('div', {
+      className: 'smodel-empty text-muted',
+      text: '当前范围暂无模型调用记录',
+    });
+    const modelsListEl = h('div', { className: 'smodel-list' });
+    const modelsSummarySection = h('div', { className: 'smodel-section' }, [
+      h('div', { className: 'smodel-section-head' }, [
+        h('span', { className: 'sstep-card-title', text: '模型总览' }),
+        modelsSummaryMeta,
+      ]),
+      modelsEmptyEl,
+      modelsListEl,
+    ]);
+
+    const modelsAnalyticsPane = h('div', { className: 'table-viewport models-analytics-pane' }, [
+      sessionLineCard,
+      modelFitCard,
+      modelsSummarySection,
     ]);
     const modelsScroll = CustomScrollbar({
-      contentEl: modelsTablePane,
+      contentEl: modelsAnalyticsPane,
       className: 'table-scroll-host',
     });
     modelsScroll.el.setAttribute('hidden', '');
@@ -5286,6 +8799,7 @@ const StepsDetailView = defineComponent({
           ]),
           h('div', { className: 'steps-header-controls' }, [
             inlineScopeSelect.el,
+            stepsModelSelect.el,
             subTabSwitch.el,
           ]),
         ]),
@@ -5296,41 +8810,98 @@ const StepsDetailView = defineComponent({
 
     const rootEl = h('div', { className: 'view-pane' }, [panelEl]);
 
-    const unsubUi = uiStore.subscribe(
-      (st) => st.stepsSubTab,
-      (tab) => {
-        subTabSwitch.setValue(tab);
-        patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
-        patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
-        if (tab === 'steps') stepsScroll.refresh();
-        else modelsScroll.refresh();
-      }
-    );
-
     let latestSlice = null;
     let isDirty = false;
 
     /**
-     * 对单步测速表和按模型汇总表执行基于 `patchKeyedList` 的键值增量对账与行更新。
+     * 解析当前会话/代理作用域下的默认活跃调用模型分组键。
+     */
+    function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
+      const activeCand = getStepModelGroupKey({
+        modelLabel: scopedConv?.activeModelLabel,
+        modelShort: scopedConv?.activeModelShort,
+      });
+      if (activeCand && activeCand !== '模型未知' && availableModelKeys.has(activeCand)) {
+        return activeCand;
+      }
+      for (let i = chronoSteps.length - 1; i >= 0; i--) {
+        const st = chronoSteps[i];
+        if (!st || st.isCompactionStep) continue;
+        const gk = getStepModelGroupKey(st);
+        if (gk && availableModelKeys.has(gk)) return gk;
+      }
+      if (chronoSteps.length > 0) {
+        const gk = getStepModelGroupKey(chronoSteps[chronoSteps.length - 1]);
+        if (gk && availableModelKeys.has(gk)) return gk;
+      }
+      if (models.length > 0) {
+        const firstKey = getStepModelGroupKey(models[0]);
+        if (firstKey && availableModelKeys.has(firstKey)) return firstKey;
+      }
+      return '__all__';
+    }
+
+    /**
+     * 归一化模型多选列表（支持同时勾选 2..N 个具体模型以独立分色对比，仅在明确点击“全部模型”或无有效项时回到 `['__all__']`）。
+     */
+    function normalizeMultiModelSelection(rawSelection, availableModelKeys) {
+      if (availableModelKeys.size <= 1) return ['__all__'];
+      const arr = Array.isArray(rawSelection) ? rawSelection : [];
+      if (arr.length === 0 || arr.includes('__all__')) return ['__all__'];
+      const valid = Array.from(new Set(arr.filter((k) => availableModelKeys.has(k))));
+      if (valid.length === 0) return ['__all__'];
+      return valid;
+    }
+
+    /**
+     * 对单步测速表、顶部会话走势图、顶部趋势拟合图及底部极简模型列表执行增量更新。
      */
     function renderStepsData(slice) {
       if (!slice) return;
       const uiSt = uiStore.getState();
-      const {
-        hasSubagents,
-        effectiveScope,
-        subagents,
-        mainAgent,
-        aggregated,
-        scopedConv,
-      } = resolveScopedConversation(
+
+      const currentCid = String(slice.cascadeId || slice.activeConversation?.cascadeId || '');
+      if (currentCid !== fitLockedCascadeId) {
+        if (fitLockedCascadeId !== null) {
+          selectedAgentScopes = [uiSt.selectedAgentScope || 'all'];
+          lastSyncedUiScope = uiSt.selectedAgentScope || 'all';
+          selectedTableModels = ['__all__'];
+          selectedLineModels = ['__all__'];
+        }
+        fitLockedCascadeId = currentCid;
+        fitUserPicked = false;
+        fitPinnedWhileVisible = false;
+        fitLockedModelKeys = [];
+      }
+
+      const baseScope = resolveScopedConversation(
         { activeConversation: slice.activeConversation },
-        uiSt.selectedAgentScope,
+        'all',
         uiSt.ctxInspectorAgentId
       );
+      const { hasSubagents, agents, subagents, mainAgent, aggregated } = baseScope;
+
+      let effectiveScopes = ['main'];
+      let isMergedMultiAgents = false;
+      let steps = [];
+      let models = [];
+      let activeModelSource = baseScope.scopedConv;
 
       patchAttr(inlineScopeSelect.el, 'hidden', !hasSubagents);
       if (hasSubagents) {
+        const validAgentIds = ['main', ...subagents.map((s) => s.agentId)];
+        const validSet = new Set(validAgentIds);
+        if (selectedAgentScopes.length === 0 || selectedAgentScopes.includes('all')) {
+          effectiveScopes = ['all'];
+        } else {
+          const filtered = selectedAgentScopes.filter((id) => validSet.has(id));
+          effectiveScopes =
+            filtered.length === 0 || filtered.length >= validAgentIds.length
+              ? ['all']
+              : filtered;
+        }
+        selectedAgentScopes = effectiveScopes;
+
         const scopeOpts = [
           {
             value: 'all',
@@ -5349,40 +8920,168 @@ const StepsDetailView = defineComponent({
           })),
         ];
         inlineScopeSelect.setProps({
-          modelValue: effectiveScope,
+          modelValue: effectiveScopes,
           options: scopeOpts,
         });
+
+        if (effectiveScopes[0] === 'all') {
+          steps = aggregated?.recentSteps || [];
+          models = aggregated?.modelBreakdown || [];
+          isMergedMultiAgents = true;
+          activeModelSource = aggregated;
+        } else if (effectiveScopes.length === 1) {
+          const targetId = effectiveScopes[0];
+          const unit =
+            targetId === 'main'
+              ? mainAgent
+              : agents.find((a) => a.agentId === targetId) || mainAgent;
+          steps = unit?.recentSteps || [];
+          models = unit?.modelBreakdown || [];
+          isMergedMultiAgents = false;
+          activeModelSource = unit;
+        } else {
+          const scopeSet = new Set(effectiveScopes);
+          const selectedUnits = agents.filter((a) =>
+            scopeSet.has(a.isMain ? 'main' : a.agentId)
+          );
+          const merged = mergeSelectedAgentUnits(selectedUnits);
+          steps = merged.steps;
+          models = merged.models;
+          isMergedMultiAgents = true;
+          activeModelSource =
+            selectedUnits.find((a) => a.isRunning) || selectedUnits[0] || aggregated;
+        }
       } else {
         inlineScopeSelect.close();
+        steps = slice.recentSteps || [];
+        models = slice.sessionModelBreakdown || [];
       }
 
-      const steps =
-        (hasSubagents ? scopedConv?.recentSteps : slice.recentSteps) ||
-        slice.recentSteps ||
-        [];
-      const models =
-        (Array.isArray(scopedConv?.modelBreakdown) && scopedConv.modelBreakdown.length > 0
-          ? scopedConv.modelBreakdown
-          : slice.sessionModelBreakdown || slice.modelBreakdown) || [];
-      const showUpstream = Boolean(slice.showUpstreamModel);
-      const modelsTabBadge = hasSubagents
-        ? effectiveScope === 'all'
-          ? '本会话汇总'
-          : scopedConv?.shortLabel || '当前代理'
-        : '本会话';
+      const displaySettings = {
+        showUpstreamModel: Boolean(slice.showUpstreamModel),
+        orchestratorIdMode: slice.orchestratorIdMode,
+      };
+
+      // 提取当前代理作用域下的时间升序步骤与全量可选模型列表
+      const showAgentPrefix = isMergedMultiAgents;
+      const chronoSteps = toChronologicalSteps(steps, isMergedMultiAgents);
+
+      const stepTtftFallbackMap = new Map();
+      const stepModelOptionMap = new Map();
+      for (const st of chronoSteps) {
+        const gk = getStepModelGroupKey(st);
+        if (!stepModelOptionMap.has(gk)) {
+          const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
+          stepModelOptionMap.set(gk, {
+            label: disp.text.replace(/·压缩\s*$/u, '').trim() || gk,
+            calls: 0,
+          });
+        }
+        stepModelOptionMap.get(gk).calls += 1;
+
+        if (!st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
+          const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
+          prev.sum += Number(st.ttftSec);
+          prev.count += 1;
+          stepTtftFallbackMap.set(gk, prev);
+        }
+      }
+
+      const availableModelKeys = new Set();
+      const modelColorByGroup = new Map();
+      const perModelOptions = [];
+      for (const m of models) {
+        const gk = getStepModelGroupKey(m);
+        if (availableModelKeys.has(gk)) continue;
+        availableModelKeys.add(gk);
+        modelColorByGroup.set(
+          gk,
+          MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
+        );
+        const disp = resolveModelDisplayInfo(m, displaySettings, {
+          preferLabelInShort: false,
+          fallback: gk,
+        });
+        perModelOptions.push({
+          value: gk,
+          label: disp.text.replace(/·压缩\s*$/u, '').trim() || gk,
+          meta: `${Number(m.calls || 0)}步`,
+        });
+      }
+      for (const [gk, info] of stepModelOptionMap.entries()) {
+        if (!availableModelKeys.has(gk)) {
+          availableModelKeys.add(gk);
+          modelColorByGroup.set(
+            gk,
+            MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
+          );
+          perModelOptions.push({
+            value: gk,
+            label: info.label,
+            meta: `${info.calls}步`,
+          });
+        }
+      }
+
+      const hasMultipleModels = availableModelKeys.size > 1;
+      const modelSelectOptions = [
+        {
+          value: '__all__',
+          label: '全部模型',
+          meta: `${chronoSteps.length}步`,
+        },
+        ...perModelOptions,
+      ];
+
+      // 1. “按步查看”模型多选过滤与表格增量对账
+      selectedTableModels = normalizeMultiModelSelection(
+        selectedTableModels,
+        availableModelKeys
+      );
+      const showStepsModelFilter = uiSt.stepsSubTab === 'steps' && hasMultipleModels;
+      patchAttr(stepsModelSelect.el, 'hidden', !showStepsModelFilter);
+      if (hasMultipleModels) {
+        stepsModelSelect.setProps({
+          modelValue: selectedTableModels,
+          options: modelSelectOptions,
+        });
+        if (!showStepsModelFilter) stepsModelSelect.close();
+      } else {
+        stepsModelSelect.close();
+      }
+
+      const tableModelFilterSet = selectedTableModels.includes('__all__')
+        ? null
+        : new Set(selectedTableModels);
+      const tableSteps = tableModelFilterSet
+        ? steps.filter((st) => tableModelFilterSet.has(getStepModelGroupKey(st)))
+        : steps;
+
+      const stepsTabLabel =
+        tableSteps.length !== steps.length
+          ? `按步查看 (${tableSteps.length}/${steps.length})`
+          : `按步查看 (${steps.length})`;
 
       subTabSwitch.setProps({
         options: [
-          { value: 'steps', label: `按步查看 (${steps.length})` },
-          { value: 'models', label: `按模型汇总 (${modelsTabBadge})` },
+          { value: 'steps', label: stepsTabLabel },
+          { value: 'models', label: '总汇总' },
         ],
       });
 
-      // 1. 单步测速表增量对账：以 `<agentCascadeId>-<stepIndex>` 为稳定行键，仅在签名变化时刷新单元格
-      patchKeyedList(stepsTbody, steps, {
+      const scopeSigKey = effectiveScopes.join(',');
+      patchKeyedList(stepsTbody, tableSteps, {
         keyFn: (st) => `${st.agentCascadeId || slice.cascadeId || 'conv'}-${st.stepIndex}`,
-        sigFn: (st) =>
-          `${hasSubagents}:${effectiveScope}:${st.agentId || 'main'}:${st.stepIndex}:${showUpstream ? st.modelUpstream || st.responseModel || st.modelShort : st.modelShort}:${st.tokPerSec}:${st.ttftSec}:${st.contextTokens}:${st.outputTokens}:${st.cacheHitPct}:${st.costUsd}:${st.selectedSpeedReason}`,
+        sigFn: (st) => {
+          const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: '—' });
+          const outTok = Math.max(0, Number(st.outputTokens || 0));
+          const thinkTok = Math.max(0, Number(st.thinkingTokens || 0));
+          const respTok =
+            st.responseTokens != null
+              ? Math.max(0, Number(st.responseTokens))
+              : Math.max(0, outTok - thinkTok);
+          return `${hasSubagents}:${scopeSigKey}:${st.agentId || 'main'}:${st.stepIndex}:${disp.text}:${disp.title}:${st.tokPerSec}:${st.ttftSec}:${st.contextTokens}:${outTok}:${thinkTok}:${respTok}:${st.cacheHitPct}:${st.costUsd}:${st.selectedSpeedReason}`;
+        },
         createRow: () => {
           const agentBadgeEl = h('span', {
             className: 'agent-badge is-clickable',
@@ -5393,7 +9092,7 @@ const StepsDetailView = defineComponent({
           const tdStep = h('td', {}, [agentBadgeEl, stepNumText]);
 
           const tdModel = h('td', {
-            style: 'max-width: 140px; overflow: hidden; text-overflow: ellipsis;',
+            style: 'max-width: 120px; overflow: hidden; text-overflow: ellipsis;',
           });
           const speedMain = h('strong', {
             className: 'cell-value accent-speed',
@@ -5432,29 +9131,31 @@ const StepsDetailView = defineComponent({
             const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
             patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
             patchText(refs.agentBadgeEl, st.agentBadge || (st.isSubagent ? '子' : '主'));
+            const targetScope = st.agentId || 'main';
+            const isSoleTarget =
+              effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
             patchAttr(
               refs.agentBadgeEl,
               'title',
-              effectiveScope === 'all'
-                ? `点击仅过滤查看 ${st.agentLabel || '该代理'}`
-                : '点击切回全部汇总'
+              isSoleTarget
+                ? '点击切回全部汇总'
+                : `点击仅过滤查看 ${st.agentLabel || '该代理'}（按住 Ctrl/Shift 可加减多选）`
             );
-            refs.agentBadgeEl.onclick = () => {
-              const targetScope = st.agentId || 'main';
-              const nextScope = effectiveScope === targetScope ? 'all' : targetScope;
-              uiStore.setState({
-                selectedAgentScope: nextScope,
-                ...(nextScope === 'all' ? { ctxInspectorAgentId: 'auto' } : {}),
-              });
+            refs.agentBadgeEl.onclick = (e) => {
+              if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && effectiveScopes[0] !== 'all') {
+                const next = effectiveScopes.includes(targetScope)
+                  ? effectiveScopes.filter((id) => id !== targetScope)
+                  : [...effectiveScopes, targetScope];
+                applyAgentScopesSelection(next.length > 0 ? next : ['all']);
+              } else {
+                applyAgentScopesSelection(isSoleTarget ? ['all'] : [targetScope]);
+              }
             };
           }
           patchText(refs.stepNumText, `#${Number(st.stepIndex)}`);
-          const modelText =
-            (showUpstream ? st.modelUpstream || st.responseModel : st.modelShort) ||
-            st.modelShort ||
-            '—';
-          patchText(refs.tdModel, modelText);
-          patchAttr(refs.tdModel, 'title', modelText);
+          const modelDisplay = resolveModelDisplayInfo(st, displaySettings, { fallback: '—' });
+          patchText(refs.tdModel, modelDisplay.text);
+          patchAttr(refs.tdModel, 'title', modelDisplay.title);
 
           patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
           const reason = speedReasonText(st.selectedSpeedReason);
@@ -5462,9 +9163,20 @@ const StepsDetailView = defineComponent({
           patchAttr(refs.speedReason, 'hidden', !reason);
 
           patchText(refs.tdTtft, formatMetric(st.ttftSec, 's'));
+          const outTok = Math.max(0, Number(st.outputTokens || 0));
+          const thinkTok = Math.max(0, Number(st.thinkingTokens || 0));
+          const respTok =
+            st.responseTokens != null
+              ? Math.max(0, Number(st.responseTokens))
+              : Math.max(0, outTok - thinkTok);
           patchText(
             refs.tdCtx,
-            `${formatTokens(st.contextTokens)} / +${Number(st.outputTokens || 0)}`
+            `${formatTokens(st.contextTokens)} / ${formatTokens(thinkTok)} / ${formatTokens(respTok)}`
+          );
+          patchAttr(
+            refs.tdCtx,
+            'title',
+            `上下文 ${Math.round(Number(st.contextTokens || 0))} · 思考 ${Math.round(thinkTok)} · 正文 ${Math.round(respTok)}`
           );
           patchText(refs.tdCache, `${Number(st.cacheHitPct ?? 0)}%`);
 
@@ -5474,42 +9186,285 @@ const StepsDetailView = defineComponent({
         },
       });
 
-      // 2. 按模型汇总表增量对账：以模型标识为稳定行键，展示调用次数、加权均速、有效样本比与总费用
-      patchKeyedList(modelsTbody, models, {
-        keyFn: (m) => m.label || m.shortName,
-        sigFn: (m) =>
-          `${showUpstream ? m.upstreamName || m.shortName : m.shortName}:${m.calls}:${m.avgTokPerSec}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.speedSummary?.sampleCount}`,
+      // 2. 顶部“会话走势”多选模型对比与图表更新（单模型时隐藏下拉框）
+      selectedLineModels = normalizeMultiModelSelection(
+        selectedLineModels,
+        availableModelKeys
+      );
+      patchAttr(lineModelSelect.el, 'hidden', !hasMultipleModels);
+      if (hasMultipleModels) {
+        lineModelSelect.setProps({
+          modelValue: selectedLineModels,
+          options: modelSelectOptions,
+        });
+      } else {
+        lineModelSelect.close();
+      }
+
+      const lineRes = sessionLineChart.update({
+        steps: chronoSteps,
+        modelGroupKey: selectedLineModels[0] || '__all__',
+        modelGroupKeys: selectedLineModels,
+        modelColorByGroup,
+        metric: selectedLineMetric,
+        showAgentPrefix,
+        displaySettings,
+      });
+      patchText(lineSummaryBadge, lineRes.summaryBadge);
+
+      // 3. 顶部“趋势拟合”多选模型对比与锁定状态机更新（单模型时隐藏下拉框）
+      const defaultActiveModelKey = resolveDefaultActiveModelKey(
+        activeModelSource,
+        chronoSteps,
+        models,
+        availableModelKeys
+      );
+
+      const sanitizeFitSelection = (keys) => {
+        if (!Array.isArray(keys) || keys.length === 0) return [];
+        if (keys.includes('__all__')) return ['__all__'];
+        return Array.from(new Set(keys.filter((k) => availableModelKeys.has(k))));
+      };
+
+      const isModelsViewVisible =
+        uiSt.activeView === 'steps' && uiSt.stepsSubTab === 'models';
+      const sanitizedLocked = sanitizeFitSelection(fitLockedModelKeys);
+
+      if (!isModelsViewVisible) {
+        fitPinnedWhileVisible = false;
+        if (!fitUserPicked || sanitizedLocked.length === 0) {
+          fitLockedModelKeys = [defaultActiveModelKey];
+        } else {
+          fitLockedModelKeys = sanitizedLocked;
+        }
+      } else if (!fitPinnedWhileVisible) {
+        if (!fitUserPicked || sanitizedLocked.length === 0) {
+          fitLockedModelKeys = [defaultActiveModelKey];
+        } else {
+          fitLockedModelKeys = sanitizedLocked;
+        }
+        if (availableModelKeys.size > 0) {
+          fitPinnedWhileVisible = true;
+        }
+      } else if (sanitizedLocked.length === 0) {
+        fitLockedModelKeys = [defaultActiveModelKey];
+      } else {
+        fitLockedModelKeys = sanitizedLocked;
+      }
+
+      const effectiveFitModelKeys =
+        availableModelKeys.size === 0
+          ? ['__all__']
+          : !hasMultipleModels
+            ? [Array.from(availableModelKeys)[0]]
+            : fitLockedModelKeys.length > 0
+              ? fitLockedModelKeys
+              : [defaultActiveModelKey];
+
+      patchAttr(fitModelSelect.el, 'hidden', !hasMultipleModels);
+      if (hasMultipleModels) {
+        fitModelSelect.setProps({
+          modelValue: effectiveFitModelKeys,
+          options: modelSelectOptions,
+        });
+      } else {
+        fitModelSelect.close();
+      }
+
+      const fitRes = modelFitChart.update({
+        steps: chronoSteps,
+        modelGroupKey: effectiveFitModelKeys[0] || '__all__',
+        modelGroupKeys: effectiveFitModelKeys,
+        modelColorByGroup,
+        metric: selectedFitMetric,
+        showAgentPrefix,
+        displaySettings,
+      });
+      patchText(fitSummaryBadge, fitRes.summaryBadge);
+
+      // 4. 极简模型总览列表增量对账（按最终展示名去重归并，一卡表达调用、Token 4 段占比、均速/首字/缓存与费用）
+      const displayModels = mergeModelsByDisplayName(models, displaySettings, { fallback: '—' });
+      let sumCalls = 0;
+      let sumTokens = 0;
+      let sumCost = 0;
+      let sumUnpriced = 0;
+      for (const m of displayModels) {
+        sumCalls += Math.max(0, Number(m.calls || 0));
+        sumTokens += Math.max(0, Number(m.totalTokens || 0));
+        sumUnpriced += Math.max(0, Number(m.unpricedCalls || 0));
+        if (Number.isFinite(Number(m.costUsd))) {
+          sumCost += Math.max(0, Number(m.costUsd));
+        }
+      }
+
+      if (displayModels.length === 0) {
+        patchText(modelsSummaryMeta, '0 次');
+      } else {
+        const modelCountPart = displayModels.length > 1 ? `${displayModels.length} 模型 · ` : '';
+        const isAllUnpricedSum = sumCalls > 0 && sumUnpriced >= sumCalls && !(sumCost > 0);
+        patchText(
+          modelsSummaryMeta,
+          `${modelCountPart}${sumCalls} 次 · ${formatTokens(sumTokens)} · ${formatUsd(
+            isAllUnpricedSum ? null : sumCost,
+            {
+              precise: sumCost > 0 && sumCost < 0.1,
+            }
+          )}`
+        );
+      }
+      patchAttr(modelsEmptyEl, 'hidden', displayModels.length > 0);
+      patchAttr(modelsListEl, 'hidden', displayModels.length === 0);
+
+      const isFitPooledAll = effectiveFitModelKeys.includes('__all__');
+      const fitActiveKeySet = new Set(isFitPooledAll ? [] : effectiveFitModelKeys);
+
+      patchKeyedList(modelsListEl, displayModels, {
+        keyFn: (m) => m.displayText || m.label || m.shortName,
+        sigFn: (m) => {
+          const gk = getStepModelGroupKey(m);
+          const fbTtft = stepTtftFallbackMap.get(gk);
+          const avgTtft =
+            m.avgTtftSec != null
+              ? m.avgTtftSec
+              : fbTtft && fbTtft.count > 0
+                ? +(fbTtft.sum / fbTtft.count).toFixed(1)
+                : null;
+          const cardGroupKeys =
+            Array.isArray(m.sourceLabels) && m.sourceLabels.length > 0
+              ? m.sourceLabels.map((lbl) => getStepModelGroupKey({ label: lbl }))
+              : [gk];
+          const isActiveFit =
+            hasMultipleModels && cardGroupKeys.some((k) => fitActiveKeySet.has(k));
+          return `${m.displayText}:${m.displayTitle}:${m.calls}:${sumCalls}:${displayModels.length}:${m.avgTokPerSec}:${avgTtft}:${m.cacheHitPct}:${m.inputTokens}:${m.cacheReadTokens}:${m.thinkingTokens}:${m.responseTokens}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${isActiveFit}:${hasMultipleModels}`;
+        },
         createRow: () => {
-          const tdName = h('td', {
-            style: 'font-weight: 600; max-width: 165px; overflow: hidden; text-overflow: ellipsis;',
-          });
-          const tdCalls = h('td');
-          const speedMain = h('div');
-          const speedSub = h('div', { className: 'text-muted', style: 'font-size: 9.5px;' });
-          const tdSpeed = h('td', {}, [speedMain, speedSub]);
-          const tdTokens = h('td');
-          const tdCost = h('td', { style: 'font-weight: 600;' });
-          const tr = h('tr', {}, [tdName, tdCalls, tdSpeed, tdTokens, tdCost]);
+          const nameEl = h('strong', { className: 'smodel-name' });
+          const callsPillEl = h('span', { className: 'smodel-calls-pill text-mono' });
+          const tokEl = h('span', { className: 'smodel-tok text-mono' });
+          const costEl = h('strong', { className: 'smodel-cost text-mono' });
+          const segBar = createFourSegmentBar();
+          segBar.el.classList.add('smodel-seg-bar');
+
+          const perfEl = h('span', { className: 'smodel-perf text-mono' });
+          const splitEl = h('span', { className: 'smodel-split text-mono' });
+
+          const cardEl = h('div', { className: 'smodel-card' }, [
+            h('div', { className: 'smodel-head' }, [
+              h('div', { className: 'smodel-ident' }, [nameEl, callsPillEl]),
+              h('div', { className: 'smodel-totals' }, [tokEl, costEl]),
+            ]),
+            segBar.el,
+            h('div', { className: 'smodel-foot' }, [perfEl, splitEl]),
+          ]);
+
           return {
-            el: tr,
-            refs: { tdName, tdCalls, speedMain, speedSub, tdTokens, tdCost },
+            el: cardEl,
+            refs: { nameEl, callsPillEl, tokEl, costEl, segBar, perfEl, splitEl },
           };
         },
-        updateRow: (refs, m) => {
-          const nameText = showUpstream
-            ? m.upstreamName || m.shortName || m.label
-            : m.shortName || m.label;
-          patchText(refs.tdName, nameText);
-          const fullUpstreamTitle =
-            showUpstream && Array.isArray(m.upstreamModels) && m.upstreamModels.length > 1
-              ? m.upstreamModels.join(' / ')
-              : nameText;
-          patchAttr(refs.tdName, 'title', fullUpstreamTitle);
-          patchText(refs.tdCalls, String(Number(m.calls || 0)));
-          patchText(refs.speedMain, formatMetric(m.avgTokPerSec, ' tok/s'));
-          patchText(refs.speedSub, `有效 ${sampleSummary(m.speedSummary)}`);
-          patchText(refs.tdTokens, formatTokens(m.totalTokens || 0));
-          patchText(refs.tdCost, formatUsd(m.costUsd || 0));
+        updateRow: (refs, m, _idx, cardEl) => {
+          const gk = getStepModelGroupKey(m);
+          const cardGroupKeys =
+            Array.isArray(m.sourceLabels) && m.sourceLabels.length > 0
+              ? Array.from(new Set(m.sourceLabels.map((lbl) => getStepModelGroupKey({ label: lbl }))))
+              : [gk];
+          const dispText = m.displayText || '—';
+          const dispTitle = m.displayTitle || dispText;
+          patchText(refs.nameEl, dispText);
+          patchAttr(refs.nameEl, 'title', dispTitle);
+
+          const calls = Math.max(0, Number(m.calls || 0));
+          const callSharePct = sumCalls > 0 ? Math.round((calls / sumCalls) * 100) : 0;
+          patchText(
+            refs.callsPillEl,
+            displayModels.length > 1 ? `${calls}次 · ${callSharePct}%` : `${calls}次`
+          );
+
+          const inTok = Math.max(0, Number(m.inputTokens || 0));
+          const cacheTok = Math.max(0, Number(m.cacheReadTokens || 0));
+          const outTok = Math.max(0, Number(m.outputTokens || 0));
+          const thinkTok = Math.max(0, Number(m.thinkingTokens || 0));
+          const respTok =
+            m.responseTokens != null
+              ? Math.max(0, Number(m.responseTokens))
+              : Math.max(0, outTok - thinkTok);
+
+          patchText(refs.tokEl, formatTokens(m.totalTokens || 0));
+          const costNum = Number(m.costUsd || 0);
+          const isAllUnpriced =
+            calls > 0 && Number(m.unpricedCalls || 0) >= calls && !(costNum > 0);
+          patchText(
+            refs.costEl,
+            formatUsd(isAllUnpriced ? null : costNum, { precise: costNum > 0 && costNum < 0.1 })
+          );
+
+          refs.segBar.update({
+            inputTokens: inTok,
+            cacheReadTokens: cacheTok,
+            responseTokens: respTok,
+            thinkingTokens: thinkTok,
+          });
+
+          const fbTtft = stepTtftFallbackMap.get(gk);
+          const resolvedAvgTtft =
+            m.avgTtftSec != null
+              ? Number(m.avgTtftSec)
+              : fbTtft && fbTtft.count > 0
+                ? fbTtft.sum / fbTtft.count
+                : null;
+          const promptTok = inTok + cacheTok;
+          const resolvedCachePct =
+            m.cacheHitPct != null
+              ? Number(m.cacheHitPct)
+              : promptTok > 0
+                ? +((cacheTok / promptTok) * 100).toFixed(1)
+                : 0;
+
+          patchText(
+            refs.perfEl,
+            `均速 ${formatMetric(m.avgTokPerSec, ' tok/s')} · 首字 ${formatMetric(resolvedAvgTtft, 's')} · 缓存 ${resolvedCachePct}%`
+          );
+          patchText(
+            refs.splitEl,
+            `入 ${formatTokens(inTok)} · 缓 ${formatTokens(cacheTok)} · 思 ${formatTokens(thinkTok)} · 正 ${formatTokens(respTok)}`
+          );
+
+          const isActiveFit =
+            hasMultipleModels && cardGroupKeys.some((k) => fitActiveKeySet.has(k));
+          patchClasses(cardEl, { 'is-fit-active': isActiveFit });
+          patchAttr(
+            cardEl,
+            'title',
+            !hasMultipleModels
+              ? dispTitle
+              : isActiveFit
+                ? `${dispTitle}（已纳入上方趋势拟合，按住 Ctrl/Shift 点击可多选对比）`
+                : `点击在上方拟合图查看 ${dispText}（按住 Ctrl/Shift 点击可多选同图对比）`
+          );
+          cardEl.onclick = (e) => {
+            if (!hasMultipleModels) return;
+            if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && !isFitPooledAll) {
+              const cardSet = new Set(cardGroupKeys);
+              const next = isActiveFit
+                ? effectiveFitModelKeys.filter((k) => !cardSet.has(k))
+                : Array.from(new Set([...effectiveFitModelKeys, ...cardGroupKeys]));
+              fitLockedModelKeys = next.length > 0 ? next : [...cardGroupKeys];
+              fitUserPicked = true;
+              fitPinnedWhileVisible = true;
+              if (latestSlice) renderStepsData(latestSlice);
+              return;
+            }
+            const isAlreadySole =
+              !isFitPooledAll &&
+              effectiveFitModelKeys.length === cardGroupKeys.length &&
+              cardGroupKeys.every((k) => fitActiveKeySet.has(k));
+            if (!isAlreadySole || !fitUserPicked) {
+              fitLockedModelKeys = [...cardGroupKeys];
+              fitUserPicked = true;
+              fitPinnedWhileVisible = true;
+              if (latestSlice) renderStepsData(latestSlice);
+            }
+          };
         },
       });
 
@@ -5520,6 +9475,22 @@ const StepsDetailView = defineComponent({
       }
     }
 
+    const unsubUi = uiStore.subscribe(
+      (st) => st.stepsSubTab,
+      (tab) => {
+        subTabSwitch.setValue(tab);
+        patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
+        patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
+        if (uiStore.getState().activeView === 'steps' && latestSlice) {
+          renderStepsData(latestSlice);
+        } else if (tab === 'steps') {
+          stepsScroll.refresh();
+        } else {
+          modelsScroll.refresh();
+        }
+      }
+    );
+
     const unsubTelemetry = telemetryStore.subscribe(
       (st) => ({
         activeConversation: st.telemetry?.activeConversation,
@@ -5528,10 +9499,16 @@ const StepsDetailView = defineComponent({
         sessionModelBreakdown: st.telemetry?.activeConversation?.modelBreakdown,
         modelBreakdown: st.telemetry?.modelBreakdown,
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
+        orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
+          st.telemetry?.settings?.orchestratorIdMode
+        ),
       }),
       (slice) => {
         latestSlice = slice;
         if (uiStore.getState().activeView !== 'steps') {
+          if (!fitUserPicked) {
+            fitPinnedWhileVisible = false;
+          }
           isDirty = true;
           return;
         }
@@ -5541,6 +9518,7 @@ const StepsDetailView = defineComponent({
     );
 
     let prevScope = uiStore.getState().selectedAgentScope;
+    let prevActiveView = uiStore.getState().activeView;
 
     const unsubView = uiStore.subscribe(
       (st) => ({
@@ -5549,12 +9527,19 @@ const StepsDetailView = defineComponent({
       }),
       (uiSlice) => {
         const scopeChanged = uiSlice.selectedAgentScope !== prevScope;
+        if (uiSlice.selectedAgentScope !== lastSyncedUiScope) {
+          lastSyncedUiScope = uiSlice.selectedAgentScope;
+          selectedAgentScopes = [uiSlice.selectedAgentScope || 'all'];
+        }
+        const viewEntered = uiSlice.activeView === 'steps' && prevActiveView !== 'steps';
         prevScope = uiSlice.selectedAgentScope;
+        prevActiveView = uiSlice.activeView;
         if (uiSlice.activeView !== 'steps') {
+          fitPinnedWhileVisible = false;
           if (scopeChanged) isDirty = true;
           return;
         }
-        if ((isDirty || scopeChanged) && latestSlice) {
+        if ((isDirty || scopeChanged || viewEntered) && latestSlice) {
           isDirty = false;
           renderStepsData(latestSlice);
         }
@@ -5565,8 +9550,15 @@ const StepsDetailView = defineComponent({
       unsubUi();
       unsubTelemetry();
       unsubView();
+      sessionLineChart.destroy?.();
+      modelFitChart.destroy?.();
       inlineScopeSelect.destroy();
+      stepsModelSelect.destroy();
       subTabSwitch.destroy();
+      lineModelSelect.destroy();
+      lineMetricSwitch.destroy();
+      fitModelSelect.destroy();
+      fitMetricSwitch.destroy();
       stepsScroll.destroy();
       modelsScroll.destroy();
     });
@@ -5575,9 +9567,14 @@ const StepsDetailView = defineComponent({
       el: rootEl,
       refs: {
         stepsTbody,
-        modelsTbody,
+        modelsListEl,
         inlineScopeSelect,
+        stepsModelSelect,
         subTabSwitch,
+        lineModelSelect,
+        lineMetricSwitch,
+        fitModelSelect,
+        fitMetricSwitch,
         stepsScroll,
         modelsScroll,
       },
@@ -5589,7 +9586,7 @@ const StepsDetailView = defineComponent({
 /**
  * @fileoverview View 4: SettingsView (系统设置视图).
  * 采用定制的 `CustomSelect` 与 `SegmentedControl` 替代所有原生表单控件，分为三个单层细线设置面板：
- * 1. 常规设置：配置面板挂载方式（双栖挂载 / 仅右侧辅助栏）与模型名称格式（精简代号 / 原始模型 ID）；
+ * 1. 常规设置：配置面板挂载方式（双栖挂载 / 仅右侧辅助栏）、模型名称格式（精简代号 / 原始模型 ID）与 Orchestrator 系列 ID 格式；
  * 2. 顶部栏定制：控制左侧「实时运行会话」入口开关，以及自由定义右侧精简胶囊三个数值槽位的显示内容与左右顺序；
  * 3. 版本更新：配置插件自动更新策略、手动同步云端模型价格表，以及检查并执行 Git/ZIP 双模式插件升级。
  */
@@ -5601,9 +9598,16 @@ const STEP_MODEL_DISPLAY_OPTIONS = [
   { value: 'upstream', label: '原始模型 ID (如 gemini-3.8-flash-n)' },
 ];
 
-/** 面板挂载模式可选项（顶部栏 + 侧边栏 vs 仅侧边栏） */
+/** Orchestrator 系列模型 ID 显示方式可选项（独立于普通模型名称格式） */
+const ORCHESTRATOR_ID_DISPLAY_OPTIONS = [
+  { value: 'compact', label: '精简代号 (如 orchestrator-argon)' },
+  { value: 'full', label: '原始完整 ID (如 gemini-pro-orchestrator)' },
+];
+
+/** 面板挂载模式可选项（顶部栏 + 侧边栏 / 输入框 + 侧边栏 / 仅侧边栏） */
 const WINDOW_MOUNT_OPTIONS = [
   { value: 'dual', label: '双栖挂载 (顶部栏 + 侧边栏)' },
+  { value: 'composer', label: '输入框挂载 (输入框 + 侧边栏)' },
   { value: 'sidebar', label: '仅侧边栏' },
 ];
 
@@ -5653,7 +9657,9 @@ const SettingsView = defineComponent({
   name: 'SettingsView',
   setup({ onCleanup }) {
     let draftShowUpstreamModel = false;
+    let draftOrchestratorIdMode = 'compact';
     let draftPluginUpdateMode = 'manual';
+    let draftWindowMountMode = 'dual';
     let draftEnableWindowOverlay = true;
     let draftShowTopbarMulti = true;
     let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -5716,12 +9722,15 @@ const SettingsView = defineComponent({
       icon: 'dock',
       options: WINDOW_MOUNT_OPTIONS,
       onUpdateModelValue: async (val) => {
-        const nextEnable = val !== 'sidebar';
+        const nextMode = normalizeClientWindowMountMode(val);
+        const nextEnable = nextMode !== 'sidebar';
+        draftWindowMountMode = nextMode;
         draftEnableWindowOverlay = nextEnable;
-        windowMountSelect.setValue(nextEnable ? 'dual' : 'sidebar');
+        windowMountSelect.setValue(nextMode);
         showSaveFeedback('保存中…');
         try {
           await saveSettingsPatch({
+            windowMountMode: nextMode,
             enableWindowOverlay: nextEnable,
           });
           showSaveFeedback('已保存');
@@ -5757,6 +9766,29 @@ const SettingsView = defineComponent({
       },
     });
 
+    const orchestratorIdSelect = CustomSelect({
+      modelValue: 'compact',
+      icon: 'layers',
+      options: ORCHESTRATOR_ID_DISPLAY_OPTIONS,
+      onUpdateModelValue: async (val) => {
+        const nextMode = normalizeClientOrchestratorIdMode(val);
+        draftOrchestratorIdMode = nextMode;
+        orchestratorIdSelect.setValue(nextMode);
+        showSaveFeedback('保存中…');
+        try {
+          await saveSettingsPatch({
+            orchestratorIdMode: nextMode,
+          });
+          showSaveFeedback('已保存');
+        } catch {
+          if (latestSettings) {
+            renderSettings(latestSettings);
+          }
+          showSaveFeedback('保存失败');
+        }
+      },
+    });
+
     const generalPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
         h('span', { className: 'panel-title' }, [
@@ -5772,6 +9804,10 @@ const SettingsView = defineComponent({
       h('div', { className: 'form-row' }, [
         h('span', { className: 'form-label', text: '模型名称格式' }),
         stepModelSelect.el,
+      ]),
+      h('div', { className: 'form-row' }, [
+        h('span', { className: 'form-label', text: 'Orchestrator 系列 ID' }),
+        orchestratorIdSelect.el,
       ]),
     ]);
 
@@ -6104,16 +10140,22 @@ const SettingsView = defineComponent({
     function renderSettings(settings) {
       if (!settings) return;
       draftShowUpstreamModel = Boolean(settings.showUpstreamModel);
+      draftOrchestratorIdMode = normalizeClientOrchestratorIdMode(settings.orchestratorIdMode);
       draftPluginUpdateMode = normalizeClientUpdateMode(
         settings.pluginUpdateMode,
         settings.autoUpdatePlugin
       );
-      draftEnableWindowOverlay = settings.enableWindowOverlay !== false;
+      draftWindowMountMode = normalizeClientWindowMountMode(
+        settings.windowMountMode,
+        settings.enableWindowOverlay
+      );
+      draftEnableWindowOverlay = draftWindowMountMode !== 'sidebar';
       draftShowTopbarMulti = settings.showTopbarMultiSession !== false;
       draftTopbarSlots = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
 
-      windowMountSelect.setValue(draftEnableWindowOverlay ? 'dual' : 'sidebar');
+      windowMountSelect.setValue(draftWindowMountMode);
       stepModelSelect.setValue(draftShowUpstreamModel ? 'upstream' : 'short');
+      orchestratorIdSelect.setValue(draftOrchestratorIdMode);
       autoUpdateSelect.setValue(draftPluginUpdateMode);
       syncTopbarControls();
       viewScrollbar.refresh();
@@ -6195,6 +10237,7 @@ const SettingsView = defineComponent({
       unsubView();
       windowMountSelect.destroy();
       stepModelSelect.destroy();
+      orchestratorIdSelect.destroy();
       multiSessionToggle.destroy();
       for (const sel of slotSelects) {
         sel.destroy();
@@ -6208,6 +10251,7 @@ const SettingsView = defineComponent({
       refs: {
         windowMountSelect,
         stepModelSelect,
+        orchestratorIdSelect,
         multiSessionToggle,
         slotSelects,
         resetTopbarBtn,
@@ -6353,8 +10397,8 @@ const App = defineComponent({
 
 const CAPSULE_HOST_ID = 'ag-usage-monitor-capsule';
 const PORTAL_HOST_ID = 'ag-usage-monitor-portal';
-const FLOATING_CARD_WIDTH = 492;
-const MULTI_PANEL_WIDTH = 484;
+const FLOATING_CARD_WIDTH = 522;
+const MULTI_PANEL_WIDTH = 464;
 const RING_RADIUS = 5.2;
 const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
 
@@ -6397,15 +10441,771 @@ function computeCapsuleLayoutMode(availWidth, currentMode = 'wide', options = un
   return 'ring-only';
 }
 
+function findIdeWorkbenchTitlebar() {
+  try {
+    if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
+      return null;
+    }
+    const workbench = document.querySelector('.monaco-workbench');
+    if (!workbench?.querySelector) return null;
+    const partTitlebar = workbench.querySelector('.part.titlebar');
+    if (!partTitlebar?.querySelector) return null;
+    if (partTitlebar.getBoundingClientRect) {
+      const pr = partTitlebar.getBoundingClientRect();
+      if (pr.width <= 0 || pr.height <= 0) return null;
+    }
+    const container =
+      partTitlebar.querySelector(':scope > .titlebar-container') ||
+      partTitlebar.querySelector('.titlebar-container');
+    const rightGroup =
+      container?.querySelector?.(':scope > .titlebar-right') ||
+      container?.querySelector?.('.titlebar-right');
+    if (!container || !rightGroup) return null;
+    const actionToolbar =
+      rightGroup.querySelector?.(':scope > .action-toolbar-container') ||
+      rightGroup.querySelector?.('.action-toolbar-container') ||
+      null;
+    return {
+      kind: 'ide-titlebar',
+      workbench,
+      titlebar: container,
+      targetContainer: rightGroup,
+      actionToolbar,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function findHostTitlebar() {
   try {
     if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
       return null;
     }
-    return document.querySelector('[class*="@container/titlebar"]');
+    const tb = document.querySelector('[class*="@container/titlebar"]');
+    if (tb?.getBoundingClientRect) {
+      const r = tb.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return null;
+    }
+    return tb;
   } catch {
     return null;
   }
+}
+
+const COMPOSER_EXCLUDED_ANCESTOR_SELECTOR =
+  '.part.titlebar, .part.statusbar, .quick-input-widget, .suggest-widget, .find-widget, .scm-editor, .search-view, [class*="@container/titlebar"]';
+const COMPOSER_MODEL_LABEL_RE =
+  /\b(?:gemini|claude|gpt|argon|carbon|hydrogen|helix|flash|sonnet|opus|haiku|orchestrator|llama|deepseek|qwen|mistral|model_placeholder|placeholder_m\d+|o[134](?:-\w+)?)\b/i;
+const COMPOSER_MODEL_ATTR_RE =
+  /\bmodel[-_\s]?(?:select|picker|switch|selector|menu|name)\b|选择模型|切换模型/i;
+const COMPOSER_MODE_EXACT_RE = /^(?:auto|自动)$/i;
+const COMPOSER_MODE_TEXT_RE =
+  /^(?:auto|ask|manual|supervised|autonomous|always\s*allow|turbo|safe|yolo|plan|act|review|confirm|normal|fast|自动|询问|手动|始终允许|受控|规划)(?:\s*(?:mode|模式))?$/i;
+const COMPOSER_MODE_ATTR_RE =
+  /\b(?:auto(?:nomy|matic)?|execution[-_]?mode|agent[-_]?mode|permission|approval|hitl|policy|mode[-_]?selector|mode[-_]?picker)\b|自动|执行模式|权限模式|审批/i;
+const COMPOSER_ICON_FONT_CLASS_RE =
+  /\b(?:codicon|material-symbols(?:-\w+)?|material-icons(?:-\w+)?|lucide(?:-\w+)?)\b/i;
+
+function querySimpleSelectorList(root, selectors) {
+  if (!root || typeof root.querySelectorAll !== 'function') return [];
+  const seen = new Set();
+  const out = [];
+  for (const sel of selectors) {
+    let list = [];
+    try {
+      list = root.querySelectorAll(sel) || [];
+    } catch {
+      list = [];
+    }
+    for (const item of list) {
+      if (item && !seen.has(item)) {
+        seen.add(item);
+        out.push(item);
+      }
+    }
+  }
+  return out;
+}
+
+function extractVisibleButtonText(node, isRoot = true) {
+  if (!node) return '';
+  const tag = String(node.tagName || node.nodeName || '').toLowerCase();
+  if (tag === 'svg' || tag === 'style' || tag === 'script') return '';
+  if (!isRoot) {
+    if (node.getAttribute?.('aria-hidden') === 'true') return '';
+    const cls = String(node.className || '');
+    if (cls && COMPOSER_ICON_FONT_CLASS_RE.test(cls)) return '';
+  }
+  if (tag === '#text' || node.nodeType === 3) {
+    return String(node.nodeValue ?? node.textContent ?? '');
+  }
+  const childNodes = node.childNodes || node.children;
+  if (!childNodes || childNodes.length === 0) {
+    return String(node.textContent || '');
+  }
+  let acc = '';
+  for (const ch of childNodes) {
+    acc += ` ${extractVisibleButtonText(ch, false)}`;
+  }
+  return acc;
+}
+
+function cleanComposerButtonText(btn) {
+  const raw = extractVisibleButtonText(btn, true)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!raw) return '';
+  return raw.replace(/^[⌃⌄▾▴∨∧^<>›‹+\s]+|[⌃⌄▾▴∨∧^<>›‹\s]+$/g, '').trim();
+}
+
+function isComposerModelButtonItem(item) {
+  if (!item) return false;
+  if (item.cleanText && COMPOSER_MODEL_LABEL_RE.test(item.cleanText)) return true;
+  if (item.attrText && COMPOSER_MODEL_ATTR_RE.test(item.attrText)) return true;
+  return false;
+}
+
+function hasExcludedComposerAncestor(el) {
+  if (!el) return false;
+  if (typeof el.closest === 'function') {
+    try {
+      if (el.closest(COMPOSER_EXCLUDED_ANCESTOR_SELECTOR)) return true;
+    } catch {
+      // 忽略选择器异常并回退祖先链遍历
+    }
+  }
+  let cur = el.parentElement || el.parentNode;
+  while (cur) {
+    const cls = String(cur.className || '');
+    if (
+      cls.includes('@container/titlebar') ||
+      cls.includes('quick-input-widget') ||
+      cls.includes('suggest-widget') ||
+      cls.includes('find-widget') ||
+      cls.includes('scm-editor') ||
+      cls.includes('search-view') ||
+      (cls.includes('part') && (cls.includes('titlebar') || cls.includes('statusbar')))
+    ) {
+      return true;
+    }
+    cur = cur.parentElement || cur.parentNode;
+  }
+  return false;
+}
+
+function isNodeHiddenByStyle(el) {
+  if (!el) return true;
+  if (el.hasAttribute?.('hidden') || el.getAttribute?.('aria-hidden') === 'true') return true;
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const cs = window.getComputedStyle(el);
+      if (cs?.display === 'none' || cs?.visibility === 'hidden') return true;
+    } catch {
+      // 忽略样式读取异常
+    }
+  }
+  return false;
+}
+
+function getInFlowHostChildren(container, capsuleNode, portalNode) {
+  const rawChildren = container?.children || [];
+  const out = [];
+  for (const ch of rawChildren) {
+    if (!ch || ch === capsuleNode || ch === portalNode) continue;
+    if (ch.id === CAPSULE_HOST_ID || ch.id === PORTAL_HOST_ID) continue;
+    if (ch.hasAttribute?.('hidden')) continue;
+    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+      try {
+        const cs = window.getComputedStyle(ch);
+        if (cs?.display === 'none') continue;
+        if (cs?.position === 'absolute' || cs?.position === 'fixed') continue;
+      } catch {
+        // 忽略计算样式异常
+      }
+    }
+    out.push(ch);
+  }
+  return out;
+}
+
+function isHorizontalFlexContainer(el) {
+  if (!el) return false;
+  const cls = String(el.className || '');
+  if (/\b(?:inline-)?flex\b/.test(cls) && !/\bflex-col\b/.test(cls)) return true;
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const cs = window.getComputedStyle(el);
+      const disp = String(cs?.display || '');
+      const dir = String(cs?.flexDirection || 'row');
+      if (disp.includes('flex') && !dir.startsWith('column')) return true;
+    } catch {
+      // 忽略计算样式异常
+    }
+  }
+  return false;
+}
+
+function isSpaceDistributedFlexContainer(el) {
+  if (!el) return false;
+  const cls = String(el.className || '');
+  if (/\bjustify-(?:between|around|evenly)\b/.test(cls)) return true;
+  if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+    try {
+      const jc = String(window.getComputedStyle(el)?.justifyContent || '');
+      if (jc.includes('space-between') || jc.includes('space-around') || jc.includes('space-evenly')) {
+        return true;
+      }
+    } catch {
+      // 忽略计算样式异常
+    }
+  }
+  return false;
+}
+
+function buildComposerDockDescriptor(autoBtn, composerCard, bottomRowBtns, capsuleNode, portalNode, patchedNode) {
+  if (!autoBtn || !composerCard) return null;
+  let item = autoBtn;
+  while (
+    (item.parentElement || item.parentNode) &&
+    (item.parentElement || item.parentNode) !== composerCard &&
+    (item.parentElement || item.parentNode) !== document.body
+  ) {
+    const parent = item.parentElement || item.parentNode;
+    const hostSiblings = getInFlowHostChildren(parent, capsuleNode, portalNode);
+    if (hostSiblings.length >= 2) break;
+    const grandParent = parent.parentElement || parent.parentNode;
+    const parentCls = String(parent.className || '');
+    const parentInlineMl = String(parent.style?.marginLeft || '').trim();
+    const isSingleClusterInSplitRow =
+      !/\b(?:relative|ml-auto|ms-auto)\b/.test(parentCls) &&
+      parentInlineMl !== 'auto' &&
+      isHorizontalFlexContainer(parent) &&
+      grandParent &&
+      isSpaceDistributedFlexContainer(grandParent) &&
+      getInFlowHostChildren(grandParent, capsuleNode, portalNode).length >= 2;
+    if (isSingleClusterInSplitRow) {
+      break;
+    }
+    item = parent;
+  }
+
+  const anchorNode = item;
+  const targetContainer = anchorNode.parentElement || anchorNode.parentNode;
+  if (!targetContainer) return null;
+
+  const hostChildren = getInFlowHostChildren(targetContainer, capsuleNode, portalNode);
+  const anchorIdx = hostChildren.indexOf(anchorNode);
+  const isFirstHostChild = anchorIdx <= 0;
+
+  let needsAutoMarginTransfer = false;
+  let patchMarginNode = null;
+
+  if (!isFirstHostChild) {
+    const cls = String(anchorNode.className || '');
+    const inlineMl = String(anchorNode.style?.marginLeft || '').trim();
+    let computedLargeMl = false;
+    if (
+      patchedNode !== anchorNode &&
+      typeof window !== 'undefined' &&
+      typeof window.getComputedStyle === 'function'
+    ) {
+      try {
+        const mlPx = parseFloat(window.getComputedStyle(anchorNode)?.marginLeft) || 0;
+        const prevSib = hostChildren[anchorIdx - 1];
+        const aRect = anchorNode.getBoundingClientRect?.();
+        const pRect = prevSib?.getBoundingClientRect?.();
+        if (mlPx > 24 && aRect && pRect && aRect.left - pRect.right >= mlPx - 6) {
+          computedLargeMl = true;
+        }
+      } catch {
+        // 忽略边距测量异常
+      }
+    }
+
+    if (
+      /\b(?:ml-auto|ms-auto)\b/.test(cls) ||
+      inlineMl === 'auto' ||
+      patchedNode === anchorNode ||
+      computedLargeMl
+    ) {
+      needsAutoMarginTransfer = true;
+      patchMarginNode = anchorNode;
+    } else if (isSpaceDistributedFlexContainer(targetContainer)) {
+      needsAutoMarginTransfer = true;
+    }
+  }
+
+  const autoRect = anchorNode.getBoundingClientRect?.() || autoBtn.getBoundingClientRect?.();
+  let leftClusterRightEdge = 0;
+  if (autoRect && Array.isArray(bottomRowBtns)) {
+    for (const entry of bottomRowBtns) {
+      if (entry.btn === autoBtn || anchorNode.contains?.(entry.btn)) continue;
+      if (entry.rect.left < autoRect.left - 2 && entry.rect.right <= autoRect.left + 4) {
+        if (entry.rect.right > leftClusterRightEdge) {
+          leftClusterRightEdge = entry.rect.right;
+        }
+      }
+    }
+  }
+
+  return {
+    kind: 'composer',
+    workbench: null,
+    titlebar: composerCard,
+    targetContainer,
+    actionToolbar: patchMarginNode,
+    anchorNode,
+    needsAutoMarginTransfer,
+    leftClusterRightEdge,
+  };
+}
+
+function buildComposerRightEndDockDescriptor(
+  leftAnchorBtn,
+  composerCard,
+  bottomRowBtns,
+  capsuleNode,
+  portalNode
+) {
+  if (!leftAnchorBtn || !composerCard) return null;
+  const cardRect = composerCard.getBoundingClientRect?.();
+  const minRowWidth = cardRect && cardRect.width > 0 ? cardRect.width * 0.65 : 180;
+  let toolbarRow = null;
+  let cur = leftAnchorBtn.parentElement || leftAnchorBtn.parentNode;
+  for (let d = 0; d < 8 && cur && cur !== composerCard && cur !== document.body; d += 1) {
+    const r = cur.getBoundingClientRect?.();
+    if (r && r.width >= minRowWidth && r.height > 0 && r.height <= 60 && isHorizontalFlexContainer(cur)) {
+      toolbarRow = cur;
+      break;
+    }
+    cur = cur.parentElement || cur.parentNode;
+  }
+  if (!toolbarRow) {
+    const p = leftAnchorBtn.parentElement || leftAnchorBtn.parentNode;
+    if (!p || !isHorizontalFlexContainer(p)) return null;
+    toolbarRow = p;
+  }
+
+  let leftClusterRightEdge = 0;
+  if (Array.isArray(bottomRowBtns)) {
+    for (const entry of bottomRowBtns) {
+      if (entry?.rect?.right > leftClusterRightEdge) {
+        leftClusterRightEdge = entry.rect.right;
+      }
+    }
+  }
+
+  const rowChildren = getInFlowHostChildren(toolbarRow, capsuleNode, portalNode);
+  const lastChild = rowChildren.length >= 2 ? rowChildren[rowChildren.length - 1] : null;
+  if (
+    lastChild &&
+    !lastChild.contains?.(leftAnchorBtn) &&
+    isHorizontalFlexContainer(lastChild) &&
+    getInFlowHostChildren(lastChild, capsuleNode, portalNode).length === 0
+  ) {
+    return {
+      kind: 'composer',
+      workbench: null,
+      titlebar: composerCard,
+      targetContainer: lastChild,
+      actionToolbar: null,
+      anchorNode: null,
+      needsAutoMarginTransfer: false,
+      leftClusterRightEdge,
+    };
+  }
+
+  return {
+    kind: 'composer',
+    workbench: null,
+    titlebar: composerCard,
+    targetContainer: toolbarRow,
+    actionToolbar: null,
+    anchorNode: null,
+    needsAutoMarginTransfer: true,
+    leftClusterRightEdge,
+  };
+}
+
+function collectComposerBottomButtons(container, editorEl, editorRect, capsuleNode, portalNode) {
+  const rawBtns = querySimpleSelectorList(container, ['button', '[role="button"]', '[aria-haspopup]']);
+  const hostBtns = [];
+  for (const btn of rawBtns) {
+    if (!btn || btn === editorEl || editorEl?.contains?.(btn)) continue;
+    if (editorEl && btn.contains?.(editorEl)) continue;
+    if (
+      btn.id === CAPSULE_HOST_ID ||
+      btn.id === PORTAL_HOST_ID ||
+      capsuleNode?.contains?.(btn) ||
+      portalNode?.contains?.(btn)
+    ) {
+      continue;
+    }
+    if (isNodeHiddenByStyle(btn)) continue;
+    // 仅排除嵌套在真实紧凑按钮内部的图标/子触发器，避免外层卡片级 role="button" 误杀工具栏按钮
+    let nestedInBtn = false;
+    let p = btn.parentElement || btn.parentNode;
+    while (p && p !== container) {
+      const pTag = String(p.tagName || '').toLowerCase();
+      if (pTag === 'button') {
+        nestedInBtn = true;
+        break;
+      }
+      if (
+        (p.getAttribute?.('role') === 'button' || p.hasAttribute?.('aria-haspopup')) &&
+        !(editorEl && p.contains?.(editorEl))
+      ) {
+        const pr = p.getBoundingClientRect?.();
+        if (pr && pr.height > 0 && pr.height <= 48 && pr.width > 0 && pr.width <= 360) {
+          nestedInBtn = true;
+          break;
+        }
+      }
+      p = p.parentElement || p.parentNode;
+    }
+    if (nestedInBtn) continue;
+
+    const br = btn.getBoundingClientRect?.();
+    if (!br || br.width <= 0 || br.height <= 0 || br.height > 48) continue;
+    const centerY = (br.top + br.bottom) / 2;
+    if (editorRect && centerY < editorRect.top - 4) continue;
+    hostBtns.push({
+      btn,
+      rect: br,
+      centerY,
+      centerX: (br.left + br.right) / 2,
+      cleanText: cleanComposerButtonText(btn),
+      attrText: `${btn.getAttribute?.('data-testid') || ''} ${btn.getAttribute?.('aria-label') || ''} ${btn.getAttribute?.('title') || ''}`.trim(),
+    });
+  }
+  if (hostBtns.length === 0) return [];
+  let maxCenterY = -Infinity;
+  for (const item of hostBtns) {
+    if (item.centerY > maxCenterY) maxCenterY = item.centerY;
+  }
+  const bottomBand = hostBtns.filter((item) => Math.abs(item.centerY - maxCenterY) <= 22);
+  bottomBand.sort((a, b) => a.rect.left - b.rect.left);
+  return bottomBand;
+}
+
+function pickAutoButtonFromRow(bottomRowBtns, containerRect, options = undefined) {
+  if (!Array.isArray(bottomRowBtns) || bottomRowBtns.length === 0) return null;
+  const requireModelForFallback = Boolean(options?.requireModelForFallback);
+  const rightSplitX = containerRect ? containerRect.left + containerRect.width * 0.35 : 0;
+  const rightFirst = [
+    ...bottomRowBtns.filter((b) => b.centerX >= rightSplitX),
+    ...bottomRowBtns.filter((b) => b.centerX < rightSplitX),
+  ];
+
+  // Tier 1: 精确文本 Auto / 自动 匹配
+  for (const item of rightFirst) {
+    if (COMPOSER_MODE_EXACT_RE.test(item.cleanText)) {
+      return { btn: item.btn, tier: 1 };
+    }
+  }
+
+  // Tier 2: 执行/权限模式文案或无障碍语义属性匹配（排除模型选择器按钮）
+  for (const item of rightFirst) {
+    if (isComposerModelButtonItem(item)) continue;
+    if (
+      (item.cleanText && COMPOSER_MODE_TEXT_RE.test(item.cleanText)) ||
+      (item.attrText && COMPOSER_MODE_ATTR_RE.test(item.attrText))
+    ) {
+      return { btn: item.btn, tier: 2 };
+    }
+  }
+
+  const hasModelBtn = bottomRowBtns.some(isComposerModelButtonItem);
+
+  // Tier 3: 几何右簇首按钮兜底（适配 Antigravity IDE 无 Auto 按钮、右侧为发送/语音按钮的输入栏布局）
+  if (bottomRowBtns.length >= 2 && (!requireModelForFallback || hasModelBtn)) {
+    let maxGap = -Infinity;
+    let splitIdx = -1;
+    for (let i = 1; i < bottomRowBtns.length; i += 1) {
+      const gap = bottomRowBtns[i].rect.left - bottomRowBtns[i - 1].rect.right;
+      if (gap > maxGap) {
+        maxGap = gap;
+        splitIdx = i;
+      }
+    }
+    if (splitIdx >= 1 && maxGap >= 16) {
+      return { btn: bottomRowBtns[splitIdx].btn, tier: 3 };
+    }
+  }
+
+  // Tier 4: 输入为空时若右侧发送按钮暂时隐藏、仅左侧存在模型选择器按钮，停靠至工具栏最右侧
+  if (hasModelBtn && containerRect && containerRect.width >= 200) {
+    const lastItem = bottomRowBtns[bottomRowBtns.length - 1];
+    if (lastItem.rect.right <= containerRect.left + containerRect.width * 0.72) {
+      return { btn: null, leftAnchorBtn: lastItem.btn, tier: 4 };
+    }
+  }
+
+  return null;
+}
+
+function resolveComposerEditorRect(ed) {
+  const er = ed?.getBoundingClientRect?.();
+  if (er && er.width >= 80 && er.height >= 12) return er;
+  let cur = ed;
+  for (let d = 0; d < 6 && cur; d += 1) {
+    if (String(cur.className || '').includes('monaco-editor')) {
+      const mr = cur.getBoundingClientRect?.();
+      if (mr && mr.width >= 80 && mr.height >= 12) return mr;
+      break;
+    }
+    cur = cur.parentElement || cur.parentNode;
+  }
+  return er || null;
+}
+
+function findHostComposerAutoTarget(capsuleNode = null, portalNode = null, patchedNode = null) {
+  try {
+    if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') {
+      return null;
+    }
+    const capEl = capsuleNode || document.getElementById?.(CAPSULE_HOST_ID) || null;
+    const porEl = portalNode || document.getElementById?.(PORTAL_HOST_ID) || null;
+    const activeRouteId = extractHostRouteCascadeId();
+
+    // 1. 优先从活跃会话的输入框编辑器向上定位底部工具栏与 Auto / 右簇发送按钮
+    const rawEditors = querySimpleSelectorList(document, [
+      'textarea',
+      '[contenteditable]',
+      '[role="textbox"]',
+      '[data-lexical-editor]',
+      '.ProseMirror',
+      '.monaco-editor',
+    ]);
+    const scoredEditors = [];
+    for (const ed of rawEditors) {
+      if (!ed || capEl?.contains?.(ed) || porEl?.contains?.(ed)) continue;
+      if (ed.hasAttribute?.('contenteditable')) {
+        const ce = String(ed.getAttribute('contenteditable') || '').trim().toLowerCase();
+        if (ce === 'false' && ed.getAttribute?.('role') !== 'textbox') continue;
+      }
+      if (isNodeHiddenByStyle(ed) || hasExcludedComposerAncestor(ed)) continue;
+      const er = resolveComposerEditorRect(ed);
+      if (!er || er.width < 100 || er.height < 12 || er.height > 540) continue;
+
+      let score = Math.min(1200, er.width) + Math.max(0, er.bottom) * 0.2;
+      if (activeRouteId) {
+        let anc = ed.parentElement || ed.parentNode;
+        while (anc) {
+          const cid = anc.getAttribute?.('data-cascade-id');
+          if (cid) {
+            score += cid === activeRouteId ? 4000 : -2000;
+            break;
+          }
+          anc = anc.parentElement || anc.parentNode;
+        }
+      }
+      if (
+        document.activeElement &&
+        (ed === document.activeElement || ed.contains?.(document.activeElement))
+      ) {
+        score += 1000;
+      }
+      scoredEditors.push({ ed, rect: er, score });
+    }
+    scoredEditors.sort((a, b) => b.score - a.score);
+
+    for (const { ed, rect: er } of scoredEditors) {
+      const isMonacoCandidate = String(ed.className || '').includes('monaco-editor') ||
+        String(ed.className || '').includes('inputarea');
+      let tier3Candidate = null;
+      let tier4Candidate = null;
+      let cur = ed.parentElement || ed.parentNode;
+      for (let depth = 0; depth < 18 && cur; depth += 1) {
+        if (cur === document.body || cur === document.documentElement) break;
+        const tag = String(cur.tagName || '').toLowerCase();
+        if (tag === 'main' || String(cur.className || '').includes('monaco-workbench')) break;
+        const cr = cur.getBoundingClientRect?.();
+        if (cr && cr.height > 680) break;
+        if (cr && cr.width >= 180 && cr.height > 0) {
+          const bottomRowBtns = collectComposerBottomButtons(cur, ed, er, capEl, porEl);
+          const picked = pickAutoButtonFromRow(bottomRowBtns, cr, {
+            requireModelForFallback: isMonacoCandidate,
+          });
+          if (picked) {
+            if (picked.tier <= 2) {
+              const desc = buildComposerDockDescriptor(
+                picked.btn,
+                cur,
+                bottomRowBtns,
+                capEl,
+                porEl,
+                patchedNode
+              );
+              if (desc) return desc;
+            } else if (picked.tier === 3 && !tier3Candidate) {
+              tier3Candidate = { btn: picked.btn, card: cur, bottomRowBtns };
+            } else if (picked.tier === 4 && !tier4Candidate) {
+              tier4Candidate = { leftAnchorBtn: picked.leftAnchorBtn, card: cur, bottomRowBtns };
+            }
+          }
+        }
+        cur = cur.parentElement || cur.parentNode;
+      }
+      if (tier3Candidate) {
+        const desc = buildComposerDockDescriptor(
+          tier3Candidate.btn,
+          tier3Candidate.card,
+          tier3Candidate.bottomRowBtns,
+          capEl,
+          porEl,
+          patchedNode
+        );
+        if (desc) return desc;
+      }
+      if (tier4Candidate) {
+        const desc = buildComposerRightEndDockDescriptor(
+          tier4Candidate.leftAnchorBtn,
+          tier4Candidate.card,
+          tier4Candidate.bottomRowBtns,
+          capEl,
+          porEl
+        );
+        if (desc) return desc;
+      }
+    }
+
+    // 2. 兜底路径：编辑器自定义封装或暂时只读时，直接扫描底部包含模型选择器或 Auto 按钮的输入工具栏
+    const vh = Number(window.innerHeight || 800);
+    const allBtns = querySimpleSelectorList(document, ['button', '[role="button"]', '[aria-haspopup]']);
+    let modelToolbarFallback = null;
+    for (const btn of allBtns) {
+      if (!btn || capEl?.contains?.(btn) || porEl?.contains?.(btn)) continue;
+      if (isNodeHiddenByStyle(btn) || hasExcludedComposerAncestor(btn)) continue;
+      const br = btn.getBoundingClientRect?.();
+      if (!br || br.width <= 0 || br.height <= 0 || br.height > 48 || br.top < vh * 0.2) continue;
+      const clean = cleanComposerButtonText(btn);
+      const attr = `${btn.getAttribute?.('data-testid') || ''} ${btn.getAttribute?.('aria-label') || ''} ${btn.getAttribute?.('title') || ''}`.trim();
+      const itemProbe = { cleanText: clean, attrText: attr };
+      const isModeBtn =
+        COMPOSER_MODE_EXACT_RE.test(clean) ||
+        (!isComposerModelButtonItem(itemProbe) &&
+          ((clean && COMPOSER_MODE_TEXT_RE.test(clean)) || (attr && COMPOSER_MODE_ATTR_RE.test(attr))));
+      const isModelBtn = isComposerModelButtonItem(itemProbe);
+      if (!isModeBtn && !isModelBtn) continue;
+
+      let cur = btn.parentElement || btn.parentNode;
+      for (let depth = 0; depth < 12 && cur; depth += 1) {
+        if (cur === document.body || cur === document.documentElement) break;
+        if (String(cur.className || '').includes('monaco-workbench')) break;
+        const cr = cur.getBoundingClientRect?.();
+        if (!cr || cr.height > 560) break;
+        if (cr.width >= 200) {
+          const rowBtns = collectComposerBottomButtons(cur, null, null, capEl, porEl);
+          if (isModeBtn) {
+            const hasModelSibling = rowBtns.some((b) => b.btn !== btn && isComposerModelButtonItem(b));
+            if (hasModelSibling) {
+              const desc = buildComposerDockDescriptor(btn, cur, rowBtns, capEl, porEl, patchedNode);
+              if (desc) return desc;
+            }
+          } else if (isModelBtn && !modelToolbarFallback) {
+            const picked = pickAutoButtonFromRow(rowBtns, cr, { requireModelForFallback: true });
+            if (picked) {
+              const desc =
+                picked.tier <= 3 && picked.btn
+                  ? buildComposerDockDescriptor(picked.btn, cur, rowBtns, capEl, porEl, patchedNode)
+                  : picked.tier === 4 && picked.leftAnchorBtn
+                    ? buildComposerRightEndDockDescriptor(
+                        picked.leftAnchorBtn,
+                        cur,
+                        rowBtns,
+                        capEl,
+                        porEl
+                      )
+                    : null;
+              if (desc) {
+                if (picked.tier <= 2) return desc;
+                modelToolbarFallback = desc;
+                break;
+              }
+            }
+          }
+        }
+        cur = cur.parentElement || cur.parentNode;
+      }
+    }
+    if (modelToolbarFallback) return modelToolbarFallback;
+  } catch {
+    // 忽略输入框探测异常
+  }
+  return null;
+}
+
+function isImmediatelyBeforeNode(node, refNode) {
+  if (!node || !refNode) return false;
+  if (node.nextElementSibling !== undefined) {
+    return node.nextElementSibling === refNode;
+  }
+  if (node.nextSibling !== undefined) {
+    return node.nextSibling === refNode;
+  }
+  const parent = node.parentElement || node.parentNode;
+  if (!parent?.children) return false;
+  const idx = Array.prototype.indexOf.call(parent.children, node);
+  return idx >= 0 && parent.children[idx + 1] === refNode;
+}
+
+function isIdeExtensionChatFrame() {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (window.__AGUsageMonitorBridge?.isIdeChatFrame === true) return true;
+    return /[?&]extension(?:View|Variant)=/i.test(String(window.location?.search || ''));
+  } catch {
+    return false;
+  }
+}
+
+function resolveActiveDockTarget(options = undefined) {
+  const settings = telemetryStore.getState().telemetry?.settings;
+  const rawMode =
+    settings?.windowMountMode ??
+    (typeof window !== 'undefined' ? window.__AGUsageMonitorBridge?.mountMode : undefined);
+  const mountMode =
+    options?.mountMode ||
+    normalizeClientWindowMountMode(rawMode, settings?.enableWindowOverlay);
+  if (isIdeExtensionChatFrame()) {
+    if (mountMode !== 'composer') return null;
+    return findHostComposerAutoTarget(
+      options?.capsuleNode || null,
+      options?.portalNode || null,
+      options?.patchedNode || null
+    );
+  }
+  if (mountMode === 'composer') {
+    const composerTarget = findHostComposerAutoTarget(
+      options?.capsuleNode || null,
+      options?.portalNode || null,
+      options?.patchedNode || null
+    );
+    if (composerTarget) return composerTarget;
+  }
+  const ideTarget = findIdeWorkbenchTitlebar();
+  if (ideTarget) return ideTarget;
+  const titlebar = findHostTitlebar();
+  if (!titlebar) return null;
+  let targetContainer = titlebar;
+  try {
+    const rightGroup = titlebar.querySelector(':scope > div.shrink-0') || titlebar.lastElementChild;
+    if (rightGroup && rightGroup !== titlebar.firstElementChild) {
+      targetContainer = rightGroup;
+    }
+  } catch {
+    // 忽略子选择器不兼容场景
+  }
+  return {
+    kind: 'flow',
+    workbench: null,
+    titlebar,
+    targetContainer,
+    actionToolbar: null,
+  };
 }
 
 function findNativeTopRightAnchor() {
@@ -6436,6 +11236,9 @@ function findNativeTopRightAnchor() {
 function getLeftSidebarRightEdge(vw) {
   try {
     if (typeof document !== 'undefined' && typeof document.querySelector === 'function') {
+      if (document.querySelector('.monaco-workbench')) {
+        return 0;
+      }
       const navEl = document.querySelector('div[role="navigation"]');
       if (navEl?.getBoundingClientRect) {
         const nr = navEl.getBoundingClientRect();
@@ -6696,6 +11499,7 @@ function mountWindowOverlay() {
     if (!hasPointerCoords || document.hidden || multiBtn.hasAttribute('hidden')) {
       return false;
     }
+    const bridgePad = multiOpen ? 12 : 1;
     if (multiBtn.getBoundingClientRect) {
       const mr = multiBtn.getBoundingClientRect();
       if (
@@ -6703,8 +11507,8 @@ function mountWindowOverlay() {
         mr.height > 0 &&
         lastPointerX >= mr.left - 1 &&
         lastPointerX <= mr.right + 1 &&
-        lastPointerY >= mr.top - 1 &&
-        lastPointerY <= mr.bottom + 10
+        lastPointerY >= mr.top - bridgePad &&
+        lastPointerY <= mr.bottom + bridgePad
       ) {
         return true;
       }
@@ -6716,8 +11520,8 @@ function mountWindowOverlay() {
         pr.height > 0 &&
         lastPointerX >= pr.left - 1 &&
         lastPointerX <= pr.right + 1 &&
-        lastPointerY >= pr.top - 4 &&
-        lastPointerY <= pr.bottom + 1
+        lastPointerY >= pr.top - 8 &&
+        lastPointerY <= pr.bottom + 12
       ) {
         return true;
       }
@@ -6802,12 +11606,20 @@ function mountWindowOverlay() {
     setPopoverOpen(true);
   }
 
-  // --- 1. 创建顶栏双胶囊 Shadow Host（左：多会话实时信息；右：单会话指标胶囊） ---
+  // --- 1. 创建顶栏/输入框双胶囊 Shadow Host（左：多会话实时信息；右：单会话指标胶囊） ---
   const capsuleHost = document.createElement('div');
   capsuleHost.id = CAPSULE_HOST_ID;
   capsuleHost.className = 'wm-capsule-host';
   capsuleHost.setAttribute('data-dock', 'fixed');
   capsuleHost.setAttribute('data-layout', layoutMode);
+  // 隔离冒泡事件，防止嵌入输入框工具栏时点击或回车误触外层编辑框聚焦或表单提交
+  capsuleHost.addEventListener?.('mousedown', (e) => e.stopPropagation?.());
+  capsuleHost.addEventListener?.('click', (e) => e.stopPropagation?.());
+  capsuleHost.addEventListener?.('keydown', (e) => {
+    if (e?.key !== 'Escape') {
+      e.stopPropagation?.();
+    }
+  });
   const capsuleShadow = capsuleHost.attachShadow({ mode: 'open' });
 
   const capsuleStyleEl = document.createElement('style');
@@ -7165,8 +11977,8 @@ function mountWindowOverlay() {
       updateRow: syncPoolQuotaRow,
     }
   );
-  const hoverWkFootLeft = h('span', { className: 'text-muted', text: '本周累计: 0 ($0.00)' });
-  const hoverWkFootRight = h('span', { className: 'text-muted', text: '本周调用: 0 次' });
+  const hoverWkFootLeft = h('span', { className: 'text-muted', text: '周期累计: 0 ($0.00)' });
+  const hoverWkFootRight = h('span', { className: 'text-muted', text: '周期调用: 0 次' });
 
   const hoverQuotaPanel = h('section', { className: 'panel' }, [
     h('div', { className: 'panel-header' }, [
@@ -7373,9 +12185,179 @@ function mountWindowOverlay() {
   portalShadow.appendChild(popoverEl);
   (document.body || document.documentElement).appendChild(portalHost);
 
-  // --- 3. 几何测量、顶栏停靠与防溢出定位 ---
+  // --- 3. 几何测量、IDE 主题桥接、顶栏停靠与防溢出定位 ---
+  let patchedActionToolbar = null;
+  let patchedActionToolbarPrevMargin = '';
+  let observedWorkbench = null;
+  let themeObserver = null;
+  const mirroredThemeVars = new Map();
+
+  function restorePatchedActionToolbar() {
+    if (!patchedActionToolbar) return;
+    try {
+      if (patchedActionToolbar.style) {
+        patchedActionToolbar.style.marginLeft = patchedActionToolbarPrevMargin;
+      }
+    } catch {
+      // 忽略还原宿主工具栏边距异常
+    }
+    patchedActionToolbar = null;
+    patchedActionToolbarPrevMargin = '';
+  }
+
+  function syncWorkbenchThemeVars() {
+    if (disposed) return null;
+    try {
+      if (
+        typeof document === 'undefined' ||
+        typeof document.querySelector !== 'function' ||
+        typeof window.getComputedStyle !== 'function'
+      ) {
+        return null;
+      }
+      const workbenchEl = document.querySelector('.monaco-workbench');
+      const rootCs = document.documentElement
+        ? window.getComputedStyle(document.documentElement)
+        : null;
+      const bodyCs = document.body ? window.getComputedStyle(document.body) : null;
+      const nativeRootBg = String(
+        rootCs?.getPropertyValue?.('--background') ||
+          bodyCs?.getPropertyValue?.('--background') ||
+          ''
+      ).trim();
+      if (nativeRootBg) {
+        if (mirroredThemeVars.size > 0) {
+          for (const k of mirroredThemeVars.keys()) {
+            portalHost.style.removeProperty?.(k);
+            capsuleHost.style.removeProperty?.(k);
+          }
+          mirroredThemeVars.clear();
+        }
+        return workbenchEl || document.documentElement || null;
+      }
+
+      const themeSourceEl = workbenchEl || document.documentElement || document.body;
+      if (!themeSourceEl) return null;
+      const wbCs = window.getComputedStyle(themeSourceEl);
+      const pick = (...names) => {
+        for (const name of names) {
+          const val = String(wbCs?.getPropertyValue?.(name) || '').trim();
+          if (val) return val;
+        }
+        return '';
+      };
+
+      const nextVars = [
+        [
+          '--background',
+          pick('--vscode-sideBar-background', '--vscode-editor-background', '--vscode-panel-background'),
+        ],
+        [
+          '--card',
+          pick(
+            '--vscode-editorWidget-background',
+            '--vscode-sideBar-background',
+            '--vscode-editor-background'
+          ),
+        ],
+        ['--foreground', pick('--vscode-foreground', '--vscode-editor-foreground')],
+        [
+          '--muted-foreground',
+          pick('--vscode-descriptionForeground', '--vscode-sideBarTitle-foreground'),
+        ],
+        [
+          '--border',
+          pick(
+            '--vscode-widget-border',
+            '--vscode-panel-border',
+            '--vscode-commandCenter-border',
+            '--vscode-contrastBorder'
+          ),
+        ],
+        [
+          '--primary',
+          pick('--vscode-textLink-foreground', '--vscode-button-background', '--vscode-focusBorder'),
+        ],
+        ['--destructive', pick('--vscode-errorForeground', '--vscode-editorError-foreground')],
+      ];
+
+      for (const [cssVar, val] of nextVars) {
+        const prevVal = mirroredThemeVars.get(cssVar) || '';
+        if (val) {
+          if (prevVal !== val) {
+            portalHost.style.setProperty?.(cssVar, val);
+            capsuleHost.style.setProperty?.(cssVar, val);
+            mirroredThemeVars.set(cssVar, val);
+          }
+        } else if (prevVal) {
+          if (typeof portalHost.style.removeProperty === 'function') {
+            portalHost.style.removeProperty(cssVar);
+          } else {
+            portalHost.style.setProperty?.(cssVar, '');
+          }
+          if (typeof capsuleHost.style.removeProperty === 'function') {
+            capsuleHost.style.removeProperty(cssVar);
+          } else {
+            capsuleHost.style.setProperty?.(cssVar, '');
+          }
+          mirroredThemeVars.delete(cssVar);
+        }
+      }
+      return themeSourceEl;
+    } catch {
+      return null;
+    }
+  }
+
+  function ensureWorkbenchThemeObserved() {
+    const wb = syncWorkbenchThemeVars();
+    if (wb && wb !== observedWorkbench && themeObserver) {
+      observedWorkbench = wb;
+      try {
+        themeObserver.observe(wb, { attributes: true, attributeFilter: ['class', 'style'] });
+      } catch {
+        // 忽略工作台属性观察异常
+      }
+    }
+  }
+
+  function resolveRuntimeDockTarget() {
+    return resolveActiveDockTarget({
+      capsuleNode: capsuleHost,
+      portalNode: portalHost,
+      patchedNode: patchedActionToolbar,
+    });
+  }
+
+  function isDockPlacementSynced(dock) {
+    const curDockAttr = capsuleHost.getAttribute('data-dock');
+    if (!capsuleHost.isConnected || !portalHost.isConnected) return false;
+    if (!dock) {
+      if (isIdeExtensionChatFrame()) {
+        return curDockAttr === 'pending-composer' && capsuleHost.style.display === 'none';
+      }
+      return curDockAttr === 'fixed';
+    }
+    if (capsuleHost.style.display === 'none') return false;
+    if (!dock.targetContainer?.contains?.(capsuleHost) || curDockAttr !== dock.kind) return false;
+    if (dock.kind === 'composer') {
+      if (dock.anchorNode) {
+        if (!isImmediatelyBeforeNode(capsuleHost, dock.anchorNode)) return false;
+      } else {
+        const lastEl =
+          dock.targetContainer.lastElementChild !== undefined
+            ? dock.targetContainer.lastElementChild
+            : dock.targetContainer.children?.[dock.targetContainer.children.length - 1] ||
+              dock.targetContainer.lastChild;
+        if (lastEl !== capsuleHost) return false;
+      }
+    }
+    return true;
+  }
+
   function updateFixedFallbackPosition() {
-    if (capsuleHost.getAttribute('data-dock') === 'flow') {
+    const dockMode = capsuleHost.getAttribute('data-dock');
+    if (dockMode === 'flow' || dockMode === 'ide-titlebar' || dockMode === 'composer') {
       capsuleHost.style.top = '';
       capsuleHost.style.right = '';
       return;
@@ -7397,8 +12379,86 @@ function mountWindowOverlay() {
     }
   }
 
-  function measureAvailableTitlebarWidth(titlebar) {
+  function measureAvailableTitlebarWidth(dockTarget) {
     try {
+      const titlebar = dockTarget?.titlebar || null;
+      if (dockTarget?.kind === 'composer' && titlebar?.getBoundingClientRect) {
+        const cRect = titlebar.getBoundingClientRect();
+        const aRect = dockTarget.anchorNode?.getBoundingClientRect?.();
+        if (cRect.width > 0) {
+          const leftEdge =
+            Number.isFinite(dockTarget.leftClusterRightEdge) &&
+            dockTarget.leftClusterRightEdge > cRect.left + 12
+              ? dockTarget.leftClusterRightEdge
+              : cRect.left + 12;
+          const leftOccupied = Math.max(12, leftEdge - cRect.left);
+          if (aRect && aRect.width > 0) {
+            const rightOccupied = Math.max(aRect.width + 8, cRect.right - aRect.left);
+            return cRect.width - leftOccupied - rightOccupied - 16;
+          }
+          if (!dockTarget.anchorNode) {
+            return cRect.width - leftOccupied - 28;
+          }
+        }
+      }
+
+      if (dockTarget?.kind === 'ide-titlebar' && titlebar?.getBoundingClientRect) {
+        const tbRect = titlebar.getBoundingClientRect();
+        if (tbRect.width > 0) {
+          let leftContentWidth = 12;
+          const leftGroup =
+            titlebar.querySelector?.(':scope > .titlebar-left') ||
+            titlebar.querySelector?.('.titlebar-left');
+          if (leftGroup) {
+            let leftSum = 0;
+            if (typeof window.getComputedStyle === 'function') {
+              leftSum += parseFloat(window.getComputedStyle(leftGroup).paddingLeft) || 0;
+            }
+            if (leftGroup.children) {
+              for (const child of leftGroup.children) {
+                if (child?.getBoundingClientRect) {
+                  leftSum += Math.max(0, child.getBoundingClientRect().width);
+                }
+              }
+            }
+            leftContentWidth = Math.min(Math.round(tbRect.width * 0.45), Math.max(12, leftSum));
+          }
+
+          let minCenterWidth = 0;
+          const centerGroup =
+            titlebar.querySelector?.(':scope > .titlebar-center') ||
+            titlebar.querySelector?.('.titlebar-center');
+          if (centerGroup?.getBoundingClientRect) {
+            const cr = centerGroup.getBoundingClientRect();
+            if (cr.width > 0 && cr.height > 0) {
+              minCenterWidth = Math.min(220, Math.ceil(cr.width));
+            }
+          }
+
+          let rightSiblingsWidth = 0;
+          let hasVisibleWindowControls = false;
+          const rightGroup = dockTarget.targetContainer;
+          if (rightGroup?.children) {
+            for (const child of rightGroup.children) {
+              if (child === capsuleHost || !child?.getBoundingClientRect) continue;
+              const cw = Math.max(0, child.getBoundingClientRect().width);
+              rightSiblingsWidth += cw;
+              if (cw > 0 && child.classList?.contains?.('window-controls-container')) {
+                hasVisibleWindowControls = true;
+              }
+            }
+          }
+          if (!hasVisibleWindowControls && navigator?.windowControlsOverlay?.visible) {
+            const wcoRect = navigator.windowControlsOverlay.getTitlebarAreaRect?.();
+            if (wcoRect && wcoRect.width > 0 && tbRect.right > wcoRect.right + 4) {
+              rightSiblingsWidth += tbRect.right - wcoRect.right;
+            }
+          }
+
+          return tbRect.width - leftContentWidth - minCenterWidth - rightSiblingsWidth - 28;
+        }
+      }
+
       if (titlebar?.getBoundingClientRect) {
         const tbRect = titlebar.getBoundingClientRect();
         if (tbRect.width > 0) {
@@ -7463,6 +12523,7 @@ function mountWindowOverlay() {
       const minLeft = navRight > 0 ? Math.max(12, navRight + 12) : 12;
       const defaultCardW = Math.min(FLOATING_CARD_WIDTH, Math.max(280, vw - 24));
       const defaultMultiW = Math.min(MULTI_PANEL_WIDTH, Math.max(280, vw - 24));
+      const isDockComposer = capsuleHost.getAttribute('data-dock') === 'composer';
 
       if (multiOpen) {
         const mRect = multiBtn.getBoundingClientRect?.() || bRect;
@@ -7476,16 +12537,30 @@ function mountWindowOverlay() {
           Number(multiPanelEl.offsetHeight) ||
           Number(multiPanelEl.getBoundingClientRect?.().height) ||
           320;
-        let top = Math.max(38, Math.round(anchorRect.bottom + 6));
-        if (top + panelH > vh - 8 && anchorRect.top > panelH + 12) {
-          top = Math.round(anchorRect.top - panelH - 6);
+        const spaceBelowMulti = vh - anchorRect.bottom - 12;
+        const spaceAboveMulti = anchorRect.top - 16;
+        const openMultiAbove =
+          (isDockComposer && spaceAboveMulti > spaceBelowMulti) ||
+          (anchorRect.bottom + 6 + panelH > vh - 8 && spaceAboveMulti > spaceBelowMulti);
+
+        let top;
+        let maxMultiH;
+        if (openMultiAbove) {
+          maxMultiH = Math.max(180, Math.floor(anchorRect.top - 20));
+          multiPanelEl.style.maxHeight = `${maxMultiH}px`;
+          const effMultiH = Math.min(Number(multiPanelEl.offsetHeight) || panelH, maxMultiH);
+          top = Math.max(12, Math.round(anchorRect.top - effMultiH - 8));
+        } else {
+          top = Math.max(38, Math.round(anchorRect.bottom + 6));
+          maxMultiH = Math.max(240, vh - top - 12);
+          multiPanelEl.style.maxHeight = `${maxMultiH}px`;
         }
+        patchClasses(multiPanelEl, { 'is-above': openMultiAbove });
         let left = Math.round(anchorRect.left);
         left = Math.min(left, vw - panelW - 12);
         left = Math.max(minLeft, left);
         multiPanelEl.style.top = `${top}px`;
         multiPanelEl.style.left = `${left}px`;
-        multiPanelEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
       }
 
       const rightAnchorEdge =
@@ -7499,13 +12574,31 @@ function mountWindowOverlay() {
           Number(popoverEl.getBoundingClientRect?.().width) ||
           defaultCardW;
         const panelW = Math.min(rawW, Math.max(280, vw - minLeft - 12));
-        const top = Math.max(38, Math.min(vh - 140, Math.round(bRect.bottom + 6)));
+        const spaceBelowPop = vh - bRect.bottom - 12;
+        const spaceAbovePop = bRect.top - 16;
+        const openPopAbove =
+          (isDockComposer && spaceAbovePop > spaceBelowPop) ||
+          (spaceBelowPop < 360 && spaceAbovePop > spaceBelowPop);
+
+        let top;
+        if (openPopAbove) {
+          const maxPopH = Math.max(240, Math.floor(bRect.top - 20));
+          const targetPopH = Math.min(588, maxPopH);
+          popoverEl.style.height = `${targetPopH}px`;
+          popoverEl.style.maxHeight = `${maxPopH}px`;
+          const actualPopH = Math.min(Number(popoverEl.offsetHeight) || targetPopH, maxPopH);
+          top = Math.max(12, Math.round(bRect.top - actualPopH - 8));
+        } else {
+          popoverEl.style.height = '';
+          top = Math.max(38, Math.min(vh - 140, Math.round(bRect.bottom + 6)));
+          popoverEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
+        }
+        patchClasses(popoverEl, { 'is-above': openPopAbove });
         let left = Math.round(rightAnchorEdge - panelW);
         left = Math.min(left, vw - panelW - 12);
         left = Math.max(minLeft, left);
         popoverEl.style.top = `${top}px`;
         popoverEl.style.left = `${left}px`;
-        popoverEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
       }
 
       if (tooltipOpen && !popoverOpen && !multiOpen) {
@@ -7518,26 +12611,38 @@ function mountWindowOverlay() {
           Number(hoverTipEl.offsetHeight) ||
           Number(hoverTipEl.getBoundingClientRect?.().height) ||
           480;
-        let top = Math.max(38, Math.round(bRect.bottom + 6));
-        if (top + tipH > vh - 8 && bRect.top > tipH + 12) {
-          top = Math.round(bRect.top - tipH - 6);
+        const spaceBelowTip = vh - bRect.bottom - 12;
+        const spaceAboveTip = bRect.top - 16;
+        const openTipAbove =
+          (isDockComposer && spaceAboveTip > spaceBelowTip) ||
+          (bRect.bottom + 6 + tipH > vh - 8 && spaceAboveTip > spaceBelowTip);
+
+        let top;
+        if (openTipAbove) {
+          const maxTipH = Math.max(220, Math.floor(bRect.top - 20));
+          hoverTipEl.style.maxHeight = `${maxTipH}px`;
+          const effTipH = Math.min(Number(hoverTipEl.offsetHeight) || tipH, maxTipH);
+          top = Math.max(12, Math.round(bRect.top - effTipH - 8));
+        } else {
+          top = Math.max(38, Math.round(bRect.bottom + 6));
+          hoverTipEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
         }
+        patchClasses(hoverTipEl, { 'is-above': openTipAbove });
         let left = Math.round(rightAnchorEdge - tipW);
         left = Math.min(left, vw - tipW - 12);
         left = Math.max(minLeft, left);
         hoverTipEl.style.top = `${top}px`;
         hoverTipEl.style.left = `${left}px`;
-        hoverTipEl.style.maxHeight = `${Math.max(240, vh - top - 12)}px`;
       }
     } catch {
       // 忽略定位异常
     }
   }
 
-  function updateResponsiveLayout() {
+  function updateResponsiveLayout(dockOverride = undefined) {
     if (disposed) return;
-    const titlebar = findHostTitlebar();
-    const avail = measureAvailableTitlebarWidth(titlebar);
+    const dockTarget = dockOverride === undefined ? resolveRuntimeDockTarget() : dockOverride;
+    const avail = measureAvailableTitlebarWidth(dockTarget);
     const curTel = telemetryStore.getState().telemetry;
     const showMulti = curTel?.settings?.showTopbarMultiSession !== false;
     const curUpdateMode = normalizeClientUpdateMode(
@@ -7566,27 +12671,79 @@ function mountWindowOverlay() {
     if (bodyOrDoc && !portalHost.isConnected) {
       bodyOrDoc.appendChild(portalHost);
     }
+    ensureWorkbenchThemeObserved();
 
-    const titlebar = findHostTitlebar();
-    if (titlebar) {
-      let targetContainer = titlebar;
-      try {
-        const rightGroup = titlebar.querySelector(':scope > div.shrink-0') || titlebar.lastElementChild;
-        if (rightGroup && rightGroup !== titlebar.firstElementChild) {
-          targetContainer = rightGroup;
-        }
-      } catch {
-        // 忽略子选择器不兼容场景
+    const dockTarget = resolveRuntimeDockTarget();
+    if (dockTarget) {
+      if (capsuleHost.style.display === 'none') {
+        capsuleHost.style.display = '';
       }
-
-      if (capsuleHost.parentElement !== targetContainer) {
-        if (targetContainer.firstChild && targetContainer !== titlebar) {
-          targetContainer.insertBefore(capsuleHost, targetContainer.firstChild);
+      const { kind, titlebar, targetContainer, actionToolbar } = dockTarget;
+      if (kind === 'composer') {
+        if (patchedActionToolbar !== actionToolbar) {
+          restorePatchedActionToolbar();
+          if (actionToolbar?.style) {
+            patchedActionToolbar = actionToolbar;
+            patchedActionToolbarPrevMargin = actionToolbar.style.marginLeft || '';
+            actionToolbar.style.marginLeft = '0px';
+          }
+        }
+        if (dockTarget.anchorNode) {
+          if (
+            (capsuleHost.parentElement || capsuleHost.parentNode) !== targetContainer ||
+            !isImmediatelyBeforeNode(capsuleHost, dockTarget.anchorNode)
+          ) {
+            targetContainer.insertBefore(capsuleHost, dockTarget.anchorNode);
+          }
         } else {
-          targetContainer.appendChild(capsuleHost);
+          const lastEl =
+            targetContainer.lastElementChild !== undefined
+              ? targetContainer.lastElementChild
+              : targetContainer.children?.[targetContainer.children.length - 1] ||
+                targetContainer.lastChild;
+          if (
+            (capsuleHost.parentElement || capsuleHost.parentNode) !== targetContainer ||
+            lastEl !== capsuleHost
+          ) {
+            targetContainer.appendChild(capsuleHost);
+          }
         }
+        patchAttr(capsuleHost, 'data-dock', 'composer');
+        patchAttr(
+          capsuleHost,
+          'data-composer-push',
+          dockTarget.needsAutoMarginTransfer ? '1' : null
+        );
+      } else if (kind === 'ide-titlebar') {
+        if (patchedActionToolbar !== actionToolbar) {
+          restorePatchedActionToolbar();
+          if (actionToolbar?.style) {
+            patchedActionToolbar = actionToolbar;
+            patchedActionToolbarPrevMargin = actionToolbar.style.marginLeft || '';
+            actionToolbar.style.marginLeft = '0px';
+          }
+        }
+        if (capsuleHost.parentElement !== targetContainer || targetContainer.firstChild !== capsuleHost) {
+          if (targetContainer.firstChild) {
+            targetContainer.insertBefore(capsuleHost, targetContainer.firstChild);
+          } else {
+            targetContainer.appendChild(capsuleHost);
+          }
+        }
+        patchAttr(capsuleHost, 'data-dock', 'ide-titlebar');
+        patchAttr(capsuleHost, 'data-composer-push', null);
+      } else {
+        restorePatchedActionToolbar();
+        if (capsuleHost.parentElement !== targetContainer) {
+          if (targetContainer.firstChild && targetContainer !== titlebar) {
+            targetContainer.insertBefore(capsuleHost, targetContainer.firstChild);
+          } else {
+            targetContainer.appendChild(capsuleHost);
+          }
+        }
+        patchAttr(capsuleHost, 'data-dock', 'flow');
+        patchAttr(capsuleHost, 'data-composer-push', null);
       }
-      patchAttr(capsuleHost, 'data-dock', 'flow');
       if (capsuleHost.style.top) capsuleHost.style.top = '';
       if (capsuleHost.style.right) capsuleHost.style.right = '';
 
@@ -7602,15 +12759,31 @@ function mountWindowOverlay() {
           // 忽略观察器异常
         }
       }
+    } else if (isIdeExtensionChatFrame()) {
+      restorePatchedActionToolbar();
+      if (popoverOpen) setPopoverOpen(false);
+      if (multiOpen) setMultiOpen(false);
+      if (tooltipOpen) setTooltipOpen(false);
+      if (bodyOrDoc && (capsuleHost.parentElement || capsuleHost.parentNode) !== bodyOrDoc) {
+        bodyOrDoc.appendChild(capsuleHost);
+      }
+      capsuleHost.style.display = 'none';
+      patchAttr(capsuleHost, 'data-dock', 'pending-composer');
+      patchAttr(capsuleHost, 'data-composer-push', null);
     } else if (bodyOrDoc) {
+      if (capsuleHost.style.display === 'none') {
+        capsuleHost.style.display = '';
+      }
+      restorePatchedActionToolbar();
       if (capsuleHost.parentElement !== bodyOrDoc) {
         bodyOrDoc.appendChild(capsuleHost);
       }
       patchAttr(capsuleHost, 'data-dock', 'fixed');
+      patchAttr(capsuleHost, 'data-composer-push', null);
       updateFixedFallbackPosition();
     }
 
-    updateResponsiveLayout();
+    updateResponsiveLayout(dockTarget);
     return Boolean(capsuleHost.isConnected && portalHost.isConnected);
   }
 
@@ -8280,9 +13453,13 @@ function mountWindowOverlay() {
         hoverUpdateVerText,
         latestVer ? `发现新版本 v${latestVer}` : '发现新版本可用'
       );
+      const isComposerDock = capsuleHost.getAttribute('data-dock') === 'composer';
+      const dockPlaceWord = isComposerDock ? '版本胶囊' : '顶栏';
       patchText(
         hoverUpdateHintText,
-        latestVer ? `点击顶栏 v${latestVer} 即可更新` : '点击顶栏版本胶囊即可更新'
+        latestVer
+          ? `点击${dockPlaceWord} v${latestVer} 即可更新`
+          : `点击${isComposerDock ? '版本胶囊' : '顶栏版本胶囊'}即可更新`
       );
     }
     if (showUpdatePrompt !== lastShowUpdate) {
@@ -8291,11 +13468,9 @@ function mountWindowOverlay() {
     }
 
     // --- 同步悬停三卡片全景概览（与 LiveOverviewView 保持完全一致的数据口径与视觉呈现） ---
-    const showUpstream = Boolean(telemetry.settings?.showUpstreamModel);
-    const activeModelDisplay =
-      (showUpstream
-        ? overviewActive.activeModelUpstream || overviewActive.activeModelShort
-        : overviewActive.activeModelShort) || '模型未知';
+    const activeModelDisplay = resolveModelDisplayInfo(overviewActive, telemetry.settings, {
+      fallback: '模型未知',
+    }).text;
 
     patchClasses(hoverPulseDot, { 'is-pulsing': Boolean(overviewActive.isRunning || isRunning) });
     patchText(hoverTpsVal, formatMetric(overviewActive.latestTokPerSec, ' tok/s'));
@@ -8351,7 +13526,6 @@ function mountWindowOverlay() {
     }
 
     const quotas = telemetry.quotas || {};
-    const weekly = quotas.weekly || {};
     const minuteTick = Number(telSt.minuteTick || Math.floor(Date.now() / 30000));
     patchText(
       hoverTierBadge,
@@ -8363,17 +13537,17 @@ function mountWindowOverlay() {
       createRow: createPoolQuotaRow,
       updateRow: syncPoolQuotaRow,
     });
-    patchText(
-      hoverWkFootLeft,
-      `本周累计: ${formatTokens(weekly.tokens || 0)} (${formatUsd(weekly.costUsd || 0)})`
-    );
-    patchText(
-      hoverWkFootRight,
-      telemetry.account?.aiCredits > 0
-        ? `AI 积分: ${telemetry.account.aiCredits}`
-        : `本周调用: ${weekly.calls || 0} 次`
-    );
+    const footSummary = formatQuotaSummaryFooter(quotas, telemetry.account);
+    patchText(hoverWkFootLeft, footSummary.leftText);
+    patchText(hoverWkFootRight, footSummary.rightText);
+    patchAttr(hoverWkFootLeft, 'title', footSummary.tooltip);
+    patchAttr(hoverWkFootRight, 'title', footSummary.tooltip);
   }
+
+  let lastAppliedMountMode = normalizeClientWindowMountMode(
+    telemetryStore.getState().telemetry?.settings?.windowMountMode,
+    telemetryStore.getState().telemetry?.settings?.enableWindowOverlay
+  );
 
   const unsubStore = telemetryStore.subscribe(
     (st) => ({
@@ -8383,10 +13557,18 @@ function mountWindowOverlay() {
       selectedConversationId: st.selectedConversationId,
     }),
     (slice) => {
-      if (slice.telemetry?.settings?.enableWindowOverlay === false) {
+      const nextMountMode = normalizeClientWindowMountMode(
+        slice.telemetry?.settings?.windowMountMode,
+        slice.telemetry?.settings?.enableWindowOverlay
+      );
+      if (slice.telemetry?.settings?.enableWindowOverlay === false || nextMountMode === 'sidebar') {
         if (popoverOpen) setPopoverOpen(false);
         if (multiOpen) setMultiOpen(false);
+      } else if (nextMountMode !== lastAppliedMountMode) {
+        lastAppliedMountMode = nextMountMode;
+        ensureCapsuleDocked();
       }
+      lastAppliedMountMode = nextMountMode;
       renderCapsuleTelemetry();
     }
   );
@@ -8447,6 +13629,7 @@ function mountWindowOverlay() {
   };
   const onWindowResize = () => updateResponsiveLayout();
   const onPopState = () => syncHostRouteIfChanged();
+  const onDocFocusIn = () => syncHostRouteIfChanged();
   const onVisibilityChange = () => {
     if (document.hidden) {
       hasPointerCoords = false;
@@ -8470,20 +13653,42 @@ function mountWindowOverlay() {
       resizeObserver = new ResizeObserver(() => updateResponsiveLayout());
       if (document.body) resizeObserver.observe(document.body);
     }
-    if (typeof MutationObserver !== 'undefined' && document.body) {
-      hostDomObserver = new MutationObserver(() => {
-        syncHostRouteIfChanged();
-        const tb = findHostTitlebar();
-        if (
-          !capsuleHost.isConnected ||
-          !portalHost.isConnected ||
-          (tb && !tb.contains(capsuleHost)) ||
-          (!tb && capsuleHost.getAttribute('data-dock') === 'flow')
-        ) {
-          scheduleDockSync();
-        }
+    if (typeof MutationObserver !== 'undefined') {
+      themeObserver = new MutationObserver(() => {
+        syncWorkbenchThemeVars();
       });
-      hostDomObserver.observe(document.body, { childList: true, subtree: true });
+      if (document.head) {
+        themeObserver.observe(document.head, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      }
+      if (document.body) {
+        hostDomObserver = new MutationObserver((records) => {
+          if (
+            Array.isArray(records) &&
+            records.length > 0 &&
+            records.every((r) => r?.target === capsuleHost || r?.target === portalHost)
+          ) {
+            return;
+          }
+          syncHostRouteIfChanged();
+          if (!observedWorkbench) {
+            ensureWorkbenchThemeObserved();
+          }
+          const dock = resolveRuntimeDockTarget();
+          if (!isDockPlacementSynced(dock)) {
+            scheduleDockSync();
+          }
+        });
+        hostDomObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['data-cascade-id', 'data-selected'],
+        });
+      }
     }
   } catch {
     // 忽略观察器初始化异常
@@ -8491,6 +13696,7 @@ function mountWindowOverlay() {
 
   document.addEventListener?.('mousedown', onDocMouseDown, true);
   document.addEventListener?.('keydown', onDocKeyDown);
+  document.addEventListener?.('focusin', onDocFocusIn);
   document.addEventListener?.('visibilitychange', onVisibilityChange);
   window.addEventListener?.('pointermove', onWindowPointerMove, { passive: true });
   window.addEventListener?.('blur', onWindowBlur);
@@ -8501,7 +13707,9 @@ function mountWindowOverlay() {
   const watchdogTimer = setInterval(() => {
     if (disposed) return;
     syncHostRouteIfChanged();
-    if (!capsuleHost.isConnected || !portalHost.isConnected) {
+    ensureWorkbenchThemeObserved();
+    const dock = resolveRuntimeDockTarget();
+    if (!isDockPlacementSynced(dock)) {
       ensureCapsuleDocked();
     }
   }, 1200);
@@ -8526,6 +13734,11 @@ function mountWindowOverlay() {
     ensureAlive() {
       if (disposed) return false;
       return ensureCapsuleDocked();
+    },
+    syncHostRoute() {
+      if (disposed) return false;
+      syncHostRouteIfChanged();
+      return true;
     },
     updateBridge(nextBridge) {
       if (disposed || !nextBridge || typeof nextBridge !== 'object') return false;
@@ -8574,6 +13787,30 @@ function mountWindowOverlay() {
     isMultiHoverOpen: () => Boolean(multiOpen && !multiPinned),
     isMultiPinnedOpen: () => Boolean(multiOpen && multiPinned),
     getLayoutMode: () => layoutMode,
+    getDockKind: () => String(capsuleHost.getAttribute('data-dock') || ''),
+    getMountMode: () => lastAppliedMountMode,
+    applyMountMode(nextMode) {
+      if (disposed) return false;
+      const normalized = normalizeClientWindowMountMode(nextMode, nextMode !== 'sidebar');
+      if (typeof window !== 'undefined' && window.__AGUsageMonitorBridge) {
+        window.__AGUsageMonitorBridge.mountMode = normalized;
+      }
+      const curTel = telemetryStore.getState().telemetry;
+      if (curTel?.settings) {
+        telemetryStore.setState({
+          telemetry: {
+            ...curTel,
+            settings: {
+              ...curTel.settings,
+              windowMountMode: normalized,
+              enableWindowOverlay: normalized !== 'sidebar',
+            },
+          },
+        });
+      }
+      lastAppliedMountMode = normalized;
+      return ensureCapsuleDocked();
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -8601,14 +13838,19 @@ function mountWindowOverlay() {
       try {
         hostDomObserver?.disconnect();
       } catch {}
+      try {
+        themeObserver?.disconnect();
+      } catch {}
       document.removeEventListener?.('mousedown', onDocMouseDown, true);
       document.removeEventListener?.('keydown', onDocKeyDown);
+      document.removeEventListener?.('focusin', onDocFocusIn);
       document.removeEventListener?.('visibilitychange', onVisibilityChange);
       window.removeEventListener?.('pointermove', onWindowPointerMove);
       window.removeEventListener?.('blur', onWindowBlur);
       window.removeEventListener?.('resize', onWindowResize);
       window.removeEventListener?.('popstate', onPopState);
       navigator?.windowControlsOverlay?.removeEventListener?.('geometrychange', onWindowResize);
+      restorePatchedActionToolbar();
       try {
         hoverCtxSegmentBar.destroy();
       } catch {}

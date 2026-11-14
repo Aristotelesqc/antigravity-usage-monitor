@@ -542,3 +542,229 @@ test('supports Gemini 4 Carbon pricing/pool and resolves all newly added languag
   assert.equal(p.quotas.activePool.poolKey, 'Carbon');
   assert.equal(p.quotas.activePool.weeklyRemainingIntPct, 65);
 });
+
+test('trendSeries preserves 1-day-per-slot granularity for >90 day spans and recentSteps separates thinking vs response tokens', async () => {
+  const nowMs = Date.now();
+  const oldStartMs = nowMs - 120 * 24 * 3600 * 1000;
+  const oldStartIso = new Date(oldStartMs).toISOString();
+  const oldEndIso = new Date(oldStartMs + 6000).toISOString();
+  const recentStartIso = new Date(nowMs - 8000).toISOString();
+  const recentEndIso = new Date(nowMs - 1000).toISOString();
+
+  const h = backendHarness({
+    trajectories: {
+      cLong: {
+        trajectory: {
+          steps: [
+            {
+              status: 'CORTEX_STEP_STATUS_DONE',
+              metadata: {
+                sourceTrajectoryStepInfo: { stepIndex: 1 },
+                createdAt: oldStartIso,
+                finishedGeneratingAt: oldEndIso,
+                modelUsage: {
+                  model: 'MODEL_PLACEHOLDER_M429',
+                  inputTokens: '10000',
+                  cacheReadTokens: '20000',
+                  outputTokens: '700',
+                  thinkingOutputTokens: '420',
+                },
+              },
+              plannerResponse: { response: 'early step' },
+            },
+            {
+              status: 'CORTEX_STEP_STATUS_DONE',
+              metadata: {
+                sourceTrajectoryStepInfo: { stepIndex: 2 },
+                createdAt: recentStartIso,
+                finishedGeneratingAt: recentEndIso,
+                modelUsage: {
+                  model: 'MODEL_PLACEHOLDER_M429',
+                  inputTokens: '5000',
+                  cacheReadTokens: '32115',
+                  outputTokens: '685',
+                  thinkingOutputTokens: '420',
+                  responseOutputTokens: '265',
+                },
+              },
+              plannerResponse: { response: 'recent step' },
+            },
+          ],
+        },
+      },
+    },
+    summaries: {
+      cLong: { stepCount: 2, lastModifiedTime: recentEndIso, status: 'IDLE' },
+    },
+  });
+
+  const pAll = await h.buildTelemetryPayloadInternal('cLong', false, { range: 'all' });
+  const trendAll = pAll.consumption.trendSeries;
+  assert.ok(trendAll.length >= 120 && trendAll.length <= 122, `Expected ~121 daily slots, got ${trendAll.length}`);
+  assert.equal(trendAll[0].granularity, 'day');
+  assert.match(trendAll[0].fullLabel, /^\d{4}年\d+月\d+日 \(周[日一二三四五六]\)$/);
+  assert.equal(trendAll.reduce((sum, b) => sum + b.tokens, 0), 30700 + 37800);
+  assert.equal(trendAll.reduce((sum, b) => sum + b.calls, 0), 2);
+
+  const steps = pAll.activeConversation.recentSteps;
+  assert.equal(steps.length, 2);
+  // recentSteps is reversed (newest first)
+  assert.equal(steps[0].contextTokens, 37800);
+  assert.equal(steps[0].thinkingTokens, 420);
+  assert.equal(steps[0].responseTokens, 265);
+  assert.equal(steps[1].thinkingTokens, 420);
+  assert.equal(steps[1].responseTokens, 280);
+});
+
+test('modelBreakdown exposes avgTtftSec, cacheHitPct, and subagent scoped breakdowns + fit math helpers', async () => {
+  const {
+    computeLinearFit,
+    computeLoessFit,
+    computePublicationFit,
+    getStepModelGroupKey,
+    toChronologicalSteps,
+  } = await import('../src/components/charts/SessionStepCharts.js');
+
+  // 1. Verify OLS + publication LOESS + 95% CI confidence band & [0, 100] cache bounds
+  const olsExact = computeLinearFit([10, 20, 30, 40]);
+  assert.ok(Math.abs(olsExact.slope - 10) < 1e-9);
+  assert.ok(Math.abs(olsExact.r - 1) < 1e-9);
+  assert.ok(Math.abs(olsExact.r2 - 1) < 1e-9);
+  assert.deepEqual(
+    olsExact.values.map((v) => +v.toFixed(4)),
+    [10, 20, 30, 40]
+  );
+
+  // Verify bimodal / high-peak TPS series is NOT crushed flat by Bisquare and builds valid 95% CI band
+  const waveXs = Array.from({ length: 20 }, (_, idx) => idx * 5 + 1);
+  const waveYs = [
+    22, 26, 48, 78, 92, 85, 64, 34, 24, 28,
+    55, 84, 76, 42, 25, 22, 26, 32, 38, 44,
+  ];
+  const pubWave = computePublicationFit(waveXs, waveYs, { minVal: 0 });
+  assert.equal(pubWave.method, 'LOESS');
+  assert.equal(pubWave.grid.length, 64);
+  assert.ok(
+    pubWave.grid.every((g) => g.ciLow <= g.fit + 1e-9 && g.fit <= g.ciHigh + 1e-9),
+    'Every grid point satisfies ciLow <= fit <= ciHigh'
+  );
+  // Around peak x ~ 21 (index 4), fitted conditional expectation must rise well above overall mean (~47)
+  assert.ok(pubWave.sampleFits[4] > 55, `Expected peak conditional mean > 55, got ${pubWave.sampleFits[4]}`);
+
+  // Warmup cache curve stays clamped within [0, 100]
+  const cacheSeries = [0, 90, 92, 93, 94, 95, 95];
+  const loessCache = computeLoessFit(cacheSeries, { minVal: 0, maxVal: 100 });
+  assert.equal(loessCache.length, cacheSeries.length);
+  assert.ok(
+    loessCache.every((v) => v >= 0 && v <= 100),
+    'Fitted cache values must stay clamped within [0, 100]'
+  );
+  assert.ok(loessCache[6] > 90, 'Tail fit tracks steady warm cache region');
+
+  // Group key strips [自动压缩] and thinking tier suffixes
+  assert.equal(getStepModelGroupKey({ modelLabel: 'Gemini 3.1 Pro (High) [自动压缩]' }), 'Gemini 3.1 Pro');
+  assert.equal(getStepModelGroupKey({ modelLabel: 'Orchestrator (Carbon)' }), 'Orchestrator (Carbon)');
+
+  const chrono = toChronologicalSteps(
+    [
+      { stepIndex: 3, createdAtMs: 3000 },
+      { stepIndex: 1, createdAtMs: 1000 },
+      { stepIndex: 2, createdAtMs: 2000 },
+    ],
+    true
+  );
+  assert.deepEqual(
+    chrono.map((s) => s.stepIndex),
+    [1, 2, 3]
+  );
+
+  // 2. Verify backend modelBreakdown enriches avgTtftSec and cacheHitPct for main & subagents
+  const h = backendHarness({
+    trajectories: {
+      'root-fit': {
+        trajectory: {
+          steps: [
+            {
+              status: 'CORTEX_STEP_STATUS_DONE',
+              metadata: {
+                createdAt: '2026-06-01T00:00:00Z',
+                finishedGeneratingAt: '2026-06-01T00:00:10Z',
+                modelUsage: {
+                  model: 'MODEL_PLACEHOLDER_M37',
+                  inputTokens: '1000',
+                  cacheReadTokens: '9000',
+                  outputTokens: '500',
+                  thinkingOutputTokens: '100',
+                  responseOutputTokens: '400',
+                },
+              },
+              plannerResponse: { response: 'main step 1' },
+            },
+            {
+              type: 'CORTEX_STEP_TYPE_INVOKE_SUBAGENT',
+              status: 'CORTEX_STEP_STATUS_DONE',
+              metadata: { createdAt: '2026-06-01T00:00:12Z' },
+              invokeSubagent: {
+                subagents: [{ typeName: 'research', role: 'Fast Researcher' }],
+                results: [{ conversationId: 'sub-fit' }],
+              },
+            },
+          ],
+          generatorMetadata: [
+            { stepIndices: [0], chatModel: { timeToFirstToken: '2.4s', streamingDuration: '7.6s' } },
+          ],
+        },
+      },
+      'sub-fit': {
+        trajectory: {
+          metadata: { parentConversationId: 'root-fit', subagentSpec: { typeName: 'research' } },
+          steps: [
+            {
+              status: 'CORTEX_STEP_STATUS_DONE',
+              metadata: {
+                createdAt: '2026-06-01T00:00:15Z',
+                finishedGeneratingAt: '2026-06-01T00:00:20Z',
+                modelUsage: {
+                  model: 'MODEL_PLACEHOLDER_M18',
+                  inputTokens: '2000',
+                  cacheReadTokens: '6000',
+                  outputTokens: '400',
+                  thinkingOutputTokens: '50',
+                  responseOutputTokens: '350',
+                },
+              },
+              plannerResponse: { response: 'sub step 1' },
+            },
+          ],
+          generatorMetadata: [
+            { stepIndices: [0], chatModel: { timeToFirstToken: '0.8s', streamingDuration: '4.2s' } },
+          ],
+        },
+      },
+    },
+    summaries: {
+      'root-fit': { stepCount: 2, lastModifiedTime: '2026-06-01T00:00:12Z', status: 'IDLE' },
+      'sub-fit': {
+        stepCount: 1,
+        lastModifiedTime: '2026-06-01T00:00:20Z',
+        status: 'IDLE',
+        trajectoryMetadata: { parentConversationId: 'root-fit' },
+      },
+    },
+  });
+
+  const payload = await h.buildTelemetryPayloadInternal('root-fit');
+  const mainMb = payload.activeConversation.modelBreakdown;
+  assert.equal(mainMb.length, 1);
+  assert.equal(mainMb[0].avgTtftSec, 2.4);
+  assert.equal(mainMb[0].ttftSampleCount, 1);
+  assert.equal(mainMb[0].cacheHitPct, 90);
+
+  const subMb = payload.activeConversation.agents[1].modelBreakdown;
+  assert.equal(subMb.length, 1);
+  assert.equal(subMb[0].avgTtftSec, 0.8);
+  assert.equal(subMb[0].cacheHitPct, 75);
+
+  const aggMb = payload.activeConversation.aggregated.modelBreakdown;
+  assert.equal(aggMb.length, 2);
+});

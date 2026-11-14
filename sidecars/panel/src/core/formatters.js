@@ -34,6 +34,9 @@ export function formatCnyApprox(usdAmount, rate = 7.2) {
 export function formatDateSpanBadge(startMs, endMs) {
   const s = startMs && Number.isFinite(startMs) ? new Date(startMs) : new Date();
   const e = endMs && Number.isFinite(endMs) ? new Date(endMs) : new Date();
+  if (s.getFullYear() !== e.getFullYear()) {
+    return `${s.getFullYear()}年${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getFullYear()}年${e.getMonth() + 1}月${e.getDate()}日`;
+  }
   return `${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getMonth() + 1}月${e.getDate()}日`;
 }
 
@@ -99,4 +102,268 @@ export function formatElapsedSec(seconds) {
   const h = Math.floor(m / 60);
   const remM = m % 60;
   return `${h}h ${remM}m`;
+}
+
+/**
+ * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'compact'|'full'}
+ */
+export function normalizeOrchestratorIdDisplayMode(mode) {
+  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+}
+
+/**
+ * 统一解析步骤、会话摘要或模型汇总行面向用户的模型显示文本与悬停提示。
+ *
+ * 规则：
+ * - Orchestrator 系列（`Orchestrator (Carbon)`、`Orchestrator (Argon)`、`gemini-flash-worker-agy` / `M669`）
+ *   独立遵循 `orchestratorIdMode`（`'compact'` 显示 `orchestrator-carbon` / `orchestrator-argon` / `worker-agy-hydrogen`；
+ *   `'full'` 显示带括号标注的完整上游 ID），不受普通模型“精简代号 / 原始模型 ID”切换影响；
+ * - 其余普通模型继续按 `showUpstreamModel` 与视图选项切换。
+ *
+ * @param {object|null|undefined} target
+ * @param {{ showUpstreamModel?: boolean, orchestratorIdMode?: string }|boolean} [settings]
+ * @param {{ preferLabelInShort?: boolean, fallback?: string }} [options]
+ * @returns {{ text: string, title: string, isOrchestratorSeries: boolean }}
+ */
+export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
+  const showUpstream =
+    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+  const orchestratorMode = normalizeOrchestratorIdDisplayMode(
+    typeof settings === 'object' && settings ? settings.orchestratorIdMode : 'compact'
+  );
+  const preferLabelInShort = Boolean(options?.preferLabelInShort);
+  const fallback = options?.fallback ?? '模型未知';
+
+  if (!target || typeof target !== 'object') {
+    return { text: fallback, title: fallback, isOrchestratorSeries: false };
+  }
+
+  const shortText = String(
+    target.activeModelShort ?? target.modelShort ?? target.shortName ?? ''
+  ).trim();
+  const labelText = String(
+    target.activeModelLabel ?? target.modelLabel ?? target.label ?? ''
+  ).trim();
+  const upstreamText = String(
+    target.activeModelUpstream ?? target.modelUpstream ?? target.upstreamName ?? ''
+  ).trim();
+  const responseText = String(target.responseModel ?? '').trim();
+  const modelKeyText = String(target.modelKey ?? '').trim();
+
+  const isCompaction =
+    Boolean(target.isCompactionStep) ||
+    /·压缩\s*$/.test(shortText) ||
+    /·压缩\s*$/.test(upstreamText) ||
+    /·压缩\s*$/.test(labelText);
+
+  const combined = `${modelKeyText} ${shortText} ${labelText} ${upstreamText} ${responseText}`;
+  const isOrchWorker =
+    /\bMODEL_PLACEHOLDER_M669\b|\b[a-z0-9.-]*worker-agy\b|\bworker-agy-hydrogen\b|\bOrchestrator\s+Worker\b/i.test(
+      combined
+    );
+  const isOrchSeries =
+    isOrchWorker ||
+    /\bgemini-pro-orchestrator(?:-argon)?\b|\borchestrator-(?:carbon|argon)\b|\borch-(?:carbon|argon)(?:·压缩)?(?=\s|$)|Orchestrator\s*\((?:Carbon|Argon)\)|\bMODEL_PLACEHOLDER_M(?:667|681)\b/i.test(
+      combined
+    );
+
+  if (isOrchSeries) {
+    let compactId = 'orchestrator-carbon';
+    let fullId = 'gemini-pro-orchestrator (carbon-4)';
+    if (isOrchWorker) {
+      compactId = 'worker-agy-hydrogen';
+      fullId = 'gemini-flash-worker-agy (hydrogen-4)';
+    } else if (/\bargon\b|\bMODEL_PLACEHOLDER_M681\b|\borch-argon\b/i.test(combined)) {
+      compactId = 'orchestrator-argon';
+      fullId = 'gemini-pro-orchestrator-argon (argon-4)';
+    }
+    const suffix = isCompaction ? '·压缩' : '';
+    const text = `${orchestratorMode === 'full' ? fullId : compactId}${suffix}`;
+    const multiUpstream =
+      Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
+        ? target.upstreamModels.join(' / ')
+        : '';
+    const title = multiUpstream || `${fullId}${suffix}`;
+    return { text, title, isOrchestratorSeries: true };
+  }
+
+  const standardText =
+    (showUpstream
+      ? upstreamText || responseText || shortText || labelText
+      : preferLabelInShort
+        ? labelText || shortText
+        : shortText || labelText) || fallback;
+  const standardTitle =
+    showUpstream && Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
+      ? target.upstreamModels.join(' / ')
+      : standardText;
+  return { text: standardText, title: standardTitle, isOrchestratorSeries: false };
+}
+
+/**
+ * 按当前显示策略 (`resolveModelDisplayInfo`) 解析出的最终展示名称对模型统计列表执行二次去重归并，
+ * 确保当多个外层模型槽位映射到同一展示名（例如切换至“原始模型 ID”后共享同一 `upstreamName`）时，
+ * 不会在排行榜或总览中出现重复同名行，同时完整累加 Token、调用次数、未定价计数与速度/首字加权均值。
+ *
+ * @param {object[]} [models=[]]
+ * @param {object|boolean} [settings={}]
+ * @param {{ preferLabelInShort?: boolean, fallback?: string }} [options={}]
+ * @returns {object[]}
+ */
+export function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
+  if (!Array.isArray(models) || models.length === 0) return [];
+  const showUpstream =
+    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+  const byDisplay = new Map();
+
+  for (const m of models) {
+    if (!m || typeof m !== 'object') continue;
+    const disp = resolveModelDisplayInfo(m, settings, options);
+    const key = String(disp.text || options?.fallback || '—').trim() || '—';
+
+    const calls = Math.max(0, Number(m.calls || 0));
+    const inTok = Math.max(0, Number(m.inputTokens || 0));
+    const cacheTok = Math.max(0, Number(m.cacheReadTokens || 0));
+    const outTok = Math.max(0, Number(m.outputTokens || 0));
+    const thinkTok = Math.max(0, Number(m.thinkingTokens || 0));
+    const respTok =
+      m.responseTokens != null
+        ? Math.max(0, Number(m.responseTokens))
+        : Math.max(0, outTok - thinkTok);
+    const totTok = Math.max(0, Number(m.totalTokens ?? inTok + cacheTok + outTok));
+    const costUsd = Number.isFinite(Number(m.costUsd)) ? Math.max(0, Number(m.costUsd)) : 0;
+    const unpricedCalls = Math.max(0, Number(m.unpricedCalls || 0));
+
+    const speedSampleCount = Math.max(0, Number(m.speedSummary?.sampleCount || 0));
+    const speedExcludedCount = Math.max(0, Number(m.speedSummary?.excludedCount || 0));
+    const speedWeight = speedSampleCount > 0 ? speedSampleCount : Math.max(1, outTok || calls || 1);
+    const hasSpeed = m.avgTokPerSec != null && Number.isFinite(Number(m.avgTokPerSec)) && Number(m.avgTokPerSec) > 0;
+
+    const ttftSampleCount = Math.max(0, Number(m.ttftSampleCount || 0));
+    const ttftWeight = ttftSampleCount > 0 ? ttftSampleCount : Math.max(1, calls || 1);
+    const hasTtft = m.avgTtftSec != null && Number.isFinite(Number(m.avgTtftSec)) && Number(m.avgTtftSec) >= 0;
+
+    let acc = byDisplay.get(key);
+    if (!acc) {
+      acc = {
+        baseItem: m,
+        mergedCount: 1,
+        displayText: key,
+        firstTitle: disp.title || key,
+        titleSet: new Set(disp.title ? [disp.title] : []),
+        upstreamSet: new Set(
+          Array.isArray(m.upstreamModels) ? m.upstreamModels.filter(Boolean) : []
+        ),
+        sourceLabels: m.label ? [m.label] : [],
+        calls,
+        inputTokens: inTok,
+        cacheReadTokens: cacheTok,
+        outputTokens: outTok,
+        thinkingTokens: thinkTok,
+        responseTokens: respTok,
+        totalTokens: totTok,
+        costUsd,
+        unpricedCalls,
+        speedWeightedSum: hasSpeed ? Number(m.avgTokPerSec) * speedWeight : 0,
+        speedWeight: hasSpeed ? speedWeight : 0,
+        speedSampleCount,
+        speedExcludedCount,
+        ttftWeightedSum: hasTtft ? Number(m.avgTtftSec) * ttftWeight : 0,
+        ttftWeight: hasTtft ? ttftWeight : 0,
+        ttftSampleCount,
+      };
+      if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
+      byDisplay.set(key, acc);
+      continue;
+    }
+
+    acc.mergedCount += 1;
+    if (disp.title) acc.titleSet.add(disp.title);
+    if (Array.isArray(m.upstreamModels)) {
+      for (const u of m.upstreamModels) {
+        if (u) acc.upstreamSet.add(u);
+      }
+    }
+    if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
+    if (m.label && !acc.sourceLabels.includes(m.label)) {
+      acc.sourceLabels.push(m.label);
+    }
+
+    acc.calls += calls;
+    acc.inputTokens += inTok;
+    acc.cacheReadTokens += cacheTok;
+    acc.outputTokens += outTok;
+    acc.thinkingTokens += thinkTok;
+    acc.responseTokens += respTok;
+    acc.totalTokens += totTok;
+    acc.costUsd += costUsd;
+    acc.unpricedCalls += unpricedCalls;
+
+    if (hasSpeed) {
+      acc.speedWeightedSum += Number(m.avgTokPerSec) * speedWeight;
+      acc.speedWeight += speedWeight;
+    }
+    acc.speedSampleCount += speedSampleCount;
+    acc.speedExcludedCount += speedExcludedCount;
+
+    if (hasTtft) {
+      acc.ttftWeightedSum += Number(m.avgTtftSec) * ttftWeight;
+      acc.ttftWeight += ttftWeight;
+    }
+    acc.ttftSampleCount += ttftSampleCount;
+  }
+
+  return Array.from(byDisplay.values()).map((acc) => {
+    if (acc.mergedCount === 1) {
+      return {
+        ...acc.baseItem,
+        displayText: acc.displayText,
+        displayTitle: acc.firstTitle,
+        sourceLabels: acc.sourceLabels,
+      };
+    }
+    const promptTok = acc.inputTokens + acc.cacheReadTokens;
+    const cacheHitPct = promptTok > 0 ? +((acc.cacheReadTokens / promptTok) * 100).toFixed(1) : 0;
+    const avgTokPerSec =
+      acc.speedWeight > 0 ? +(acc.speedWeightedSum / acc.speedWeight).toFixed(1) : null;
+    const avgTtftSec =
+      acc.ttftWeight > 0 ? +(acc.ttftWeightedSum / acc.ttftWeight).toFixed(1) : null;
+    const upstreamModels = Array.from(acc.upstreamSet);
+    const displayTitle =
+      showUpstream && upstreamModels.length > 1
+        ? upstreamModels.join(' / ')
+        : Array.from(acc.titleSet).join(' / ') || acc.displayText;
+
+    return {
+      ...acc.baseItem,
+      calls: acc.calls,
+      inputTokens: acc.inputTokens,
+      cacheReadTokens: acc.cacheReadTokens,
+      outputTokens: acc.outputTokens,
+      thinkingTokens: acc.thinkingTokens,
+      responseTokens: acc.responseTokens,
+      totalTokens: acc.totalTokens,
+      costUsd: +acc.costUsd.toFixed(6),
+      unpricedCalls: acc.unpricedCalls,
+      cacheHitPct,
+      avgTokPerSec,
+      avgTtftSec,
+      ttftSampleCount: acc.ttftSampleCount,
+      speedSummary: acc.baseItem.speedSummary
+        ? {
+            ...acc.baseItem.speedSummary,
+            sampleCount: acc.speedSampleCount,
+            excludedCount: acc.speedExcludedCount,
+            avgTokPerSec,
+          }
+        : undefined,
+      upstreamModels,
+      displayText: acc.displayText,
+      displayTitle,
+      sourceLabels: acc.sourceLabels,
+    };
+  });
 }

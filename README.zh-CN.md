@@ -51,7 +51,7 @@
 - **偏好设置**
   - 选择面板挂载方式：双栖挂载（顶部栏 + 侧边栏）或仅侧边栏。
   - 顶部栏定制：独立开关实时运行会话入口，并自由定义右侧三个指标槽位的显示内容与排列顺序。
-  - 选择模型名称格式：精简代号或原始模型 ID。
+  - 选择模型名称格式：精简代号或原始模型 ID，并可独立设置 Orchestrator 系列显示精简代号（如 `orchestrator-argon`、`worker-agy-hydrogen`）或原始完整 ID。
   - 版本更新与价格表同步：支持从云端 [`pricing-catalog.json`](pricing-catalog.json) 动态同步最新模型价格表，并提供「仅提示新版本，手动更新」（默认）、「自动更新」与「关闭更新」三档更新方式。
 
 ## 模型识别与费用口径
@@ -98,8 +98,10 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
 ## 启用与打开面板
 
 1. 打开左侧边栏的 **Customizations**，进入 **Installed** 标签页，找到 `usage-monitor` 并开启。
-2. **顶部栏胶囊悬浮面板（默认双栖开启）**：开启插件后，后台 Sidecar 会自动在主对话窗口右上角顶部栏挂载实时状态与指标胶囊（悬停查看速览，左键展开完整四标签面板，右键强制刷新），全程不修改宿主 `app.asar`。如需关闭顶部栏胶囊，可在 **偏好设置 -> 面板挂载方式** 中切换为「仅侧边栏」。
-3. **右侧辅助栏面板**：点击对话窗口右上角 `⋮` -> **Extensions** -> **用量监控**，在右侧辅助栏展开面板；或在对话中输入「打开用量监控面板」通过快捷入口唤起。
+2. **顶部栏胶囊悬浮面板（默认开启，兼容 Antigravity 2.0 与 Antigravity IDE）**：
+   - **Antigravity 2.0 桌面端**：开启插件后即自动在主对话窗口右上角顶部栏挂载实时状态与指标胶囊（悬停查看速览，左键展开完整四标签面板，右键强制刷新），全程不修改宿主 `app.asar`。
+   - **Antigravity IDE**：首次启用插件时，后台 Sidecar 会自动在 `~/.antigravity-ide/argv.json` 中补齐 `"remote-debugging-port": "0"`（保留原有注释与配置）。**完整重启一次 Antigravity IDE** 后，胶囊会自动停靠在 IDE 窗口最上方标题栏右侧。由于 Antigravity IDE 宿主暂未开放右侧 UI Sidecar 辅助栏，在 IDE 中请保持「双栖挂载」并直接点击顶部栏胶囊打开四标签面板。
+3. **右侧辅助栏面板（Antigravity 2.0）**：在 Antigravity 2.0 对话窗口点击右上角菜单打开右侧辅助栏中的 **用量监控**，或在 **偏好设置 -> 面板挂载方式** 中按需切换「顶部栏 + 侧边栏」与「仅侧边栏」。
 
 ## 更新
 
