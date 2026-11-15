@@ -257,10 +257,12 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   'steps.modelSplitFoot': 'In {inTok} · Cache {cacheTok} · Think {thinkTok} · Out {respTok}',
   'steps.fitActiveCardTitle': '{title} (Active in Trend Fit; Ctrl/Shift-click to compare)',
   'steps.fitInactiveCardTitle': 'Click to inspect {text} in Trend Fit (Ctrl/Shift-click to compare)',
+  'steps.turnMediaOnly': '[Media Attachment]',
+  'steps.turnMediaSuffix': '[Media]',
 
   // Step Table Columns (Headers & Option Labels)
   'stepCol.step.th': 'Step',
-  'stepCol.step.opt': 'Step & Agent',
+  'stepCol.step.opt': 'Step Number (#)',
   'stepCol.time.th': 'Time',
   'stepCol.time.opt': 'Timestamp (HH:mm:ss)',
   'stepCol.model.th': 'Model',
@@ -423,6 +425,8 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.addOverviewMetric': 'Add Metric ({count}/{max})',
   'settings.str.stepsSection': 'Step Table Columns',
   'settings.str.stepsBadge': '{count} cols',
+  'settings.str.stepTurnRailToggle': 'Turn Rail & Preview',
+  'settings.str.stepAgentBadgeToggle': 'Main/Sub Agent Badge',
   'settings.str.stepsColsLabel': '"Steps" Visible Columns (Left → Right, min 2)',
   'settings.str.addStepCol': 'Add Column ({count}/{max})',
   'settings.slot.moveUp': 'Move earlier',

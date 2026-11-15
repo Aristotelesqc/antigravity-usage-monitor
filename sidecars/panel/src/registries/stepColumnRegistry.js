@@ -63,7 +63,7 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     thLabel: () => t('stepCol.step.th'),
     optLabel: () => t('stepCol.step.opt'),
     sigPart: (st, ctx) =>
-      `${ctx.hasSubagents}:${ctx.scopeSigKey}:${st.agentId || 'main'}:${st.stepIndex}:${st.agentBadge || ''}:${st.agentLabel || ''}`,
+      `${Boolean(ctx.showAgentBadge)}:${ctx.scopeSigKey}:${st.agentId || 'main'}:${st.stepIndex}:${st.agentBadge || ''}:${st.agentLabel || ''}`,
     createCell: () => {
       const agentBadgeEl = h('span', {
         className: 'agent-badge is-clickable',
@@ -75,9 +75,9 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
       return { td, refs: { agentBadgeEl, stepNumText } };
     },
     updateCell: (refs, st, ctx) => {
-      const { hasSubagents, effectiveScopes, onSelectAgentScopes } = ctx;
-      patchAttr(refs.agentBadgeEl, 'hidden', !hasSubagents);
-      if (hasSubagents) {
+      const { showAgentBadge, effectiveScopes, onSelectAgentScopes } = ctx;
+      patchAttr(refs.agentBadgeEl, 'hidden', !showAgentBadge);
+      if (showAgentBadge) {
         const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
         patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
         const badgeText = isEnglishLocale()
@@ -117,6 +117,8 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
             onSelectAgentScopes(isSoleTarget ? ['all'] : [targetScope]);
           }
         };
+      } else {
+        refs.agentBadgeEl.onclick = null;
       }
       patchText(refs.stepNumText, `#${Number(st.stepIndex)}`);
     },

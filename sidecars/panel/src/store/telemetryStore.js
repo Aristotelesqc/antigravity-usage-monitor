@@ -381,6 +381,12 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.showTopbarMultiSession !== false) !== (nSet?.showTopbarMultiSession !== false)) {
     return false;
   }
+  if ((pSet?.showStepTurnRail !== false) !== (nSet?.showStepTurnRail !== false)) {
+    return false;
+  }
+  if ((pSet?.showStepAgentBadge !== false) !== (nSet?.showStepAgentBadge !== false)) {
+    return false;
+  }
   if (!sameArr(pSet?.topbarCapsuleSlots, nSet?.topbarCapsuleSlots)) return false;
   if (!sameArr(pSet?.hoverModules, nSet?.hoverModules)) return false;
   if (!sameArr(pSet?.overviewModules, nSet?.overviewModules)) return false;
@@ -547,7 +553,13 @@ function isEquivalentTelemetry(prev, next) {
         bs?.cacheReadTokens !== as?.cacheReadTokens ||
         bs?.contextTokens !== as?.contextTokens ||
         bs?.cacheHitPct !== as?.cacheHitPct ||
-        bs?.selectedSpeedReason !== as?.selectedSpeedReason
+        bs?.selectedSpeedReason !== as?.selectedSpeedReason ||
+        bs?.turnIndex !== as?.turnIndex ||
+        bs?.rootTurnIndex !== as?.rootTurnIndex ||
+        bs?.isTurnStart !== as?.isTurnStart ||
+        bs?.isRootTurnStart !== as?.isRootTurnStart ||
+        bs?.turnPrompt !== as?.turnPrompt ||
+        bs?.rootTurnPrompt !== as?.rootTurnPrompt
       ) {
         return false;
       }
@@ -594,7 +606,13 @@ function isEquivalentTelemetry(prev, next) {
       before.cacheReadTokens !== after.cacheReadTokens ||
       before.contextTokens !== after.contextTokens ||
       before.cacheHitPct !== after.cacheHitPct ||
-      before.selectedSpeedReason !== after.selectedSpeedReason
+      before.selectedSpeedReason !== after.selectedSpeedReason ||
+      before.turnIndex !== after.turnIndex ||
+      before.rootTurnIndex !== after.rootTurnIndex ||
+      before.isTurnStart !== after.isTurnStart ||
+      before.isRootTurnStart !== after.isRootTurnStart ||
+      before.turnPrompt !== after.turnPrompt ||
+      before.rootTurnPrompt !== after.rootTurnPrompt
     ) {
       return false;
     }
@@ -937,6 +955,12 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'showTopbarMultiSession')) {
     safePatch.showTopbarMultiSession = Boolean(safePatch.showTopbarMultiSession);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepTurnRail')) {
+    safePatch.showStepTurnRail = Boolean(safePatch.showStepTurnRail);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepAgentBadge')) {
+    safePatch.showStepAgentBadge = Boolean(safePatch.showStepAgentBadge);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
     safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);

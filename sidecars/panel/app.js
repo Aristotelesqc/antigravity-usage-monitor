@@ -521,10 +521,12 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'steps.modelSplitFoot': '入 {inTok} · 缓 {cacheTok} · 思 {thinkTok} · 正 {respTok}',
   'steps.fitActiveCardTitle': '{title}（已纳入上方趋势拟合，按住 Ctrl/Shift 点击可多选对比）',
   'steps.fitInactiveCardTitle': '点击在上方拟合图查看 {text}（按住 Ctrl/Shift 点击可多选同图对比）',
+  'steps.turnMediaOnly': '[图片/附件提问]',
+  'steps.turnMediaSuffix': '[附图]',
 
   // Step Table Columns (Headers & Option Labels)
   'stepCol.step.th': '步序',
-  'stepCol.step.opt': '步序与代理',
+  'stepCol.step.opt': '调用步序 (#)',
   'stepCol.time.th': '时间',
   'stepCol.time.opt': '调用时间 (HH:mm:ss)',
   'stepCol.model.th': '模型',
@@ -687,6 +689,8 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.addOverviewMetric': '添加指标 ({count}/{max})',
   'settings.str.stepsSection': '调用明细字段',
   'settings.str.stepsBadge': '{count} 列',
+  'settings.str.stepTurnRailToggle': '对话轮次导轨',
+  'settings.str.stepAgentBadgeToggle': '主/子代理标识',
   'settings.str.stepsColsLabel': '「按步查看」显示列 (左 → 右，至少 2 列)',
   'settings.str.addStepCol': '添加字段 ({count}/{max})',
   'settings.slot.moveUp': '前移',
@@ -995,10 +999,12 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'steps.modelSplitFoot': 'In {inTok} · Cache {cacheTok} · Think {thinkTok} · Out {respTok}',
   'steps.fitActiveCardTitle': '{title} (Active in Trend Fit; Ctrl/Shift-click to compare)',
   'steps.fitInactiveCardTitle': 'Click to inspect {text} in Trend Fit (Ctrl/Shift-click to compare)',
+  'steps.turnMediaOnly': '[Media Attachment]',
+  'steps.turnMediaSuffix': '[Media]',
 
   // Step Table Columns (Headers & Option Labels)
   'stepCol.step.th': 'Step',
-  'stepCol.step.opt': 'Step & Agent',
+  'stepCol.step.opt': 'Step Number (#)',
   'stepCol.time.th': 'Time',
   'stepCol.time.opt': 'Timestamp (HH:mm:ss)',
   'stepCol.model.th': 'Model',
@@ -1161,6 +1167,8 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.addOverviewMetric': 'Add Metric ({count}/{max})',
   'settings.str.stepsSection': 'Step Table Columns',
   'settings.str.stepsBadge': '{count} cols',
+  'settings.str.stepTurnRailToggle': 'Turn Rail & Preview',
+  'settings.str.stepAgentBadgeToggle': 'Main/Sub Agent Badge',
   'settings.str.stepsColsLabel': '"Steps" Visible Columns (Left → Right, min 2)',
   'settings.str.addStepCol': 'Add Column ({count}/{max})',
   'settings.slot.moveUp': 'Move earlier',
@@ -2649,6 +2657,12 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.showTopbarMultiSession !== false) !== (nSet?.showTopbarMultiSession !== false)) {
     return false;
   }
+  if ((pSet?.showStepTurnRail !== false) !== (nSet?.showStepTurnRail !== false)) {
+    return false;
+  }
+  if ((pSet?.showStepAgentBadge !== false) !== (nSet?.showStepAgentBadge !== false)) {
+    return false;
+  }
   if (!sameArr(pSet?.topbarCapsuleSlots, nSet?.topbarCapsuleSlots)) return false;
   if (!sameArr(pSet?.hoverModules, nSet?.hoverModules)) return false;
   if (!sameArr(pSet?.overviewModules, nSet?.overviewModules)) return false;
@@ -2815,7 +2829,13 @@ function isEquivalentTelemetry(prev, next) {
         bs?.cacheReadTokens !== as?.cacheReadTokens ||
         bs?.contextTokens !== as?.contextTokens ||
         bs?.cacheHitPct !== as?.cacheHitPct ||
-        bs?.selectedSpeedReason !== as?.selectedSpeedReason
+        bs?.selectedSpeedReason !== as?.selectedSpeedReason ||
+        bs?.turnIndex !== as?.turnIndex ||
+        bs?.rootTurnIndex !== as?.rootTurnIndex ||
+        bs?.isTurnStart !== as?.isTurnStart ||
+        bs?.isRootTurnStart !== as?.isRootTurnStart ||
+        bs?.turnPrompt !== as?.turnPrompt ||
+        bs?.rootTurnPrompt !== as?.rootTurnPrompt
       ) {
         return false;
       }
@@ -2862,7 +2882,13 @@ function isEquivalentTelemetry(prev, next) {
       before.cacheReadTokens !== after.cacheReadTokens ||
       before.contextTokens !== after.contextTokens ||
       before.cacheHitPct !== after.cacheHitPct ||
-      before.selectedSpeedReason !== after.selectedSpeedReason
+      before.selectedSpeedReason !== after.selectedSpeedReason ||
+      before.turnIndex !== after.turnIndex ||
+      before.rootTurnIndex !== after.rootTurnIndex ||
+      before.isTurnStart !== after.isTurnStart ||
+      before.isRootTurnStart !== after.isRootTurnStart ||
+      before.turnPrompt !== after.turnPrompt ||
+      before.rootTurnPrompt !== after.rootTurnPrompt
     ) {
       return false;
     }
@@ -3205,6 +3231,12 @@ async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'showTopbarMultiSession')) {
     safePatch.showTopbarMultiSession = Boolean(safePatch.showTopbarMultiSession);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepTurnRail')) {
+    safePatch.showStepTurnRail = Boolean(safePatch.showStepTurnRail);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepAgentBadge')) {
+    safePatch.showStepAgentBadge = Boolean(safePatch.showStepAgentBadge);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
     safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);
@@ -9985,7 +10017,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     thLabel: () => t('stepCol.step.th'),
     optLabel: () => t('stepCol.step.opt'),
     sigPart: (st, ctx) =>
-      `${ctx.hasSubagents}:${ctx.scopeSigKey}:${st.agentId || 'main'}:${st.stepIndex}:${st.agentBadge || ''}:${st.agentLabel || ''}`,
+      `${Boolean(ctx.showAgentBadge)}:${ctx.scopeSigKey}:${st.agentId || 'main'}:${st.stepIndex}:${st.agentBadge || ''}:${st.agentLabel || ''}`,
     createCell: () => {
       const agentBadgeEl = h('span', {
         className: 'agent-badge is-clickable',
@@ -9997,9 +10029,9 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
       return { td, refs: { agentBadgeEl, stepNumText } };
     },
     updateCell: (refs, st, ctx) => {
-      const { hasSubagents, effectiveScopes, onSelectAgentScopes } = ctx;
-      patchAttr(refs.agentBadgeEl, 'hidden', !hasSubagents);
-      if (hasSubagents) {
+      const { showAgentBadge, effectiveScopes, onSelectAgentScopes } = ctx;
+      patchAttr(refs.agentBadgeEl, 'hidden', !showAgentBadge);
+      if (showAgentBadge) {
         const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
         patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
         const badgeText = isEnglishLocale()
@@ -10039,6 +10071,8 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
             onSelectAgentScopes(isSoleTarget ? ['all'] : [targetScope]);
           }
         };
+      } else {
+        refs.agentBadgeEl.onclick = null;
       }
       patchText(refs.stepNumText, `#${Number(st.stepIndex)}`);
     },
@@ -11278,6 +11312,8 @@ const SettingsStructureTab = defineComponent({
     let draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
     let draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
     let draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
+    let draftShowStepTurnRail = true;
+    let draftShowStepAgentBadge = true;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
 
@@ -11572,10 +11608,44 @@ const SettingsStructureTab = defineComponent({
       overviewSection.refs.setResetDisabled(isDefault);
     }
 
-    // --- Section 4: 调用明细字段 (Step Table Columns 2..12) ---
+    // --- Section 4: 调用明细字段 (Turn Rail + Agent Badge Toggles + Step Table Columns 2..12) ---
+    const stepTurnRailLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepTurnRailToggle'),
+    });
+    const stepAgentBadgeLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepAgentBadgeToggle'),
+    });
     const stepColsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepsColsLabel'),
+    });
+
+    const stepTurnRailToggle = SegmentedControl({
+      ariaLabel: t('settings.str.stepTurnRailToggle'),
+      modelValue: 'show',
+      options: getMultiToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftShowStepTurnRail = val !== 'hide';
+        syncStepsSectionMeta();
+        void persistStructurePatch(stepsSection, {
+          showStepTurnRail: draftShowStepTurnRail,
+        });
+      },
+    });
+
+    const stepAgentBadgeToggle = SegmentedControl({
+      ariaLabel: t('settings.str.stepAgentBadgeToggle'),
+      modelValue: 'show',
+      options: getMultiToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftShowStepAgentBadge = val !== 'hide';
+        syncStepsSectionMeta();
+        void persistStructurePatch(stepsSection, {
+          showStepAgentBadge: draftShowStepAgentBadge,
+        });
+      },
     });
 
     const stepColumnsList = EditableSlotList({
@@ -11601,26 +11671,55 @@ const SettingsStructureTab = defineComponent({
       defaultExpanded: false,
       onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
+        draftShowStepTurnRail = true;
+        draftShowStepAgentBadge = true;
         draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           stepsSection,
-          { stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS] },
+          {
+            showStepTurnRail: true,
+            showStepAgentBadge: true,
+            stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
+          },
           'settings.resetDone'
         );
       },
-      children: [h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el])],
+      children: [
+        h('div', { className: 'settings-inline-row' }, [
+          stepTurnRailLabelEl,
+          stepTurnRailToggle.el,
+        ]),
+        h('div', { className: 'settings-inline-row' }, [
+          stepAgentBadgeLabelEl,
+          stepAgentBadgeToggle.el,
+        ]),
+        h('div', { className: 'settings-divider' }),
+        h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
+      ],
     });
 
     function syncStepsSectionMeta() {
+      stepTurnRailToggle.setProps({
+        modelValue: draftShowStepTurnRail ? 'show' : 'hide',
+        options: getMultiToggleOptions(),
+      });
+      stepAgentBadgeToggle.setProps({
+        modelValue: draftShowStepAgentBadge ? 'show' : 'hide',
+        options: getMultiToggleOptions(),
+      });
       stepColumnsList.refs.setProps({
         items: draftStepColumns,
         options: getStepColumnOptions(),
         addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       });
       stepsSection.refs.setBadge(t('settings.str.stepsBadge', { count: draftStepColumns.length }));
-      stepsSection.refs.setResetDisabled(isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS));
+      const isDefault =
+        draftShowStepTurnRail === true &&
+        draftShowStepAgentBadge === true &&
+        isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
+      stepsSection.refs.setResetDisabled(isDefault);
     }
 
     const rootEl = h('div', { className: 'settings-tab-stack' }, [
@@ -11642,6 +11741,8 @@ const SettingsStructureTab = defineComponent({
       draftHoverModules = normalizeClientHoverModules(settings.hoverModules);
       draftOverviewModules = normalizeClientOverviewModules(settings.overviewModules);
       draftOverviewMetrics = normalizeClientOverviewMetrics(settings.overviewMetrics);
+      draftShowStepTurnRail = settings.showStepTurnRail !== false;
+      draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
       draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
@@ -11669,6 +11770,8 @@ const SettingsStructureTab = defineComponent({
 
       stepsSection.refs.setTitle(t('settings.str.stepsSection'));
       stepsSection.refs.setResetLabel(t('settings.resetBtn'));
+      patchText(stepTurnRailLabelEl, t('settings.str.stepTurnRailToggle'));
+      patchText(stepAgentBadgeLabelEl, t('settings.str.stepAgentBadgeToggle'));
       patchText(stepColsLabelEl, t('settings.str.stepsColsLabel'));
 
       syncMountSectionMeta();
@@ -11689,6 +11792,8 @@ const SettingsStructureTab = defineComponent({
       hoverModulesList.destroy();
       overviewModulesList.destroy();
       overviewMetricsList.destroy();
+      stepTurnRailToggle.destroy();
+      stepAgentBadgeToggle.destroy();
       stepColumnsList.destroy();
       mountSection.destroy();
       hoverSection.destroy();
@@ -11705,6 +11810,8 @@ const SettingsStructureTab = defineComponent({
         hoverModulesList,
         overviewModulesList,
         overviewMetricsList,
+        stepTurnRailToggle,
+        stepAgentBadgeToggle,
         stepColumnsList,
         mountSection,
         hoverSection,
@@ -13790,6 +13897,16 @@ function getFitMetricSwitchOptions() {
   ];
 }
 
+function formatTurnPromptText(rawPrompt) {
+  const text = String(rawPrompt || '').trim();
+  if (!text || !isEnglishLocale()) return text;
+  if (text === '[图片/附件提问]') return t('steps.turnMediaOnly');
+  if (text.endsWith(' [附图]')) {
+    return `${text.slice(0, -5)} ${t('steps.turnMediaSuffix')}`;
+  }
+  return text;
+}
+
 const StepsDetailView = defineComponent({
   name: 'StepsDetailView',
   setup({ onCleanup }) {
@@ -13881,16 +13998,56 @@ const StepsDetailView = defineComponent({
 
     syncTableHeaderColumns(DEFAULT_STEP_COLUMN_KEYS);
 
-    const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [
-      h('table', { className: 'data-table' }, [
-        h('thead', {}, [stepsTheadRow]),
-        stepsTbody,
-      ]),
+    const stepsTableEl = h('table', { className: 'data-table steps-data-table' }, [
+      h('thead', {}, [stepsTheadRow]),
+      stepsTbody,
     ]);
+    const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [stepsTableEl]);
     const stepsScroll = CustomScrollbar({
       contentEl: stepsTablePane,
       className: 'table-scroll-host',
     });
+
+    const turnTipEl = h('div', {
+      className: 'turn-prompt-tip',
+      role: 'tooltip',
+      hidden: true,
+    });
+    const hideTurnTip = () => patchAttr(turnTipEl, 'hidden', true);
+
+    function showTurnTip(anchorCell, promptText) {
+      const text = String(promptText || '').trim();
+      if (!anchorCell || !text) {
+        hideTurnTip();
+        return;
+      }
+      patchText(turnTipEl, text);
+      patchAttr(turnTipEl, 'hidden', false);
+      if (
+        typeof panelEl.getBoundingClientRect === 'function' &&
+        typeof anchorCell.getBoundingClientRect === 'function'
+      ) {
+        const panelRect = panelEl.getBoundingClientRect();
+        const cellRect = anchorCell.getBoundingClientRect();
+        if (panelRect.width > 0 && panelRect.height > 0) {
+          const tipH = turnTipEl.offsetHeight || 36;
+          const tipW = turnTipEl.offsetWidth || 180;
+          const placeAbove =
+            panelRect.bottom - cellRect.bottom < tipH + 10 &&
+            cellRect.top - panelRect.top > tipH + 6;
+          const topPx = placeAbove
+            ? Math.max(4, Math.round(cellRect.top - panelRect.top - tipH - 4))
+            : Math.round(cellRect.bottom - panelRect.top + 4);
+          const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
+          const leftPx = Math.min(
+            maxLeft,
+            Math.max(6, Math.round(cellRect.left - panelRect.left + 4))
+          );
+          turnTipEl.style.top = `${topPx}px`;
+          turnTipEl.style.left = `${leftPx}px`;
+        }
+      }
+    }
 
     // --- 子视图 2：总汇总分析面板 ---
     let selectedLineMetric = 'totalTokens';
@@ -14021,7 +14178,7 @@ const StepsDetailView = defineComponent({
       'section',
       {
         className: 'panel',
-        style: 'flex: 1; min-height: 0; display: flex; flex-direction: column;',
+        style: 'flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative;',
       },
       [
         h('div', { className: 'panel-header steps-panel-header' }, [
@@ -14037,8 +14194,11 @@ const StepsDetailView = defineComponent({
         ]),
         stepsScroll.el,
         modelsScroll.el,
+        turnTipEl,
       ]
     );
+    stepsTablePane.addEventListener('scroll', hideTurnTip);
+    stepsTbody.addEventListener('mouseleave', hideTurnTip);
 
     const rootEl = h('div', { className: 'view-pane' }, [panelEl]);
 
@@ -14114,42 +14274,111 @@ const StepsDetailView = defineComponent({
     function renderStepTable(tableSteps, cascadeId, colKeys, locale, {
       effectiveScopes,
       hasSubagents,
+      isMergedMultiAgents,
+      showStepTurnRail,
+      showStepAgentBadge,
       displaySettings,
     }) {
       const colOrderSig = colKeys.join(',');
       const wantedSet = new Set(colKeys);
       syncTableHeaderColumns(colKeys);
 
+      const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
       const cellCtx = {
         hasSubagents,
+        showAgentBadge,
         effectiveScopes,
         scopeSigKey: effectiveScopes.join(','),
         displaySettings,
         onSelectAgentScopes: applyAgentScopesSelection,
       };
 
-      patchKeyedList(stepsTbody, tableSteps, {
-        keyFn: (st) => `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
-        sigFn: (st) => {
+      const useRootTurn = Boolean(hasSubagents && isMergedMultiAgents);
+      const getStepTurnIdx = (st) =>
+        useRootTurn ? (st?.rootTurnIndex ?? st?.turnIndex) : st?.turnIndex;
+      const getStepIsStart = (st) =>
+        Boolean(useRootTurn ? (st?.isRootTurnStart ?? st?.isTurnStart) : st?.isTurnStart);
+      const getStepIsLatest = (st) =>
+        Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
+      const getStepPrompt = (st) =>
+        (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
+      const turnKeyOf = (st) => {
+        if (!showStepTurnRail) return '';
+        const tIdx = getStepTurnIdx(st);
+        if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
+        return useRootTurn ? `root:${tIdx}` : `${st?.agentId || 'main'}:${tIdx}`;
+      };
+
+      const decoratedSteps = tableSteps.map((st, idx) => {
+        const tKey = turnKeyOf(st);
+        const hasTurn = Boolean(tKey);
+        const hasUp = Boolean(hasTurn && idx > 0 && turnKeyOf(tableSteps[idx - 1]) === tKey);
+        const hasDown = Boolean(
+          hasTurn && idx + 1 < tableSteps.length && turnKeyOf(tableSteps[idx + 1]) === tKey
+        );
+        return {
+          st,
+          rowKey: `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
+          hasTurn,
+          hasUp,
+          hasDown,
+          isStart: Boolean(hasTurn && (getStepIsStart(st) || !hasDown)),
+          isLatest: hasTurn && getStepIsLatest(st),
+          prompt: hasTurn ? formatTurnPromptText(getStepPrompt(st)) : '',
+        };
+      });
+
+      const railActive = Boolean(showStepTurnRail && decoratedSteps.some((d) => d.hasTurn));
+      if (!railActive) {
+        hideTurnTip();
+      }
+      patchClasses(stepsTableEl, { 'has-turn-rail': railActive });
+
+      patchKeyedList(stepsTbody, decoratedSteps, {
+        keyFn: (item) => item.rowKey,
+        sigFn: (item) => {
+          const { st } = item;
           const parts = colKeys
             .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
             .join('|');
-          return `${locale}:${colOrderSig}:${parts}`;
+          return `${locale}:${colOrderSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: () => {
           const tr = h('tr');
+          const railLineEl = h('span', { className: 'turn-rail-line', hidden: true });
+          const railDotEl = h('span', { className: 'turn-rail-dot', hidden: true });
+          const railEl = h(
+            'span',
+            { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
+            [railLineEl, railDotEl]
+          );
           return {
             el: tr,
             refs: {
               cellMap: new Map(),
               colOrderSig: '',
+              railEl,
+              railLineEl,
+              railDotEl,
+              hoverTd: null,
             },
           };
         },
-        updateRow: (refs, st, _idx, tr) => {
+        updateRow: (refs, item, _idx, tr) => {
+          const { st, hasTurn, hasUp, hasDown, isStart, isLatest, prompt } = item;
+
           if (refs.colOrderSig !== colOrderSig) {
+            if (refs.hoverTd) {
+              refs.hoverTd.onmouseenter = null;
+              refs.hoverTd.onmousemove = null;
+              refs.hoverTd.onmouseleave = null;
+              refs.hoverTd = null;
+            }
             for (const [oldColKey, entry] of refs.cellMap) {
               if (!wantedSet.has(oldColKey)) {
+                if (refs.railEl.parentNode === entry.td) {
+                  entry.td.removeChild(refs.railEl);
+                }
                 tr.removeChild(entry.td);
                 refs.cellMap.delete(oldColKey);
               }
@@ -14171,6 +14400,74 @@ const StepsDetailView = defineComponent({
           for (const colKey of colKeys) {
             const cellEntry = refs.cellMap.get(colKey);
             STEP_COLUMN_REGISTRY[colKey].updateCell(cellEntry.refs, st, cellCtx);
+          }
+
+          const firstColKey = colKeys[0];
+          const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
+          if (firstTd && refs.railEl.parentNode !== firstTd) {
+            firstTd.insertBefore(refs.railEl, firstTd.firstChild);
+          }
+
+          const showRowRail = Boolean(railActive && hasTurn && firstTd);
+          patchAttr(refs.railEl, 'hidden', !showRowRail);
+          if (showRowRail) {
+            patchClasses(refs.railEl, {
+              'is-latest': isLatest,
+              'has-up': hasUp,
+              'has-down': hasDown,
+            });
+            patchAttr(refs.railLineEl, 'hidden', !hasUp && !hasDown);
+            const showOrigin = isStart;
+            const showCap = !showOrigin && !hasUp && hasDown;
+            patchAttr(refs.railDotEl, 'hidden', !showOrigin && !showCap);
+            patchClasses(refs.railDotEl, {
+              'is-origin': showOrigin,
+              'is-cap': showCap,
+            });
+          }
+
+          const stepEntry = refs.cellMap.get('step') || null;
+          const targetHoverTd = stepEntry ? stepEntry.td : firstTd;
+          if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
+            refs.hoverTd.onmouseenter = null;
+            refs.hoverTd.onmousemove = null;
+            refs.hoverTd.onmouseleave = null;
+          }
+          refs.hoverTd = targetHoverTd;
+
+          if (targetHoverTd) {
+            if (stepEntry) {
+              const badgeEl = stepEntry.refs.agentBadgeEl;
+              targetHoverTd.onmouseenter = (ev) => {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
+                  hideTurnTip();
+                  return;
+                }
+                showTurnTip(targetHoverTd, prompt);
+              };
+              targetHoverTd.onmousemove = (ev) => {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
+                  hideTurnTip();
+                }
+              };
+              targetHoverTd.onmouseleave = hideTurnTip;
+            } else {
+              targetHoverTd.onmouseenter = null;
+              targetHoverTd.onmousemove = (ev) => {
+                if (!showRowRail || !prompt) {
+                  hideTurnTip();
+                  return;
+                }
+                const rect = targetHoverTd.getBoundingClientRect?.();
+                const relX = rect ? (ev?.clientX ?? 0) - rect.left : 0;
+                if (relX <= 18) {
+                  showTurnTip(targetHoverTd, prompt);
+                } else {
+                  hideTurnTip();
+                }
+              };
+              targetHoverTd.onmouseleave = hideTurnTip;
+            }
           }
         },
       });
@@ -14402,6 +14699,9 @@ const StepsDetailView = defineComponent({
         renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
           effectiveScopes,
           hasSubagents,
+          isMergedMultiAgents,
+          showStepTurnRail: slice.showStepTurnRail !== false,
+          showStepAgentBadge: slice.showStepAgentBadge !== false,
           displaySettings,
         });
         stepsScroll.refresh();
@@ -14698,6 +14998,7 @@ const StepsDetailView = defineComponent({
     const unsubUi = uiStore.subscribe(
       (st) => st.stepsSubTab,
       (tab) => {
+        hideTurnTip();
         subTabSwitch.setValue(tab);
         patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
         patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
@@ -14721,6 +15022,8 @@ const StepsDetailView = defineComponent({
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
         ),
+        showStepTurnRail: st.telemetry?.settings?.showStepTurnRail !== false,
+        showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
       }),
       (slice) => {
@@ -14755,6 +15058,7 @@ const StepsDetailView = defineComponent({
         prevScope = uiSlice.selectedAgentScope;
         prevActiveView = uiSlice.activeView;
         if (uiSlice.activeView !== 'steps') {
+          hideTurnTip();
           fitPinnedWhileVisible = false;
           if (scopeChanged) isDirty = true;
           return;
@@ -14779,6 +15083,8 @@ const StepsDetailView = defineComponent({
     );
 
     onCleanup(() => {
+      stepsTablePane.removeEventListener('scroll', hideTurnTip);
+      stepsTbody.removeEventListener('mouseleave', hideTurnTip);
       unsubUi();
       unsubTelemetry();
       unsubView();
@@ -14799,8 +15105,10 @@ const StepsDetailView = defineComponent({
     return {
       el: rootEl,
       refs: {
+        stepsTableEl,
         stepsTheadRow,
         stepsTbody,
+        turnTipEl,
         modelsListEl,
         inlineScopeSelect,
         stepsModelSelect,

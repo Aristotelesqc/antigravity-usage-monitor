@@ -257,10 +257,12 @@ export const I18N_MESSAGES_ZH_CN = Object.freeze({
   'steps.modelSplitFoot': '入 {inTok} · 缓 {cacheTok} · 思 {thinkTok} · 正 {respTok}',
   'steps.fitActiveCardTitle': '{title}（已纳入上方趋势拟合，按住 Ctrl/Shift 点击可多选对比）',
   'steps.fitInactiveCardTitle': '点击在上方拟合图查看 {text}（按住 Ctrl/Shift 点击可多选同图对比）',
+  'steps.turnMediaOnly': '[图片/附件提问]',
+  'steps.turnMediaSuffix': '[附图]',
 
   // Step Table Columns (Headers & Option Labels)
   'stepCol.step.th': '步序',
-  'stepCol.step.opt': '步序与代理',
+  'stepCol.step.opt': '调用步序 (#)',
   'stepCol.time.th': '时间',
   'stepCol.time.opt': '调用时间 (HH:mm:ss)',
   'stepCol.model.th': '模型',
@@ -423,6 +425,8 @@ export const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.addOverviewMetric': '添加指标 ({count}/{max})',
   'settings.str.stepsSection': '调用明细字段',
   'settings.str.stepsBadge': '{count} 列',
+  'settings.str.stepTurnRailToggle': '对话轮次导轨',
+  'settings.str.stepAgentBadgeToggle': '主/子代理标识',
   'settings.str.stepsColsLabel': '「按步查看」显示列 (左 → 右，至少 2 列)',
   'settings.str.addStepCol': '添加字段 ({count}/{max})',
   'settings.slot.moveUp': '前移',

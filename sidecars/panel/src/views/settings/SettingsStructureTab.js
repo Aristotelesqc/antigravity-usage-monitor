@@ -67,6 +67,8 @@ export const SettingsStructureTab = defineComponent({
     let draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
     let draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
     let draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
+    let draftShowStepTurnRail = true;
+    let draftShowStepAgentBadge = true;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
 
@@ -361,10 +363,44 @@ export const SettingsStructureTab = defineComponent({
       overviewSection.refs.setResetDisabled(isDefault);
     }
 
-    // --- Section 4: 调用明细字段 (Step Table Columns 2..12) ---
+    // --- Section 4: 调用明细字段 (Turn Rail + Agent Badge Toggles + Step Table Columns 2..12) ---
+    const stepTurnRailLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepTurnRailToggle'),
+    });
+    const stepAgentBadgeLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepAgentBadgeToggle'),
+    });
     const stepColsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepsColsLabel'),
+    });
+
+    const stepTurnRailToggle = SegmentedControl({
+      ariaLabel: t('settings.str.stepTurnRailToggle'),
+      modelValue: 'show',
+      options: getMultiToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftShowStepTurnRail = val !== 'hide';
+        syncStepsSectionMeta();
+        void persistStructurePatch(stepsSection, {
+          showStepTurnRail: draftShowStepTurnRail,
+        });
+      },
+    });
+
+    const stepAgentBadgeToggle = SegmentedControl({
+      ariaLabel: t('settings.str.stepAgentBadgeToggle'),
+      modelValue: 'show',
+      options: getMultiToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftShowStepAgentBadge = val !== 'hide';
+        syncStepsSectionMeta();
+        void persistStructurePatch(stepsSection, {
+          showStepAgentBadge: draftShowStepAgentBadge,
+        });
+      },
     });
 
     const stepColumnsList = EditableSlotList({
@@ -390,26 +426,55 @@ export const SettingsStructureTab = defineComponent({
       defaultExpanded: false,
       onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
+        draftShowStepTurnRail = true;
+        draftShowStepAgentBadge = true;
         draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           stepsSection,
-          { stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS] },
+          {
+            showStepTurnRail: true,
+            showStepAgentBadge: true,
+            stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
+          },
           'settings.resetDone'
         );
       },
-      children: [h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el])],
+      children: [
+        h('div', { className: 'settings-inline-row' }, [
+          stepTurnRailLabelEl,
+          stepTurnRailToggle.el,
+        ]),
+        h('div', { className: 'settings-inline-row' }, [
+          stepAgentBadgeLabelEl,
+          stepAgentBadgeToggle.el,
+        ]),
+        h('div', { className: 'settings-divider' }),
+        h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
+      ],
     });
 
     function syncStepsSectionMeta() {
+      stepTurnRailToggle.setProps({
+        modelValue: draftShowStepTurnRail ? 'show' : 'hide',
+        options: getMultiToggleOptions(),
+      });
+      stepAgentBadgeToggle.setProps({
+        modelValue: draftShowStepAgentBadge ? 'show' : 'hide',
+        options: getMultiToggleOptions(),
+      });
       stepColumnsList.refs.setProps({
         items: draftStepColumns,
         options: getStepColumnOptions(),
         addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       });
       stepsSection.refs.setBadge(t('settings.str.stepsBadge', { count: draftStepColumns.length }));
-      stepsSection.refs.setResetDisabled(isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS));
+      const isDefault =
+        draftShowStepTurnRail === true &&
+        draftShowStepAgentBadge === true &&
+        isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
+      stepsSection.refs.setResetDisabled(isDefault);
     }
 
     const rootEl = h('div', { className: 'settings-tab-stack' }, [
@@ -431,6 +496,8 @@ export const SettingsStructureTab = defineComponent({
       draftHoverModules = normalizeClientHoverModules(settings.hoverModules);
       draftOverviewModules = normalizeClientOverviewModules(settings.overviewModules);
       draftOverviewMetrics = normalizeClientOverviewMetrics(settings.overviewMetrics);
+      draftShowStepTurnRail = settings.showStepTurnRail !== false;
+      draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
       draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
@@ -458,6 +525,8 @@ export const SettingsStructureTab = defineComponent({
 
       stepsSection.refs.setTitle(t('settings.str.stepsSection'));
       stepsSection.refs.setResetLabel(t('settings.resetBtn'));
+      patchText(stepTurnRailLabelEl, t('settings.str.stepTurnRailToggle'));
+      patchText(stepAgentBadgeLabelEl, t('settings.str.stepAgentBadgeToggle'));
       patchText(stepColsLabelEl, t('settings.str.stepsColsLabel'));
 
       syncMountSectionMeta();
@@ -478,6 +547,8 @@ export const SettingsStructureTab = defineComponent({
       hoverModulesList.destroy();
       overviewModulesList.destroy();
       overviewMetricsList.destroy();
+      stepTurnRailToggle.destroy();
+      stepAgentBadgeToggle.destroy();
       stepColumnsList.destroy();
       mountSection.destroy();
       hoverSection.destroy();
@@ -494,6 +565,8 @@ export const SettingsStructureTab = defineComponent({
         hoverModulesList,
         overviewModulesList,
         overviewMetricsList,
+        stepTurnRailToggle,
+        stepAgentBadgeToggle,
         stepColumnsList,
         mountSection,
         hoverSection,

@@ -763,6 +763,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     overviewModules: ['metrics', 'context', 'quotas', 'live_tasks'],
     overviewMetrics: ['tps', 'ttft', 'avg_tps', 'step_cost'],
     stepTableColumns: ['step', 'model', 'tps', 'ttft', 'tokens_combo', 'cache', 'cost'],
+    showStepTurnRail: true,
+    showStepAgentBadge: true,
     showUpstreamModel: false,
     orchestratorIdMode: 'compact',
     weeklyLimitMode: 'official',
@@ -968,6 +970,14 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
               {
                 stepIndex: 35,
                 createdAtMs: 2000,
+                turnIndex: 1,
+                isTurnStart: false,
+                isLatestTurn: true,
+                turnPrompt: '请优化调用明细与轮次导轨',
+                rootTurnIndex: 1,
+                isRootTurnStart: false,
+                isRootLatestTurn: true,
+                rootTurnPrompt: '请优化调用明细与轮次导轨',
                 modelLabel: 'Gemini 4 Hydrogen',
                 modelShort: 'gemini-4-hydrogen',
                 modelUpstream: 'gemini-4-hydrogen',
@@ -985,6 +995,14 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
               {
                 stepIndex: 20,
                 createdAtMs: 1000,
+                turnIndex: 1,
+                isTurnStart: true,
+                isLatestTurn: true,
+                turnPrompt: '请优化调用明细与轮次导轨',
+                rootTurnIndex: 1,
+                isRootTurnStart: true,
+                isRootLatestTurn: true,
+                rootTurnPrompt: '请优化调用明细与轮次导轨',
                 modelLabel: 'Claude Opus 4.6',
                 modelShort: 'claude-opus-4.6',
                 modelUpstream: 'claude-opus-4-6',
@@ -1068,6 +1086,14 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
               isSubagent: true,
               stepIndex: 4,
               createdAtMs: 3500,
+              turnIndex: 1,
+              isTurnStart: true,
+              isLatestTurn: true,
+              turnPrompt: '审计子代理任务',
+              rootTurnIndex: 1,
+              isRootTurnStart: false,
+              isRootLatestTurn: true,
+              rootTurnPrompt: '请优化调用明细与轮次导轨',
               modelLabel: 'Gemini 3 Flash',
               modelShort: 'gemini-3-flash',
               modelUpstream: 'gemini-3-flash',
@@ -1138,6 +1164,12 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
                   stepCount: 2,
                   activeModelLabel: 'Gemini 4 Hydrogen',
                   activeModelShort: 'gemini-4-hydrogen',
+                  recentSteps: mainSteps.map((s) => ({
+                    ...s,
+                    agentId: 'main',
+                    agentBadge: '主',
+                    isSubagent: false,
+                  })),
                   modelBreakdown: mainModels,
                 },
                 {
@@ -1163,6 +1195,15 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
                 activeAgentId: 'sub-fast-1',
                 activeModelLabel: 'Gemini 3 Flash',
                 activeModelShort: 'gemini-3-flash',
+                recentSteps: [
+                  subStep,
+                  ...mainSteps.map((s) => ({
+                    ...s,
+                    agentId: 'main',
+                    agentBadge: '主',
+                    isSubagent: false,
+                  })),
+                ],
                 modelBreakdown: [...mainModels, subModel],
               },
             };
@@ -1745,9 +1786,22 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.deepEqual(mockSettings.overviewModules, ['metrics', 'context', 'quotas', 'live_tasks']);
     assert.deepEqual(mockSettings.overviewMetrics, ['tps', 'ttft', 'avg_tps', 'step_cost']);
 
-    // Section 3: Step Table Columns (2..12) — add optional 'time' and 'duration' columns
+    // Section 3: Step Table Columns (2..12) + independent Turn Rail & Main/Sub Agent Badge switches
     const sec3 = accordionSections[3];
     sec3.querySelector('.collapsible-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    const sec3SettingLabels = sec3.querySelectorAll('.form-label').map((el) => el.textContent);
+    assert.ok(sec3SettingLabels.includes('对话轮次导轨'), 'Turn rail switch rendered in 调用明细字段');
+    assert.ok(sec3SettingLabels.includes('主/子代理标识'), 'Main/Sub agent badge switch rendered in 调用明细字段');
+    const sec3SegControls = sec3.querySelectorAll('.segmented');
+    assert.equal(sec3SegControls.length, 2, 'Two independent switches rendered in 调用明细字段');
+    // Toggle off 对话轮次导轨 and 主/子代理标识
+    sec3SegControls[0].querySelectorAll('.seg-btn')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(mockSettings.showStepTurnRail, false, 'Turn rail switch updates showStepTurnRail to false');
+    sec3SegControls[1].querySelectorAll('.seg-btn')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(mockSettings.showStepAgentBadge, false, 'Agent badge switch updates showStepAgentBadge to false');
+
     const stepColWrap = sec3.querySelector('.editable-slot-wrap');
     stepColWrap.querySelector('.slot-add-btn').dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 25));
@@ -1756,13 +1810,26 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.stepTableColumns.length, 9, 'Added time and duration columns (7 -> 9)');
     pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
-    const stepHeaderThs = allPanes[2].querySelector('.data-table').children[0].children[0].children;
+    const stepTableWhileRailOff = allPanes[2].querySelector('.data-table');
+    assert.equal(
+      stepTableWhileRailOff.classList.contains('has-turn-rail'),
+      false,
+      'has-turn-rail class removed when showStepTurnRail is false'
+    );
+    assert.equal(
+      stepTableWhileRailOff.querySelector('.turn-rail').hasAttribute('hidden'),
+      true,
+      'Turn rail DOM hidden when showStepTurnRail is false'
+    );
+    const stepHeaderThs = stepTableWhileRailOff.children[0].children[0].children;
     assert.equal(stepHeaderThs.length, 9, 'StepsDetailView thead dynamically renders 9 columns');
     pillTabs[3].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     sec3.querySelector('.btn-ghost-sm').dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(mockSettings.stepTableColumns.length, 7);
+    assert.equal(mockSettings.showStepTurnRail, true, 'Section reset restores showStepTurnRail to true');
+    assert.equal(mockSettings.showStepAgentBadge, true, 'Section reset restores showStepAgentBadge to true');
 
     // --- 其他 (model format, context limits, cache rebuild, reset) ---
     subNavBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -1927,6 +1994,24 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(stepRows[0].children[4].textContent, '37.8k / 420 / 265');
     assert.equal(stepRows[0].children[4].getAttribute('title'), '上下文 37800 · 思考 420 · 正文 265');
     assert.equal(stepRows[1].children[4].textContent, '117.7k / 14.5k / 57');
+
+    // Verify minimalist Turn Rail (.has-turn-rail, cap & origin dots) and hover prompt preview tooltip
+    const stepsDataTable = stepsPane.querySelectorAll('.data-table')[0];
+    assert.equal(stepsDataTable.classList.contains('has-turn-rail'), true, 'Turn rail active when showStepTurnRail=true');
+    const row0Rail = stepRows[0].children[0].querySelector('.turn-rail');
+    const row1Rail = stepRows[1].children[0].querySelector('.turn-rail');
+    assert.equal(row0Rail.hasAttribute('hidden'), false);
+    assert.equal(row0Rail.classList.contains('is-latest'), true);
+    assert.equal(row0Rail.querySelector('.turn-rail-dot').classList.contains('is-cap'), true, 'Newest step in turn renders cap dot');
+    assert.equal(row1Rail.querySelector('.turn-rail-dot').classList.contains('is-origin'), true, 'First step of user turn renders hollow origin dot');
+
+    const turnPromptTipEl = stepsPane.querySelector('.turn-prompt-tip');
+    assert.equal(turnPromptTipEl.hasAttribute('hidden'), true, 'Prompt preview tooltip hidden initially');
+    stepRows[0].children[0].onmouseenter({ target: stepRows[0].children[0] });
+    assert.equal(turnPromptTipEl.hasAttribute('hidden'), false, 'Hovering first cell opens turn prompt preview');
+    assert.equal(turnPromptTipEl.textContent, '请优化调用明细与轮次导轨');
+    stepRows[0].children[0].onmouseleave();
+    assert.equal(turnPromptTipEl.hasAttribute('hidden'), true, 'Leaving cell hides turn prompt preview');
 
     // Verify '按步查看' multi-select model filter (visible when >1 model) & '总汇总' sub-tab rename
     const stepsHeaderSegBtns = stepsPane.querySelector('.steps-header-controls').querySelectorAll('.seg-btn');
@@ -2191,8 +2276,78 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       'ModelFitChart model dropdown auto-hidden when only 1 model exists'
     );
 
-    // Restore sub-tab to 'steps' before subsequent route tests
+    // Restore sub-tab to 'steps', reset scope to 'all', and verify multi-agent rootTurnIndex rail + decoupled [主]/[子] badge toggle
     stepsHeaderSegBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    inlineScopeSelectEl
+      .querySelectorAll('.select-option')
+      .find((o) => o.getAttribute('data-value') === 'all')
+      .dispatchEvent({ type: 'click', stopPropagation() {} });
+    inlineScopeSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const multiStepRows = stepsPane.querySelectorAll('.data-table')[0].children[1].children;
+    assert.equal(multiStepRows.length, 3, 'All 3 interleaved main + subagent steps rendered in 全部代理');
+    assert.equal(
+      multiStepRows[0].children[0].querySelector('.agent-badge').hasAttribute('hidden'),
+      false,
+      '[子1] badge visible when showStepAgentBadge is true'
+    );
+    assert.equal(multiStepRows[0].children[0].querySelector('.agent-badge').textContent, '子1');
+    assert.equal(multiStepRows[1].children[0].querySelector('.agent-badge').textContent, '主');
+    assert.equal(
+      multiStepRows[0].children[0].querySelector('.turn-rail-dot').classList.contains('is-cap'),
+      true,
+      'Interleaved subagent step at top joins unified rootTurnIndex rail as cap'
+    );
+    assert.equal(
+      multiStepRows[1].children[0].querySelector('.turn-rail-dot').hasAttribute('hidden'),
+      true,
+      'Middle main step connects continuously along unified rootTurnIndex rail'
+    );
+    assert.equal(
+      multiStepRows[2].children[0].querySelector('.turn-rail-dot').classList.contains('is-origin'),
+      true,
+      'Earliest main step anchors unified rootTurnIndex rail origin'
+    );
+
+    // Hide [主]/[子] badge independently via settings switch while keeping step numbers (#4, #35, #20) and turn rail intact
+    pillTabs[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    subNavBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    sec3SegControls[1].querySelectorAll('.seg-btn')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+    pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(
+      multiStepRows[0].children[0].querySelector('.agent-badge').hasAttribute('hidden'),
+      true,
+      '[子1] badge hidden when showStepAgentBadge=false'
+    );
+    assert.equal(
+      multiStepRows[1].children[0].querySelector('.agent-badge').hasAttribute('hidden'),
+      true,
+      '[主] badge hidden when showStepAgentBadge=false'
+    );
+    assert.equal(
+      multiStepRows[0].children[0].children.at(-1).textContent,
+      '#4',
+      'Step index remains intact when [主]/[子] badge is hidden'
+    );
+    assert.equal(
+      multiStepRows[0].children[0].querySelector('.turn-rail').hasAttribute('hidden'),
+      false,
+      'Turn rail remains visible independently of [主]/[子] badge switch'
+    );
+
+    // Restore showStepAgentBadge=true before subsequent route tests
+    pillTabs[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    sec3SegControls[1].querySelectorAll('.seg-btn')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 260));
+    pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
     liveSubagentPollActive = false;
 
     // Verify bundle version bump NEVER calls window.location.reload() in overlay mode

@@ -816,6 +816,8 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   assert.deepEqual([...def.hoverModules], ['metrics', 'context', 'quotas']);
   assert.deepEqual([...def.overviewModules], ['metrics', 'context', 'quotas', 'live_tasks']);
   assert.deepEqual([...def.overviewMetrics], ['tps', 'ttft', 'avg_tps', 'step_cost']);
+  assert.equal(def.showStepTurnRail, true);
+  assert.equal(def.showStepAgentBadge, true);
   assert.deepEqual([...def.stepTableColumns], ['step', 'model', 'tps', 'ttft', 'tokens_combo', 'cache', 'cost']);
   assert.deepEqual({ ...def.modelContextWindows }, {});
 
@@ -846,6 +848,8 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
     hoverModules: ['metrics', 'context'],
     overviewModules: ['quotas', 'metrics'],
     overviewMetrics: ['avg_tps', 'cache_hit'],
+    showStepTurnRail: false,
+    showStepAgentBadge: false,
     stepTableColumns: ['step', 'time', 'model', 'duration', 'input_tokens', 'output_tokens', 'cost'],
     contextLimitOverrideTokens: 128000,
     modelContextWindows: { MODEL_PLACEHOLDER_M418: '900K' },
@@ -858,6 +862,8 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   assert.deepEqual([...saveRes.updated.hoverModules], ['metrics', 'context']);
   assert.deepEqual([...saveRes.updated.overviewModules], ['quotas', 'metrics']);
   assert.deepEqual([...saveRes.updated.overviewMetrics], ['avg_tps', 'cache_hit']);
+  assert.equal(saveRes.updated.showStepTurnRail, false);
+  assert.equal(saveRes.updated.showStepAgentBadge, false);
   assert.equal(saveRes.updated.contextLimitOverrideTokens, undefined);
   assert.deepEqual({ ...saveRes.updated.modelContextWindows }, {});
 
@@ -885,5 +891,71 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   assert.equal(resetRes.ok, true);
   assert.equal(resetRes.updated.language, 'zh-CN');
   assert.equal(resetRes.updated.themeAccent, 'host');
+  assert.equal(resetRes.updated.showStepTurnRail, true);
+  assert.equal(resetRes.updated.showStepAgentBadge, true);
   assert.deepEqual([...resetRes.updated.topbarCapsuleSlots], ['context', 'tps', 'quota_auto']);
+});
+
+test('assigns unified rootTurnIndex across interleaved main and subagent steps so multi-agent turn rail never fragments', async () => {
+  const mkPlanner = (stepIndex, createdAt, finishedGeneratingAt) => ({
+    status: 'CORTEX_STEP_STATUS_DONE',
+    type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+    metadata: {
+      sourceTrajectoryStepInfo: { stepIndex },
+      createdAt,
+      finishedGeneratingAt,
+      modelUsage: { model: 'MODEL_PLACEHOLDER_M429', inputTokens: '100', cacheReadTokens: '0', outputTokens: '80' },
+    },
+    plannerResponse: { response: 'ok' },
+  });
+
+  const h = backendHarness({
+    trajectories: {
+      'root-turn': {
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', userInput: { userResponse: '第一轮设计' } },
+            mkPlanner(1, '2026-11-13T20:00:01Z', '2026-11-13T20:00:03Z'),
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', userInput: { userResponse: '确认。设计是满意的。执行' } },
+            mkPlanner(3, '2026-11-13T20:33:10Z', '2026-11-13T20:33:12Z'),
+            mkPlanner(5, '2026-11-13T20:33:30Z', '2026-11-13T20:33:35Z'),
+          ],
+        },
+      },
+      'sub-turn': {
+        trajectory: {
+          metadata: { parentConversationId: 'root-turn', rootConversationId: 'root-turn' },
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', userInput: { userResponse: 'Subagent internal brief' } },
+            mkPlanner(1, '2026-11-13T20:33:20Z', '2026-11-13T20:33:25Z'),
+            mkPlanner(2, '2026-11-13T20:33:40Z', '2026-11-13T20:33:45Z'),
+          ],
+        },
+      },
+    },
+    summaries: {
+      'root-turn': { stepCount: 5, lastModifiedTime: '2026-11-13T20:33:35Z', status: 'IDLE' },
+      'sub-turn': {
+        stepCount: 3,
+        lastModifiedTime: '2026-11-13T20:33:45Z',
+        status: 'IDLE',
+        trajectoryMetadata: { parentConversationId: 'root-turn', rootConversationId: 'root-turn' },
+      },
+    },
+  });
+
+  const p = await h.buildTelemetryPayloadInternal('root-turn');
+  const mainSteps = p.activeConversation.recentSteps; // desc: #5 (20:33:30), #3 (20:33:10), #1 (20:00:01)
+  const subSteps = p.activeConversation.agents[1].recentSteps; // desc: #2 (20:33:40), #1 (20:33:20)
+
+  for (const s of [mainSteps[0], mainSteps[1], subSteps[0], subSteps[1]]) {
+    assert.equal(s.rootTurnIndex, 2);
+    assert.equal(s.isRootLatestTurn, true);
+    assert.equal(s.rootTurnPrompt, '确认。设计是满意的。执行');
+  }
+  assert.equal(mainSteps[1].isRootTurnStart, true);
+  assert.equal(mainSteps[0].isRootTurnStart, false);
+  assert.equal(subSteps[1].isRootTurnStart, false);
+  assert.equal(subSteps[1].isTurnStart, true);
+  assert.equal(subSteps[1].turnPrompt, 'Subagent internal brief');
 });

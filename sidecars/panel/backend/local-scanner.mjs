@@ -878,6 +878,7 @@ export async function enumerateAndSyncConversations({
               wasRunning: isRunning,
               contextLimitTelemetry: true,
               speedClearedTelemetry: true,
+              turnRailTelemetry: true,
               steps,
               subagentRefs,
             };
@@ -900,6 +901,7 @@ export async function enumerateAndSyncConversations({
               Boolean(prev.wasRunning) !== isRunning ||
               !prev.contextLimitTelemetry ||
               !prev.speedClearedTelemetry ||
+              !prev.turnRailTelemetry ||
               metaChanged ||
               JSON.stringify(prev.steps) !== JSON.stringify(steps);
 
@@ -948,13 +950,28 @@ export async function enumerateAndSyncConversations({
   const selectedRootId = rawConversations.find(
     (c) => c.cascadeId.toLowerCase() === contextTelemetryCascadeId
   )?.rootConversationId || contextTelemetryCascadeId;
+  function hasMissingTurnRailFields(cached) {
+    const steps = cached?.steps || [];
+    const lastCachedStep = steps[steps.length - 1];
+    if (!lastCachedStep) return false;
+    return !Object.prototype.hasOwnProperty.call(lastCachedStep, 'turnIndex');
+  }
+
   let remainingTimingRefreshes = LEGACY_MIGRATION_BATCH_SIZE;
   const toFetch = rawConversations.filter((conv) => {
     const sig = buildConvSig(conv);
     if (isFetchInCooldown(conv, sig)) return false;
     const cached = trajectoryCache[conv.cascadeId];
     if (!cached || conv.needsInitialLoad) return true;
-    if (!cached.contextLimitTelemetry && conv.cascadeId.toLowerCase() === contextTelemetryCascadeId) return true;
+    const lowerCid = conv.cascadeId.toLowerCase();
+    const isSelectedFamily =
+      lowerCid === contextTelemetryCascadeId ||
+      lowerCid === selectedRootId ||
+      Boolean(conv.rootConversationId && conv.rootConversationId.toLowerCase() === selectedRootId);
+    if (!cached.contextLimitTelemetry && lowerCid === contextTelemetryCascadeId) return true;
+    if ((!cached.turnRailTelemetry || hasMissingTurnRailFields(cached)) && isSelectedFamily) {
+      return true;
+    }
     const hasCurrentSchema = String(cached.signature || '').startsWith(
       `${CACHE_SCHEMA_VERSION}:`
     );
@@ -1064,10 +1081,13 @@ export async function enumerateAndSyncConversations({
 
           const targetCacheKey = subConv.cascadeId;
           const existingSubCache = trajectoryCache[targetCacheKey];
+          const isSelectedSubFamily = rootId === selectedRootId;
           const hasValidSubCache =
             existingSubCache &&
             String(existingSubCache.signature || '').startsWith(`${CACHE_SCHEMA_VERSION}:`) &&
-            !hasMissingStepFields(existingSubCache);
+            !hasMissingStepFields(existingSubCache) &&
+            (!isSelectedSubFamily ||
+              (Boolean(existingSubCache.turnRailTelemetry) && !hasMissingTurnRailFields(existingSubCache)));
 
           if (hasValidSubCache) {
             let subMetaUpdated = false;

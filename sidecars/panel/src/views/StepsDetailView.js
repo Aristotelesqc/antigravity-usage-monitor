@@ -22,7 +22,7 @@ import {
   resolveModelDisplayInfo,
 } from '../core/formatters.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
-import { getEffectiveLocale, i18nStore, t } from '../i18n/index.js';
+import { getEffectiveLocale, i18nStore, isEnglishLocale, t } from '../i18n/index.js';
 import {
   DEFAULT_STEP_COLUMN_KEYS,
   STEP_COLUMN_REGISTRY,
@@ -191,6 +191,16 @@ function getFitMetricSwitchOptions() {
   ];
 }
 
+function formatTurnPromptText(rawPrompt) {
+  const text = String(rawPrompt || '').trim();
+  if (!text || !isEnglishLocale()) return text;
+  if (text === '[图片/附件提问]') return t('steps.turnMediaOnly');
+  if (text.endsWith(' [附图]')) {
+    return `${text.slice(0, -5)} ${t('steps.turnMediaSuffix')}`;
+  }
+  return text;
+}
+
 export const StepsDetailView = defineComponent({
   name: 'StepsDetailView',
   setup({ onCleanup }) {
@@ -282,16 +292,56 @@ export const StepsDetailView = defineComponent({
 
     syncTableHeaderColumns(DEFAULT_STEP_COLUMN_KEYS);
 
-    const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [
-      h('table', { className: 'data-table' }, [
-        h('thead', {}, [stepsTheadRow]),
-        stepsTbody,
-      ]),
+    const stepsTableEl = h('table', { className: 'data-table steps-data-table' }, [
+      h('thead', {}, [stepsTheadRow]),
+      stepsTbody,
     ]);
+    const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [stepsTableEl]);
     const stepsScroll = CustomScrollbar({
       contentEl: stepsTablePane,
       className: 'table-scroll-host',
     });
+
+    const turnTipEl = h('div', {
+      className: 'turn-prompt-tip',
+      role: 'tooltip',
+      hidden: true,
+    });
+    const hideTurnTip = () => patchAttr(turnTipEl, 'hidden', true);
+
+    function showTurnTip(anchorCell, promptText) {
+      const text = String(promptText || '').trim();
+      if (!anchorCell || !text) {
+        hideTurnTip();
+        return;
+      }
+      patchText(turnTipEl, text);
+      patchAttr(turnTipEl, 'hidden', false);
+      if (
+        typeof panelEl.getBoundingClientRect === 'function' &&
+        typeof anchorCell.getBoundingClientRect === 'function'
+      ) {
+        const panelRect = panelEl.getBoundingClientRect();
+        const cellRect = anchorCell.getBoundingClientRect();
+        if (panelRect.width > 0 && panelRect.height > 0) {
+          const tipH = turnTipEl.offsetHeight || 36;
+          const tipW = turnTipEl.offsetWidth || 180;
+          const placeAbove =
+            panelRect.bottom - cellRect.bottom < tipH + 10 &&
+            cellRect.top - panelRect.top > tipH + 6;
+          const topPx = placeAbove
+            ? Math.max(4, Math.round(cellRect.top - panelRect.top - tipH - 4))
+            : Math.round(cellRect.bottom - panelRect.top + 4);
+          const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
+          const leftPx = Math.min(
+            maxLeft,
+            Math.max(6, Math.round(cellRect.left - panelRect.left + 4))
+          );
+          turnTipEl.style.top = `${topPx}px`;
+          turnTipEl.style.left = `${leftPx}px`;
+        }
+      }
+    }
 
     // --- 子视图 2：总汇总分析面板 ---
     let selectedLineMetric = 'totalTokens';
@@ -422,7 +472,7 @@ export const StepsDetailView = defineComponent({
       'section',
       {
         className: 'panel',
-        style: 'flex: 1; min-height: 0; display: flex; flex-direction: column;',
+        style: 'flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative;',
       },
       [
         h('div', { className: 'panel-header steps-panel-header' }, [
@@ -438,8 +488,11 @@ export const StepsDetailView = defineComponent({
         ]),
         stepsScroll.el,
         modelsScroll.el,
+        turnTipEl,
       ]
     );
+    stepsTablePane.addEventListener('scroll', hideTurnTip);
+    stepsTbody.addEventListener('mouseleave', hideTurnTip);
 
     const rootEl = h('div', { className: 'view-pane' }, [panelEl]);
 
@@ -515,42 +568,111 @@ export const StepsDetailView = defineComponent({
     function renderStepTable(tableSteps, cascadeId, colKeys, locale, {
       effectiveScopes,
       hasSubagents,
+      isMergedMultiAgents,
+      showStepTurnRail,
+      showStepAgentBadge,
       displaySettings,
     }) {
       const colOrderSig = colKeys.join(',');
       const wantedSet = new Set(colKeys);
       syncTableHeaderColumns(colKeys);
 
+      const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
       const cellCtx = {
         hasSubagents,
+        showAgentBadge,
         effectiveScopes,
         scopeSigKey: effectiveScopes.join(','),
         displaySettings,
         onSelectAgentScopes: applyAgentScopesSelection,
       };
 
-      patchKeyedList(stepsTbody, tableSteps, {
-        keyFn: (st) => `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
-        sigFn: (st) => {
+      const useRootTurn = Boolean(hasSubagents && isMergedMultiAgents);
+      const getStepTurnIdx = (st) =>
+        useRootTurn ? (st?.rootTurnIndex ?? st?.turnIndex) : st?.turnIndex;
+      const getStepIsStart = (st) =>
+        Boolean(useRootTurn ? (st?.isRootTurnStart ?? st?.isTurnStart) : st?.isTurnStart);
+      const getStepIsLatest = (st) =>
+        Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
+      const getStepPrompt = (st) =>
+        (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
+      const turnKeyOf = (st) => {
+        if (!showStepTurnRail) return '';
+        const tIdx = getStepTurnIdx(st);
+        if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
+        return useRootTurn ? `root:${tIdx}` : `${st?.agentId || 'main'}:${tIdx}`;
+      };
+
+      const decoratedSteps = tableSteps.map((st, idx) => {
+        const tKey = turnKeyOf(st);
+        const hasTurn = Boolean(tKey);
+        const hasUp = Boolean(hasTurn && idx > 0 && turnKeyOf(tableSteps[idx - 1]) === tKey);
+        const hasDown = Boolean(
+          hasTurn && idx + 1 < tableSteps.length && turnKeyOf(tableSteps[idx + 1]) === tKey
+        );
+        return {
+          st,
+          rowKey: `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
+          hasTurn,
+          hasUp,
+          hasDown,
+          isStart: Boolean(hasTurn && (getStepIsStart(st) || !hasDown)),
+          isLatest: hasTurn && getStepIsLatest(st),
+          prompt: hasTurn ? formatTurnPromptText(getStepPrompt(st)) : '',
+        };
+      });
+
+      const railActive = Boolean(showStepTurnRail && decoratedSteps.some((d) => d.hasTurn));
+      if (!railActive) {
+        hideTurnTip();
+      }
+      patchClasses(stepsTableEl, { 'has-turn-rail': railActive });
+
+      patchKeyedList(stepsTbody, decoratedSteps, {
+        keyFn: (item) => item.rowKey,
+        sigFn: (item) => {
+          const { st } = item;
           const parts = colKeys
             .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
             .join('|');
-          return `${locale}:${colOrderSig}:${parts}`;
+          return `${locale}:${colOrderSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: () => {
           const tr = h('tr');
+          const railLineEl = h('span', { className: 'turn-rail-line', hidden: true });
+          const railDotEl = h('span', { className: 'turn-rail-dot', hidden: true });
+          const railEl = h(
+            'span',
+            { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
+            [railLineEl, railDotEl]
+          );
           return {
             el: tr,
             refs: {
               cellMap: new Map(),
               colOrderSig: '',
+              railEl,
+              railLineEl,
+              railDotEl,
+              hoverTd: null,
             },
           };
         },
-        updateRow: (refs, st, _idx, tr) => {
+        updateRow: (refs, item, _idx, tr) => {
+          const { st, hasTurn, hasUp, hasDown, isStart, isLatest, prompt } = item;
+
           if (refs.colOrderSig !== colOrderSig) {
+            if (refs.hoverTd) {
+              refs.hoverTd.onmouseenter = null;
+              refs.hoverTd.onmousemove = null;
+              refs.hoverTd.onmouseleave = null;
+              refs.hoverTd = null;
+            }
             for (const [oldColKey, entry] of refs.cellMap) {
               if (!wantedSet.has(oldColKey)) {
+                if (refs.railEl.parentNode === entry.td) {
+                  entry.td.removeChild(refs.railEl);
+                }
                 tr.removeChild(entry.td);
                 refs.cellMap.delete(oldColKey);
               }
@@ -572,6 +694,74 @@ export const StepsDetailView = defineComponent({
           for (const colKey of colKeys) {
             const cellEntry = refs.cellMap.get(colKey);
             STEP_COLUMN_REGISTRY[colKey].updateCell(cellEntry.refs, st, cellCtx);
+          }
+
+          const firstColKey = colKeys[0];
+          const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
+          if (firstTd && refs.railEl.parentNode !== firstTd) {
+            firstTd.insertBefore(refs.railEl, firstTd.firstChild);
+          }
+
+          const showRowRail = Boolean(railActive && hasTurn && firstTd);
+          patchAttr(refs.railEl, 'hidden', !showRowRail);
+          if (showRowRail) {
+            patchClasses(refs.railEl, {
+              'is-latest': isLatest,
+              'has-up': hasUp,
+              'has-down': hasDown,
+            });
+            patchAttr(refs.railLineEl, 'hidden', !hasUp && !hasDown);
+            const showOrigin = isStart;
+            const showCap = !showOrigin && !hasUp && hasDown;
+            patchAttr(refs.railDotEl, 'hidden', !showOrigin && !showCap);
+            patchClasses(refs.railDotEl, {
+              'is-origin': showOrigin,
+              'is-cap': showCap,
+            });
+          }
+
+          const stepEntry = refs.cellMap.get('step') || null;
+          const targetHoverTd = stepEntry ? stepEntry.td : firstTd;
+          if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
+            refs.hoverTd.onmouseenter = null;
+            refs.hoverTd.onmousemove = null;
+            refs.hoverTd.onmouseleave = null;
+          }
+          refs.hoverTd = targetHoverTd;
+
+          if (targetHoverTd) {
+            if (stepEntry) {
+              const badgeEl = stepEntry.refs.agentBadgeEl;
+              targetHoverTd.onmouseenter = (ev) => {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
+                  hideTurnTip();
+                  return;
+                }
+                showTurnTip(targetHoverTd, prompt);
+              };
+              targetHoverTd.onmousemove = (ev) => {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
+                  hideTurnTip();
+                }
+              };
+              targetHoverTd.onmouseleave = hideTurnTip;
+            } else {
+              targetHoverTd.onmouseenter = null;
+              targetHoverTd.onmousemove = (ev) => {
+                if (!showRowRail || !prompt) {
+                  hideTurnTip();
+                  return;
+                }
+                const rect = targetHoverTd.getBoundingClientRect?.();
+                const relX = rect ? (ev?.clientX ?? 0) - rect.left : 0;
+                if (relX <= 18) {
+                  showTurnTip(targetHoverTd, prompt);
+                } else {
+                  hideTurnTip();
+                }
+              };
+              targetHoverTd.onmouseleave = hideTurnTip;
+            }
           }
         },
       });
@@ -803,6 +993,9 @@ export const StepsDetailView = defineComponent({
         renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
           effectiveScopes,
           hasSubagents,
+          isMergedMultiAgents,
+          showStepTurnRail: slice.showStepTurnRail !== false,
+          showStepAgentBadge: slice.showStepAgentBadge !== false,
           displaySettings,
         });
         stepsScroll.refresh();
@@ -1099,6 +1292,7 @@ export const StepsDetailView = defineComponent({
     const unsubUi = uiStore.subscribe(
       (st) => st.stepsSubTab,
       (tab) => {
+        hideTurnTip();
         subTabSwitch.setValue(tab);
         patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
         patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
@@ -1122,6 +1316,8 @@ export const StepsDetailView = defineComponent({
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
         ),
+        showStepTurnRail: st.telemetry?.settings?.showStepTurnRail !== false,
+        showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
       }),
       (slice) => {
@@ -1156,6 +1352,7 @@ export const StepsDetailView = defineComponent({
         prevScope = uiSlice.selectedAgentScope;
         prevActiveView = uiSlice.activeView;
         if (uiSlice.activeView !== 'steps') {
+          hideTurnTip();
           fitPinnedWhileVisible = false;
           if (scopeChanged) isDirty = true;
           return;
@@ -1180,6 +1377,8 @@ export const StepsDetailView = defineComponent({
     );
 
     onCleanup(() => {
+      stepsTablePane.removeEventListener('scroll', hideTurnTip);
+      stepsTbody.removeEventListener('mouseleave', hideTurnTip);
       unsubUi();
       unsubTelemetry();
       unsubView();
@@ -1200,8 +1399,10 @@ export const StepsDetailView = defineComponent({
     return {
       el: rootEl,
       refs: {
+        stepsTableEl,
         stepsTheadRow,
         stepsTbody,
+        turnTipEl,
         modelsListEl,
         inlineScopeSelect,
         stepsModelSelect,

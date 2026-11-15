@@ -360,6 +360,8 @@ export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   hoverModules: DEFAULT_HOVER_MODULES,
   overviewModules: DEFAULT_OVERVIEW_MODULES,
   overviewMetrics: DEFAULT_OVERVIEW_METRICS,
+  showStepTurnRail: true,
+  showStepAgentBadge: true,
   stepTableColumns: DEFAULT_STEP_TABLE_COLUMNS,
   modelContextWindows: Object.freeze({}),
 });
@@ -386,6 +388,8 @@ export function createDefaultSettingsObject() {
     hoverModules: [...DEFAULT_HOVER_MODULES],
     overviewModules: [...DEFAULT_OVERVIEW_MODULES],
     overviewMetrics: [...DEFAULT_OVERVIEW_METRICS],
+    showStepTurnRail: DEFAULT_SETTINGS_SCHEMA.showStepTurnRail,
+    showStepAgentBadge: DEFAULT_SETTINGS_SCHEMA.showStepAgentBadge,
     stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
     modelContextWindows: {},
   };
@@ -430,6 +434,8 @@ export function normalizeFullSettings(rawInput) {
     hoverModules: normalizeHoverModules(safeRaw.hoverModules),
     overviewModules: normalizeOverviewModules(safeRaw.overviewModules),
     overviewMetrics: normalizeOverviewMetrics(safeRaw.overviewMetrics),
+    showStepTurnRail: safeRaw.showStepTurnRail !== false,
+    showStepAgentBadge: safeRaw.showStepAgentBadge !== false,
     stepTableColumns: normalizeStepTableColumns(safeRaw.stepTableColumns),
     modelContextWindows: normalizeModelContextWindows(safeRaw.modelContextWindows),
   };
