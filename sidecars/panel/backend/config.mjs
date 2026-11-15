@@ -42,6 +42,7 @@ import {
   normalizeOverviewMetrics,
   normalizeOverviewModules,
   normalizePluginUpdateMode,
+  normalizeStandalonePort,
   normalizeStepTableColumns,
   normalizeThemeAccent,
   normalizeTopbarCapsuleSlots,
@@ -77,6 +78,7 @@ export {
   normalizeOverviewMetrics,
   normalizeOverviewModules,
   normalizePluginUpdateMode,
+  normalizeStandalonePort,
   normalizeStepTableColumns,
   normalizeThemeAccent,
   normalizeTopbarCapsuleSlots,
@@ -95,23 +97,70 @@ export const PLUGIN_ROOT = dirname(dirname(HERE));
 export const PLUGIN_MANIFEST_FILE = join(PLUGIN_ROOT, 'plugin.json');
 export const LOCAL_CATALOG_FILE = join(PLUGIN_ROOT, 'pricing-catalog.json');
 
+function resolveGeminiBaseDir() {
+  const envGemini = String(process.env.ANTIGRAVITY_GEMINI_DIR || '').trim();
+  return envGemini || join(homedir(), '.gemini');
+}
+
+function dedupeDirCandidates(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const clean = String(item || '').trim();
+    if (!clean) continue;
+    const key = process.platform === 'win32' ? clean.toLowerCase() : clean;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+  }
+  return out;
+}
+
+function resolveProductDataRoots() {
+  const geminiBase = resolveGeminiBaseDir();
+  const explicitAppDir = String(
+    process.env.USAGE_MONITOR_APP_DATA_DIR || process.env.ANTIGRAVITY_APP_DATA_DIR || ''
+  ).trim();
+  const customRoot = explicitAppDir
+    ? /[\\/]|^[a-zA-Z]:/.test(explicitAppDir)
+      ? explicitAppDir
+      : join(geminiBase, explicitAppDir)
+    : '';
+  return dedupeDirCandidates([
+    customRoot,
+    join(geminiBase, 'antigravity'),
+    join(geminiBase, 'antigravity-cli'),
+    join(geminiBase, 'antigravity-ide'),
+    join(geminiBase, 'antigravity-idea'),
+  ]);
+}
+
 /**
  * 插件持久化数据目录（默认由 Antigravity 宿主注入 `~/.gemini/antigravity/sidecar_data/usage-monitor/panel/data`）。
- * 当通过插件 `mcp_config.json` 在 Antigravity IDE 中后台启动且未注入 `ANTIGRAVITY_EXECUTABLE_DATA_DIR` 时，
- * 自动对齐至同一 `sidecar_data` 目录，确保双端共享同一份设置、历史轨迹缓存与窗口桥接租约。
+ * 兼容桌面端、Antigravity IDE 与无头 `agy` CLI（`~/.gemini/antigravity-cli`）：
+ * 优先使用已存在的持久化目录，纯 CLI 服务器自动落入 `~/.gemini/antigravity-cli/sidecar_data/usage-monitor/panel/data`，
+ * 避免落入插件源码目录而在自更新时丢失缓存与设置。
  */
 function resolveDefaultDataDir() {
+  const explicitDataDir = String(process.env.USAGE_MONITOR_DATA_DIR || '').trim();
+  if (explicitDataDir) {
+    return explicitDataDir;
+  }
   if (process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR) {
     return process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR;
   }
   if (String(process.env.ANTIGRAVITY_LS_ADDRESS || '').trim() === 'test.invalid') {
     return join(HERE, '.data');
   }
-  const antigravityRoot = join(homedir(), '.gemini', 'antigravity');
+  const geminiBase = resolveGeminiBaseDir();
+  const antigravityRoot = join(geminiBase, 'antigravity');
+  const cliRoot = join(geminiBase, 'antigravity-cli');
   const panelDataDir = join(antigravityRoot, 'sidecar_data', 'usage-monitor', 'panel', 'data');
   const legacyDataDir = join(antigravityRoot, 'sidecar_data', 'usage-monitor', 'data');
+  const cliPanelDataDir = join(cliRoot, 'sidecar_data', 'usage-monitor', 'panel', 'data');
   if (existsSync(panelDataDir)) return panelDataDir;
   if (existsSync(legacyDataDir)) return legacyDataDir;
+  if (existsSync(cliPanelDataDir)) return cliPanelDataDir;
   if (existsSync(antigravityRoot)) return panelDataDir;
   if (
     process.env.USAGE_MONITOR_PLUGIN_DATA &&
@@ -119,6 +168,7 @@ function resolveDefaultDataDir() {
   ) {
     return process.env.USAGE_MONITOR_PLUGIN_DATA;
   }
+  if (existsSync(cliRoot)) return cliPanelDataDir;
   return join(HERE, '.data');
 }
 
@@ -128,29 +178,41 @@ export const CACHE_FILE = join(DATA_DIR, 'trajectory_usage_cache.json');
 export const REMOTE_CATALOG_CACHE_FILE = join(DATA_DIR, 'remote_pricing_cache.json');
 
 /**
- * 本地对话记录目录与跨端深层统计缓存路径候选列表。
+ * 本地对话记录目录、脑图日志目录、守护发现目录与跨端深层统计缓存路径候选列表（联合覆盖 Desktop / CLI / IDE）。
  */
-export const CONVERSATIONS_DIR = join(homedir(), '.gemini', 'antigravity', 'conversations');
-export const BRAIN_DIR = join(homedir(), '.gemini', 'antigravity', 'brain');
-export const DEEP_STATS_CACHE_CANDIDATES = [
-  join(homedir(), '.gemini', 'antigravity-ide', 'brain', '.deep_stats_cache.json'),
-  join(homedir(), '.gemini', 'antigravity', 'brain', '.deep_stats_cache.json'),
-  join(homedir(), '.gemini', 'antigravity-idea', 'brain', '.deep_stats_cache.json'),
-];
+export const PRODUCT_DATA_ROOTS = resolveProductDataRoots();
+export const CONVERSATION_DIRS = PRODUCT_DATA_ROOTS.map((root) => join(root, 'conversations'));
+export const BRAIN_DIRS = PRODUCT_DATA_ROOTS.map((root) => join(root, 'brain'));
+export const ANNOTATION_DIRS = PRODUCT_DATA_ROOTS.map((root) => join(root, 'annotations'));
+export const DAEMON_DIRS = dedupeDirCandidates([
+  join(resolveGeminiBaseDir(), 'antigravity-cli', 'daemon'),
+  ...PRODUCT_DATA_ROOTS.map((root) => join(root, 'daemon')),
+]);
+export const CONVERSATIONS_DIR = CONVERSATION_DIRS[0];
+export const BRAIN_DIR = BRAIN_DIRS[0];
+export const DEEP_STATS_CACHE_CANDIDATES = dedupeDirCandidates([
+  join(resolveGeminiBaseDir(), 'antigravity-ide', 'brain', '.deep_stats_cache.json'),
+  join(resolveGeminiBaseDir(), 'antigravity-cli', 'brain', '.deep_stats_cache.json'),
+  join(resolveGeminiBaseDir(), 'antigravity', 'brain', '.deep_stats_cache.json'),
+  join(resolveGeminiBaseDir(), 'antigravity-idea', 'brain', '.deep_stats_cache.json'),
+  ...BRAIN_DIRS.map((dir) => join(dir, '.deep_stats_cache.json')),
+]);
 
 /**
- * Antigravity 本地 Language Server Connect RPC 端点与鉴权 Token（支持环境变量静态注入与进程动态发现）。
+ * Antigravity 本地 Language Server Connect RPC 端点与鉴权 Token（支持环境变量静态注入与进程/守护文件动态发现）。
  */
 const rawLsAddr = String(process.env.ANTIGRAVITY_LS_ADDRESS || '').trim();
 const LS_PROTOCOL = /^https:\/\//i.test(rawLsAddr) ? 'https' : 'http';
 export const LS_ADDR = rawLsAddr.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
 export const LS_BASE_URL = LS_ADDR ? `${LS_PROTOCOL}://${LS_ADDR}` : '';
-export const CSRF_TOKEN = process.env.ANTIGRAVITY_CSRF_TOKEN;
+export const CSRF_TOKEN =
+  process.env.ANTIGRAVITY_CSRF_TOKEN || process.env.ANTIGRAVITY_SERVER_CSRF_TOKEN;
 
 export const lsRuntimeEndpoint = {
   addr: LS_ADDR,
   baseUrl: LS_BASE_URL,
   csrfToken: CSRF_TOKEN || '',
+  isDynamic: false,
 };
 
 /**
@@ -158,14 +220,16 @@ export const lsRuntimeEndpoint = {
  *
  * @param {string} nextAddr
  * @param {string} nextCsrfToken
+ * @param {{ isDynamic?: boolean }} [opts]
  */
-export function setLsRuntimeEndpoint(nextAddr, nextCsrfToken) {
+export function setLsRuntimeEndpoint(nextAddr, nextCsrfToken, { isDynamic = true } = {}) {
   const raw = String(nextAddr || '').trim();
   const proto = /^https:\/\//i.test(raw) ? 'https' : 'http';
   const cleanAddr = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
   lsRuntimeEndpoint.addr = cleanAddr;
   lsRuntimeEndpoint.baseUrl = cleanAddr ? `${proto}://${cleanAddr}` : '';
   lsRuntimeEndpoint.csrfToken = String(nextCsrfToken || '').trim();
+  lsRuntimeEndpoint.isDynamic = Boolean(cleanAddr && isDynamic);
 }
 
 /**
@@ -268,6 +332,7 @@ export function computeRuntimeCodeVersion() {
     join(HERE, 'app.js'),
     join(HERE, 'styles.css'),
     join(HERE, 'main.mjs'),
+    join(HERE, 'standalone.mjs'),
     join(HERE, 'bridge-daemon.mjs'),
     join(HERE, 'mcp-entry.mjs'),
     join(HERE, 'speed-metrics.mjs'),
@@ -362,6 +427,11 @@ export const externalDeepStatsMemo = {
   convos: new Map(),
 };
 
+export const localSummaryMemo = {
+  sig: '',
+  byId: new Map(),
+};
+
 /** 并发请求去重表（防止同一参数并发重复拉取）。 */
 export const inFlightRequests = new Map();
 
@@ -414,6 +484,8 @@ export function clearRuntimeCaches() {
   cacheState.needsSave = false;
   externalDeepStatsMemo.sig = '';
   externalDeepStatsMemo.convos.clear();
+  localSummaryMemo.sig = '';
+  localSummaryMemo.byId.clear();
   quotaSummaryCache.ts = 0;
   quotaSummaryCache.lastAttemptTs = 0;
   quotaSummaryCache.accountName = '';

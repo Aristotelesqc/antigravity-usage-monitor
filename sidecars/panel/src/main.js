@@ -41,6 +41,14 @@ function startEntry() {
     mountWindowOverlay();
     return;
   }
+  if (
+    typeof window !== 'undefined' &&
+    !window.sidecar?.fetch &&
+    typeof document !== 'undefined' &&
+    document.documentElement
+  ) {
+    document.documentElement.setAttribute('data-standalone', 'true');
+  }
   bootstrapApp();
 }
 

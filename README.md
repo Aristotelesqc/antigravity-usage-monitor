@@ -2,8 +2,8 @@
 
 English | [简体中文](README.zh-CN.md)
 
-**Real-time dual-mount monitor for Google Antigravity IDE.**  
-Track token generation speed (TPS), time-to-first-token (TTFT), context window usage, official model quotas, subagent activity, and historical token consumption — across Windows, macOS, and Linux.
+**Real-time usage & speed monitor for Google Antigravity 2.0, IDE, and CLI.**<br>
+Track token generation speed (TPS), time-to-first-token (TTFT), context window usage, official model quotas, subagent activity, and historical token consumption — across Windows, macOS, Linux, and headless CLI servers.
 
 ![Antigravity Usage Monitor Preview](assets/preview.png)
 
@@ -103,6 +103,18 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
    - **Antigravity 2.0 App**: Immediately mounts a live status & metric capsule in the top-right bar of the main chat window (hover for quick overview, left-click to expand the full 4-tab panel, right-click to force refresh) without modifying `app.asar`.
    - **Antigravity IDE**: On first enable, the background sidecar automatically adds `"remote-debugging-port": "0"` to `~/.antigravity-ide/argv.json` (preserving comments and existing settings). **Restart Antigravity IDE once**, and the capsule will dock into the top-right IDE window titlebar on every launch. Because Antigravity IDE does not currently expose the right-hand UI Sidecar auxiliary pane, keep **Mount Mode** set to *Dual-mount* in IDE and click the top-bar capsule to open the 4-tab dashboard.
 3. **Right-Hand Sidebar Panel (Antigravity 2.0)**: Open the auxiliary sidebar menu in the chat window to dock **Usage & Speed Monitor** on the right, or switch **Mount Mode** between *Top Bar + Sidebar* and *Sidebar only* in Preferences.
+4. **Headless CLI / `agy remote-control serve` Standalone Web Mode**:
+   - On terminal-only machines or remote Linux servers, the backend automatically discovers `~/.gemini/antigravity-cli` (`daemon/hub_*.json`, conversations, and `transcript.jsonl`). When `agy` is offline, historical sessions and token accounting still load from local transcripts/cache and automatically upgrade to full live RPC telemetry once `agy` starts.
+   - **Manual launch (recommended with SSH port forwarding)**:
+     ```bash
+     # On the remote server (binds strictly to 127.0.0.1:8787 by default)
+     node ~/.gemini/config/plugins/usage-monitor/sidecars/panel/standalone.mjs --port 8787
+
+     # Forward from your local machine, then open http://localhost:8787
+     ssh -L 8787:127.0.0.1:8787 user@your-server
+     ```
+   - **Auto-host alongside `agy`**: Set `USAGE_MONITOR_STANDALONE_PORT=8787` or `"standalonePort": 8787` in `~/.gemini/antigravity-cli/sidecar_data/usage-monitor/panel/data/settings.json` to host the standalone Web UI automatically whenever the plugin's MCP supervisor starts.
+   - **Token-protected non-loopback access**: Binding to `0.0.0.0` or a LAN IP requires `--token <secret>` (or `USAGE_MONITOR_STANDALONE_TOKEN`); unauthenticated non-loopback startup is refused.
 
 ## Updating
 

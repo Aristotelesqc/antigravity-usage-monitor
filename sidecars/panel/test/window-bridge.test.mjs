@@ -21,8 +21,15 @@ import {
 } from '../backend/window-bridge.mjs';
 import {
   discoverAntigravityLsEndpoint,
+  parseLinuxProcNetTcpPorts,
   parseLsArgsFromCommandLine,
+  parseSsListeningPorts,
 } from '../backend/ls-discovery.mjs';
+import {
+  createStandaloneWebServer,
+  isLoopbackBindHost,
+  parseStandaloneCliArgs,
+} from '../backend/standalone-server.mjs';
 import { handleMcpJsonRpcMessage } from '../mcp-entry.mjs';
 import { computeCapsuleLayoutMode } from '../src/components/layout/WindowOverlayShell.js';
 import {
@@ -4807,4 +4814,275 @@ test('Step table semantic tone classes (speed/cache/ttft/cost) and domain-aligne
     'tone-warn',
     'Capsule step cost $0.198 matches tone-warn'
   );
+});
+
+test('Headless CLI LS discovery reads daemon/hub_*.json without subprocesses and falls back to Linux /proc + ss without lsof', async () => {
+  // 1. CLI command line parsing covers agy remote-control serve & antigravity-cli
+  const rcParsed = parseLsArgsFromCommandLine(
+    '/home/ubuntu/.local/bin/agy remote-control serve --http-port=43120 --csrf-token rc-token-99'
+  );
+  assert.equal(rcParsed.isHub, true);
+  assert.equal(rcParsed.hubPort, 43120);
+  assert.equal(rcParsed.csrfToken, 'rc-token-99');
+
+  const cliBinParsed = parseLsArgsFromCommandLine(
+    '/usr/local/bin/antigravity-cli --hub --hub-port 51200 --csrf_token=cli-tok'
+  );
+  assert.equal(cliBinParsed.isHub, true);
+  assert.equal(cliBinParsed.hubPort, 51200);
+  assert.equal(cliBinParsed.csrfToken, 'cli-tok');
+
+  // 2. Stage 1: daemon/hub_*.json zero-subprocess discovery skips dead PIDs and prefers plain HTTP port
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-um-daemon-test-'));
+  try {
+    fs.writeFileSync(
+      path.join(tmpDir, 'hub_dead.json'),
+      JSON.stringify({
+        pid: 99991,
+        httpPort: 19001,
+        httpsPort: 19000,
+        csrfToken: 'dead-token',
+      }),
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'hub_13019.json'),
+      JSON.stringify({
+        pid: 42424,
+        httpPort: 13019,
+        httpsPort: 13018,
+        lsVersion: '2.32.1',
+        csrfToken: 'live-hub-token',
+      }),
+      'utf8'
+    );
+
+    let subprocessCalled = false;
+    const probedUrls = [];
+    const foundViaDaemon = await discoverAntigravityLsEndpoint({
+      platform: 'linux',
+      daemonDirs: [tmpDir],
+      isPidAliveFn: (pid) => pid === 42424,
+      execCmdFn: async () => {
+        subprocessCalled = true;
+        return '';
+      },
+      fetchFn: async (url, init) => {
+        probedUrls.push({ url, token: init?.headers?.['x-codeium-csrf-token'] });
+        return { ok: url.startsWith('http://127.0.0.1:13019/') };
+      },
+    });
+
+    assert.equal(subprocessCalled, false, 'daemon/hub_*.json hits without spawning ps/ss/lsof');
+    assert.equal(probedUrls.length, 1, 'Dead PID hub_dead.json skipped; httpPort probed first');
+    assert.equal(foundViaDaemon?.addr, '127.0.0.1:13019');
+    assert.equal(foundViaDaemon?.baseUrl, 'http://127.0.0.1:13019');
+    assert.equal(foundViaDaemon?.csrfToken, 'live-hub-token');
+    assert.equal(foundViaDaemon?.pid, 42424);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // 3. Linux /proc/<pid>/fd + /proc/net/tcp parser (0xA4D3 = 42195, state 0A = LISTEN)
+  const tcpSample = [
+    '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+    '   0: 0100007F:A4D3 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 554433 1 0 100 0',
+    '   1: 0100007F:1F90 0100007F:C350 01 00000000:00000000 00:00000000 00000000  1000        0 554434 1 0 100 0',
+  ].join('\n');
+  assert.deepEqual(parseLinuxProcNetTcpPorts(tcpSample, new Set(['554433', '554434'])), [42195]);
+
+  const foundViaProcFs = await discoverAntigravityLsEndpoint({
+    platform: 'linux',
+    daemonDirs: [],
+    procFs: {
+      existsSync: (p) => p === '/proc/7788/fd' || p === '/proc/7788/net/tcp',
+      readdirSync: (p) => (p === '/proc/7788/fd' ? ['3', '4'] : []),
+      readlinkSync: (p) => (p === '/proc/7788/fd/4' ? 'socket:[554433]' : '/dev/null'),
+      readFileSync: () => tcpSample,
+    },
+    execCmdFn: async (cmd) => {
+      if (cmd === 'ps') {
+        return '7788 1 /opt/agy/language_server_linux_x64 --csrf_token proc-tok-1\n';
+      }
+      throw new Error(`Unexpected command ${cmd}`);
+    },
+    fetchFn: async (url, init) => ({
+      ok:
+        url.startsWith('http://127.0.0.1:42195/') &&
+        init?.headers?.['x-codeium-csrf-token'] === 'proc-tok-1',
+    }),
+  });
+  assert.equal(foundViaProcFs?.addr, '127.0.0.1:42195');
+  assert.equal(foundViaProcFs?.csrfToken, 'proc-tok-1');
+
+  // 4. Linux ss -H -lntp fallback when /proc net is restricted and lsof is not installed
+  const ssSample =
+    'LISTEN 0 4096 127.0.0.1:38899 0.0.0.0:* users:(("language_server",pid=8899,fd=7))\n';
+  assert.deepEqual(parseSsListeningPorts(ssSample, 8899), [38899]);
+});
+
+test('Standalone Web server enforces loopback/non-loopback security boundaries, serves full assets, and supports token cookie/Bearer auth', async () => {
+  // 1. CLI arg & host boundary validation
+  assert.equal(isLoopbackBindHost('127.0.0.1'), true);
+  assert.equal(isLoopbackBindHost('localhost'), true);
+  assert.equal(isLoopbackBindHost('::1'), true);
+  assert.equal(isLoopbackBindHost('[::1]'), true);
+  assert.equal(isLoopbackBindHost('0.0.0.0'), false);
+  assert.equal(isLoopbackBindHost('192.168.1.25'), false);
+
+  const parsedArgs = parseStandaloneCliArgs(
+    ['--port', '9090', '--host=0.0.0.0', '--token', 's3cr3t'],
+    {}
+  );
+  assert.equal(parsedArgs.port, 9090);
+  assert.equal(parsedArgs.host, '0.0.0.0');
+  assert.equal(parsedArgs.token, 's3cr3t');
+
+  // Refuse non-loopback bind without --token
+  assert.throws(
+    () => createStandaloneWebServer({ host: '0.0.0.0', port: 0, skipStartupDiscovery: true }),
+    /Refusing to bind standalone server to non-loopback host "0\.0\.0\.0" without --token/
+  );
+
+  // 2. Default 127.0.0.1 loopback server (ssh -L friendly, blocks cross-site & DNS rebinding)
+  const loopSrv = createStandaloneWebServer({
+    host: '127.0.0.1',
+    port: 0,
+    skipStartupDiscovery: true,
+    readAssetFn: async (rel) => `ASSET:${rel}`,
+    handleApiRequest: async (pathname, method, data) => ({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, pathname, method, data }),
+    }),
+  });
+
+  try {
+    const st = await loopSrv.start();
+    assert.equal(st.running, true);
+    assert.ok(st.port > 0);
+    assert.equal(st.loopbackOnly, true);
+    assert.equal(st.tokenProtected, false);
+
+    const indexRes = await fetch(`${st.url}/`);
+    assert.equal(indexRes.status, 200);
+    assert.equal(await indexRes.text(), 'ASSET:index.html');
+
+    const preloadRes = await fetch(`${st.url}/preload.js`);
+    assert.equal(preloadRes.status, 200);
+    assert.match(await preloadRes.text(), /standalone web mode/);
+
+    const apiRes = await fetch(`${st.url}/api/telemetry?range=today`);
+    assert.equal(apiRes.status, 200);
+    const apiJson = await apiRes.json();
+    assert.deepEqual(apiJson, {
+      ok: true,
+      pathname: '/api/telemetry',
+      method: 'GET',
+      data: { range: 'today' },
+    });
+
+    // Cross-site Origin blocked with 403
+    const crossSiteRes = await fetch(`${st.url}/api/telemetry`, {
+      headers: { Origin: 'https://evil.example' },
+    });
+    assert.equal(crossSiteRes.status, 403);
+
+    // DNS rebinding Host header blocked with 403
+    const rebindStatus = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: st.port,
+          path: '/api/telemetry',
+          method: 'GET',
+          headers: { Host: `attacker.rebind.test:${st.port}` },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        }
+      );
+      req.on('error', reject);
+      req.end();
+    });
+    assert.equal(rebindStatus, 403);
+  } finally {
+    await loopSrv.stop();
+  }
+
+  // 3. Token-protected mode (--token): 401 prompt, ?token= 302 -> HttpOnly cookie, Bearer header, and cross-origin POST block
+  const tokenSrv = createStandaloneWebServer({
+    host: '127.0.0.1',
+    port: 0,
+    token: 'cli-remote-secret',
+    skipStartupDiscovery: true,
+    readAssetFn: async (rel) => `PROTECTED:${rel}`,
+    handleApiRequest: async (pathname, method, data) => ({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, pathname, method, data }),
+    }),
+  });
+
+  try {
+    const st = await tokenSrv.start();
+    assert.equal(st.tokenProtected, true);
+
+    // Unauthenticated browser GET / -> 401 HTML login form
+    const unauthPage = await fetch(`${st.url}/`);
+    assert.equal(unauthPage.status, 401);
+    assert.match(await unauthPage.text(), /standalone-auth/);
+
+    // Unauthenticated API -> 401 JSON
+    const unauthApi = await fetch(`${st.url}/api/telemetry`);
+    assert.equal(unauthApi.status, 401);
+
+    // Bearer header works directly
+    const bearerApi = await fetch(`${st.url}/api/telemetry?range=week`, {
+      headers: { Authorization: 'Bearer cli-remote-secret' },
+    });
+    assert.equal(bearerApi.status, 200);
+
+    // Browser GET /?token=cli-remote-secret sets HttpOnly cookie and 302 redirects to clean /
+    const loginRedirect = await fetch(`${st.url}/?token=cli-remote-secret`, {
+      redirect: 'manual',
+    });
+    assert.equal(loginRedirect.status, 302);
+    assert.equal(loginRedirect.headers.get('location'), '/');
+    const setCookie = loginRedirect.headers.get('set-cookie') || '';
+    assert.match(setCookie, /ag_um_token=[0-9a-f]{64}; HttpOnly; SameSite=Strict; Path=\//);
+    const cookiePair = setCookie.split(';')[0];
+
+    // Cookie authenticates same-origin GET and POST, but blocks cross-origin POST CSRF
+    const authedPage = await fetch(`${st.url}/`, {
+      headers: { Cookie: cookiePair },
+    });
+    assert.equal(authedPage.status, 200);
+    assert.equal(await authedPage.text(), 'PROTECTED:index.html');
+
+    const csrfPost = await fetch(`${st.url}/api/settings`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookiePair,
+        Origin: 'https://evil.example',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ language: 'en-US' }),
+    });
+    assert.equal(csrfPost.status, 403);
+
+    const validPost = await fetch(`${st.url}/api/settings`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookiePair,
+        Origin: st.url,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ language: 'en-US' }),
+    });
+    assert.equal(validPost.status, 200);
+  } finally {
+    await tokenSrv.stop();
+  }
 });

@@ -342,6 +342,19 @@ export function normalizeModelContextWindows(value) {
   );
 }
 
+/**
+ * 归一化独立 Web 服务自动托管端口（`0` 表示关闭自动拉起，合法监听端口范围 `1024..65535`）。
+ *
+ * @param {unknown} port
+ * @returns {number}
+ */
+export function normalizeStandalonePort(port) {
+  const num = Number(port);
+  if (!Number.isInteger(num) || num <= 0) return 0;
+  if (num >= 1024 && num <= 65535) return num;
+  return 0;
+}
+
 export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   language: 'zh-CN',
   themeAccent: 'host',
@@ -355,6 +368,7 @@ export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   autoUpdatePlugin: false,
   windowMountMode: 'dual',
   enableWindowOverlay: true,
+  standalonePort: 0,
   showTopbarMultiSession: true,
   topbarCapsuleSlots: DEFAULT_TOPBAR_SLOTS,
   hoverModules: DEFAULT_HOVER_MODULES,
@@ -383,6 +397,7 @@ export function createDefaultSettingsObject() {
     autoUpdatePlugin: DEFAULT_SETTINGS_SCHEMA.autoUpdatePlugin,
     windowMountMode: DEFAULT_SETTINGS_SCHEMA.windowMountMode,
     enableWindowOverlay: DEFAULT_SETTINGS_SCHEMA.enableWindowOverlay,
+    standalonePort: DEFAULT_SETTINGS_SCHEMA.standalonePort,
     showTopbarMultiSession: DEFAULT_SETTINGS_SCHEMA.showTopbarMultiSession,
     topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS],
     hoverModules: [...DEFAULT_HOVER_MODULES],
@@ -429,6 +444,7 @@ export function normalizeFullSettings(rawInput) {
     autoUpdatePlugin: pluginUpdateMode === 'auto',
     windowMountMode,
     enableWindowOverlay: windowMountMode !== 'sidebar',
+    standalonePort: normalizeStandalonePort(safeRaw.standalonePort),
     showTopbarMultiSession: safeRaw.showTopbarMultiSession !== false,
     topbarCapsuleSlots: normalizeTopbarCapsuleSlots(safeRaw.topbarCapsuleSlots),
     hoverModules: normalizeHoverModules(safeRaw.hoverModules),

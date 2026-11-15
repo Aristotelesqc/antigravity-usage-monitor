@@ -50,6 +50,12 @@ import {
 
 export const bootBundleVersion = computeRuntimeCodeVersion();
 
+let standalonePortListener = null;
+
+export function setStandalonePortListener(listener) {
+  standalonePortListener = typeof listener === 'function' ? listener : null;
+}
+
 /**
  * 异步读取 `sidecars/panel` 目录下的静态资源文件（兼容单元测试同步沙箱）。
  *
@@ -299,6 +305,16 @@ export function executeSettingsAction(data) {
   ) {
     void notifyWindowOverlaySetting(updated.enableWindowOverlay);
   }
+  if (
+    typeof standalonePortListener === 'function' &&
+    Number(updated.standalonePort || 0) !== Number(current.standalonePort || 0)
+  ) {
+    try {
+      standalonePortListener(Number(updated.standalonePort || 0));
+    } catch {
+      // 忽略独立端口热重载回调异常
+    }
+  }
   return {
     ok: true,
     status: 200,
@@ -370,6 +386,16 @@ export function executeResetSettingsAction() {
     void notifyWindowOverlaySetting(updated.enableWindowOverlay);
   } else if (Object.keys(current.modelContextWindows).length) {
     void notifyModelContextWindowsChanged();
+  }
+  if (
+    typeof standalonePortListener === 'function' &&
+    Number(updated.standalonePort || 0) !== Number(current.standalonePort || 0)
+  ) {
+    try {
+      standalonePortListener(Number(updated.standalonePort || 0));
+    } catch {
+      // 忽略独立端口热重载回调异常
+    }
   }
   return {
     ok: true,

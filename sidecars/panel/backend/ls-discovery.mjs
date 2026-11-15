@@ -1,14 +1,16 @@
 /**
- * @fileoverview Antigravity Hub / Language Server 本地进程自动发现器。
+ * @fileoverview Antigravity Hub / Language Server 本地守护文件与进程自动发现器。
  *
- * 当插件通过 `mcp_config.json` 在 Antigravity IDE 中以后台守护方式启动时，
- * 宿主可能未在环境变量中直接注入 `ANTIGRAVITY_LS_ADDRESS` 与 `ANTIGRAVITY_CSRF_TOKEN`。
- * 本模块跨平台（Windows / macOS / Linux）枚举当前用户的 `agy --hub` 或 `language_server` 进程，
- * 优先匹配父进程 `process.ppid`，并经 `GetUserStatus` 实测握手验证后写入 `lsRuntimeEndpoint`。
+ * 兼容 Antigravity 2.0、Antigravity IDE、无头 `agy` CLI 与 `agy remote-control serve`：
+ * 1. 优先读取 `~/.gemini/<product>/daemon/hub_*.json`（跨平台零外部命令依赖，毫秒级命中 `httpPort` + `csrfToken`）；
+ * 2. 回退枚举当前用户的 `agy` / `antigravity-cli` / `language_server` 进程；
+ * 3. 在精简版无头 Linux 环境优先通过 `/proc/<pid>/fd` + `/proc/net/tcp{,6}` 与 `ss -H -lntp` 解析监听端口，不强依赖 `lsof`；
+ * 4. 经 `GetUserStatus` 实测握手验证后写入 `lsRuntimeEndpoint`。
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { lsRuntimeEndpoint, setLsRuntimeEndpoint } from './config.mjs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { DAEMON_DIRS, lsRuntimeEndpoint, setLsRuntimeEndpoint } from './config.mjs';
 
 const LS_DISC_COOLDOWN_MS = 4000;
 
@@ -17,8 +19,20 @@ const lsDiscoveryState = {
   lastAttemptMs: 0,
 };
 
+function defaultIsLsPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  if (typeof process?.kill !== 'function') return true;
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
 /**
- * 从 `agy --hub` 或 `language_server` 命令行字符串中提取端口号与 CSRF 令牌。
+ * 从 `agy`（`--hub` / `remote-control` / CLI）或 `language_server` 命令行字符串中提取端口号与 CSRF 令牌。
  *
  * @param {string} commandLine
  * @returns {{ hubPort: number|null, csrfToken: string, isHub: boolean, isLanguageServer: boolean }}
@@ -28,11 +42,14 @@ export function parseLsArgsFromCommandLine(commandLine) {
   if (!cmd) {
     return { hubPort: null, csrfToken: '', isHub: false, isLanguageServer: false };
   }
-  const isHub = /(?:^|[\s/\\"'])agy(?:\.exe)?(?:["'\s]|$)/i.test(cmd) && /--hub\b/i.test(cmd);
+  const isAgyBinary = /(?:^|[\s/\\"'])(?:agy|antigravity-cli)(?:\.exe)?(?:["'\s]|$)/i.test(cmd);
+  const isHub = isAgyBinary && /(?:--hub\b|\bremote-control\b|--csrf[-_]token\b)/i.test(cmd);
   const isLanguageServer = /language_server/i.test(cmd);
 
   let hubPort = null;
-  const portMatch = cmd.match(/--hub[-_]port(?:=|\s+)["']?(\d{1,5})["']?(?=\s|$)/i);
+  const portMatch = cmd.match(
+    /--(?:hub[-_]port|http[-_]port|https[-_]server[-_]port|server[-_]port)(?:=|\s+)["']?(\d{1,5})["']?(?=\s|$)/i
+  );
   if (portMatch) {
     const num = Number(portMatch[1]);
     if (Number.isInteger(num) && num > 0 && num <= 65535) {
@@ -52,6 +69,159 @@ export function parseLsArgsFromCommandLine(commandLine) {
     isHub,
     isLanguageServer,
   };
+}
+
+/**
+ * 解析 Linux `/proc/net/tcp` 或 `/proc/net/tcp6` 内容，提取指定 socket inode 集合中处于 `0A` (LISTEN) 状态的本地端口。
+ *
+ * @param {string} tcpTableText
+ * @param {Set<string>} socketInodes
+ * @returns {number[]}
+ */
+export function parseLinuxProcNetTcpPorts(tcpTableText, socketInodes) {
+  if (!tcpTableText || !(socketInodes instanceof Set) || socketInodes.size === 0) {
+    return [];
+  }
+  const ports = new Set();
+  for (const rawLine of String(tcpTableText).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || /^sl\b/i.test(line)) continue;
+    const cols = line.split(/\s+/);
+    if (cols.length < 10) continue;
+    const localAddr = cols[1] || '';
+    const stateHex = (cols[3] || '').toUpperCase();
+    const inode = cols[9] || '';
+    if (stateHex !== '0A' || !socketInodes.has(inode)) continue;
+    const colonIdx = localAddr.lastIndexOf(':');
+    if (colonIdx < 0) continue;
+    const port = Number.parseInt(localAddr.slice(colonIdx + 1), 16);
+    if (Number.isInteger(port) && port > 0 && port <= 65535) {
+      ports.add(port);
+    }
+  }
+  return Array.from(ports);
+}
+
+/**
+ * 解析 Linux `ss -H -lntp` 输出，提取归属于目标 `pid` 的监听端口。
+ *
+ * @param {string} ssOutput
+ * @param {number} pid
+ * @returns {number[]}
+ */
+export function parseSsListeningPorts(ssOutput, pid) {
+  if (!ssOutput || !Number.isInteger(pid) || pid <= 0) return [];
+  const pidTokenRe = new RegExp(`\\bpid=${pid}\\b`);
+  const ports = new Set();
+  for (const rawLine of String(ssOutput).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || !pidTokenRe.test(line)) continue;
+    const cols = line.split(/\s+/);
+    const localCol = cols[3] || '';
+    const m = localCol.match(/:(\d{1,5})$/);
+    if (m) {
+      const p = Number(m[1]);
+      if (Number.isInteger(p) && p > 0 && p <= 65535) ports.add(p);
+    }
+  }
+  return Array.from(ports);
+}
+
+async function readLinuxProcListeningPorts(pid, customProcFs = null) {
+  try {
+    const fsMod = customProcFs || (await import('node:fs'));
+    const readlinkFn = fsMod.readlinkSync || fsMod.default?.readlinkSync;
+    const readdirFn = fsMod.readdirSync || fsMod.default?.readdirSync || readdirSync;
+    const readFileFn = fsMod.readFileSync || fsMod.default?.readFileSync || readFileSync;
+    const existsFn = fsMod.existsSync || fsMod.default?.existsSync || existsSync;
+    if (typeof readlinkFn !== 'function') return [];
+
+    const fdDir = `/proc/${pid}/fd`;
+    if (!existsFn(fdDir)) return [];
+    const socketInodes = new Set();
+    for (const fdName of readdirFn(fdDir)) {
+      try {
+        const target = String(readlinkFn(`${fdDir}/${fdName}`) || '');
+        const m = target.match(/^socket:\[(\d+)\]$/);
+        if (m) socketInodes.add(m[1]);
+      } catch {
+        // 忽略瞬态关闭的 fd
+      }
+    }
+    if (socketInodes.size === 0) return [];
+
+    const ports = new Set();
+    for (const netFile of [`/proc/${pid}/net/tcp`, `/proc/${pid}/net/tcp6`, '/proc/net/tcp', '/proc/net/tcp6']) {
+      if (!existsFn(netFile)) continue;
+      try {
+        const raw = String(readFileFn(netFile, 'utf8') || '');
+        for (const p of parseLinuxProcNetTcpPorts(raw, socketInodes)) {
+          ports.add(p);
+        }
+      } catch {
+        // 忽略不可读的 proc 网络表
+      }
+    }
+    return Array.from(ports);
+  } catch {
+    return [];
+  }
+}
+
+function readHubDaemonCandidates(daemonDirs, preferredPids, isPidAliveFn) {
+  const candidates = [];
+  const seenKeys = new Set();
+  for (const dir of Array.isArray(daemonDirs) ? daemonDirs : []) {
+    if (!dir || !existsSync(dir)) continue;
+    let names = [];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!/^hub_.*\.json$/i.test(name)) continue;
+      const fullPath = join(dir, name);
+      try {
+        const st = statSync(fullPath);
+        const parsed = JSON.parse(readFileSync(fullPath, 'utf8'));
+        const csrfToken = String(parsed?.csrfToken || parsed?.csrf_token || '').trim();
+        if (!csrfToken) continue;
+        const pid = Number(parsed?.pid) || 0;
+        if (pid > 0 && !isPidAliveFn(pid)) continue;
+        const httpPort = Number(parsed?.httpPort || parsed?.port) || 0;
+        const httpsPort = Number(parsed?.httpsPort) || 0;
+        const targets = [];
+        if (Number.isInteger(httpPort) && httpPort > 0 && httpPort <= 65535) {
+          targets.push({ port: httpPort, protos: ['http', 'https'] });
+        }
+        if (
+          Number.isInteger(httpsPort) &&
+          httpsPort > 0 &&
+          httpsPort <= 65535 &&
+          httpsPort !== httpPort
+        ) {
+          targets.push({ port: httpsPort, protos: ['https', 'http'] });
+        }
+        if (targets.length === 0) continue;
+        const dedupKey = `${pid}:${httpPort}:${httpsPort}:${csrfToken}`;
+        if (seenKeys.has(dedupKey)) continue;
+        seenKeys.add(dedupKey);
+        const priority = preferredPids.has(pid) ? 115 : 95;
+        candidates.push({
+          pid,
+          priority,
+          mtimeMs: Number(st?.mtimeMs || 0),
+          csrfToken,
+          targets,
+        });
+      } catch {
+        // 忽略损坏或正在替换的 daemon 文件
+      }
+    }
+  }
+  candidates.sort((a, b) => b.priority - a.priority || b.mtimeMs - a.mtimeMs || b.pid - a.pid);
+  return candidates;
 }
 
 async function execLsDiscoveryCmd(file, args, timeoutMs = 5000) {
@@ -87,7 +257,7 @@ function readLinuxProcCandidates() {
         const rawCmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8');
         if (!rawCmd) continue;
         const commandLine = rawCmd.replace(/\0+/g, ' ').trim();
-        if (!/agy|language_server/i.test(commandLine)) continue;
+        if (!/agy|antigravity-cli|language_server/i.test(commandLine)) continue;
         let ppid = 0;
         try {
           const statRaw = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -111,7 +281,7 @@ function readLinuxProcCandidates() {
 async function listCandidateOsProcesses(platform, execCmdFn) {
   if (platform === 'win32') {
     const psScript =
-      "Get-CimInstance Win32_Process -Filter \"Name LIKE 'agy%' OR Name LIKE 'language_server%'\" | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress";
+      "Get-CimInstance Win32_Process -Filter \"Name LIKE 'agy%' OR Name LIKE 'antigravity-cli%' OR Name LIKE 'language_server%'\" | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress";
     const out = await execCmdFn('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
@@ -144,7 +314,7 @@ async function listCandidateOsProcesses(platform, execCmdFn) {
     const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
     if (!m) continue;
     const cmdLine = m[3];
-    if (!/agy|language_server/i.test(cmdLine)) continue;
+    if (!/agy|antigravity-cli|language_server/i.test(cmdLine)) continue;
     results.push({
       pid: Number(m[1]) || 0,
       ppid: Number(m[2]) || 0,
@@ -154,10 +324,10 @@ async function listCandidateOsProcesses(platform, execCmdFn) {
   return results;
 }
 
-async function findListeningPortsForPid(pid, platform, execCmdFn) {
+async function findListeningPortsForPid(pid, platform, execCmdFn, procFs = null) {
   if (!Number.isInteger(pid) || pid <= 0) return [];
-  try {
-    if (platform === 'win32') {
+  if (platform === 'win32') {
+    try {
       const out = await execCmdFn('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
@@ -175,7 +345,24 @@ async function findListeningPortsForPid(pid, platform, execCmdFn) {
             .filter((p) => Number.isInteger(p) && p > 0 && p <= 65535)
         )
       );
+    } catch {
+      return [];
     }
+  }
+
+  if (platform === 'linux') {
+    const procPorts = await readLinuxProcListeningPorts(pid, procFs);
+    if (procPorts.length > 0) return procPorts;
+    try {
+      const ssOut = await execCmdFn('ss', ['-H', '-lntp']);
+      const ssPorts = parseSsListeningPorts(ssOut, pid);
+      if (ssPorts.length > 0) return ssPorts;
+    } catch {
+      // 无 ss 或权限受限时继续回退至 lsof
+    }
+  }
+
+  try {
     const out = await execCmdFn('lsof', ['-Pan', '-p', String(pid), '-iTCP', '-sTCP:LISTEN']);
     const ports = new Set();
     for (const line of out.split(/\r?\n/)) {
@@ -191,8 +378,8 @@ async function findListeningPortsForPid(pid, platform, execCmdFn) {
   }
 }
 
-async function probeLsCandidate(port, csrfToken, fetchFn) {
-  for (const proto of ['http', 'https']) {
+async function probeLsCandidate(port, csrfToken, fetchFn, protos = ['http', 'https']) {
+  for (const proto of protos) {
     try {
       const addr = `127.0.0.1:${port}`;
       const baseUrl = `${proto}://${addr}`;
@@ -225,6 +412,9 @@ async function probeLsCandidate(port, csrfToken, fetchFn) {
  *   ppid?: number,
  *   ancestorPids?: number[],
  *   platform?: string,
+ *   daemonDirs?: string[],
+ *   isPidAliveFn?: (pid: number) => boolean,
+ *   procFs?: object|null,
  *   execCmdFn?: (file: string, args: string[]) => Promise<string>,
  *   fetchFn?: typeof fetch
  * }} [options]
@@ -235,6 +425,9 @@ export async function discoverAntigravityLsEndpoint(options = {}) {
     ppid = Number(process?.ppid || 0),
     ancestorPids = [],
     platform = process?.platform || 'win32',
+    daemonDirs = options.execCmdFn ? [] : DAEMON_DIRS,
+    isPidAliveFn = defaultIsLsPidAlive,
+    procFs = null,
     execCmdFn = execLsDiscoveryCmd,
     fetchFn = typeof fetch === 'function' ? fetch : null,
   } = options;
@@ -247,6 +440,20 @@ export async function discoverAntigravityLsEndpoint(options = {}) {
       .filter((n) => Number.isInteger(n) && n > 0)
   );
 
+  // 1. 优先探测 ~/.gemini/<product>/daemon/hub_*.json 守护端点描述文件（零外部进程开销）
+  const daemonCandidates = readHubDaemonCandidates(daemonDirs, preferredPids, isPidAliveFn);
+  const probedDaemonKeys = new Set();
+  for (const cand of daemonCandidates) {
+    for (const target of cand.targets) {
+      probedDaemonKeys.add(`${target.port}:${cand.csrfToken}`);
+      const verified = await probeLsCandidate(target.port, cand.csrfToken, fetchFn, target.protos);
+      if (verified) {
+        return { ...verified, pid: cand.pid };
+      }
+    }
+  }
+
+  // 2. 回退枚举操作系统进程并解析监听端口
   let rawProcs = [];
   try {
     rawProcs = await listCandidateOsProcesses(platform, execCmdFn);
@@ -280,8 +487,9 @@ export async function discoverAntigravityLsEndpoint(options = {}) {
   for (const cand of parsedCandidates) {
     const ports = cand.hubPort
       ? [cand.hubPort]
-      : await findListeningPortsForPid(cand.pid, platform, execCmdFn);
+      : await findListeningPortsForPid(cand.pid, platform, execCmdFn, procFs);
     for (const port of ports) {
+      if (probedDaemonKeys.has(`${port}:${cand.csrfToken}`)) continue;
       const verified = await probeLsCandidate(port, cand.csrfToken, fetchFn);
       if (verified) {
         return { ...verified, pid: cand.pid };
@@ -292,12 +500,16 @@ export async function discoverAntigravityLsEndpoint(options = {}) {
 }
 
 /**
- * 确保 `lsRuntimeEndpoint` 已就绪（具备并发去重与失败冷却保护）。
+ * 确保 `lsRuntimeEndpoint` 已就绪（具备并发去重、失败冷却与动态端点重连能力）。
  *
- * @param {{ force?: boolean, ancestorPids?: number[] }} [options]
+ * @param {{ force?: boolean, respectCooldown?: boolean, ancestorPids?: number[] }} [options]
  * @returns {Promise<boolean>}
  */
-export async function ensureLsEndpointDiscovered({ force = false, ancestorPids = [] } = {}) {
+export async function ensureLsEndpointDiscovered({
+  force = false,
+  respectCooldown = false,
+  ancestorPids = [],
+} = {}) {
   if (lsRuntimeEndpoint.addr === 'test.invalid') {
     return false;
   }
@@ -309,7 +521,7 @@ export async function ensureLsEndpointDiscovered({ force = false, ancestorPids =
   }
   const now = Date.now();
   if (
-    !force &&
+    (!force || respectCooldown) &&
     lsDiscoveryState.lastAttemptMs > 0 &&
     now - lsDiscoveryState.lastAttemptMs < LS_DISC_COOLDOWN_MS
   ) {
@@ -328,7 +540,7 @@ export async function ensureLsEndpointDiscovered({ force = false, ancestorPids =
         ancestorPids: [...envHintPids, ...ancestorPids],
       });
       if (found && found.addr && found.csrfToken) {
-        setLsRuntimeEndpoint(found.addr, found.csrfToken);
+        setLsRuntimeEndpoint(found.addr, found.csrfToken, { isDynamic: true });
         return true;
       }
       return Boolean(lsRuntimeEndpoint.baseUrl);

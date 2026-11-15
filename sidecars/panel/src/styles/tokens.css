@@ -119,3 +119,15 @@
   --space-4: 10px;
   --space-5: 12px;
 }
+
+@media (prefers-color-scheme: dark) {
+  html[data-standalone="true"] {
+    color-scheme: dark;
+    --background: hsl(222 18% 10%);
+    --card: hsl(222 16% 13%);
+    --border: hsl(220 14% 21%);
+    --foreground: hsl(214 24% 92%);
+    --muted-foreground: hsl(215 14% 63%);
+    --primary: hsl(217 86% 61%);
+  }
+}

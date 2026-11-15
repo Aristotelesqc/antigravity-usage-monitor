@@ -21,6 +21,7 @@ const BACKEND_MODULE_FILES = [
   '../backend/account-switch.mjs',
   '../backend/settings-schema.mjs',
   '../backend/config.mjs',
+  '../backend/cli-sqlite-reader.mjs',
   '../backend/ls-discovery.mjs',
   '../backend/pricing-catalog.mjs',
   '../backend/plugin-updater.mjs',
@@ -49,6 +50,7 @@ export function backendHarness({
   cache={},
   deepStats=null,
   transcripts={},
+  diskDirs={},
   settings={},
   trajectories={},
   summaries={},
@@ -69,7 +71,7 @@ export function backendHarness({
   const mainUrl = pluginRootPath ? `file://${pluginRootPath}/sidecars/panel/main.mjs` : 'file:///test/sidecars/panel/main.mjs';
   const mainPath = pluginRootPath ? `${pluginRootPath}/sidecars/panel/main.mjs` : '/test/sidecars/panel/main.mjs';
   const source = stripEsmSyntax(sourceText ?? loadCombinedBackendSource(), mainUrl);
-  const state={calls:[],errors:[],saves:[],settings,trajectories,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,deepStats,deepStatsMtimeMs:1};
+  const state={calls:[],errors:[],saves:[],settings,trajectories,summaries,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,deepStats,deepStatsMtimeMs:1};
   const ctx={
     ...metricsImplementation, URL, AbortSignal, Buffer, isDeepStrictEqual, randomUUID,
     ...(clock ? { Date: class extends Date {
@@ -96,9 +98,15 @@ export function backendHarness({
         return Boolean(m && state.transcripts?.[m[1]]);
       }
       if (norm.endsWith('/.git')) return Boolean(state.hasGitDir);
+      if (diskDirs && Object.prototype.hasOwnProperty.call(diskDirs, norm)) return true;
       return false;
     },
-    mkdirSync:()=>{},readdirSync:()=>[],
+    mkdirSync:()=>{},
+    readdirSync:p=>{
+      const norm = String(p).replace(/\\/g, '/');
+      if (diskDirs && Array.isArray(diskDirs[norm])) return diskDirs[norm];
+      return [];
+    },
     statSync:p=>{
       const norm = String(p).replace(/\\/g, '/');
       if (norm.endsWith('/.system_generated/logs/transcript.jsonl')) {
@@ -160,10 +168,10 @@ export function backendHarness({
         if(qs instanceof Error) throw qs;
         return {ok:true,json:async()=>({response:qs})};
       }
-      const data={GetUserStatus:{userStatus:state.userStatus},GetAvailableModels:{response:{models:availableModels}},GetAllCascadeTrajectories:{trajectorySummaries:summaries}}[method];
+      const data={GetUserStatus:{userStatus:state.userStatus},GetAvailableModels:{response:{models:availableModels}},GetAllCascadeTrajectories:{trajectorySummaries:state.summaries}}[method];
       return {ok:true,json:async()=>data};
     },
   };
-  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns};',ctx);
+  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns,normalizeStandalonePort,setStandalonePortListener,parseAnnotationPbtxtTitle};',ctx);
   return {...ctx.api,state};
 }

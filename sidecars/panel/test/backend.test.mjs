@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {backendHarness} from './backend-harness.mjs';
+import {
+  getNodeSqliteDatabaseSync,
+  parseAnnotationPbtxtTitle,
+  readAnnotationTitleForCascade,
+  readLocalSqliteTrajectory,
+  readLocalSummaryIndex,
+} from '../backend/cli-sqlite-reader.mjs';
 import { writeTrajectoryCacheFile } from '../backend/trajectory-cache-file.mjs';
 
 const raw={trajectory:{steps:[{status:'CORTEX_STEP_STATUS_DONE',metadata:{
@@ -1315,4 +1323,440 @@ test('reconciles 8-group context breakdown with real API prompt+output tokens an
   await h.buildTelemetryPayloadInternal('c311b');
   const fetchCountAfterSecond = h.state.calls.filter((c) => c.method === 'GetCascadeTrajectory').length;
   assert.equal(fetchCountAfterSecond, 1);
+});
+
+test('antigravity-cli multi-dir transcript fallback recovers offline sessions and upgrades once LS comes online', async () => {
+  const cliId = '88888888-4444-4444-8888-111111111111';
+  const h = backendHarness({
+    summaries: {},
+    trajectories: {
+      [cliId]: new Error('Language Server offline'),
+    },
+    diskDirs: {
+      '/test-home/.gemini/antigravity-cli/brain': [cliId],
+    },
+    deepStats: {
+      titleMap: {},
+      perConvo: {
+        [`cli:${cliId}`]: {
+          appSource: 'cli',
+          entries: [
+            {
+              ts: '2026-11-15T12:00:02Z',
+              model: 'claude-sonnet-4-6',
+              modelCanonicalId: 'claude-sonnet-4-6',
+              modelDisplayName: 'Claude Sonnet 4.6',
+              provider: 'API_PROVIDER_ANTHROPIC_VERTEX',
+              inp: 4000,
+              cache: 16000,
+              out: 300,
+              reasoning: 100,
+            },
+          ],
+        },
+      },
+    },
+    transcripts: {
+      [cliId]: [
+        {
+          step_index: 1,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          status: 'DONE',
+          created_at: '2026-11-15T12:00:00Z',
+          content: '<USER_REQUEST>\n排查无头 Linux CLI 远程监控配置\n</USER_REQUEST>',
+        },
+        {
+          step_index: 2,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          status: 'DONE',
+          created_at: '2026-11-15T12:00:02Z',
+          input_tokens: 4000,
+          cache_read_tokens: 16000,
+          output_tokens: 400,
+          content: '已完成排查。',
+        },
+      ],
+    },
+  });
+
+  // 1. Offline mode: recovers CLI conversation list, prompt-derived title, turn rail, and token accounting
+  const offlinePayload = await h.buildTelemetryPayloadInternal(cliId);
+  assert.equal(offlinePayload.conversations.length, 1);
+  assert.equal(offlinePayload.conversations[0].cascadeId, cliId);
+  assert.equal(offlinePayload.conversations[0].title, '排查无头 Linux CLI 远程监控配置');
+  assert.equal(offlinePayload.activeConversation.inputTokens, 4000);
+  assert.equal(offlinePayload.activeConversation.cacheReadTokens, 16000);
+  assert.equal(offlinePayload.activeConversation.outputTokens, 400);
+  const offlineStep = offlinePayload.activeConversation.recentSteps[0];
+  assert.equal(offlineStep.turnIndex, 1);
+  assert.equal(offlineStep.turnPrompt, '排查无头 Linux CLI 远程监控配置');
+  assert.equal(offlineStep.tokPerSec, null);
+  assert.equal(offlineStep.selectedSpeedReason, 'incomplete_or_invalid_timing');
+  assert.equal(
+    offlinePayload.consumption.sourcesBreakdown.some(
+      (s) => s.name === 'Antigravity CLI' && s.totalTokens === 20400
+    ),
+    true
+  );
+
+  // Steady offline poll does not hammer GetCascadeTrajectory
+  const callsAfterFirst = h.state.calls.filter((c) => c.method === 'GetCascadeTrajectory').length;
+  assert.equal(callsAfterFirst, 1);
+  await h.buildTelemetryPayloadInternal(cliId);
+  const callsAfterSecond = h.state.calls.filter((c) => c.method === 'GetCascadeTrajectory').length;
+  assert.equal(callsAfterSecond, 1);
+
+  // 2. Language Server comes online: immediately upgrades offline fallback entry to full RPC telemetry
+  h.state.summaries = {
+    [cliId]: {
+      stepCount: 2,
+      lastModifiedTime: '2026-11-15T12:00:06Z',
+      status: 'IDLE',
+      annotations: { title: 'CLI 在线完整轨迹' },
+    },
+  };
+  h.state.trajectories[cliId] = {
+    numTotalSteps: 2,
+    trajectory: {
+      steps: [
+        {
+          type: 'CORTEX_STEP_TYPE_USER_INPUT',
+          userInput: { userResponse: '排查无头 Linux CLI 远程监控配置' },
+        },
+        {
+          type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+          status: 'CORTEX_STEP_STATUS_DONE',
+          plannerResponse: { response: '已完成排查。', thinkingTokens: 100, responseTokens: 300 },
+          metadata: {
+            createdAt: '2026-11-15T12:00:02Z',
+            finishedGeneratingAt: '2026-11-15T12:00:06Z',
+            sourceTrajectoryStepInfo: { stepIndex: 1 },
+            modelUsage: {
+              model: 'MODEL_CLAUDE_4_SONNET',
+              responseModel: 'claude-sonnet-4-6',
+              apiProvider: 'API_PROVIDER_ANTHROPIC_VERTEX',
+              inputTokens: 4000,
+              cacheReadTokens: 16000,
+              outputTokens: 400,
+            },
+          },
+        },
+      ],
+      generatorMetadata: [
+        {
+          stepIndices: [1],
+          chatModel: {
+            timeToFirstToken: '0.8s',
+            modelDisplayName: 'Claude Sonnet 4.6',
+          },
+        },
+      ],
+    },
+  };
+
+  const onlinePayload = await h.buildTelemetryPayloadInternal(cliId);
+  const onlineStep = onlinePayload.activeConversation.recentSteps[0];
+  assert.equal(onlinePayload.activeConversation.title, 'CLI 在线完整轨迹');
+  assert.equal(onlineStep.tokPerSec, 100);
+  assert.equal(onlineStep.ttftSec, 0.8);
+});
+
+test('standalonePort setting normalizes valid ports and notifies auto-host listener on change and reset', () => {
+  const h = backendHarness();
+  const observedPorts = [];
+  h.setStandalonePortListener((p) => observedPorts.push(p));
+
+  assert.equal(h.normalizeStandalonePort(0), 0);
+  assert.equal(h.normalizeStandalonePort(80), 0);
+  assert.equal(h.normalizeStandalonePort(70000), 0);
+  assert.equal(h.normalizeStandalonePort('8787'), 8787);
+
+  const saved = h.executeSettingsAction({ standalonePort: 8787 });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.updated.standalonePort, 8787);
+  assert.deepEqual(observedPorts, [8787]);
+
+  // Same port does not re-trigger listener
+  h.executeSettingsAction({ standalonePort: 8787 });
+  assert.deepEqual(observedPorts, [8787]);
+
+  // Reset returns standalonePort to 0 and notifies listener
+  const reset = h.executeResetSettingsAction();
+  assert.equal(reset.ok, true);
+  assert.equal(reset.updated.standalonePort, 0);
+  assert.deepEqual(observedPorts, [8787, 0]);
+});
+
+function encodeProtoVarint(value) {
+  let v = BigInt(value);
+  const out = [];
+  while (v >= 0x80n) {
+    out.push(Number((v & 0x7fn) | 0x80n));
+    v >>= 7n;
+  }
+  out.push(Number(v));
+  return Buffer.from(out);
+}
+
+function encodeProtoFieldVarint(fieldNo, value) {
+  return Buffer.concat([encodeProtoVarint((fieldNo << 3) | 0), encodeProtoVarint(value)]);
+}
+
+function encodeProtoFieldBytes(fieldNo, payload) {
+  const buf = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
+  return Buffer.concat([
+    encodeProtoVarint((fieldNo << 3) | 2),
+    encodeProtoVarint(buf.length),
+    buf,
+  ]);
+}
+
+test('Antigravity CLI annotations.pbtxt + SQLite trajectory reader recovers title, TPS, TTFT, thinking split, and 10-channel context', () => {
+  assert.equal(
+    parseAnnotationPbtxtTitle('last_user_view_time:{seconds:1794759792}\ntitle:"Greeting and Hello"\n'),
+    'Greeting and Hello'
+  );
+  assert.equal(
+    parseAnnotationPbtxtTitle('title: "用量图表与调用记录优化建议"'),
+    '用量图表与调用记录优化建议'
+  );
+  // Octal UTF-8 byte escape for "你好" (\344\275\240\345\245\275) + escaped quote
+  assert.equal(
+    parseAnnotationPbtxtTitle('title:"\\344\\275\\240\\345\\245\\275 \\"CLI\\""'),
+    '你好 "CLI"'
+  );
+
+  const DatabaseSync = getNodeSqliteDatabaseSync();
+  if (!DatabaseSync) return;
+
+  const tempRoot = mkdtempSync(fileURLToPath(new URL('./.cli-sqlite-', import.meta.url)));
+  try {
+    const cliRoot = join(tempRoot, 'antigravity-cli');
+    const convDir = join(cliRoot, 'conversations');
+    const annDir = join(cliRoot, 'annotations');
+    const cid = '278a0174-296c-45a9-bc6c-62ce7bdd82c4';
+    const logDir = join(cliRoot, 'brain', cid, '.system_generated', 'logs');
+    mkdirSync(convDir, { recursive: true });
+    mkdirSync(annDir, { recursive: true });
+    mkdirSync(logDir, { recursive: true });
+
+    writeFileSync(
+      join(annDir, `${cid}.pbtxt`),
+      'last_user_view_time:{seconds:1794759792 nanos:730218300}\ntitle:"Greeting and Hello"\n',
+      'utf8'
+    );
+    assert.equal(readAnnotationTitleForCascade(cid, [annDir]), 'Greeting and Hello');
+
+    // Create conversation_summaries.db matching Antigravity CLI 1.5.9 schema
+    const sumDb = new DatabaseSync(join(cliRoot, 'conversation_summaries.db'));
+    sumDb.exec(`
+      CREATE TABLE conversation_summaries (
+        conversation_id TEXT NOT NULL,
+        title TEXT,
+        status TEXT,
+        parent_conversation_id TEXT,
+        agent_name TEXT,
+        not_fully_idle INTEGER,
+        killed INTEGER,
+        step_count INTEGER,
+        last_modified_time TEXT,
+        app_data_dir TEXT
+      );
+    `);
+    sumDb
+      .prepare(
+        `INSERT INTO conversation_summaries
+         (conversation_id, title, status, parent_conversation_id, agent_name, not_fully_idle, killed, step_count, last_modified_time, app_data_dir)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        cid,
+        'Greeting and Hello',
+        'CASCADE_RUN_STATUS_IDLE',
+        '',
+        '',
+        0,
+        0,
+        2,
+        '2026-11-15 16:23:12.7302183+00:00',
+        'antigravity-cli'
+      );
+    sumDb.close();
+
+    const summaryMap = readLocalSummaryIndex([cliRoot]);
+    assert.equal(summaryMap.get(cid)?.title, 'Greeting and Hello');
+    assert.equal(summaryMap.get(cid)?.status, 'CASCADE_RUN_STATUS_IDLE');
+
+    // Create conversations/<cid>.db with protobuf metadata matching Antigravity CLI 1.5.9
+    const modelUsageBuf = Buffer.concat([
+      encodeProtoFieldVarint(1, 1526), // MODEL_PLACEHOLDER_M526
+      encodeProtoFieldVarint(2, 14569), // inputTokens
+      encodeProtoFieldVarint(3, 89), // outputTokens
+      encodeProtoFieldVarint(6, 24), // API_PROVIDER_GOOGLE_GEMINI
+      encodeProtoFieldVarint(9, 57), // thinkingOutputTokens
+      encodeProtoFieldVarint(10, 32), // responseOutputTokens
+    ]);
+    const stepMetaBuf = Buffer.concat([
+      encodeProtoFieldBytes(
+        1,
+        Buffer.concat([encodeProtoFieldVarint(1, 1794759788), encodeProtoFieldVarint(2, 899044700)])
+      ),
+      encodeProtoFieldBytes(
+        6,
+        Buffer.concat([encodeProtoFieldVarint(1, 1794759792), encodeProtoFieldVarint(2, 175393200)])
+      ),
+      encodeProtoFieldBytes(
+        7,
+        Buffer.concat([encodeProtoFieldVarint(1, 1794759792), encodeProtoFieldVarint(2, 730218300)])
+      ),
+      encodeProtoFieldBytes(9, modelUsageBuf),
+      encodeProtoFieldBytes(20, encodeProtoFieldVarint(2, 1)),
+    ]);
+
+    const encodeGroup = (name, typeInt, numTokens, children = []) =>
+      Buffer.concat([
+        encodeProtoFieldBytes(1, name),
+        encodeProtoFieldVarint(2, typeInt),
+        encodeProtoFieldVarint(4, numTokens),
+        ...children.map((c) => encodeProtoFieldBytes(5, c)),
+      ]);
+    const tokenBreakdownBuf = Buffer.concat([
+      encodeProtoFieldBytes(1, encodeGroup('System Prompt', 1, 6244)),
+      encodeProtoFieldBytes(1, encodeGroup('Mcp Tools', 4, 234)),
+      encodeProtoFieldBytes(1, encodeGroup('Subagents', 6, 689)),
+      encodeProtoFieldBytes(1, encodeGroup('Skills', 5, 4102)),
+      encodeProtoFieldBytes(1, encodeGroup('Rules', 3, 2282)),
+      encodeProtoFieldBytes(1, encodeGroup('Tools', 2, 6972)),
+      encodeProtoFieldBytes(
+        1,
+        encodeGroup('Chat Messages', 7, 149, [encodeGroup('0: USER_INPUT', 0, 149)])
+      ),
+    ]);
+    const contextWindowBuf = Buffer.concat([
+      encodeProtoFieldVarint(1, 20672),
+      encodeProtoFieldBytes(3, tokenBreakdownBuf),
+      encodeProtoFieldVarint(4, 256000),
+    ]);
+    const chatModelBuf = Buffer.concat([
+      encodeProtoFieldBytes(1, 'x'.repeat(8192)), // large prompt skipped in O(1)
+      encodeProtoFieldVarint(3, 1526),
+      encodeProtoFieldBytes(4, modelUsageBuf),
+      encodeProtoFieldBytes(9, encodeProtoFieldBytes(10, contextWindowBuf)),
+      encodeProtoFieldBytes(
+        11,
+        Buffer.concat([encodeProtoFieldVarint(1, 3), encodeProtoFieldVarint(2, 276645700)])
+      ),
+      encodeProtoFieldBytes(12, encodeProtoFieldVarint(2, 555832700)),
+      encodeProtoFieldBytes(19, 'gemini-4-hydrogen'),
+      encodeProtoFieldBytes(
+        20,
+        Buffer.concat([
+          encodeProtoFieldBytes(1, 'model_enum'),
+          encodeProtoFieldBytes(2, 'MODEL_PLACEHOLDER_M526'),
+        ])
+      ),
+      encodeProtoFieldBytes(21, 'Gemini 4 Hydrogen (Medium)'),
+    ]);
+    const genMetaBuf = Buffer.concat([
+      encodeProtoFieldBytes(2, Buffer.from([1])),
+      encodeProtoFieldBytes(1, chatModelBuf),
+    ]);
+
+    const convDbPath = join(convDir, `${cid}.db`);
+    const convDb = new DatabaseSync(convDbPath);
+    convDb.exec(`
+      CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, metadata BLOB, step_payload BLOB);
+      CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB);
+    `);
+    convDb.prepare('INSERT INTO steps (idx, step_type, status, metadata) VALUES (?, ?, ?, ?)').run(0, 14, 3, null);
+    convDb.prepare('INSERT INTO steps (idx, step_type, status, metadata) VALUES (?, ?, ?, ?)').run(1, 15, 3, stepMetaBuf);
+    convDb.prepare('INSERT INTO gen_metadata (idx, data) VALUES (?, ?)').run(0, genMetaBuf);
+    convDb.close();
+
+    writeFileSync(
+      join(logDir, 'transcript.jsonl'),
+      [
+        JSON.stringify({
+          step_index: 0,
+          type: 'USER_INPUT',
+          status: 'DONE',
+          created_at: '2026-11-15T16:23:08Z',
+          content: '<USER_REQUEST>\n你好\n</USER_REQUEST>',
+        }),
+        JSON.stringify({
+          step_index: 1,
+          type: 'PLANNER_RESPONSE',
+          status: 'DONE',
+          created_at: '2026-11-15T16:23:08Z',
+          model: 'gemini-4-hydrogen-medium',
+          input_tokens: 14569,
+          cache_read_tokens: 0,
+          output_tokens: 89,
+          content: '你好呀！今天有什么我可以帮你的吗？',
+        }),
+      ].join('\n'),
+      'utf8'
+    );
+
+    const decoded = readLocalSqliteTrajectory(convDbPath);
+    assert.ok(decoded);
+    assert.equal(decoded.steps.length, 2);
+    assert.equal(decoded.generatorMetadata.length, 1);
+    assert.equal(decoded.generatorMetadata[0].chatModel.modelDisplayName, 'Gemini 4 Hydrogen (Medium)');
+
+    // End-to-end verification in isolated child process with ANTIGRAVITY_GEMINI_DIR
+    const builderUrl = new URL('../backend/telemetry-builder.mjs', import.meta.url).href;
+    const rawOut = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const { buildTelemetryPayload } = await import(${JSON.stringify(builderUrl)});
+         const p = await buildTelemetryPayload(${JSON.stringify(cid)}, false, { range: 'all' });
+         process.stdout.write(JSON.stringify({
+           title: p.activeConversation?.title,
+           modelLabel: p.activeConversation?.activeModelLabel,
+           tokPerSec: p.activeConversation?.latestTokPerSec,
+           ttftSec: p.activeConversation?.latestTtftSec,
+           step: p.activeConversation?.recentSteps?.[0],
+           ctx: p.activeConversation?.context,
+           sources: p.consumption?.sourcesBreakdown,
+         }));`,
+      ],
+      {
+        env: {
+          ...process.env,
+          ANTIGRAVITY_GEMINI_DIR: tempRoot,
+          USAGE_MONITOR_DATA_DIR: join(tempRoot, 'data'),
+          ANTIGRAVITY_LS_ADDRESS: 'test.invalid',
+          ANTIGRAVITY_CSRF_TOKEN: 'test',
+        },
+        encoding: 'utf8',
+      }
+    );
+    const parsed = JSON.parse(rawOut);
+    assert.equal(parsed.title, 'Greeting and Hello');
+    assert.equal(parsed.modelLabel, 'Gemini 4 Hydrogen (Medium)');
+    assert.equal(parsed.tokPerSec, 23.2);
+    assert.ok(Math.abs(parsed.ttftSec - 3.2766) < 0.01);
+    assert.equal(parsed.step.thinkingTokens, 57);
+    assert.equal(parsed.step.responseTokens, 32);
+    assert.equal(parsed.step.turnPrompt, '你好');
+    assert.equal(parsed.step.estimatedContextTokens, 20672);
+    assert.equal(parsed.step.contextBreakdown.mcpToolsTokens, 234);
+    assert.equal(parsed.step.contextBreakdown.skillsTokens, 4102);
+    assert.equal(parsed.step.contextBreakdown.userRulesTokens, 2282);
+    assert.equal(parsed.step.contextBreakdown.systemToolsTokens, 6972);
+    assert.equal(parsed.step.contextBreakdown.userInputTokens, 149);
+    assert.equal(parsed.ctx.totalTokens, 14658);
+    assert.equal(parsed.ctx.limitTokens, 256000);
+    const cliSource = parsed.sources?.find((s) => s.name === 'Antigravity CLI');
+    assert.ok(cliSource);
+    assert.equal(cliSource.calls, 1);
+    assert.equal(cliSource.totalTokens, 14658);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

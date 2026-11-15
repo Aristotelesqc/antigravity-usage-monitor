@@ -121,6 +121,18 @@
   --space-5: 12px;
 }
 
+@media (prefers-color-scheme: dark) {
+  html[data-standalone="true"] {
+    color-scheme: dark;
+    --background: hsl(222 18% 10%);
+    --card: hsl(222 16% 13%);
+    --border: hsl(220 14% 21%);
+    --foreground: hsl(214 24% 92%);
+    --muted-foreground: hsl(215 14% 63%);
+    --primary: hsl(217 86% 61%);
+  }
+}
+
 /* --- src/styles/base.css --- */
 /*
  * Base reset, viewport-locked shell (preventing ultra-long px scroll pages),
@@ -184,6 +196,19 @@ input {
   gap: var(--space-3);
   overflow: hidden;
   position: relative;
+}
+
+html[data-standalone="true"] .app-shell {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+@media (min-width: 980px) {
+  html[data-standalone="true"] .app-shell {
+    padding: var(--space-4) var(--space-5);
+    border-left: 1px solid var(--border-hairline);
+    border-right: 1px solid var(--border-hairline);
+  }
 }
 
 .top-deck {

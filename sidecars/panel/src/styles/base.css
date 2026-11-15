@@ -62,6 +62,19 @@ input {
   position: relative;
 }
 
+html[data-standalone="true"] .app-shell {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+@media (min-width: 980px) {
+  html[data-standalone="true"] .app-shell {
+    padding: var(--space-4) var(--space-5);
+    border-left: 1px solid var(--border-hairline);
+    border-right: 1px solid var(--border-hairline);
+  }
+}
+
 .top-deck {
   display: flex;
   flex-direction: column;

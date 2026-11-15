@@ -2,8 +2,8 @@
 
 [English](README.md) | 简体中文
 
-**Google Antigravity IDE 实时双栖监控插件。**  
-一站式查看生成速度（TPS）、首字延迟（TTFT）、十维上下文窗口占用、官方模型配额、子代理追踪与历史 Token 消耗（支持 Windows / macOS / Linux）。
+**Google Antigravity 2.0 / IDE / CLI 实时监控插件。**<br>
+一站式查看生成速度（TPS）、首字延迟（TTFT）、十维上下文窗口占用、官方模型配额、子代理追踪与历史 Token 消耗（支持 Windows / macOS / Linux 及无头服务器 CLI）。
 
 ![Antigravity Usage Monitor 界面预览](assets/preview.png)
 
@@ -103,6 +103,18 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
    - **Antigravity 2.0 桌面端**：开启插件后即自动在主对话窗口右上角顶部栏挂载实时状态与指标胶囊（悬停查看速览，左键展开完整四标签面板，右键强制刷新），全程不修改宿主 `app.asar`。
    - **Antigravity IDE**：首次启用插件时，后台 Sidecar 会自动在 `~/.antigravity-ide/argv.json` 中补齐 `"remote-debugging-port": "0"`（保留原有注释与配置）。**完整重启一次 Antigravity IDE** 后，胶囊会自动停靠在 IDE 窗口最上方标题栏右侧。由于 Antigravity IDE 宿主暂未开放右侧 UI Sidecar 辅助栏，在 IDE 中请保持「双栖挂载」并直接点击顶部栏胶囊打开四标签面板。
 3. **右侧辅助栏面板（Antigravity 2.0）**：在 Antigravity 2.0 对话窗口点击右上角菜单打开右侧辅助栏中的 **用量监控**，或在 **偏好设置 -> 面板挂载方式** 中按需切换「顶部栏 + 侧边栏」与「仅侧边栏」。
+4. **无头 CLI / `agy remote-control serve` 独立 Web 模式**：
+   - 在纯终端或远程 Linux 服务器上，插件会自动扫描 `~/.gemini/antigravity-cli`（含 `daemon/hub_*.json`、对话轨迹与 `transcript.jsonl`）；即使 `agy` 暂未运行，也会基于本地日志离线展示历史会话与 Token 消耗，并在 `agy` 启动后自动重连升级为完整遥测。
+   - **手动启动（推荐配合 SSH 端口转发）**：
+     ```bash
+     # 在远程服务器上启动（默认仅监听 127.0.0.1:8787）
+     node ~/.gemini/config/plugins/usage-monitor/sidecars/panel/standalone.mjs --port 8787
+
+     # 在本地电脑转发端口后，浏览器打开 http://localhost:8787
+     ssh -L 8787:127.0.0.1:8787 user@your-server
+     ```
+   - **随 `agy` 后台自动托管**：设置环境变量 `USAGE_MONITOR_STANDALONE_PORT=8787`，或在 `~/.gemini/antigravity-cli/sidecar_data/usage-monitor/panel/data/settings.json` 中写入 `"standalonePort": 8787`，启用插件后即随 `agy` 自动监听该端口。
+   - **非回环地址受保护访问**：若需显式绑定 `0.0.0.0` 或局域网地址，必须同时指定 `--token <密钥>`（或 `USAGE_MONITOR_STANDALONE_TOKEN`），未配置令牌时服务端会拒绝非回环启动。
 
 ## 更新
 

@@ -21,11 +21,13 @@ import {
   computeRuntimeCodeVersion,
   inFlightRequests,
   loadSettings,
+  lsRuntimeEndpoint,
   roundMetric,
   trajectoryCache,
 } from './config.mjs';
 import { getContextWindowGroups, getContextWindowModels } from './context-windows.mjs';
 import { enumerateAndSyncConversations } from './local-scanner.mjs';
+import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
 import { callLsRpc, getContextModelCatalog, getOfficialQuotaSummary } from './ls-rpc.mjs';
 import {
   computeStepCost,
@@ -647,7 +649,29 @@ export async function buildTelemetryPayloadInternal(
   filterOpts = {}
 ) {
   const settings = loadSettings();
-  const userStatus = await callLsRpc('GetUserStatus', {}).then((data) => data?.userStatus).catch(() => null);
+  let userStatus = await callLsRpc('GetUserStatus', {})
+    .then((data) => data?.userStatus)
+    .catch(() => null);
+  if (
+    !userStatus &&
+    lsRuntimeEndpoint.addr !== 'test.invalid' &&
+    (!lsRuntimeEndpoint.baseUrl || lsRuntimeEndpoint.isDynamic)
+  ) {
+    const prevBaseUrl = lsRuntimeEndpoint.baseUrl;
+    const prevCsrf = lsRuntimeEndpoint.csrfToken;
+    await ensureLsEndpointDiscovered({
+      force: true,
+      respectCooldown: !forceQuotaRefresh,
+    });
+    if (
+      lsRuntimeEndpoint.baseUrl &&
+      (lsRuntimeEndpoint.baseUrl !== prevBaseUrl || lsRuntimeEndpoint.csrfToken !== prevCsrf)
+    ) {
+      userStatus = await callLsRpc('GetUserStatus', {})
+        .then((data) => data?.userStatus)
+        .catch(() => null);
+    }
+  }
   const currentAccountName = userStatus?.email || userStatus?.name || '';
   const accountStatus = currentAccountName ? 'signedIn' :
     userStatus && !userStatus.userTier && !userStatus.planStatus ? 'signedOut' : 'unknown';
