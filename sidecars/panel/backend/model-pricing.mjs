@@ -288,11 +288,16 @@ export function createStepModelResolver(dynamicModelMap) {
     ) {
       return resolveModelInfo(modelKey, dynamicModelMap, apiProvider, modelDisplayName, responseModel);
     }
-    const key = JSON.stringify([modelKey, apiProvider, modelDisplayName, responseModel]);
-    let info = models.get(key);
+    let providers = models.get(modelKey);
+    if (!providers) models.set(modelKey, (providers = new Map()));
+    let names = providers.get(apiProvider);
+    if (!names) providers.set(apiProvider, (names = new Map()));
+    let responses = names.get(modelDisplayName);
+    if (!responses) names.set(modelDisplayName, (responses = new Map()));
+    let info = responses.get(responseModel);
     if (!info) {
       info = resolveModelInfo(modelKey, dynamicModelMap, apiProvider, modelDisplayName, responseModel);
-      models.set(key, info);
+      responses.set(responseModel, info);
     }
     return info;
   };

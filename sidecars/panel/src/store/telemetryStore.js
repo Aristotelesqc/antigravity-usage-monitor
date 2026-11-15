@@ -4,7 +4,7 @@
  */
 
 import { createReactiveStore } from '../core/reactive.js';
-import { callSidecarApi, isWindowOverlayMode } from '../core/httpClient.js';
+import { callSidecarApi, getWindowBridgeConfig, isWindowOverlayMode } from '../core/httpClient.js';
 import { isEnglishLocale, normalizeI18nLanguage, t } from '../i18n/index.js';
 import { normalizeClientFontScale, normalizeClientThemeAccent } from '../core/appearance.js';
 
@@ -100,6 +100,8 @@ let feedbackTimer = null;
 let activeBundleVersion = 0;
 let latestRequestSeq = 0;
 let activeForceCount = 0;
+let inFlightTelemetryPoll = null;
+let lastReceivedSteps = null;
 let loopActive = false;
 let loopIntervalMs = 2000;
 let loopTickFn = null;
@@ -526,10 +528,11 @@ function isEquivalentTelemetry(prev, next) {
     ) {
       return false;
     }
-    const paSteps = pa?.recentSteps || [];
-    const naSteps = na?.recentSteps || [];
+    // 主代理步骤由根会话统一比对，避免明细视图组装后的引用造成重复比对。
+    const paSteps = pa?.isMain && pAct?.recentSteps ? [] : pa?.recentSteps || [];
+    const naSteps = na?.isMain && nAct?.recentSteps ? [] : na?.recentSteps || [];
     if (paSteps.length !== naSteps.length) return false;
-    for (let j = 0; j < paSteps.length; j++) {
+    for (let j = 0; paSteps !== naSteps && j < paSteps.length; j++) {
       const bs = paSteps[j];
       const as = naSteps[j];
       if (
@@ -558,6 +561,8 @@ function isEquivalentTelemetry(prev, next) {
         bs?.rootTurnIndex !== as?.rootTurnIndex ||
         bs?.isTurnStart !== as?.isTurnStart ||
         bs?.isRootTurnStart !== as?.isRootTurnStart ||
+        bs?.isLatestTurn !== as?.isLatestTurn ||
+        bs?.isRootLatestTurn !== as?.isRootLatestTurn ||
         bs?.turnPrompt !== as?.turnPrompt ||
         bs?.rootTurnPrompt !== as?.rootTurnPrompt
       ) {
@@ -584,9 +589,10 @@ function isEquivalentTelemetry(prev, next) {
   if (pCtx?.systemPromptTokens !== nCtx?.systemPromptTokens) return false;
   if (pCtx?.userRulesTokens !== nCtx?.userRulesTokens) return false;
   if ((pAct?.recentSteps?.length || 0) !== (nAct?.recentSteps?.length || 0)) return false;
-  for (let i = 0; i < (pAct?.recentSteps?.length || 0); i++) {
+  for (let i = 0; pAct?.recentSteps !== nAct?.recentSteps && i < (pAct?.recentSteps?.length || 0); i++) {
     const before = pAct.recentSteps[i], after = nAct.recentSteps[i];
     if (
+      before.stepIndex !== after.stepIndex ||
       before.createdAtMs !== after.createdAtMs ||
       before.totalDurationSec !== after.totalDurationSec ||
       before.streamDurationSec !== after.streamDurationSec ||
@@ -611,6 +617,8 @@ function isEquivalentTelemetry(prev, next) {
       before.rootTurnIndex !== after.rootTurnIndex ||
       before.isTurnStart !== after.isTurnStart ||
       before.isRootTurnStart !== after.isRootTurnStart ||
+      before.isLatestTurn !== after.isLatestTurn ||
+      before.isRootLatestTurn !== after.isRootLatestTurn ||
       before.turnPrompt !== after.turnPrompt ||
       before.rootTurnPrompt !== after.rootTurnPrompt
     ) {
@@ -822,7 +830,61 @@ export async function fetchTelemetry({ force = false } = {}) {
     return telemetryStore.getState().telemetry;
   }
 
-  const st = telemetryStore.getState();
+  const overlay = isWindowOverlayMode();
+  if (overlay) {
+    const st = telemetryStore.getState();
+    const liveRouteId = extractHostRouteCascadeId();
+    if (liveRouteId !== st.hostRouteConversationId) {
+      const patch = { hostRouteConversationId: liveRouteId };
+      if (liveRouteId && st.selectedConversationId && st.selectedConversationId !== liveRouteId) {
+        patch.selectedConversationId = '';
+      }
+      telemetryStore.setState(patch);
+    }
+  }
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  if (current.selectedTimeRange) params.set('range', current.selectedTimeRange);
+  if (current.selectedTimeRange === 'custom') {
+    if (current.customStartMs > 0) params.set('startMs', String(current.customStartMs));
+    if (current.customEndMs > 0) params.set('endMs', String(current.customEndMs));
+  }
+  if (force) params.set('force', '1');
+  params.set('stepDetails', 'display');
+
+  if (force) {
+    inFlightTelemetryPoll = null;
+    return requestTelemetry(params, true);
+  }
+  const query = params.toString();
+  const bridge = overlay ? getWindowBridgeConfig() : null;
+  const existing = inFlightTelemetryPoll;
+  if (existing?.query === query && existing.port === bridge?.port && existing.token === bridge?.token) {
+    return existing.promise;
+  }
+  const poll = { query, port: bridge?.port, token: bridge?.token, promise: null };
+  poll.promise = requestTelemetry(params, false).finally(() => {
+    if (inFlightTelemetryPoll === poll) inFlightTelemetryPoll = null;
+  });
+  inFlightTelemetryPoll = poll;
+  return poll.promise;
+}
+
+function readDisplaySteps(payload) {
+  const active = payload?.activeConversation;
+  if (!payload?.stepRevision || !Array.isArray(active?.recentSteps)) return null;
+  return {
+    revision: payload.stepRevision,
+    recentSteps: active.recentSteps,
+    agentSteps: active.agents.map((agent) => agent.recentSteps === active.recentSteps
+      ? undefined
+      : agent.recentSteps),
+  };
+}
+
+async function requestTelemetry(params, force) {
   const reqSeq = ++latestRequestSeq;
   const startMs = Date.now();
 
@@ -836,41 +898,28 @@ export async function fetchTelemetry({ force = false } = {}) {
   }
 
   try {
-    if (isWindowOverlayMode()) {
-      const liveRouteId = extractHostRouteCascadeId();
-      if (liveRouteId !== st.hostRouteConversationId) {
-        const patch = { hostRouteConversationId: liveRouteId };
-        if (liveRouteId && st.selectedConversationId && st.selectedConversationId !== liveRouteId) {
-          patch.selectedConversationId = '';
-        }
-        telemetryStore.setState(patch);
-      }
-    }
-    const curSt = telemetryStore.getState();
-    const effectiveConvId = curSt.selectedConversationId || curSt.hostRouteConversationId || '';
-    const params = new URLSearchParams();
-    if (effectiveConvId) {
-      params.set('conversationId', effectiveConvId);
-    }
-    if (curSt.selectedTimeRange) {
-      params.set('range', curSt.selectedTimeRange);
-    }
-    if (curSt.selectedTimeRange === 'custom') {
-      if (curSt.customStartMs > 0) params.set('startMs', String(curSt.customStartMs));
-      if (curSt.customEndMs > 0) params.set('endMs', String(curSt.customEndMs));
-    }
-    if (force) {
-      params.set('force', '1');
-    }
-    const qs = params.toString();
-    const payload = await callSidecarApi(`/api/telemetry${qs ? `?${qs}` : ''}`, {
+    const previousSteps = lastReceivedSteps || readDisplaySteps(telemetryStore.getState().telemetry);
+    params.set('stepRevision', previousSteps?.revision || '');
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
       method: 'GET',
       abortKey: force ? 'telemetry-force' : 'telemetry-poll',
     });
 
+    const active = payload?.activeConversation;
+    if (payload?.stepsUnchanged) {
+      if (!active || !previousSteps || payload.stepRevision !== previousSteps.revision) {
+        throw new Error('Telemetry step revision mismatch');
+      }
+      active.recentSteps = previousSteps.recentSteps;
+      active.agents.forEach((agent, index) => {
+        const steps = previousSteps.agentSteps[index];
+        if (steps) agent.recentSteps = steps;
+      });
+    }
     if (reqSeq !== latestRequestSeq) {
       return payload;
     }
+    lastReceivedSteps = readDisplaySteps(payload);
 
     if (payload?.uiBundleVersion) {
       if (activeBundleVersion && activeBundleVersion !== payload.uiBundleVersion) {
@@ -1170,26 +1219,28 @@ export function formatAgentLabel(agent) {
  * @param {object|null} telemetry
  * @param {string} [selectedAgentScope='all']
  * @param {string} [ctxInspectorAgentId='auto']
+ * @param {boolean} [includeSteps=false] 是否组装调用明细所需的步骤列表
  */
 export function resolveScopedConversation(
   telemetry,
   selectedAgentScope = 'all',
-  ctxInspectorAgentId = 'auto'
+  ctxInspectorAgentId = 'auto',
+  includeSteps = false
 ) {
   const active = telemetry?.activeConversation || {};
   const agents = Array.isArray(active.agents) && active.agents.length > 0 ? active.agents : [];
   const hasSubagents = Boolean(active.hasSubagents && agents.length > 1);
   const subagents = agents.filter((a) => !a.isMain);
   const mainAgent = agents.find((a) => a.isMain) || active;
-  if (mainAgent && !Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
+  if (includeSteps && !Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
     mainAgent.recentSteps = active.recentSteps;
   }
   const aggregated = active.aggregated || active;
-  if (hasSubagents && aggregated && !Array.isArray(aggregated.recentSteps)) {
+  if (includeSteps && hasSubagents && !Array.isArray(aggregated.recentSteps)) {
     const combined = [];
     for (const ag of agents) {
       const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
-      combined.push(...steps);
+      for (const step of steps) combined.push(step);
     }
     combined.sort(
       (a, b) =>

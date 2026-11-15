@@ -1958,9 +1958,10 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       'has-turn-rail class removed when showStepTurnRail is false'
     );
     assert.equal(
-      stepTableWhileRailOff.querySelector('.turn-rail').hasAttribute('hidden'),
+      Array.from(stepTableWhileRailOff.querySelectorAll('.turn-rail'))
+        .every((rail) => rail.hasAttribute('hidden')),
       true,
-      'Turn rail DOM hidden when showStepTurnRail is false'
+      'No visible turn rail when showStepTurnRail is false'
     );
     const stepHeaderThs = stepTableWhileRailOff.children[0].children[0].children;
     assert.equal(stepHeaderThs.length, 9, 'StepsDetailView thead dynamically renders 9 columns');
@@ -2144,8 +2145,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const row1Rail = stepRows[1].children[0].querySelector('.turn-rail');
     assert.equal(row0Rail.hasAttribute('hidden'), false);
     assert.equal(row0Rail.classList.contains('is-latest'), true);
-    assert.equal(row0Rail.querySelector('.turn-rail-dot').classList.contains('is-cap'), true, 'Newest step in turn renders cap dot');
-    assert.equal(row1Rail.querySelector('.turn-rail-dot').classList.contains('is-origin'), true, 'First step of user turn renders hollow origin dot');
+    assert.equal(row0Rail.classList.contains('is-cap'), true, 'Newest step in turn renders cap dot');
+    assert.equal(row1Rail.classList.contains('is-origin'), true, 'First step of user turn renders hollow origin dot');
 
     const turnPromptTipEl = stepsPane.querySelector('.turn-prompt-tip');
     assert.equal(turnPromptTipEl.hasAttribute('hidden'), true, 'Prompt preview tooltip hidden initially');
@@ -2438,17 +2439,18 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(multiStepRows[0].children[0].querySelector('.agent-badge').textContent, '子1');
     assert.equal(multiStepRows[1].children[0].querySelector('.agent-badge').textContent, '主');
     assert.equal(
-      multiStepRows[0].children[0].querySelector('.turn-rail-dot').classList.contains('is-cap'),
+      multiStepRows[0].children[0].querySelector('.turn-rail').classList.contains('is-cap'),
       true,
       'Interleaved subagent step at top joins unified rootTurnIndex rail as cap'
     );
     assert.equal(
-      multiStepRows[1].children[0].querySelector('.turn-rail-dot').hasAttribute('hidden'),
-      true,
+      multiStepRows[1].children[0].querySelector('.turn-rail').classList.contains('is-cap') ||
+        multiStepRows[1].children[0].querySelector('.turn-rail').classList.contains('is-origin'),
+      false,
       'Middle main step connects continuously along unified rootTurnIndex rail'
     );
     assert.equal(
-      multiStepRows[2].children[0].querySelector('.turn-rail-dot').classList.contains('is-origin'),
+      multiStepRows[2].children[0].querySelector('.turn-rail').classList.contains('is-origin'),
       true,
       'Earliest main step anchors unified rootTurnIndex rail origin'
     );

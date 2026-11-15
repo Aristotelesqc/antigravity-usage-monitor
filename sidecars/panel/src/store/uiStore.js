@@ -23,9 +23,14 @@ export function getViewTabs() {
 
 export const uiStore = createReactiveStore({
   activeView: 'overview',
+  monitorVisible: true,
   stepsSubTab: 'steps', // 'steps' | 'models'
   settingsSubTab: 'general', // 'general' | 'structure' | 'account' | 'other'
   settingsStructureTab: 'mount', // 'mount' | 'hover' | 'overview' | 'steps'
   selectedAgentScope: 'all', // 'all' | 'main' | <subagent cascadeId>
   ctxInspectorAgentId: 'auto', // 'auto' | 'main' | <subagent cascadeId>
 });
+
+export function getVisibleMonitorView(state = uiStore.getState()) {
+  return state.monitorVisible ? state.activeView : null;
+}

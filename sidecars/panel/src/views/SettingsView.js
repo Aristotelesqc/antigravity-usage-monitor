@@ -8,7 +8,7 @@ import { defineComponent } from '../core/component.js';
 import { h, patchAttr } from '../core/domPatch.js';
 import { i18nStore, t } from '../i18n/index.js';
 import { telemetryStore } from '../store/telemetryStore.js';
-import { uiStore } from '../store/uiStore.js';
+import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import { CustomScrollbar } from '../components/ui/CustomScrollbar.js';
 import { SegmentedControl } from '../components/ui/SegmentedControl.js';
 import { SettingsAccountTab } from './settings/SettingsAccountTab.js';
@@ -37,7 +37,7 @@ export const SettingsView = defineComponent({
       modelValue: initialSubTab,
       options: getSettingsSubTabOptions(),
       onUpdateModelValue: (nextSubTab) => {
-        uiStore.setState({ settingsSubTab: nextSubTab });
+        uiStore.setState({ settingsSubTab: nextSubTab }, { sync: true });
       },
     });
 
@@ -95,20 +95,21 @@ export const SettingsView = defineComponent({
       viewScrollbar.el,
     ]);
 
-    let latestSettings = null;
-    let latestCloudStatus = null;
-    let latestContextWindowModels = [];
-    const initialTelemetry = telemetryStore.getState().telemetry;
-    accountTab.refs.renderAccount(initialTelemetry?.account, initialTelemetry?.quotas);
-
-    function syncAllTabs(settings, cloudStatus) {
-      if (settings) {
-        generalTab.refs.renderSettings(settings);
-        structureTab.refs.renderSettings(settings);
-        otherTab.refs.renderSettings(settings, latestContextWindowModels);
-      }
-      if (cloudStatus) {
-        generalTab.refs.renderCloudStatus(cloudStatus);
+    function syncActiveTab() {
+      const ui = uiStore.getState();
+      const { settingsSubTab } = ui;
+      if (getVisibleMonitorView(ui) !== 'settings') return;
+      const telemetry = telemetryStore.getState().telemetry;
+      const settings = telemetry?.settings;
+      if (settingsSubTab === 'structure') {
+        if (settings) structureTab.refs.renderSettings(settings);
+      } else if (settingsSubTab === 'other') {
+        if (settings) otherTab.refs.renderSettings(settings, telemetry.contextWindowModels || []);
+      } else if (SHOW_ACCOUNT_TAB && settingsSubTab === 'account') {
+        accountTab.refs.renderAccount(telemetry?.account, telemetry?.quotas);
+      } else {
+        if (settings) generalTab.refs.renderSettings(settings);
+        if (telemetry?.cloudStatus) generalTab.refs.renderCloudStatus(telemetry.cloudStatus);
       }
       refreshScroll();
     }
@@ -121,33 +122,17 @@ export const SettingsView = defineComponent({
         account: st.telemetry?.account,
         quotas: st.telemetry?.quotas,
       }),
-      (slice) => {
-        latestSettings = slice.settings;
-        latestCloudStatus = slice.cloudStatus;
-        latestContextWindowModels = slice.contextWindowModels || [];
-        accountTab.refs.renderAccount(slice.account, slice.quotas);
-        if (slice.settings) {
-          generalTab.refs.renderSettings(slice.settings);
-          structureTab.refs.renderSettings(slice.settings);
-          otherTab.refs.renderSettings(slice.settings, latestContextWindowModels);
-        }
-        if (uiStore.getState().activeView === 'settings' && slice.cloudStatus) {
-          generalTab.refs.renderCloudStatus(slice.cloudStatus);
-        }
-        refreshScroll();
-      }
+      syncActiveTab
     );
 
     const unsubUi = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         settingsSubTab: st.settingsSubTab,
       }),
       (slice) => {
         applyActiveSubTab(slice.settingsSubTab, slice.activeView);
-        if (slice.activeView === 'settings') {
-          syncAllTabs(latestSettings, latestCloudStatus);
-        }
+        syncActiveTab();
       }
     );
 

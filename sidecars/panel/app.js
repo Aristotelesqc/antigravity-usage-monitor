@@ -306,6 +306,8 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   // Formatters & Common Labels
   'fmt.pending': '待定',
   'fmt.speedIncomplete': '计时不完整',
+  'fmt.speedCanceled': '已取消',
+  'fmt.speedCompactionTimingUnavailable': '压缩无计时',
   'fmt.speedInvalidOutput': '无有效输出',
   'fmt.speedInconsistent': '耗时数据异常',
   'fmt.speedShort': '耗时过短 (<0.5s)',
@@ -794,6 +796,8 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   // Formatters & Common Labels
   'fmt.pending': 'N/A',
   'fmt.speedIncomplete': 'Incomplete timing',
+  'fmt.speedCanceled': 'Canceled',
+  'fmt.speedCompactionTimingUnavailable': 'Untimed compaction',
   'fmt.speedInvalidOutput': 'No valid output',
   'fmt.speedInconsistent': 'Invalid timing',
   'fmt.speedShort': 'Too brief (<0.5s)',
@@ -1793,6 +1797,8 @@ function formatUsd(amount, { precise = false } = {}) {
 const SPEED_REASON_LABELS = {
   __proto__: null,
   incomplete_or_invalid_timing: 'fmt.speedIncomplete',
+  canceled: 'fmt.speedCanceled',
+  compaction_timing_unavailable: 'fmt.speedCompactionTimingUnavailable',
   invalid_output_tokens: 'fmt.speedInvalidOutput',
   inconsistent_timing: 'fmt.speedInconsistent',
   short_timing: 'fmt.speedShort',
@@ -2346,12 +2352,17 @@ function getViewTabs() {
 
 const uiStore = createReactiveStore({
   activeView: 'overview',
+  monitorVisible: true,
   stepsSubTab: 'steps', // 'steps' | 'models'
   settingsSubTab: 'general', // 'general' | 'structure' | 'account' | 'other'
   settingsStructureTab: 'mount', // 'mount' | 'hover' | 'overview' | 'steps'
   selectedAgentScope: 'all', // 'all' | 'main' | <subagent cascadeId>
   ctxInspectorAgentId: 'auto', // 'auto' | 'main' | <subagent cascadeId>
 });
+
+function getVisibleMonitorView(state = uiStore.getState()) {
+  return state.monitorVisible ? state.activeView : null;
+}
 
 // --- src/store/telemetryStore.js ---
 /**
@@ -2452,6 +2463,8 @@ let feedbackTimer = null;
 let activeBundleVersion = 0;
 let latestRequestSeq = 0;
 let activeForceCount = 0;
+let inFlightTelemetryPoll = null;
+let lastReceivedSteps = null;
 let loopActive = false;
 let loopIntervalMs = 2000;
 let loopTickFn = null;
@@ -2878,10 +2891,11 @@ function isEquivalentTelemetry(prev, next) {
     ) {
       return false;
     }
-    const paSteps = pa?.recentSteps || [];
-    const naSteps = na?.recentSteps || [];
+    // 主代理步骤由根会话统一比对，避免明细视图组装后的引用造成重复比对。
+    const paSteps = pa?.isMain && pAct?.recentSteps ? [] : pa?.recentSteps || [];
+    const naSteps = na?.isMain && nAct?.recentSteps ? [] : na?.recentSteps || [];
     if (paSteps.length !== naSteps.length) return false;
-    for (let j = 0; j < paSteps.length; j++) {
+    for (let j = 0; paSteps !== naSteps && j < paSteps.length; j++) {
       const bs = paSteps[j];
       const as = naSteps[j];
       if (
@@ -2910,6 +2924,8 @@ function isEquivalentTelemetry(prev, next) {
         bs?.rootTurnIndex !== as?.rootTurnIndex ||
         bs?.isTurnStart !== as?.isTurnStart ||
         bs?.isRootTurnStart !== as?.isRootTurnStart ||
+        bs?.isLatestTurn !== as?.isLatestTurn ||
+        bs?.isRootLatestTurn !== as?.isRootLatestTurn ||
         bs?.turnPrompt !== as?.turnPrompt ||
         bs?.rootTurnPrompt !== as?.rootTurnPrompt
       ) {
@@ -2936,9 +2952,10 @@ function isEquivalentTelemetry(prev, next) {
   if (pCtx?.systemPromptTokens !== nCtx?.systemPromptTokens) return false;
   if (pCtx?.userRulesTokens !== nCtx?.userRulesTokens) return false;
   if ((pAct?.recentSteps?.length || 0) !== (nAct?.recentSteps?.length || 0)) return false;
-  for (let i = 0; i < (pAct?.recentSteps?.length || 0); i++) {
+  for (let i = 0; pAct?.recentSteps !== nAct?.recentSteps && i < (pAct?.recentSteps?.length || 0); i++) {
     const before = pAct.recentSteps[i], after = nAct.recentSteps[i];
     if (
+      before.stepIndex !== after.stepIndex ||
       before.createdAtMs !== after.createdAtMs ||
       before.totalDurationSec !== after.totalDurationSec ||
       before.streamDurationSec !== after.streamDurationSec ||
@@ -2963,6 +2980,8 @@ function isEquivalentTelemetry(prev, next) {
       before.rootTurnIndex !== after.rootTurnIndex ||
       before.isTurnStart !== after.isTurnStart ||
       before.isRootTurnStart !== after.isRootTurnStart ||
+      before.isLatestTurn !== after.isLatestTurn ||
+      before.isRootLatestTurn !== after.isRootLatestTurn ||
       before.turnPrompt !== after.turnPrompt ||
       before.rootTurnPrompt !== after.rootTurnPrompt
     ) {
@@ -3174,7 +3193,61 @@ async function fetchTelemetry({ force = false } = {}) {
     return telemetryStore.getState().telemetry;
   }
 
-  const st = telemetryStore.getState();
+  const overlay = isWindowOverlayMode();
+  if (overlay) {
+    const st = telemetryStore.getState();
+    const liveRouteId = extractHostRouteCascadeId();
+    if (liveRouteId !== st.hostRouteConversationId) {
+      const patch = { hostRouteConversationId: liveRouteId };
+      if (liveRouteId && st.selectedConversationId && st.selectedConversationId !== liveRouteId) {
+        patch.selectedConversationId = '';
+      }
+      telemetryStore.setState(patch);
+    }
+  }
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  if (current.selectedTimeRange) params.set('range', current.selectedTimeRange);
+  if (current.selectedTimeRange === 'custom') {
+    if (current.customStartMs > 0) params.set('startMs', String(current.customStartMs));
+    if (current.customEndMs > 0) params.set('endMs', String(current.customEndMs));
+  }
+  if (force) params.set('force', '1');
+  params.set('stepDetails', 'display');
+
+  if (force) {
+    inFlightTelemetryPoll = null;
+    return requestTelemetry(params, true);
+  }
+  const query = params.toString();
+  const bridge = overlay ? getWindowBridgeConfig() : null;
+  const existing = inFlightTelemetryPoll;
+  if (existing?.query === query && existing.port === bridge?.port && existing.token === bridge?.token) {
+    return existing.promise;
+  }
+  const poll = { query, port: bridge?.port, token: bridge?.token, promise: null };
+  poll.promise = requestTelemetry(params, false).finally(() => {
+    if (inFlightTelemetryPoll === poll) inFlightTelemetryPoll = null;
+  });
+  inFlightTelemetryPoll = poll;
+  return poll.promise;
+}
+
+function readDisplaySteps(payload) {
+  const active = payload?.activeConversation;
+  if (!payload?.stepRevision || !Array.isArray(active?.recentSteps)) return null;
+  return {
+    revision: payload.stepRevision,
+    recentSteps: active.recentSteps,
+    agentSteps: active.agents.map((agent) => agent.recentSteps === active.recentSteps
+      ? undefined
+      : agent.recentSteps),
+  };
+}
+
+async function requestTelemetry(params, force) {
   const reqSeq = ++latestRequestSeq;
   const startMs = Date.now();
 
@@ -3188,41 +3261,28 @@ async function fetchTelemetry({ force = false } = {}) {
   }
 
   try {
-    if (isWindowOverlayMode()) {
-      const liveRouteId = extractHostRouteCascadeId();
-      if (liveRouteId !== st.hostRouteConversationId) {
-        const patch = { hostRouteConversationId: liveRouteId };
-        if (liveRouteId && st.selectedConversationId && st.selectedConversationId !== liveRouteId) {
-          patch.selectedConversationId = '';
-        }
-        telemetryStore.setState(patch);
-      }
-    }
-    const curSt = telemetryStore.getState();
-    const effectiveConvId = curSt.selectedConversationId || curSt.hostRouteConversationId || '';
-    const params = new URLSearchParams();
-    if (effectiveConvId) {
-      params.set('conversationId', effectiveConvId);
-    }
-    if (curSt.selectedTimeRange) {
-      params.set('range', curSt.selectedTimeRange);
-    }
-    if (curSt.selectedTimeRange === 'custom') {
-      if (curSt.customStartMs > 0) params.set('startMs', String(curSt.customStartMs));
-      if (curSt.customEndMs > 0) params.set('endMs', String(curSt.customEndMs));
-    }
-    if (force) {
-      params.set('force', '1');
-    }
-    const qs = params.toString();
-    const payload = await callSidecarApi(`/api/telemetry${qs ? `?${qs}` : ''}`, {
+    const previousSteps = lastReceivedSteps || readDisplaySteps(telemetryStore.getState().telemetry);
+    params.set('stepRevision', previousSteps?.revision || '');
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
       method: 'GET',
       abortKey: force ? 'telemetry-force' : 'telemetry-poll',
     });
 
+    const active = payload?.activeConversation;
+    if (payload?.stepsUnchanged) {
+      if (!active || !previousSteps || payload.stepRevision !== previousSteps.revision) {
+        throw new Error('Telemetry step revision mismatch');
+      }
+      active.recentSteps = previousSteps.recentSteps;
+      active.agents.forEach((agent, index) => {
+        const steps = previousSteps.agentSteps[index];
+        if (steps) agent.recentSteps = steps;
+      });
+    }
     if (reqSeq !== latestRequestSeq) {
       return payload;
     }
+    lastReceivedSteps = readDisplaySteps(payload);
 
     if (payload?.uiBundleVersion) {
       if (activeBundleVersion && activeBundleVersion !== payload.uiBundleVersion) {
@@ -3522,26 +3582,28 @@ function formatAgentLabel(agent) {
  * @param {object|null} telemetry
  * @param {string} [selectedAgentScope='all']
  * @param {string} [ctxInspectorAgentId='auto']
+ * @param {boolean} [includeSteps=false] 是否组装调用明细所需的步骤列表
  */
 function resolveScopedConversation(
   telemetry,
   selectedAgentScope = 'all',
-  ctxInspectorAgentId = 'auto'
+  ctxInspectorAgentId = 'auto',
+  includeSteps = false
 ) {
   const active = telemetry?.activeConversation || {};
   const agents = Array.isArray(active.agents) && active.agents.length > 0 ? active.agents : [];
   const hasSubagents = Boolean(active.hasSubagents && agents.length > 1);
   const subagents = agents.filter((a) => !a.isMain);
   const mainAgent = agents.find((a) => a.isMain) || active;
-  if (mainAgent && !Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
+  if (includeSteps && !Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
     mainAgent.recentSteps = active.recentSteps;
   }
   const aggregated = active.aggregated || active;
-  if (hasSubagents && aggregated && !Array.isArray(aggregated.recentSteps)) {
+  if (includeSteps && hasSubagents && !Array.isArray(aggregated.recentSteps)) {
     const combined = [];
     for (const ag of agents) {
       const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
-      combined.push(...steps);
+      for (const step of steps) combined.push(step);
     }
     combined.sort(
       (a, b) =>
@@ -5954,7 +6016,8 @@ function computePublicationFit(
     let swx = 0;
     for (let j = start; j < end; j++) {
       const u = Math.abs(xs[j] - x0) / maxDist;
-      const w = u >= 1 ? 0 : (1 - u * u * u) ** 3;
+      const base = 1 - u * u * u;
+      const w = u >= 1 ? 0 : base * base * base;
       wBuf[j] = w;
       sw += w;
       swx += w * xs[j];
@@ -5976,6 +6039,8 @@ function computePublicationFit(
 
     const dx0 = x0 - mx;
     const useSlope = sxxW > 1e-12;
+    const inverseWeightSum = 1 / sw;
+    const slopeScale = useSlope ? dx0 / sxxW : 0;
     let rawFit = 0;
     let leverageNormSq = 0;
     let diagHat = 0;
@@ -5983,7 +6048,7 @@ function computePublicationFit(
     for (let j = start; j < end; j++) {
       const w = wBuf[j];
       if (w <= 0) continue;
-      const lj = w / sw + (useSlope ? (w * (xs[j] - mx) * dx0) / sxxW : 0);
+      const lj = w * inverseWeightSum + (useSlope ? w * (xs[j] - mx) * slopeScale : 0);
       rawFit += lj * ys[j];
       leverageNormSq += lj * lj;
       if (j === diagIdx) diagHat = lj;
@@ -7114,6 +7179,26 @@ function createModelFitChart() {
   let hoveredIdx = -1;
   let lastSig = '';
   let lastUpdateParams = null;
+  let fitCacheMetric = '';
+  const fitCache = new Map();
+
+  function reusePublicationFit(key, xs, ys, maxVal, isMultiCompare) {
+    const previous = fitCache.get(key);
+    if (
+      previous && previous.xs.length === xs.length &&
+      xs.every((x, i) => x === previous.xs[i] && ys[i] === previous.ys[i])
+    ) {
+      return previous.result;
+    }
+    const result = computePublicationFit(xs, ys, {
+      minVal: 0,
+      maxVal,
+      gridSize: isMultiCompare ? 56 : 64,
+      span: 0.5,
+    });
+    fitCache.set(key, { xs, ys, result });
+    return result;
+  }
 
   function syncViewWidth() {
     const measured = Math.round(
@@ -7439,7 +7524,16 @@ function createModelFitChart() {
       }
     }
 
+    if (fitCacheMetric !== metric) {
+      fitCache.clear();
+      fitCacheMetric = metric;
+    }
+    for (const key of fitCache.keys()) {
+      if (isMultiCompare ? !targetKeySet.has(key) : key !== null) fitCache.delete(key);
+    }
+
     if (matchedItems.length === 0) {
+      fitCache.clear();
       currentSamples = [];
       lastSig = 'empty';
       patchAttr(ciBandPath, 'd', '');
@@ -7471,12 +7565,7 @@ function createModelFitChart() {
         if (items.length === 0) continue;
         const xs = items.map((d) => d.xVal);
         const rawYs = items.map((d) => d.rawVal);
-        const pubFit = computePublicationFit(xs, rawYs, {
-          minVal: minBound,
-          maxVal: maxBound,
-          gridSize: 56,
-          span: 0.5,
-        });
+        const pubFit = reusePublicationFit(key, xs, rawYs, maxBound, true);
         const colorVar =
           modelColorByGroup?.get(key) || MODEL_COLOR_VARS[kIdx % MODEL_COLOR_VARS.length];
         seriesList.push({
@@ -7704,12 +7793,7 @@ function createModelFitChart() {
     const filtered = matchedItems;
     const xs = filtered.map((d) => d.xVal);
     const rawYs = filtered.map((d) => d.rawVal);
-    const pubFit = computePublicationFit(xs, rawYs, {
-      minVal: minBound,
-      maxVal: maxBound,
-      gridSize: 64,
-      span: 0.5,
-    });
+    const pubFit = reusePublicationFit(null, xs, rawYs, maxBound, false);
 
     patchText(fitMethodLabelEl, pubFit.method === 'LOESS' ? 'LOESS 拟合' : 'OLS 回归');
     patchAttr(olsLegendWrapEl, 'hidden', filtered.length < 6);
@@ -10248,24 +10332,29 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
         className: 'cell-value tone-muted',
         style: 'font-size: var(--fs-base-sm);',
       });
-      const speedReason = h('div', {
-        className: 'text-muted',
-        style: 'font-size: var(--fs-2xs);',
-      });
       const wrapEl = h(
         'span',
         { style: 'display: inline-block; vertical-align: middle;' },
-        [speedMain, speedReason]
+        [speedMain]
       );
       const td = h('td', {}, [wrapEl]);
-      return { td, refs: { td, speedMain, speedReason } };
+      return { td, refs: { wrapEl, speedMain, speedReason: null } };
     },
     updateCell: (refs, st) => {
       patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
       patchAttr(refs.speedMain, 'class', `cell-value ${getSpeedToneClass(st.tokPerSec)}`);
       const reason = speedReasonText(st.selectedSpeedReason);
-      patchText(refs.speedReason, reason);
-      patchAttr(refs.speedReason, 'hidden', !reason);
+      if (reason && !refs.speedReason) {
+        refs.speedReason = h('div', {
+          className: 'text-muted',
+          style: 'font-size: var(--fs-2xs);',
+        });
+        refs.wrapEl.appendChild(refs.speedReason);
+      }
+      if (refs.speedReason) {
+        patchText(refs.speedReason, reason);
+        patchAttr(refs.speedReason, 'hidden', !reason);
+      }
     },
   },
 
@@ -10899,6 +10988,34 @@ const StepTableWidget = defineComponent({
 
     stepsTablePane.addEventListener('scroll', hideTurnTip);
     stepsTbody.addEventListener('mouseleave', hideTurnTip);
+    const hoverRows = new WeakMap();
+    let lastRenderedRows = null;
+    let lastRenderOptions = '';
+
+    function enterStepCell(event) {
+      const { badge, prompt } = hoverRows.get(this);
+      if (event?.target === badge) hideTurnTip();
+      else showTurnTip(this, prompt);
+    }
+
+    function moveInStepCell(event) {
+      if (event?.target === hoverRows.get(this).badge) hideTurnTip();
+    }
+
+    function moveAlongTurnRail(event) {
+      const { badge, prompt } = hoverRows.get(this);
+      const rect = this.getBoundingClientRect?.();
+      const relX = rect ? (event?.clientX ?? 0) - rect.left : 0;
+      if (event?.target !== badge && relX <= 18) showTurnTip(this, prompt);
+      else hideTurnTip();
+    }
+
+    function clearCellHover(cell) {
+      if (!cell || !hoverRows.delete(cell)) return;
+      cell.onmouseenter = null;
+      cell.onmousemove = null;
+      cell.onmouseleave = null;
+    }
 
     function renderStepTable(
       tableSteps,
@@ -10915,6 +11032,16 @@ const StepTableWidget = defineComponent({
       } = {}
     ) {
       const colOrderSig = colKeys.join(',');
+      const renderOptions = JSON.stringify([
+        cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
+        showStepTurnRail, showStepAgentBadge, displaySettings.showUpstreamModel,
+        displaySettings.orchestratorIdMode,
+      ]);
+      if (lastRenderOptions === renderOptions && lastRenderedRows &&
+          (lastRenderedRows === tableSteps || (lastRenderedRows.length === tableSteps.length &&
+            tableSteps.every((step, i) => step === lastRenderedRows[i])))) {
+        return;
+      }
       const wantedSet = new Set(colKeys);
       syncTableHeaderColumns(colKeys);
 
@@ -10937,20 +11064,23 @@ const StepTableWidget = defineComponent({
         Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
       const getStepPrompt = (st) =>
         (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
-      const turnKeyOf = (st) => {
-        if (!showStepTurnRail) return '';
+      const turnKeys = showStepTurnRail ? tableSteps.map((st) => {
         const tIdx = getStepTurnIdx(st);
         if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
         return useRootTurn ? `root:${tIdx}` : `${st?.agentId || 'main'}:${tIdx}`;
-      };
+      }) : [];
+      const formattedPrompts = new Map();
+      function formattedTurnPrompt(st) {
+        const raw = getStepPrompt(st);
+        if (!formattedPrompts.has(raw)) formattedPrompts.set(raw, formatTurnPromptText(raw));
+        return formattedPrompts.get(raw);
+      }
 
       const decoratedSteps = tableSteps.map((st, idx) => {
-        const tKey = turnKeyOf(st);
+        const tKey = turnKeys[idx];
         const hasTurn = Boolean(tKey);
-        const hasUp = Boolean(hasTurn && idx > 0 && turnKeyOf(tableSteps[idx - 1]) === tKey);
-        const hasDown = Boolean(
-          hasTurn && idx + 1 < tableSteps.length && turnKeyOf(tableSteps[idx + 1]) === tKey
-        );
+        const hasUp = hasTurn && turnKeys[idx - 1] === tKey;
+        const hasDown = hasTurn && turnKeys[idx + 1] === tKey;
         return {
           st,
           rowKey: `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
@@ -10959,7 +11089,7 @@ const StepTableWidget = defineComponent({
           hasDown,
           isStart: Boolean(hasTurn && (getStepIsStart(st) || !hasDown)),
           isLatest: hasTurn && getStepIsLatest(st),
-          prompt: hasTurn ? formatTurnPromptText(getStepPrompt(st)) : '',
+          prompt: hasTurn ? formattedTurnPrompt(st) : '',
         };
       });
 
@@ -10976,32 +11106,20 @@ const StepTableWidget = defineComponent({
           const parts = colKeys
             .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
             .join('|');
-          const badgeSig = `${showAgentBadge}:${interactiveBadges}:${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`;
+          const badgeSig = showAgentBadge
+            ? `${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`
+            : '';
           return `${locale}:${colOrderSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: () => {
           const tr = h('tr');
-          const railLineEl = h('span', { className: 'turn-rail-line', hidden: true });
-          const railDotEl = h('span', { className: 'turn-rail-dot', hidden: true });
-          const railEl = h(
-            'span',
-            { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
-            [railLineEl, railDotEl]
-          );
-          const agentBadgeEl = h('span', {
-            className: 'agent-badge',
-            hidden: true,
-            style: 'margin-right: 4px;',
-          });
           return {
             el: tr,
             refs: {
               cellMap: new Map(),
               colOrderSig: '',
-              railEl,
-              railLineEl,
-              railDotEl,
-              agentBadgeEl,
+              railEl: null,
+              agentBadgeEl: null,
               hoverTd: null,
             },
           };
@@ -11011,17 +11129,15 @@ const StepTableWidget = defineComponent({
 
           if (refs.colOrderSig !== colOrderSig) {
             if (refs.hoverTd) {
-              refs.hoverTd.onmouseenter = null;
-              refs.hoverTd.onmousemove = null;
-              refs.hoverTd.onmouseleave = null;
+              clearCellHover(refs.hoverTd);
               refs.hoverTd = null;
             }
             for (const [oldColKey, entry] of refs.cellMap) {
               if (!wantedSet.has(oldColKey)) {
-                if (refs.railEl.parentNode === entry.td) {
+                if (refs.railEl?.parentNode === entry.td) {
                   entry.td.removeChild(refs.railEl);
                 }
-                if (refs.agentBadgeEl.parentNode === entry.td) {
+                if (refs.agentBadgeEl?.parentNode === entry.td) {
                   entry.td.removeChild(refs.agentBadgeEl);
                 }
                 tr.removeChild(entry.td);
@@ -11029,14 +11145,19 @@ const StepTableWidget = defineComponent({
               }
             }
 
-            for (const [i, colKey] of colKeys.entries()) {
-              if (!refs.cellMap.has(colKey)) {
-                refs.cellMap.set(colKey, STEP_COLUMN_REGISTRY[colKey].createCell());
+            const isNewRow = refs.colOrderSig === '';
+            for (let i = 0; i < colKeys.length; i++) {
+              const colKey = colKeys[i];
+              let cell = refs.cellMap.get(colKey);
+              if (!cell) {
+                cell = STEP_COLUMN_REGISTRY[colKey].createCell();
+                refs.cellMap.set(colKey, cell);
               }
-              const targetTd = refs.cellMap.get(colKey).td;
-              const currentTd = tr.children[i] || null;
-              if (currentTd !== targetTd) {
-                tr.insertBefore(targetTd, currentTd);
+              if (isNewRow) {
+                tr.appendChild(cell.td);
+              } else {
+                const currentTd = tr.children[i] || null;
+                if (currentTd !== cell.td) tr.insertBefore(cell.td, currentTd);
               }
             }
             refs.colOrderSig = colOrderSig;
@@ -11049,12 +11170,22 @@ const StepTableWidget = defineComponent({
 
           const firstColKey = colKeys[0];
           const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
+          const showRowRail = Boolean(hasTurn && firstTd);
+          if (showRowRail && !refs.railEl) {
+            refs.railEl = h('span', { className: 'turn-rail', 'aria-hidden': 'true' });
+          }
+          if (showAgentBadge && firstTd && !refs.agentBadgeEl) {
+            refs.agentBadgeEl = h('span', { className: 'agent-badge', style: 'margin-right: 4px;' });
+          }
           if (firstTd) {
-            if (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl) {
+            if (refs.railEl && (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl)) {
               firstTd.insertBefore(refs.railEl, firstTd.firstChild);
             }
-            const afterRail = refs.railEl.nextSibling ?? firstTd.children[1] ?? null;
-            if (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl) {
+            const afterRail = refs.railEl
+              ? refs.railEl.nextSibling ?? firstTd.children[1] ?? null
+              : firstTd.firstChild;
+            if (refs.agentBadgeEl &&
+              (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl)) {
               firstTd.insertBefore(refs.agentBadgeEl, afterRail);
             }
           }
@@ -11105,72 +11236,29 @@ const StepTableWidget = defineComponent({
               patchAttr(refs.agentBadgeEl, 'title', null);
               refs.agentBadgeEl.onclick = null;
             }
-          } else {
+          } else if (refs.agentBadgeEl) {
             refs.agentBadgeEl.onclick = null;
           }
 
-          const showRowRail = Boolean(railActive && hasTurn && firstTd);
           patchAttr(refs.railEl, 'hidden', !showRowRail);
           if (showRowRail) {
-            patchClasses(refs.railEl, {
-              'is-latest': isLatest,
-              'has-up': hasUp,
-              'has-down': hasDown,
-            });
-            patchAttr(refs.railLineEl, 'hidden', !hasUp && !hasDown);
-            const showOrigin = isStart;
-            const showCap = !showOrigin && !hasUp && hasDown;
-            patchAttr(refs.railDotEl, 'hidden', !showOrigin && !showCap);
-            patchClasses(refs.railDotEl, {
-              'is-origin': showOrigin,
-              'is-cap': showCap,
-            });
+            const marker = isStart ? ' is-origin' : !hasUp && hasDown ? ' is-cap' : '';
+            patchAttr(refs.railEl, 'class', `turn-rail${isLatest ? ' is-latest' : ''}${hasUp ? ' has-up' : ''}${hasDown ? ' has-down' : ''}${marker}`);
           }
 
-          const targetHoverTd = firstTd;
-          if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
-            refs.hoverTd.onmouseenter = null;
-            refs.hoverTd.onmousemove = null;
-            refs.hoverTd.onmouseleave = null;
-          }
-          refs.hoverTd = targetHoverTd;
-
-          if (targetHoverTd) {
-            const badgeEl = refs.agentBadgeEl;
-            if (firstColKey === 'step') {
-              targetHoverTd.onmouseenter = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                  return;
-                }
-                showTurnTip(targetHoverTd, prompt);
-              };
-              targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                }
-              };
-              targetHoverTd.onmouseleave = hideTurnTip;
-            } else {
-              targetHoverTd.onmouseenter = null;
-              targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                  return;
-                }
-                const rect = targetHoverTd.getBoundingClientRect?.();
-                const relX = rect ? (ev?.clientX ?? 0) - rect.left : 0;
-                if (relX <= 18) {
-                  showTurnTip(targetHoverTd, prompt);
-                } else {
-                  hideTurnTip();
-                }
-              };
-              targetHoverTd.onmouseleave = hideTurnTip;
-            }
+          const hoverTd = showRowRail && prompt ? firstTd : null;
+          if (refs.hoverTd !== hoverTd) clearCellHover(refs.hoverTd);
+          refs.hoverTd = hoverTd;
+          if (hoverTd) {
+            hoverRows.set(hoverTd, { badge: refs.agentBadgeEl, prompt });
+            hoverTd.onmouseenter = firstColKey === 'step' ? enterStepCell : null;
+            hoverTd.onmousemove = firstColKey === 'step' ? moveInStepCell : moveAlongTurnRail;
+            hoverTd.onmouseleave = hideTurnTip;
           }
         },
       });
+      lastRenderOptions = renderOptions;
+      lastRenderedRows = tableSteps;
     }
 
     onCleanup(() => {
@@ -12827,7 +12915,7 @@ const SettingsStructureTab = defineComponent({
 
     function isStructureVisible() {
       const st = uiStore.getState();
-      return st.activeView === 'settings' && st.settingsSubTab === 'structure';
+      return getVisibleMonitorView(st) === 'settings' && st.settingsSubTab === 'structure';
     }
 
     function buildDraftTelemetry() {
@@ -13522,7 +13610,7 @@ const SettingsStructureTab = defineComponent({
     let wasStructureVisible = isStructureVisible();
     const unsubUi = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         settingsSubTab: st.settingsSubTab,
         settingsStructureTab: st.settingsStructureTab,
       }),
@@ -14410,6 +14498,7 @@ const TopSessionHeader = defineComponent({
       } else if (currentCascadeId) {
         lastActiveCascadeId = currentCascadeId;
       }
+      if (!uiSt.monitorVisible) return;
 
       patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
       patchAttr(refreshBtn, 'aria-label', t('header.ariaRefresh'));
@@ -14573,10 +14662,18 @@ const TopSessionHeader = defineComponent({
       (st) => st.locale,
       () => renderHeaderState()
     );
+    const unsubVisibility = uiStore.subscribe(
+      (st) => st.monitorVisible,
+      (visible) => {
+        if (visible) renderHeaderState();
+      },
+      { immediate: false }
+    );
 
     onCleanup(() => {
       unsubTelemetry();
       unsubI18n();
+      unsubVisibility();
       convSelect.destroy();
     });
 
@@ -14608,7 +14705,7 @@ const LiveOverviewView = defineComponent({
     const widgetHost = createDynamicWidgetHost({
       containerEl: overviewInner,
       mode: 'overview',
-      isVisibleFn: () => uiStore.getState().activeView === 'overview',
+      isVisibleFn: () => getVisibleMonitorView() === 'overview',
       initialModuleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
     });
 
@@ -14629,13 +14726,13 @@ const LiveOverviewView = defineComponent({
     }
 
     function ensureCountdownTicker() {
-      if (uiStore.getState().activeView !== 'overview') {
+      if (getVisibleMonitorView() !== 'overview') {
         stopCountdownTicker();
         return;
       }
       if (!countdownTickTimer) {
         countdownTickTimer = setInterval(() => {
-          if (uiStore.getState().activeView === 'overview' && latestData) {
+          if (getVisibleMonitorView() === 'overview' && latestData) {
             renderData(latestData);
           }
         }, 30_000);
@@ -14659,7 +14756,7 @@ const LiveOverviewView = defineComponent({
       (st) => ({ telemetry: st.telemetry, minuteTick: st.minuteTick }),
       ({ telemetry: data }) => {
         latestData = data;
-        if (uiStore.getState().activeView !== 'overview') {
+        if (getVisibleMonitorView() !== 'overview') {
           const stillRunning =
             (Array.isArray(data?.runningConversations) && data.runningConversations.length > 0) ||
             Boolean(
@@ -14681,7 +14778,7 @@ const LiveOverviewView = defineComponent({
 
     const unsubView = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         ctxInspectorAgentId: st.ctxInspectorAgentId,
       }),
       (slice) => {
@@ -14707,7 +14804,7 @@ const LiveOverviewView = defineComponent({
     const unsubI18n = i18nStore.subscribe(
       (st) => st.locale,
       () => {
-        if (uiStore.getState().activeView !== 'overview') {
+        if (getVisibleMonitorView() !== 'overview') {
           isDirty = true;
           // Refresh initial skeleton labels even before telemetry arrives
           if (!latestData) {
@@ -15225,11 +15322,38 @@ const ConsumptionView = defineComponent({
     let latestSlice = null;
     let isDirty = false;
 
+    let lastRenderedUsage = '';
+
     /**
      * 将遥测状态切片同步渲染至消费统计视图的 5 个子面板。
      */
     function renderConsumptionData(slice) {
       if (!slice) return;
+      const cons = slice.consumption || {};
+      const preset =
+        slice.range !== 'custom' && cons.presets?.[slice.range]
+          ? cons.presets[slice.range]
+          : null;
+      const acct = preset?.account || cons.account || {};
+      const rangeInfo = cons.selectedRange || {};
+      const dateSpan = formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs);
+      const now = new Date();
+      const currentMonthIdx = now.getMonth();
+      const monthlyYear = cons.monthlyYear || now.getFullYear();
+      const locale = i18nStore.getState().locale;
+      // 额度与会话状态也会发布遥测更新，只对用量页实际展示的数据重绘。
+      const signature = JSON.stringify([
+        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.showUpstreamModel,
+        slice.orchestratorIdMode, dateSpan, preset?.label || rangeInfo.label, acct,
+        cons.trendSeries, slice.modelBreakdown, cons.sourcesBreakdown,
+        monthlyYear, currentMonthIdx, cons.monthlySeries,
+      ]);
+      if (signature === lastRenderedUsage) return;
+      drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear });
+      lastRenderedUsage = signature;
+    }
+
+    function drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear }) {
       timeFilterSwitch.setValue(slice.range);
       patchAttr(customRangeBar, 'hidden', slice.range !== 'custom');
       if (!hasUncommittedCustomDraft) {
@@ -15239,16 +15363,8 @@ const ConsumptionView = defineComponent({
         endPicker.setValue(draftEndMs);
       }
 
-      const cons = slice.consumption || {};
-      const preset =
-        slice.range !== 'custom' && cons.presets?.[slice.range]
-          ? cons.presets[slice.range]
-          : null;
-      const acct = preset?.account || cons.account || {};
-      const rangeInfo = cons.selectedRange || {};
-
       // 1. 同步用量概览矩阵与顶部 4 段比例条
-      patchText(dateSpanBadge, formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs));
+      patchText(dateSpanBadge, dateSpan);
       const totalTokens = Number(acct.totalTokens || 0);
       const inputTokens = Number(acct.inputTokens || 0);
       const cacheTokens = Number(acct.cacheReadTokens || 0);
@@ -15375,8 +15491,6 @@ const ConsumptionView = defineComponent({
       });
 
       // 5. 同步 12 个月垂直堆叠柱状图（相对于年度峰值月缩放柱高，最低保留 8% 可视高度）
-      const monthlyYear = cons.monthlyYear || new Date().getFullYear();
-      const currentMonthIdx = new Date().getMonth();
       patchText(monthlyYearBadge, String(monthlyYear));
       const monthlySeries = cons.monthlySeries || [];
       const maxMonthTokens = Math.max(
@@ -15437,7 +15551,7 @@ const ConsumptionView = defineComponent({
       }),
       (slice) => {
         latestSlice = slice;
-        if (uiStore.getState().activeView !== 'consumption') {
+        if (getVisibleMonitorView() !== 'consumption') {
           isDirty = true;
           return;
         }
@@ -15447,7 +15561,7 @@ const ConsumptionView = defineComponent({
     );
 
     const unsubView = uiStore.subscribe(
-      (st) => st.activeView,
+      getVisibleMonitorView,
       (activeView) => {
         if (activeView === 'consumption' && isDirty) {
           isDirty = false;
@@ -15489,7 +15603,7 @@ const ConsumptionView = defineComponent({
       (st) => st.locale,
       () => {
         syncStaticLocaleLabels();
-        if (uiStore.getState().activeView === 'consumption' && latestSlice) {
+        if (getVisibleMonitorView() === 'consumption' && latestSlice) {
           isDirty = false;
           renderConsumptionData(latestSlice);
         } else {
@@ -15532,7 +15646,7 @@ function mergeSelectedAgentUnits(units) {
   for (const ag of units) {
     if (!ag || typeof ag !== 'object') continue;
     if (Array.isArray(ag.recentSteps)) {
-      combinedSteps.push(...ag.recentSteps);
+      for (const step of ag.recentSteps) combinedSteps.push(step);
     }
     const breakdown = Array.isArray(ag.modelBreakdown) ? ag.modelBreakdown : [];
     for (const m of breakdown) {
@@ -16002,7 +16116,8 @@ const StepsDetailView = defineComponent({
       const baseScope = resolveScopedConversation(
         { activeConversation: slice.activeConversation },
         'all',
-        uiSt.ctxInspectorAgentId
+        uiSt.ctxInspectorAgentId,
+        true
       );
       const { hasSubagents, agents, subagents, mainAgent, aggregated } = baseScope;
 
@@ -16509,7 +16624,7 @@ const StepsDetailView = defineComponent({
         subTabSwitch.setValue(tab);
         patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
         patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
-        if (uiStore.getState().activeView === 'steps' && latestSlice) {
+        if (getVisibleMonitorView() === 'steps' && latestSlice) {
           renderStepsData(latestSlice);
         } else if (tab === 'steps') {
           stepsScroll.refresh();
@@ -16535,7 +16650,7 @@ const StepsDetailView = defineComponent({
       }),
       (slice) => {
         latestSlice = slice;
-        if (uiStore.getState().activeView !== 'steps') {
+        if (getVisibleMonitorView() !== 'steps') {
           if (!fitUserPicked) {
             fitPinnedWhileVisible = false;
           }
@@ -16548,11 +16663,11 @@ const StepsDetailView = defineComponent({
     );
 
     let prevScope = uiStore.getState().selectedAgentScope;
-    let prevActiveView = uiStore.getState().activeView;
+    let prevActiveView = getVisibleMonitorView();
 
     const unsubView = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         selectedAgentScope: st.selectedAgentScope,
       }),
       (uiSlice) => {
@@ -16581,7 +16696,7 @@ const StepsDetailView = defineComponent({
       (st) => st.locale,
       () => {
         refreshStaticLocaleLabels();
-        if (uiStore.getState().activeView === 'steps' && latestSlice) {
+        if (getVisibleMonitorView() === 'steps' && latestSlice) {
           renderStepsData(latestSlice);
         } else {
           isDirty = true;
@@ -16659,7 +16774,7 @@ const SettingsView = defineComponent({
       modelValue: initialSubTab,
       options: getSettingsSubTabOptions(),
       onUpdateModelValue: (nextSubTab) => {
-        uiStore.setState({ settingsSubTab: nextSubTab });
+        uiStore.setState({ settingsSubTab: nextSubTab }, { sync: true });
       },
     });
 
@@ -16717,20 +16832,21 @@ const SettingsView = defineComponent({
       viewScrollbar.el,
     ]);
 
-    let latestSettings = null;
-    let latestCloudStatus = null;
-    let latestContextWindowModels = [];
-    const initialTelemetry = telemetryStore.getState().telemetry;
-    accountTab.refs.renderAccount(initialTelemetry?.account, initialTelemetry?.quotas);
-
-    function syncAllTabs(settings, cloudStatus) {
-      if (settings) {
-        generalTab.refs.renderSettings(settings);
-        structureTab.refs.renderSettings(settings);
-        otherTab.refs.renderSettings(settings, latestContextWindowModels);
-      }
-      if (cloudStatus) {
-        generalTab.refs.renderCloudStatus(cloudStatus);
+    function syncActiveTab() {
+      const ui = uiStore.getState();
+      const { settingsSubTab } = ui;
+      if (getVisibleMonitorView(ui) !== 'settings') return;
+      const telemetry = telemetryStore.getState().telemetry;
+      const settings = telemetry?.settings;
+      if (settingsSubTab === 'structure') {
+        if (settings) structureTab.refs.renderSettings(settings);
+      } else if (settingsSubTab === 'other') {
+        if (settings) otherTab.refs.renderSettings(settings, telemetry.contextWindowModels || []);
+      } else if (SHOW_ACCOUNT_TAB && settingsSubTab === 'account') {
+        accountTab.refs.renderAccount(telemetry?.account, telemetry?.quotas);
+      } else {
+        if (settings) generalTab.refs.renderSettings(settings);
+        if (telemetry?.cloudStatus) generalTab.refs.renderCloudStatus(telemetry.cloudStatus);
       }
       refreshScroll();
     }
@@ -16743,33 +16859,17 @@ const SettingsView = defineComponent({
         account: st.telemetry?.account,
         quotas: st.telemetry?.quotas,
       }),
-      (slice) => {
-        latestSettings = slice.settings;
-        latestCloudStatus = slice.cloudStatus;
-        latestContextWindowModels = slice.contextWindowModels || [];
-        accountTab.refs.renderAccount(slice.account, slice.quotas);
-        if (slice.settings) {
-          generalTab.refs.renderSettings(slice.settings);
-          structureTab.refs.renderSettings(slice.settings);
-          otherTab.refs.renderSettings(slice.settings, latestContextWindowModels);
-        }
-        if (uiStore.getState().activeView === 'settings' && slice.cloudStatus) {
-          generalTab.refs.renderCloudStatus(slice.cloudStatus);
-        }
-        refreshScroll();
-      }
+      syncActiveTab
     );
 
     const unsubUi = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         settingsSubTab: st.settingsSubTab,
       }),
       (slice) => {
         applyActiveSubTab(slice.settingsSubTab, slice.activeView);
-        if (slice.activeView === 'settings') {
-          syncAllTabs(latestSettings, latestCloudStatus);
-        }
+        syncActiveTab();
       }
     );
 
@@ -18007,11 +18107,15 @@ function mountWindowOverlay() {
     }
   }
 
-  function stopMultiLiveTicker() {
+  function pauseMultiLiveTicker() {
     if (multiLiveTickTimer) {
       clearInterval(multiLiveTickTimer);
       multiLiveTickTimer = null;
     }
+  }
+
+  function stopMultiLiveTicker() {
+    pauseMultiLiveTicker();
     multiTimersMap.clear();
   }
 
@@ -18479,6 +18583,7 @@ function mountWindowOverlay() {
   );
 
   // 完整四标签悬浮容器
+  uiStore.setState({ monitorVisible: false });
   const appInstance = App();
   const popoverEl = h(
     'div',
@@ -19154,10 +19259,13 @@ function mountWindowOverlay() {
     patchClasses(multiPanelEl, { 'is-instant': Boolean(instant && multiOpen) });
     patchAttr(multiPanelEl, 'hidden', !multiOpen);
     if (multiOpen) {
+      renderCapsuleTelemetry();
       positionFloatingElements();
       if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => positionFloatingElements());
       }
+    } else {
+      pauseMultiLiveTicker();
     }
   }
 
@@ -19188,6 +19296,7 @@ function mountWindowOverlay() {
     patchClasses(hoverTipEl, { 'is-instant': Boolean(instant && targetOpen) });
     patchAttr(hoverTipEl, 'hidden', !tooltipOpen);
     if (tooltipOpen) {
+      renderHoverWidgets();
       hoverWidgetHost.resumeTickers();
       positionFloatingElements();
       if (typeof requestAnimationFrame === 'function') {
@@ -19212,6 +19321,7 @@ function mountWindowOverlay() {
     patchClasses(popoverEl, { 'is-instant': Boolean(instant && popoverOpen) });
     patchAttr(capsuleBtn, 'aria-expanded', popoverOpen ? 'true' : 'false');
     patchAttr(popoverEl, 'hidden', !popoverOpen);
+    uiStore.setState({ monitorVisible: popoverOpen && !document.hidden }, { sync: true });
     if (popoverOpen) {
       positionFloatingElements();
       if (typeof requestAnimationFrame === 'function') {
@@ -19229,125 +19339,17 @@ function mountWindowOverlay() {
     syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
   }
 
-  // --- 4. 实时遥测状态绑定（双胶囊与多会话/动态组件浮层就地更新，零硬编码、零布局跳动） ---
-  function renderCapsuleTelemetry() {
-    if (disposed) return;
-    const telSt = telemetryStore.getState();
-    const uiSt = uiStore.getState();
-    const telemetry = telSt.telemetry;
-
-    setI18nLanguage(telemetry?.settings?.language);
-    applyAppearanceToRoot(capsuleHost, telemetry?.settings, { includeFontScale: false });
-    applyAppearanceToRoot(portalHost, telemetry?.settings, { includeFontScale: true });
-
-    const showMulti = telemetry?.settings?.showTopbarMultiSession !== false;
-    patchAttr(multiBtn, 'hidden', !showMulti);
-    patchAttr(capsuleHost, 'data-multi', showMulti ? 'on' : 'off');
-    if (!showMulti && multiOpen) {
-      setMultiOpen(false);
+  function renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, hostRouteConversationId) {
+    if (manualSubExpandMap.size > 0) {
+      const runningIds = new Set(rawRunningList.map((item) => item.cascadeId));
+      for (const id of manualSubExpandMap.keys()) {
+        if (!runningIds.has(id)) manualSubExpandMap.delete(id);
+      }
     }
-
-    const slotKeys = normalizeClientTopbarSlots(telemetry?.settings?.topbarCapsuleSlots);
-    const layoutInputsChanged =
-      showMulti !== lastShowMulti || slotKeys.length !== lastSlotCount;
-    if (layoutInputsChanged) {
-      lastShowMulti = showMulti;
-      lastSlotCount = slotKeys.length;
-      updateResponsiveLayout();
-    }
-
-    if (!telemetry) {
-      patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
-      patchText(multiLabel, t('capsule.multiZero'));
-      patchText(multiRunningMetaEl, t('multi.loading'));
-      stopMultiLiveTicker();
-
-      applyCapsuleSlots(slotKeys, { hasTelemetry: false });
-      return;
-    }
-
-    const { agents, scopedConv: overviewScopedConv, ctxAgent, aggregated } =
-      resolveScopedConversation(telemetry, 'all', uiSt.ctxInspectorAgentId);
-    const { scopedConv: capsuleScopedConv } = resolveScopedConversation(
-      telemetry,
-      uiSt.selectedAgentScope,
-      uiSt.ctxInspectorAgentId
-    );
-    const activeConv = telemetry.activeConversation || {};
-    const overviewActive = overviewScopedConv || activeConv;
-    const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
-    const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
-    const totalTokens = Number(ctx.totalTokens || 0);
-    const usedPct =
-      limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
-    const dashOffset = +(
-      RING_CIRCUMFERENCE *
-      (1 - Math.max(0, Math.min(100, usedPct)) / 100)
-    ).toFixed(2);
+    if (!multiOpen || document.hidden) return;
     const localeKey = getEffectiveLocale();
-
-    // --- 4a. 同步左侧多会话实时状态胶囊与浮层看板 ---
-    const rawRunningList =
-      Array.isArray(telemetry.runningConversations) && telemetry.runningConversations.length > 0
-        ? telemetry.runningConversations
-        : activeConv.isRunning || aggregated?.isRunning
-          ? [
-              {
-                cascadeId: activeConv.cascadeId || 'current',
-                title: activeConv.title || t('live.currentSession'),
-                isCurrentSelected: true,
-                isMainRunning: Boolean(activeConv.isRunning),
-                isRunning: true,
-                mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
-                subagentCount: Math.max(0, (agents?.length || 1) - 1),
-                runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
-                latestTokPerSec: overviewActive.latestTokPerSec ?? null,
-                contextUsedPct: usedPct,
-                subagents: (agents || [])
-                  .filter((a) => !a.isMain)
-                  .map((s, idx) => ({
-                    cascadeId: s.cascadeId || s.agentId,
-                    index: s.index || idx + 1,
-                    badgeText: s.badgeText || t('fmt.subBadge', { index: idx + 1 }),
-                    shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-                    role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
-                    isRunning: Boolean(s.isRunning),
-                    stepCount: Number(s.stepCount || 0),
-                    lastModifiedMs: s.lastModifiedMs || 0,
-                    liveActivity: s.liveActivity || {
-                      phase: s.isRunning ? 'thinking' : 'done',
-                      label: s.isRunning ? t('live.thinking') : t('live.done'),
-                      detail: '',
-                      stepProgress: '',
-                      startedAtMs: s.lastModifiedMs || 0,
-                      signature: `${s.agentId}:${s.stepCount || 0}`,
-                    },
-                  })),
-              },
-            ]
-          : [];
-
-    const runningCount = rawRunningList.length;
-    const runningSubCount = rawRunningList.reduce(
-      (acc, item) => acc + Number(item.runningSubagentCount || 0),
-      0
-    );
-    const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
-
-    patchClasses(multiBtn, {
-      'is-running': runningCount > 0 && !hasWaiting,
-      'is-waiting': runningCount > 0 && hasWaiting,
-    });
-    const multiBtnText =
-      runningCount > 0
-        ? runningSubCount > 0
-          ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
-          : t('capsule.multiRunning', { count: runningCount })
-        : t('capsule.multiZero');
-    patchText(multiLabel, multiBtnText);
-
     const hostRouteLower = String(
-      telSt.hostRouteConversationId || extractHostRouteCascadeId() || ''
+      hostRouteConversationId || extractHostRouteCascadeId() || ''
     ).toLowerCase();
 
     patchText(
@@ -19361,20 +19363,10 @@ function mountWindowOverlay() {
     patchAttr(multiEmptyEl, 'hidden', runningCount > 0);
     patchAttr(multiRunningListEl, 'hidden', runningCount === 0);
 
-    const runningIdsLower = new Set(
-      rawRunningList.map((item) => String(item.cascadeId || '').toLowerCase())
-    );
-
     if (runningCount === 0) {
       stopMultiLiveTicker();
-      manualSubExpandMap.clear();
+      patchKeyedList(multiRunningListEl, [], {});
     } else {
-      for (const cid of [...manualSubExpandMap.keys()]) {
-        if (!runningIdsLower.has(String(cid || '').toLowerCase())) {
-          manualSubExpandMap.delete(cid);
-        }
-      }
-
       const activeTimerKeys = new Set();
       for (const item of rawRunningList) {
         activeTimerKeys.add(`main:${item.cascadeId}`);
@@ -19562,7 +19554,135 @@ function mountWindowOverlay() {
         }
       }
       ensureMultiLiveTicker();
+      tickMultiElapsedDisplay();
     }
+  }
+
+  function renderHoverWidgets() {
+    const { telemetry, minuteTick } = telemetryStore.getState();
+    hoverWidgetHost.update({
+      moduleKeys: normalizeClientHoverModules(telemetry?.settings?.hoverModules),
+      data: telemetry,
+      minuteTick: Number(minuteTick || Math.floor(Date.now() / 30000)),
+    });
+  }
+
+  // --- 4. 实时遥测状态绑定（双胶囊与多会话/动态组件浮层就地更新，零硬编码、零布局跳动） ---
+  function renderCapsuleTelemetry() {
+    if (disposed) return;
+    const telSt = telemetryStore.getState();
+    const uiSt = uiStore.getState();
+    const telemetry = telSt.telemetry;
+
+    setI18nLanguage(telemetry?.settings?.language);
+    applyAppearanceToRoot(capsuleHost, telemetry?.settings, { includeFontScale: false });
+    applyAppearanceToRoot(portalHost, telemetry?.settings, { includeFontScale: true });
+
+    const showMulti = telemetry?.settings?.showTopbarMultiSession !== false;
+    patchAttr(multiBtn, 'hidden', !showMulti);
+    patchAttr(capsuleHost, 'data-multi', showMulti ? 'on' : 'off');
+    if (!showMulti && multiOpen) {
+      setMultiOpen(false);
+    }
+
+    const slotKeys = normalizeClientTopbarSlots(telemetry?.settings?.topbarCapsuleSlots);
+    const layoutInputsChanged =
+      showMulti !== lastShowMulti || slotKeys.length !== lastSlotCount;
+    if (layoutInputsChanged) {
+      lastShowMulti = showMulti;
+      lastSlotCount = slotKeys.length;
+      updateResponsiveLayout();
+    }
+
+    if (!telemetry) {
+      patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
+      patchText(multiLabel, t('capsule.multiZero'));
+      patchText(multiRunningMetaEl, t('multi.loading'));
+      stopMultiLiveTicker();
+
+      applyCapsuleSlots(slotKeys, { hasTelemetry: false });
+      return;
+    }
+
+    const { agents, scopedConv: overviewScopedConv, ctxAgent, aggregated } =
+      resolveScopedConversation(telemetry, 'all', uiSt.ctxInspectorAgentId);
+    const { scopedConv: capsuleScopedConv } = resolveScopedConversation(
+      telemetry,
+      uiSt.selectedAgentScope,
+      uiSt.ctxInspectorAgentId
+    );
+    const activeConv = telemetry.activeConversation || {};
+    const overviewActive = overviewScopedConv || activeConv;
+    const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
+    const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
+    const totalTokens = Number(ctx.totalTokens || 0);
+    const usedPct =
+      limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
+    const dashOffset = +(
+      RING_CIRCUMFERENCE *
+      (1 - Math.max(0, Math.min(100, usedPct)) / 100)
+    ).toFixed(2);
+    // --- 4a. 同步左侧多会话实时状态胶囊与浮层看板 ---
+    const rawRunningList =
+      Array.isArray(telemetry.runningConversations) && telemetry.runningConversations.length > 0
+        ? telemetry.runningConversations
+        : activeConv.isRunning || aggregated?.isRunning
+          ? [
+              {
+                cascadeId: activeConv.cascadeId || 'current',
+                title: activeConv.title || t('live.currentSession'),
+                isCurrentSelected: true,
+                isMainRunning: Boolean(activeConv.isRunning),
+                isRunning: true,
+                mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
+                subagentCount: Math.max(0, (agents?.length || 1) - 1),
+                runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
+                latestTokPerSec: overviewActive.latestTokPerSec ?? null,
+                contextUsedPct: usedPct,
+                subagents: (agents || [])
+                  .filter((a) => !a.isMain)
+                  .map((s, idx) => ({
+                    cascadeId: s.cascadeId || s.agentId,
+                    index: s.index || idx + 1,
+                    badgeText: s.badgeText || t('fmt.subBadge', { index: idx + 1 }),
+                    shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
+                    role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
+                    isRunning: Boolean(s.isRunning),
+                    stepCount: Number(s.stepCount || 0),
+                    lastModifiedMs: s.lastModifiedMs || 0,
+                    liveActivity: s.liveActivity || {
+                      phase: s.isRunning ? 'thinking' : 'done',
+                      label: s.isRunning ? t('live.thinking') : t('live.done'),
+                      detail: '',
+                      stepProgress: '',
+                      startedAtMs: s.lastModifiedMs || 0,
+                      signature: `${s.agentId}:${s.stepCount || 0}`,
+                    },
+                  })),
+              },
+            ]
+          : [];
+
+    const runningCount = rawRunningList.length;
+    const runningSubCount = rawRunningList.reduce(
+      (acc, item) => acc + Number(item.runningSubagentCount || 0),
+      0
+    );
+    const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+
+    patchClasses(multiBtn, {
+      'is-running': runningCount > 0 && !hasWaiting,
+      'is-waiting': runningCount > 0 && hasWaiting,
+    });
+    const multiBtnText =
+      runningCount > 0
+        ? runningSubCount > 0
+          ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+          : t('capsule.multiRunning', { count: runningCount })
+        : t('capsule.multiZero');
+    patchText(multiLabel, multiBtnText);
+
+    renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, telSt.hostRouteConversationId);
 
     // --- 4b. 同步右侧 1..5 动态槽位胶囊与组件化悬停浮层 ---
     const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
@@ -19668,13 +19788,8 @@ function mountWindowOverlay() {
     if (hoverModuleKeys.length === 0 && !showUpdatePrompt && tooltipOpen) {
       setTooltipOpen(false);
     }
-    const minuteTick = Number(telSt.minuteTick || Math.floor(Date.now() / 30000));
-    hoverWidgetHost.update({
-      moduleKeys: hoverModuleKeys,
-      data: telemetry,
-      minuteTick,
-    });
     if (tooltipOpen) {
+      renderHoverWidgets();
       positionFloatingElements();
     }
   }
@@ -19783,6 +19898,8 @@ function mountWindowOverlay() {
   const onDocFocusIn = () => syncHostRouteIfChanged();
   const onVisibilityChange = () => {
     if (document.hidden) {
+      uiStore.setState({ monitorVisible: false });
+      pauseMultiLiveTicker();
       hasPointerCoords = false;
       if (tooltipOpen) {
         setTooltipOpen(false);
@@ -19793,6 +19910,8 @@ function mountWindowOverlay() {
       return;
     }
     if (!document.hidden && !disposed) {
+      uiStore.setState({ monitorVisible: popoverOpen });
+      if (multiOpen) renderCapsuleTelemetry();
       syncHostRouteIfChanged();
       void fetchTelemetry({ force: false });
     }

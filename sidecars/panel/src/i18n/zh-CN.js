@@ -34,6 +34,8 @@ export const I18N_MESSAGES_ZH_CN = Object.freeze({
   // Formatters & Common Labels
   'fmt.pending': '待定',
   'fmt.speedIncomplete': '计时不完整',
+  'fmt.speedCanceled': '已取消',
+  'fmt.speedCompactionTimingUnavailable': '压缩无计时',
   'fmt.speedInvalidOutput': '无有效输出',
   'fmt.speedInconsistent': '耗时数据异常',
   'fmt.speedShort': '耗时过短 (<0.5s)',

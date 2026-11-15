@@ -33,7 +33,7 @@ import {
   normalizeClientWindowMountMode,
   saveSettingsPatch,
 } from '../../store/telemetryStore.js';
-import { uiStore } from '../../store/uiStore.js';
+import { getVisibleMonitorView, uiStore } from '../../store/uiStore.js';
 import { CollapsibleSection } from '../../components/settings/CollapsibleSection.js';
 import { EditableSlotList } from '../../components/settings/EditableSlotList.js';
 import { buildStructurePreviewTelemetry } from '../../components/settings/structurePreviewMock.js';
@@ -94,7 +94,7 @@ export const SettingsStructureTab = defineComponent({
 
     function isStructureVisible() {
       const st = uiStore.getState();
-      return st.activeView === 'settings' && st.settingsSubTab === 'structure';
+      return getVisibleMonitorView(st) === 'settings' && st.settingsSubTab === 'structure';
     }
 
     function buildDraftTelemetry() {
@@ -789,7 +789,7 @@ export const SettingsStructureTab = defineComponent({
     let wasStructureVisible = isStructureVisible();
     const unsubUi = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         settingsSubTab: st.settingsSubTab,
         settingsStructureTab: st.settingsStructureTab,
       }),

@@ -32,6 +32,7 @@ import {
  */
 export const MODEL_PRICING = {};
 export const PLACEHOLDER_MAP = {};
+export let pricingCatalogRevision = 0;
 
 /**
  * 校验字符串是否为合法的 SemVer 2.0 语义化版本号格式（支持 `-prerelease` 与 `+build` 元数据）。
@@ -361,6 +362,7 @@ export function rebuildActiveCatalog() {
 
   for (const k of Object.keys(PLACEHOLDER_MAP)) delete PLACEHOLDER_MAP[k];
   Object.assign(PLACEHOLDER_MAP, nextPlaceholders);
+  pricingCatalogRevision += 1;
 
   cloudSyncState.source = activeSource;
   cloudSyncState.catalogVersion = catalogVersion;

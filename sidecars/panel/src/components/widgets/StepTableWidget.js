@@ -128,6 +128,34 @@ export const StepTableWidget = defineComponent({
 
     stepsTablePane.addEventListener('scroll', hideTurnTip);
     stepsTbody.addEventListener('mouseleave', hideTurnTip);
+    const hoverRows = new WeakMap();
+    let lastRenderedRows = null;
+    let lastRenderOptions = '';
+
+    function enterStepCell(event) {
+      const { badge, prompt } = hoverRows.get(this);
+      if (event?.target === badge) hideTurnTip();
+      else showTurnTip(this, prompt);
+    }
+
+    function moveInStepCell(event) {
+      if (event?.target === hoverRows.get(this).badge) hideTurnTip();
+    }
+
+    function moveAlongTurnRail(event) {
+      const { badge, prompt } = hoverRows.get(this);
+      const rect = this.getBoundingClientRect?.();
+      const relX = rect ? (event?.clientX ?? 0) - rect.left : 0;
+      if (event?.target !== badge && relX <= 18) showTurnTip(this, prompt);
+      else hideTurnTip();
+    }
+
+    function clearCellHover(cell) {
+      if (!cell || !hoverRows.delete(cell)) return;
+      cell.onmouseenter = null;
+      cell.onmousemove = null;
+      cell.onmouseleave = null;
+    }
 
     function renderStepTable(
       tableSteps,
@@ -144,6 +172,16 @@ export const StepTableWidget = defineComponent({
       } = {}
     ) {
       const colOrderSig = colKeys.join(',');
+      const renderOptions = JSON.stringify([
+        cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
+        showStepTurnRail, showStepAgentBadge, displaySettings.showUpstreamModel,
+        displaySettings.orchestratorIdMode,
+      ]);
+      if (lastRenderOptions === renderOptions && lastRenderedRows &&
+          (lastRenderedRows === tableSteps || (lastRenderedRows.length === tableSteps.length &&
+            tableSteps.every((step, i) => step === lastRenderedRows[i])))) {
+        return;
+      }
       const wantedSet = new Set(colKeys);
       syncTableHeaderColumns(colKeys);
 
@@ -166,20 +204,23 @@ export const StepTableWidget = defineComponent({
         Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
       const getStepPrompt = (st) =>
         (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
-      const turnKeyOf = (st) => {
-        if (!showStepTurnRail) return '';
+      const turnKeys = showStepTurnRail ? tableSteps.map((st) => {
         const tIdx = getStepTurnIdx(st);
         if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
         return useRootTurn ? `root:${tIdx}` : `${st?.agentId || 'main'}:${tIdx}`;
-      };
+      }) : [];
+      const formattedPrompts = new Map();
+      function formattedTurnPrompt(st) {
+        const raw = getStepPrompt(st);
+        if (!formattedPrompts.has(raw)) formattedPrompts.set(raw, formatTurnPromptText(raw));
+        return formattedPrompts.get(raw);
+      }
 
       const decoratedSteps = tableSteps.map((st, idx) => {
-        const tKey = turnKeyOf(st);
+        const tKey = turnKeys[idx];
         const hasTurn = Boolean(tKey);
-        const hasUp = Boolean(hasTurn && idx > 0 && turnKeyOf(tableSteps[idx - 1]) === tKey);
-        const hasDown = Boolean(
-          hasTurn && idx + 1 < tableSteps.length && turnKeyOf(tableSteps[idx + 1]) === tKey
-        );
+        const hasUp = hasTurn && turnKeys[idx - 1] === tKey;
+        const hasDown = hasTurn && turnKeys[idx + 1] === tKey;
         return {
           st,
           rowKey: `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
@@ -188,7 +229,7 @@ export const StepTableWidget = defineComponent({
           hasDown,
           isStart: Boolean(hasTurn && (getStepIsStart(st) || !hasDown)),
           isLatest: hasTurn && getStepIsLatest(st),
-          prompt: hasTurn ? formatTurnPromptText(getStepPrompt(st)) : '',
+          prompt: hasTurn ? formattedTurnPrompt(st) : '',
         };
       });
 
@@ -205,32 +246,20 @@ export const StepTableWidget = defineComponent({
           const parts = colKeys
             .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
             .join('|');
-          const badgeSig = `${showAgentBadge}:${interactiveBadges}:${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`;
+          const badgeSig = showAgentBadge
+            ? `${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`
+            : '';
           return `${locale}:${colOrderSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: () => {
           const tr = h('tr');
-          const railLineEl = h('span', { className: 'turn-rail-line', hidden: true });
-          const railDotEl = h('span', { className: 'turn-rail-dot', hidden: true });
-          const railEl = h(
-            'span',
-            { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
-            [railLineEl, railDotEl]
-          );
-          const agentBadgeEl = h('span', {
-            className: 'agent-badge',
-            hidden: true,
-            style: 'margin-right: 4px;',
-          });
           return {
             el: tr,
             refs: {
               cellMap: new Map(),
               colOrderSig: '',
-              railEl,
-              railLineEl,
-              railDotEl,
-              agentBadgeEl,
+              railEl: null,
+              agentBadgeEl: null,
               hoverTd: null,
             },
           };
@@ -240,17 +269,15 @@ export const StepTableWidget = defineComponent({
 
           if (refs.colOrderSig !== colOrderSig) {
             if (refs.hoverTd) {
-              refs.hoverTd.onmouseenter = null;
-              refs.hoverTd.onmousemove = null;
-              refs.hoverTd.onmouseleave = null;
+              clearCellHover(refs.hoverTd);
               refs.hoverTd = null;
             }
             for (const [oldColKey, entry] of refs.cellMap) {
               if (!wantedSet.has(oldColKey)) {
-                if (refs.railEl.parentNode === entry.td) {
+                if (refs.railEl?.parentNode === entry.td) {
                   entry.td.removeChild(refs.railEl);
                 }
-                if (refs.agentBadgeEl.parentNode === entry.td) {
+                if (refs.agentBadgeEl?.parentNode === entry.td) {
                   entry.td.removeChild(refs.agentBadgeEl);
                 }
                 tr.removeChild(entry.td);
@@ -258,14 +285,19 @@ export const StepTableWidget = defineComponent({
               }
             }
 
-            for (const [i, colKey] of colKeys.entries()) {
-              if (!refs.cellMap.has(colKey)) {
-                refs.cellMap.set(colKey, STEP_COLUMN_REGISTRY[colKey].createCell());
+            const isNewRow = refs.colOrderSig === '';
+            for (let i = 0; i < colKeys.length; i++) {
+              const colKey = colKeys[i];
+              let cell = refs.cellMap.get(colKey);
+              if (!cell) {
+                cell = STEP_COLUMN_REGISTRY[colKey].createCell();
+                refs.cellMap.set(colKey, cell);
               }
-              const targetTd = refs.cellMap.get(colKey).td;
-              const currentTd = tr.children[i] || null;
-              if (currentTd !== targetTd) {
-                tr.insertBefore(targetTd, currentTd);
+              if (isNewRow) {
+                tr.appendChild(cell.td);
+              } else {
+                const currentTd = tr.children[i] || null;
+                if (currentTd !== cell.td) tr.insertBefore(cell.td, currentTd);
               }
             }
             refs.colOrderSig = colOrderSig;
@@ -278,12 +310,22 @@ export const StepTableWidget = defineComponent({
 
           const firstColKey = colKeys[0];
           const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
+          const showRowRail = Boolean(hasTurn && firstTd);
+          if (showRowRail && !refs.railEl) {
+            refs.railEl = h('span', { className: 'turn-rail', 'aria-hidden': 'true' });
+          }
+          if (showAgentBadge && firstTd && !refs.agentBadgeEl) {
+            refs.agentBadgeEl = h('span', { className: 'agent-badge', style: 'margin-right: 4px;' });
+          }
           if (firstTd) {
-            if (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl) {
+            if (refs.railEl && (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl)) {
               firstTd.insertBefore(refs.railEl, firstTd.firstChild);
             }
-            const afterRail = refs.railEl.nextSibling ?? firstTd.children[1] ?? null;
-            if (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl) {
+            const afterRail = refs.railEl
+              ? refs.railEl.nextSibling ?? firstTd.children[1] ?? null
+              : firstTd.firstChild;
+            if (refs.agentBadgeEl &&
+              (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl)) {
               firstTd.insertBefore(refs.agentBadgeEl, afterRail);
             }
           }
@@ -334,72 +376,29 @@ export const StepTableWidget = defineComponent({
               patchAttr(refs.agentBadgeEl, 'title', null);
               refs.agentBadgeEl.onclick = null;
             }
-          } else {
+          } else if (refs.agentBadgeEl) {
             refs.agentBadgeEl.onclick = null;
           }
 
-          const showRowRail = Boolean(railActive && hasTurn && firstTd);
           patchAttr(refs.railEl, 'hidden', !showRowRail);
           if (showRowRail) {
-            patchClasses(refs.railEl, {
-              'is-latest': isLatest,
-              'has-up': hasUp,
-              'has-down': hasDown,
-            });
-            patchAttr(refs.railLineEl, 'hidden', !hasUp && !hasDown);
-            const showOrigin = isStart;
-            const showCap = !showOrigin && !hasUp && hasDown;
-            patchAttr(refs.railDotEl, 'hidden', !showOrigin && !showCap);
-            patchClasses(refs.railDotEl, {
-              'is-origin': showOrigin,
-              'is-cap': showCap,
-            });
+            const marker = isStart ? ' is-origin' : !hasUp && hasDown ? ' is-cap' : '';
+            patchAttr(refs.railEl, 'class', `turn-rail${isLatest ? ' is-latest' : ''}${hasUp ? ' has-up' : ''}${hasDown ? ' has-down' : ''}${marker}`);
           }
 
-          const targetHoverTd = firstTd;
-          if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
-            refs.hoverTd.onmouseenter = null;
-            refs.hoverTd.onmousemove = null;
-            refs.hoverTd.onmouseleave = null;
-          }
-          refs.hoverTd = targetHoverTd;
-
-          if (targetHoverTd) {
-            const badgeEl = refs.agentBadgeEl;
-            if (firstColKey === 'step') {
-              targetHoverTd.onmouseenter = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                  return;
-                }
-                showTurnTip(targetHoverTd, prompt);
-              };
-              targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                }
-              };
-              targetHoverTd.onmouseleave = hideTurnTip;
-            } else {
-              targetHoverTd.onmouseenter = null;
-              targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                  return;
-                }
-                const rect = targetHoverTd.getBoundingClientRect?.();
-                const relX = rect ? (ev?.clientX ?? 0) - rect.left : 0;
-                if (relX <= 18) {
-                  showTurnTip(targetHoverTd, prompt);
-                } else {
-                  hideTurnTip();
-                }
-              };
-              targetHoverTd.onmouseleave = hideTurnTip;
-            }
+          const hoverTd = showRowRail && prompt ? firstTd : null;
+          if (refs.hoverTd !== hoverTd) clearCellHover(refs.hoverTd);
+          refs.hoverTd = hoverTd;
+          if (hoverTd) {
+            hoverRows.set(hoverTd, { badge: refs.agentBadgeEl, prompt });
+            hoverTd.onmouseenter = firstColKey === 'step' ? enterStepCell : null;
+            hoverTd.onmousemove = firstColKey === 'step' ? moveInStepCell : moveAlongTurnRail;
+            hoverTd.onmouseleave = hideTurnTip;
           }
         },
       });
+      lastRenderOptions = renderOptions;
+      lastRenderedRows = tableSteps;
     }
 
     onCleanup(() => {

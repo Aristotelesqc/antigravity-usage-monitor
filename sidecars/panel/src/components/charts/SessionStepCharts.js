@@ -317,7 +317,8 @@ export function computePublicationFit(
     let swx = 0;
     for (let j = start; j < end; j++) {
       const u = Math.abs(xs[j] - x0) / maxDist;
-      const w = u >= 1 ? 0 : (1 - u * u * u) ** 3;
+      const base = 1 - u * u * u;
+      const w = u >= 1 ? 0 : base * base * base;
       wBuf[j] = w;
       sw += w;
       swx += w * xs[j];
@@ -339,6 +340,8 @@ export function computePublicationFit(
 
     const dx0 = x0 - mx;
     const useSlope = sxxW > 1e-12;
+    const inverseWeightSum = 1 / sw;
+    const slopeScale = useSlope ? dx0 / sxxW : 0;
     let rawFit = 0;
     let leverageNormSq = 0;
     let diagHat = 0;
@@ -346,7 +349,7 @@ export function computePublicationFit(
     for (let j = start; j < end; j++) {
       const w = wBuf[j];
       if (w <= 0) continue;
-      const lj = w / sw + (useSlope ? (w * (xs[j] - mx) * dx0) / sxxW : 0);
+      const lj = w * inverseWeightSum + (useSlope ? w * (xs[j] - mx) * slopeScale : 0);
       rawFit += lj * ys[j];
       leverageNormSq += lj * lj;
       if (j === diagIdx) diagHat = lj;
@@ -1477,6 +1480,26 @@ export function createModelFitChart() {
   let hoveredIdx = -1;
   let lastSig = '';
   let lastUpdateParams = null;
+  let fitCacheMetric = '';
+  const fitCache = new Map();
+
+  function reusePublicationFit(key, xs, ys, maxVal, isMultiCompare) {
+    const previous = fitCache.get(key);
+    if (
+      previous && previous.xs.length === xs.length &&
+      xs.every((x, i) => x === previous.xs[i] && ys[i] === previous.ys[i])
+    ) {
+      return previous.result;
+    }
+    const result = computePublicationFit(xs, ys, {
+      minVal: 0,
+      maxVal,
+      gridSize: isMultiCompare ? 56 : 64,
+      span: 0.5,
+    });
+    fitCache.set(key, { xs, ys, result });
+    return result;
+  }
 
   function syncViewWidth() {
     const measured = Math.round(
@@ -1802,7 +1825,16 @@ export function createModelFitChart() {
       }
     }
 
+    if (fitCacheMetric !== metric) {
+      fitCache.clear();
+      fitCacheMetric = metric;
+    }
+    for (const key of fitCache.keys()) {
+      if (isMultiCompare ? !targetKeySet.has(key) : key !== null) fitCache.delete(key);
+    }
+
     if (matchedItems.length === 0) {
+      fitCache.clear();
       currentSamples = [];
       lastSig = 'empty';
       patchAttr(ciBandPath, 'd', '');
@@ -1834,12 +1866,7 @@ export function createModelFitChart() {
         if (items.length === 0) continue;
         const xs = items.map((d) => d.xVal);
         const rawYs = items.map((d) => d.rawVal);
-        const pubFit = computePublicationFit(xs, rawYs, {
-          minVal: minBound,
-          maxVal: maxBound,
-          gridSize: 56,
-          span: 0.5,
-        });
+        const pubFit = reusePublicationFit(key, xs, rawYs, maxBound, true);
         const colorVar =
           modelColorByGroup?.get(key) || MODEL_COLOR_VARS[kIdx % MODEL_COLOR_VARS.length];
         seriesList.push({
@@ -2067,12 +2094,7 @@ export function createModelFitChart() {
     const filtered = matchedItems;
     const xs = filtered.map((d) => d.xVal);
     const rawYs = filtered.map((d) => d.rawVal);
-    const pubFit = computePublicationFit(xs, rawYs, {
-      minVal: minBound,
-      maxVal: maxBound,
-      gridSize: 64,
-      span: 0.5,
-    });
+    const pubFit = reusePublicationFit(null, xs, rawYs, maxBound, false);
 
     patchText(fitMethodLabelEl, pubFit.method === 'LOESS' ? 'LOESS 拟合' : 'OLS 回归');
     patchAttr(olsLegendWrapEl, 'hidden', filtered.length < 6);

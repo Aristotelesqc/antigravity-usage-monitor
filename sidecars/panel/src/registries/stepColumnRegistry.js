@@ -123,24 +123,29 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
         className: 'cell-value tone-muted',
         style: 'font-size: var(--fs-base-sm);',
       });
-      const speedReason = h('div', {
-        className: 'text-muted',
-        style: 'font-size: var(--fs-2xs);',
-      });
       const wrapEl = h(
         'span',
         { style: 'display: inline-block; vertical-align: middle;' },
-        [speedMain, speedReason]
+        [speedMain]
       );
       const td = h('td', {}, [wrapEl]);
-      return { td, refs: { td, speedMain, speedReason } };
+      return { td, refs: { wrapEl, speedMain, speedReason: null } };
     },
     updateCell: (refs, st) => {
       patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
       patchAttr(refs.speedMain, 'class', `cell-value ${getSpeedToneClass(st.tokPerSec)}`);
       const reason = speedReasonText(st.selectedSpeedReason);
-      patchText(refs.speedReason, reason);
-      patchAttr(refs.speedReason, 'hidden', !reason);
+      if (reason && !refs.speedReason) {
+        refs.speedReason = h('div', {
+          className: 'text-muted',
+          style: 'font-size: var(--fs-2xs);',
+        });
+        refs.wrapEl.appendChild(refs.speedReason);
+      }
+      if (refs.speedReason) {
+        patchText(refs.speedReason, reason);
+        patchAttr(refs.speedReason, 'hidden', !reason);
+      }
     },
   },
 

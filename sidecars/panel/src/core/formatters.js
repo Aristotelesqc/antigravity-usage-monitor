@@ -115,6 +115,8 @@ export function formatUsd(amount, { precise = false } = {}) {
 const SPEED_REASON_LABELS = {
   __proto__: null,
   incomplete_or_invalid_timing: 'fmt.speedIncomplete',
+  canceled: 'fmt.speedCanceled',
+  compaction_timing_unavailable: 'fmt.speedCompactionTimingUnavailable',
   invalid_output_tokens: 'fmt.speedInvalidOutput',
   inconsistent_timing: 'fmt.speedInconsistent',
   short_timing: 'fmt.speedShort',

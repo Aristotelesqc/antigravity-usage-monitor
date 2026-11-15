@@ -1335,6 +1335,8 @@ export function createWindowBridgeController(options) {
         const initOut = await handleApiRequest('/api/telemetry', 'GET', {
           conversationId: targetConvId,
           range: 'today',
+          stepDetails: 'display',
+          stepRevision: '',
         });
         if (Number(initOut?.status || 200) === 200 && initOut?.body) {
           initialTelemetry = JSON.parse(initOut.body);

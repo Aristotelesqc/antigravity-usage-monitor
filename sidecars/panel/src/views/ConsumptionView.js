@@ -29,7 +29,7 @@ import {
 import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
 import { fetchTelemetry, telemetryStore } from '../store/telemetryStore.js';
-import { uiStore } from '../store/uiStore.js';
+import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import {
   createTrendAreaChart,
   HEATMAP_DAYS_THRESHOLD,
@@ -506,11 +506,38 @@ export const ConsumptionView = defineComponent({
     let latestSlice = null;
     let isDirty = false;
 
+    let lastRenderedUsage = '';
+
     /**
      * 将遥测状态切片同步渲染至消费统计视图的 5 个子面板。
      */
     function renderConsumptionData(slice) {
       if (!slice) return;
+      const cons = slice.consumption || {};
+      const preset =
+        slice.range !== 'custom' && cons.presets?.[slice.range]
+          ? cons.presets[slice.range]
+          : null;
+      const acct = preset?.account || cons.account || {};
+      const rangeInfo = cons.selectedRange || {};
+      const dateSpan = formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs);
+      const now = new Date();
+      const currentMonthIdx = now.getMonth();
+      const monthlyYear = cons.monthlyYear || now.getFullYear();
+      const locale = i18nStore.getState().locale;
+      // 额度与会话状态也会发布遥测更新，只对用量页实际展示的数据重绘。
+      const signature = JSON.stringify([
+        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.showUpstreamModel,
+        slice.orchestratorIdMode, dateSpan, preset?.label || rangeInfo.label, acct,
+        cons.trendSeries, slice.modelBreakdown, cons.sourcesBreakdown,
+        monthlyYear, currentMonthIdx, cons.monthlySeries,
+      ]);
+      if (signature === lastRenderedUsage) return;
+      drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear });
+      lastRenderedUsage = signature;
+    }
+
+    function drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear }) {
       timeFilterSwitch.setValue(slice.range);
       patchAttr(customRangeBar, 'hidden', slice.range !== 'custom');
       if (!hasUncommittedCustomDraft) {
@@ -520,16 +547,8 @@ export const ConsumptionView = defineComponent({
         endPicker.setValue(draftEndMs);
       }
 
-      const cons = slice.consumption || {};
-      const preset =
-        slice.range !== 'custom' && cons.presets?.[slice.range]
-          ? cons.presets[slice.range]
-          : null;
-      const acct = preset?.account || cons.account || {};
-      const rangeInfo = cons.selectedRange || {};
-
       // 1. 同步用量概览矩阵与顶部 4 段比例条
-      patchText(dateSpanBadge, formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs));
+      patchText(dateSpanBadge, dateSpan);
       const totalTokens = Number(acct.totalTokens || 0);
       const inputTokens = Number(acct.inputTokens || 0);
       const cacheTokens = Number(acct.cacheReadTokens || 0);
@@ -656,8 +675,6 @@ export const ConsumptionView = defineComponent({
       });
 
       // 5. 同步 12 个月垂直堆叠柱状图（相对于年度峰值月缩放柱高，最低保留 8% 可视高度）
-      const monthlyYear = cons.monthlyYear || new Date().getFullYear();
-      const currentMonthIdx = new Date().getMonth();
       patchText(monthlyYearBadge, String(monthlyYear));
       const monthlySeries = cons.monthlySeries || [];
       const maxMonthTokens = Math.max(
@@ -718,7 +735,7 @@ export const ConsumptionView = defineComponent({
       }),
       (slice) => {
         latestSlice = slice;
-        if (uiStore.getState().activeView !== 'consumption') {
+        if (getVisibleMonitorView() !== 'consumption') {
           isDirty = true;
           return;
         }
@@ -728,7 +745,7 @@ export const ConsumptionView = defineComponent({
     );
 
     const unsubView = uiStore.subscribe(
-      (st) => st.activeView,
+      getVisibleMonitorView,
       (activeView) => {
         if (activeView === 'consumption' && isDirty) {
           isDirty = false;
@@ -770,7 +787,7 @@ export const ConsumptionView = defineComponent({
       (st) => st.locale,
       () => {
         syncStaticLocaleLabels();
-        if (uiStore.getState().activeView === 'consumption' && latestSlice) {
+        if (getVisibleMonitorView() === 'consumption' && latestSlice) {
           isDirty = false;
           renderConsumptionData(latestSlice);
         } else {

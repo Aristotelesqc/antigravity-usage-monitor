@@ -83,8 +83,14 @@ test('cleared steps with a recorded generation end retain their original request
   for(const status of ['CORTEX_STEP_STATUS_CANCELED','CORTEX_STEP_STATUS_ERROR','CORTEX_STEP_STATUS_GENERATING']){
     assert.equal(extractModelSteps([{...s,status}],[gm])[0].totalTokPerSec,null);
   }
+  const [canceled]=extractModelSteps([{...s,status:'CORTEX_STEP_STATUS_CANCELED'}],[gm]);
+  assert.equal(speedMetric(canceled).reason,'canceled');
   delete s.metadata.finishedGeneratingAt;
   assert.equal(extractModelSteps([s],[gm])[0].totalTokPerSec,null);
+  const [checkpoint]=extractModelSteps([{...s,type:'CORTEX_STEP_TYPE_CHECKPOINT'}],[gm]);
+  assert.equal(speedMetric(checkpoint).value,null);
+  assert.equal(speedMetric(checkpoint).reason,'compaction_timing_unavailable');
+  assert.equal(summarizeSpeed([checkpoint,canceled]).sampleCount,0);
 });
 test('zero output is a real zero; malformed or missing output counts cannot produce rates',()=>{
   const zero=parse({output:0,response:0,thinking:0});

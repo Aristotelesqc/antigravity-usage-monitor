@@ -14,7 +14,7 @@ import {
   normalizeClientOverviewModules,
   telemetryStore,
 } from '../store/telemetryStore.js';
-import { uiStore } from '../store/uiStore.js';
+import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import { CustomScrollbar } from '../components/ui/CustomScrollbar.js';
 
 export { CTX_CHANNEL_DEFS } from '../components/widgets/ContextWindowWidget.js';
@@ -37,7 +37,7 @@ export const LiveOverviewView = defineComponent({
     const widgetHost = createDynamicWidgetHost({
       containerEl: overviewInner,
       mode: 'overview',
-      isVisibleFn: () => uiStore.getState().activeView === 'overview',
+      isVisibleFn: () => getVisibleMonitorView() === 'overview',
       initialModuleKeys: DEFAULT_CLIENT_OVERVIEW_MODULES,
     });
 
@@ -58,13 +58,13 @@ export const LiveOverviewView = defineComponent({
     }
 
     function ensureCountdownTicker() {
-      if (uiStore.getState().activeView !== 'overview') {
+      if (getVisibleMonitorView() !== 'overview') {
         stopCountdownTicker();
         return;
       }
       if (!countdownTickTimer) {
         countdownTickTimer = setInterval(() => {
-          if (uiStore.getState().activeView === 'overview' && latestData) {
+          if (getVisibleMonitorView() === 'overview' && latestData) {
             renderData(latestData);
           }
         }, 30_000);
@@ -88,7 +88,7 @@ export const LiveOverviewView = defineComponent({
       (st) => ({ telemetry: st.telemetry, minuteTick: st.minuteTick }),
       ({ telemetry: data }) => {
         latestData = data;
-        if (uiStore.getState().activeView !== 'overview') {
+        if (getVisibleMonitorView() !== 'overview') {
           const stillRunning =
             (Array.isArray(data?.runningConversations) && data.runningConversations.length > 0) ||
             Boolean(
@@ -110,7 +110,7 @@ export const LiveOverviewView = defineComponent({
 
     const unsubView = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         ctxInspectorAgentId: st.ctxInspectorAgentId,
       }),
       (slice) => {
@@ -136,7 +136,7 @@ export const LiveOverviewView = defineComponent({
     const unsubI18n = i18nStore.subscribe(
       (st) => st.locale,
       () => {
-        if (uiStore.getState().activeView !== 'overview') {
+        if (getVisibleMonitorView() !== 'overview') {
           isDirty = true;
           // Refresh initial skeleton labels even before telemetry arrives
           if (!latestData) {

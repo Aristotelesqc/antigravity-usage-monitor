@@ -9,6 +9,7 @@
  * 5. 调用 `aggregateMultiWindowUsage` 完成全量多窗口聚合，并组装精简的前端遥测 JSON。
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import {
   extractLiveActivity,
   parseIsoMs,
@@ -33,7 +34,7 @@ import {
   isArgonModelIdentifier,
   isCarbonModelIdentifier,
 } from './model-pricing.mjs';
-import { getCloudStatus } from './pricing-catalog.mjs';
+import { getCloudStatus, pricingCatalogRevision } from './pricing-catalog.mjs';
 import { buildOfficialQuotaPools } from './quota-pools.mjs';
 import {
   aggregateMultiWindowUsage,
@@ -43,6 +44,9 @@ import {
 
 const MAX_RECENT_CONVERSATIONS = 30;
 const POOL_PRIORITY_ORDER = ['Gemini', 'Argon', 'Carbon', 'Claude & GPT'];
+const inFlightTelemetrySources = new Map();
+const trajectoryModelFacts = new WeakMap();
+let lastMainPreparation = null;
 
 function roundSessionCost(val) {
   if (!Number.isFinite(val) || val <= 0) return 0;
@@ -59,24 +63,50 @@ function findTrajectoryCacheEntry(cascadeId) {
   return null;
 }
 
-/**
- * 构建全局 `modelKey -> responseModel` 已知映射表（单次轮询仅扫描一次 `trajectoryCache`）。
- *
- * @returns {Map<string, string>}
- */
+function rememberModelContextLimit(limits, step) {
+  const previous = limits.get(step.modelKey);
+  if (!previous || step.createdAtMs > previous.at) {
+    limits.set(step.modelKey, { tokens: step.reportedContextLimitTokens, at: step.createdAtMs });
+  }
+}
+
+function readTrajectoryModelFacts(steps) {
+  const cached = trajectoryModelFacts.get(steps);
+  if (cached) return cached;
+  const upstream = new Map();
+  const limits = new Map();
+  let sortableLimits = true;
+  for (const step of steps) {
+    if (step?.modelKey && step.modelKey !== 'unknown' && step.responseModel) {
+      upstream.set(step.modelKey, step.responseModel);
+    }
+    if (!step?.isCompactionStep && step?.reportedContextLimitTokens > 0) {
+      sortableLimits &&= Number.isFinite(step.createdAtMs);
+      rememberModelContextLimit(limits, step);
+    }
+  }
+  const result = { upstream, limits: sortableLimits ? limits : null };
+  trajectoryModelFacts.set(steps, result);
+  return result;
+}
+
+/** 合并各会话的上游模型与上下文上限，步骤数组更新后重新提取对应会话的数据。 */
 function buildKnownUpstreamModelMap(contextLimits, currentAccountName) {
   const knownUpstreamByModelKey = new Map();
   for (const entry of Object.values(trajectoryCache)) {
-    const trackContext = contextLimits && !entry.subagentSpec &&
-      (!entry.accountName || entry.accountName === currentAccountName);
-    for (const s of entry?.steps || []) {
-      if (s?.modelKey && s.modelKey !== 'unknown' && s.responseModel) {
-        knownUpstreamByModelKey.set(s.modelKey, s.responseModel);
+    if (!entry?.steps?.length) continue;
+    const facts = readTrajectoryModelFacts(entry.steps);
+    for (const [key, model] of facts.upstream) knownUpstreamByModelKey.set(key, model);
+    if (entry.subagentSpec || (entry.accountName && entry.accountName !== currentAccountName)) continue;
+    if (facts.limits) {
+      for (const [key, limit] of facts.limits) {
+        const previous = contextLimits.get(key);
+        if (!previous || limit.at > previous.at) contextLimits.set(key, limit);
       }
-      if (trackContext && !s.isCompactionStep && s.reportedContextLimitTokens > 0) {
-        const prev = contextLimits.get(s.modelKey);
-        if (!prev || s.createdAtMs > prev.at) {
-          contextLimits.set(s.modelKey, { tokens: s.reportedContextLimitTokens, at: s.createdAtMs });
+    } else {
+      for (const step of entry.steps) {
+        if (!step?.isCompactionStep && step?.reportedContextLimitTokens > 0) {
+          rememberModelContextLimit(contextLimits, step);
         }
       }
     }
@@ -90,12 +120,14 @@ function buildKnownUpstreamModelMap(contextLimits, currentAccountName) {
  *
  * @param {object[]} activeSteps 当前会话的原始缓存步骤
  * @param {ReturnType<typeof createStepModelResolver>} resolveStepModel 模型身份与价格解析器
- * @param {Map<string, string>} [sharedUpstreamMap=null] 预先构建的已知上游模型映射表
+ * @param {Map<string, string>} sharedUpstreamMap 预先构建的已知上游模型映射表
+ * @param {object} agentFields 步骤所属代理的标签和标识
  */
 function enrichActiveConversationSteps(
   activeSteps,
   resolveStepModel,
-  sharedUpstreamMap = null
+  sharedUpstreamMap,
+  agentFields
 ) {
   const sessionSpeed = summarizeSpeed(activeSteps);
   const sessionTtft = summarizeTtft(activeSteps);
@@ -105,13 +137,7 @@ function enrichActiveConversationSteps(
   let sessionCacheReadTokens = 0;
   let sessionOutputTokens = 0;
 
-  const knownUpstreamByModelKey = sharedUpstreamMap || buildKnownUpstreamModelMap();
-  for (const s of activeSteps) {
-    if (s?.modelKey && s.modelKey !== 'unknown' && s.responseModel) {
-      knownUpstreamByModelKey.set(s.modelKey, s.responseModel);
-    }
-  }
-
+  const knownUpstreamByModelKey = sharedUpstreamMap;
   const enrichedActiveSteps = activeSteps.map((st) => {
     const mInfo = resolveStepModel(st);
     const costUsd = computeStepCost(st, mInfo.pricing);
@@ -121,7 +147,8 @@ function enrichActiveConversationSteps(
     if (costUsd === null) sessionUnpricedCalls++;
     sessionInputTokens += st.inputTokens;
     sessionCacheReadTokens += st.cacheReadTokens;
-    sessionOutputTokens += resolveStepOutputTokens(st);
+    const outputTokens = resolveStepOutputTokens(st);
+    sessionOutputTokens += outputTokens;
 
     const tokPerSec = metric.value;
     const totalPrompt = st.inputTokens + st.cacheReadTokens;
@@ -167,7 +194,8 @@ function enrichActiveConversationSteps(
       inCostUsd: inCostUsd === null ? null : +inCostUsd.toFixed(4),
       cacheCostUsd: cacheCostUsd === null ? null : +cacheCostUsd.toFixed(4),
       outCostUsd: outCostUsd === null ? null : +outCostUsd.toFixed(4),
-      contextTokens: st.inputTokens + st.cacheReadTokens + resolveStepOutputTokens(st),
+      contextTokens: totalPrompt + outputTokens,
+      ...agentFields,
     };
   });
 
@@ -450,6 +478,30 @@ function extractActiveContextTelemetry(
   };
 }
 
+function prepareAgentSteps(rawSteps, resolveStepModel, upstream, agentFields, reuseInputs) {
+  for (const [key, model] of readTrajectoryModelFacts(rawSteps).upstream) upstream.set(key, model);
+  const previous = lastMainPreparation;
+  if (reuseInputs && previous?.rawSteps === rawSteps &&
+    isDeepStrictEqual(previous.inputs, reuseInputs) && isDeepStrictEqual(previous.upstream, upstream)) {
+    const prepared = previous.prepared.deref();
+    if (prepared) return prepared;
+  }
+  const enrichedRes = enrichActiveConversationSteps(rawSteps, resolveStepModel, upstream, agentFields);
+  const taggedSteps = enrichedRes.enrichedActiveSteps;
+  const prepared = {
+    enrichedRes,
+    recentSteps: taggedSteps.slice().reverse(),
+    ctxRes: extractActiveContextTelemetry(taggedSteps, enrichedRes.latestEnriched,
+      enrichedRes.sessionInputTokens, enrichedRes.sessionCacheReadTokens),
+    modelBreakdown: buildScopedModelBreakdown(taggedSteps, resolveStepModel),
+  };
+  // 单代理行可跨轮询复用。内存紧张时允许回收，运行状态仍单独实时组装。
+  if (reuseInputs) {
+    lastMainPreparation = { rawSteps, inputs: reuseInputs, upstream, prepared: new WeakRef(prepared) };
+  }
+  return prepared;
+}
+
 /**
  * 构建单个代理（主代理或子代理）的标准遥测单元对象。
  */
@@ -470,29 +522,24 @@ function buildAgentUnitTelemetry({
   resolveStepModel,
   knownUpstreamByModelKey,
   includeRecentSteps = true,
+  reuseInputs = null,
 }) {
-  const enrichedRes = enrichActiveConversationSteps(
+  const { enrichedRes, ctxRes, modelBreakdown, recentSteps } = prepareAgentSteps(
     rawSteps,
     resolveStepModel,
-    knownUpstreamByModelKey
+    knownUpstreamByModelKey,
+    {
+      agentId,
+      agentCascadeId: cascadeId,
+      agentLabel,
+      agentBadge: badgeText,
+      agentRole: role,
+      agentIndex: index,
+      isSubagent: !isMain,
+    },
+    reuseInputs
   );
-  const taggedSteps = enrichedRes.enrichedActiveSteps.map((st) => ({
-    ...st,
-    agentId,
-    agentCascadeId: cascadeId,
-    agentLabel,
-    agentBadge: badgeText,
-    agentRole: role,
-    agentIndex: index,
-    isSubagent: !isMain,
-  }));
-  const ctxRes = extractActiveContextTelemetry(
-    taggedSteps,
-    enrichedRes.latestEnriched,
-    enrichedRes.sessionInputTokens,
-    enrichedRes.sessionCacheReadTokens
-  );
-  const modelBreakdown = buildScopedModelBreakdown(taggedSteps, resolveStepModel);
+  const taggedSteps = enrichedRes.enrichedActiveSteps;
   const lastModifiedMs =
     enrichedRes.latestEnriched?.createdAtMs || fallbackLastModMs || 0;
   const isRunning = status === 'CASCADE_RUN_STATUS_RUNNING';
@@ -504,6 +551,7 @@ function buildAgentUnitTelemetry({
   return {
     enrichedRes,
     taggedSteps,
+    recentSteps,
     ctxRes,
     telemetryUnit: {
       agentId,
@@ -547,11 +595,42 @@ function buildAgentUnitTelemetry({
         enrichedRes.latestEnriched?.modelShort ||
         '模型未知',
       context: ctxRes.context,
-      ...(includeRecentSteps ? { recentSteps: taggedSteps.slice().reverse() } : {}),
+      ...(includeRecentSteps ? { recentSteps } : {}),
       modelBreakdown,
       lastModifiedMs,
     },
   };
+}
+
+async function readTelemetrySources(requestedConvId, forceQuotaRefresh, currentAccountName, accountScope, userStatus) {
+  const [allTrajRes, officialQuotaInfo, contextModelCatalog] = await Promise.all([
+    callLsRpc('GetAllCascadeTrajectories', {}).catch(() => ({})),
+    userStatus ? getOfficialQuotaSummary(forceQuotaRefresh, currentAccountName) : null,
+    getContextModelCatalog(),
+  ]);
+
+  const sessions = await enumerateAndSyncConversations({
+    summariesObj: allTrajRes?.trajectorySummaries || {},
+    currentAccountName: accountScope,
+    requestedConvId,
+    forceRefresh: forceQuotaRefresh,
+  });
+  return { officialQuotaInfo, contextModelCatalog, sessions };
+}
+
+function getTelemetrySources(requestedConvId, forceQuotaRefresh, currentAccountName, accountScope, userStatus) {
+  const read = () => readTelemetrySources(
+    requestedConvId, forceQuotaRefresh, currentAccountName, accountScope, userStatus
+  );
+  if (forceQuotaRefresh) return read();
+  const key = JSON.stringify([requestedConvId || '', accountScope, Boolean(userStatus)]);
+  const existing = inFlightTelemetrySources.get(key);
+  if (existing) return existing;
+  const pending = read().finally(() => {
+    inFlightTelemetrySources.delete(key);
+  });
+  inFlightTelemetrySources.set(key, pending);
+  return pending;
 }
 
 /**
@@ -573,11 +652,10 @@ export async function buildTelemetryPayloadInternal(
   const accountStatus = currentAccountName ? 'signedIn' :
     userStatus && !userStatus.userTier && !userStatus.planStatus ? 'signedOut' : 'unknown';
   const accountScope = accountStatus === 'signedOut' ? null : currentAccountName;
-  const [allTrajRes, officialQuotaInfo, contextModelCatalog] = await Promise.all([
-    callLsRpc('GetAllCascadeTrajectories', {}).catch(() => ({})),
-    userStatus ? getOfficialQuotaSummary(forceQuotaRefresh, currentAccountName) : null,
-    getContextModelCatalog(),
-  ]);
+  const { officialQuotaInfo, contextModelCatalog, sessions } = await getTelemetrySources(
+    requestedConvId, forceQuotaRefresh, currentAccountName, accountScope, userStatus
+  );
+  const { conversations, activeConvSummary, activeCascadeId } = sessions;
 
   const officialQuota = officialQuotaInfo?.data || null;
   const clientConfigs = userStatus?.cascadeModelConfigData?.clientModelConfigs || [];
@@ -588,14 +666,6 @@ export async function buildTelemetryPayloadInternal(
     clientConfigs
   );
 
-  // 2. 枚举本地与 LS 会话，并增量同步历史轨迹步骤
-  const { conversations, activeConvSummary, activeCascadeId } =
-    await enumerateAndSyncConversations({
-      summariesObj: allTrajRes?.trajectorySummaries || {},
-      currentAccountName: accountScope,
-      requestedConvId,
-      forceRefresh: forceQuotaRefresh,
-    });
   const resolveStepModel = createStepModelResolver(dynamicModelMap);
 
   // 3. 计算当前活跃根会话及其子代理的步骤指标、10 通道上下文拆解与按模型汇总
@@ -603,6 +673,9 @@ export async function buildTelemetryPayloadInternal(
   const knownUpstreamByModelKey = buildKnownUpstreamModelMap(reportedContextLimits, currentAccountName);
   const activeEntry = findTrajectoryCacheEntry(activeCascadeId);
   const activeSteps = activeEntry?.steps || [];
+  const subagentSummaries = activeConvSummary?.subagents || [];
+  if (subagentSummaries.length) lastMainPreparation = null;
+  const modelInputs = { catalogRevision: pricingCatalogRevision, dynamicModelMap };
   const mainUnit = buildAgentUnitTelemetry({
     agentId: 'main',
     cascadeId: activeCascadeId,
@@ -620,6 +693,7 @@ export async function buildTelemetryPayloadInternal(
     resolveStepModel,
     knownUpstreamByModelKey,
     includeRecentSteps: false,
+    reuseInputs: subagentSummaries.length ? null : { ...modelInputs, activeCascadeId, accountScope },
   });
 
   const enrichedActiveSteps = mainUnit.taggedSteps;
@@ -638,11 +712,10 @@ export async function buildTelemetryPayloadInternal(
   const mainAgentTelemetry = mainUnit.telemetryUnit;
   const mainModelBreakdown = mainAgentTelemetry.modelBreakdown;
 
-  const subagentSummaries = activeConvSummary?.subagents || [];
   const activeFamilyCascadeIds = new Set(activeCascadeId ? [activeCascadeId.toLowerCase()] : []);
   const subAgentTelemetries = [];
-  const allCombinedRawSteps = [...activeSteps];
-  const allCombinedEnrichedSteps = [...enrichedActiveSteps];
+  const allCombinedRawSteps = subagentSummaries.length ? activeSteps.slice() : [];
+  const allCombinedEnrichedSteps = subagentSummaries.length ? enrichedActiveSteps.slice() : [];
   let totalRawSessionCostUsd = sessionCostUsd;
   let totalFamilyInputTokens = sessionInputTokens;
   let totalFamilyCacheReadTokens = sessionCacheReadTokens;
@@ -654,7 +727,7 @@ export async function buildTelemetryPayloadInternal(
     activeFamilyCascadeIds.add(String(subCid || '').toLowerCase());
     const subEntry = findTrajectoryCacheEntry(subCid);
     const subRawSteps = subEntry?.steps || [];
-    allCombinedRawSteps.push(...subRawSteps);
+    for (const step of subRawSteps) allCombinedRawSteps.push(step);
 
     const subSpec = subSum.subagentSpec || subEntry?.subagentSpec || null;
     const rawRole =
@@ -684,7 +757,7 @@ export async function buildTelemetryPayloadInternal(
       includeRecentSteps: true,
     });
 
-    allCombinedEnrichedSteps.push(...subUnit.taggedSteps);
+    for (const step of subUnit.taggedSteps) allCombinedEnrichedSteps.push(step);
     totalRawSessionCostUsd += subUnit.enrichedRes.sessionCostUsd;
     totalFamilyInputTokens += subUnit.enrichedRes.sessionInputTokens;
     totalFamilyCacheReadTokens += subUnit.enrichedRes.sessionCacheReadTokens;
@@ -948,6 +1021,7 @@ export async function buildTelemetryPayloadInternal(
     activeFamilyCascadeIds,
     resolveStepModel,
     quotaPoolsMap,
+    modelInputs,
   });
 
   const emptyCycleSummary = () => ({
@@ -1339,7 +1413,9 @@ export async function buildTelemetryPayloadInternal(
       stepCount: enrichedActiveSteps.length,
       hasSubagents: subAgentTelemetries.length > 0,
       subagentCount: subAgentTelemetries.length,
-      totalStepsAllAgents: allCombinedEnrichedSteps.length,
+      totalStepsAllAgents: subAgentTelemetries.length
+        ? allCombinedEnrichedSteps.length
+        : enrichedActiveSteps.length,
       latestTokPerSec: latestEnriched?.tokPerSec ?? null,
       latestTtftSec: latestEnriched?.ttftSec ?? null,
       latestSpeedReason: latestEnriched?.selectedSpeedReason ?? null,
@@ -1363,7 +1439,7 @@ export async function buildTelemetryPayloadInternal(
       activeModelUpstream:
         latestEnriched?.modelUpstream || latestEnriched?.modelShort || '模型未知',
       context,
-      recentSteps: enrichedActiveSteps.slice().reverse(),
+      recentSteps: mainUnit.recentSteps,
       modelBreakdown: mainModelBreakdown,
       agents: allAgents,
       aggregated: aggregatedTelemetry,

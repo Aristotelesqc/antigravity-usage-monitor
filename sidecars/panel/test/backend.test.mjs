@@ -1,12 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {backendHarness} from './backend-harness.mjs';
+import { writeTrajectoryCacheFile } from '../backend/trajectory-cache-file.mjs';
 
 const raw={trajectory:{steps:[{status:'CORTEX_STEP_STATUS_DONE',metadata:{
   createdAt:'2026-01-01T00:00:00Z',finishedGeneratingAt:'2026-01-01T00:00:10Z',
   modelUsage:{inputTokens:'100',cacheReadTokens:'200',outputTokens:'600',thinkingOutputTokens:'100',responseOutputTokens:'500'},
 },plannerResponse:{response:'answer',thinkingDuration:'5s'}}],generatorMetadata:[{stepIndices:[0],chatModel:{timeToFirstToken:'3s',streamingDuration:'7s'}}]}};
 const old={signature:'v5:old',title:'test',steps:[{stepIndex:0,modelKey:'MODEL_PLACEHOLDER_M418',inputTokens:100,cacheReadTokens:200,outputTokens:600,thinkingTokens:100,responseTokens:500,createdAtMs:1767225600000,ttftSec:0.4,streamTokPerSec:200,streamTokens:500,streamDurationSec:2.5,totalDurationSec:10,totalTokPerSec:60}]};
+
+test('trajectory checkpoints preserve updated metadata and ignore bytes replaced by another writer', () => {
+  const directory = mkdtempSync(fileURLToPath(new URL('./.checkpoint-', import.meta.url)));
+  const file = join(directory, 'trajectory_usage_cache.json');
+  const state = {
+    '会话📝': { title: 'first', steps: [{ stepIndex: 1, model: '模型', inputTokens: 10 }] },
+    second: { title: 'second', steps: [{ stepIndex: 2, outputTokens: 4 }] },
+  };
+  const read = () => JSON.parse(readFileSync(file, 'utf8'));
+  try {
+    writeTrajectoryCacheFile(file, state);
+    assert.deepEqual(read(), state);
+    state['会话📝'].title = 'new metadata';
+    state.second.steps = [{ stepIndex: 2, outputTokens: 8 }];
+    writeTrajectoryCacheFile(file, state);
+    assert.deepEqual(read(), state);
+
+    const external = read();
+    external['会话📝'].steps[0].inputTokens = 90;
+    writeFileSync(file, JSON.stringify(external));
+    writeTrajectoryCacheFile(file, state);
+    assert.deepEqual(read(), state);
+
+    writeTrajectoryCacheFile(file, {});
+    assert.deepEqual(read(), {});
+    assert.deepEqual(readdirSync(directory), ['trajectory_usage_cache.json']);
+  } finally {
+    if (existsSync(file)) unlinkSync(file);
+    rmdirSync(directory);
+  }
+});
 
 test('failed migration retains all accounting, makes legacy speed and TTFT unavailable',async()=>{
   const h=backendHarness({cache:{test:old},trajectories:{test:new Error('offline')}});
@@ -648,6 +683,118 @@ test('cached incomplete timing is refreshed once without invalidating completed 
   );
 });
 
+test('unchanged running steps skip cache writes, but corrected timing with the same summary is persisted', async () => {
+  const time = '2026-01-01T00:00:10Z';
+  const live = structuredClone(raw);
+  live.trajectory.steps[0].status = 'CORTEX_STEP_STATUS_GENERATING';
+  const h = backendHarness({
+    trajectories: { live },
+    summaries: { live: { stepCount: 1, lastModifiedTime: time, status: 'CASCADE_RUN_STATUS_RUNNING' } },
+  });
+
+  const pending = await h.buildTelemetryPayloadInternal('live');
+  assert.equal(pending.activeConversation.latestTokPerSec, null);
+  const writes = h.state.saves.length;
+  assert.ok(writes > 0);
+
+  await h.buildTelemetryPayloadInternal('live');
+  assert.equal(h.state.saves.length, writes);
+
+  h.state.trajectories.live = raw;
+  const completed = await h.buildTelemetryPayloadInternal('live');
+  assert.equal(completed.activeConversation.latestTokPerSec, 60);
+  assert.equal(h.state.saves.length, writes + 1);
+  assert.equal(h.state.saves.at(-1).data.live.steps[0].totalTokPerSec, 60);
+});
+
+test('display step revisions omit only matching rows and invalidate on timing changes', async () => {
+  const time = '2026-01-01T00:00:10Z';
+  const live = structuredClone(raw);
+  live.trajectory.steps[0].status = 'CORTEX_STEP_STATUS_GENERATING';
+  const h = backendHarness({
+    trajectories: { live },
+    summaries: { live: { stepCount: 1, lastModifiedTime: time, status: 'CASCADE_RUN_STATUS_RUNNING' } },
+  });
+  const request = { conversationId: 'live', stepDetails: 'display' };
+  const get = async (stepRevision) => JSON.parse((await h.executeTelemetryAction({
+    ...request, stepRevision
+  })).body);
+  const initial = await get('');
+  assert.equal(initial.stepsUnchanged, false);
+  assert.equal(initial.activeConversation.recentSteps[0].tokPerSec, null);
+  const same = await get(initial.stepRevision);
+  assert.equal(same.stepsUnchanged, true);
+  assert.equal(same.stepRevision, initial.stepRevision);
+  assert.equal(same.activeConversation.recentSteps, undefined);
+
+  h.state.trajectories.live = raw;
+  const changed = await get(initial.stepRevision);
+  assert.equal(changed.stepsUnchanged, false);
+  assert.notEqual(changed.stepRevision, initial.stepRevision);
+  assert.equal(changed.activeConversation.recentSteps[0].tokPerSec, 60);
+  assert.equal((await get()).activeConversation.recentSteps[0].tokPerSec, 60);
+});
+
+test('simultaneous ranges share the trajectory scan while keeping their own totals', async () => {
+  const h = backendHarness({
+    trajectories: { live: raw },
+    summaries: { live: { stepCount: 1, lastModifiedTime: '2026-01-01T00:00:10Z' } },
+  });
+  const [all, custom] = await Promise.all([
+    h.buildTelemetryPayloadInternal('live', false, { range: 'all' }),
+    h.buildTelemetryPayloadInternal('live', false, { range: 'custom', startMs: 1, endMs: 2 }),
+  ]);
+  assert.equal(all.consumption.account.totalTokens, 900);
+  assert.equal(custom.consumption.account.totalTokens, 0);
+  assert.equal(h.state.calls.filter((call) => call.method === 'GetAllCascadeTrajectories').length, 1);
+  assert.equal(h.state.calls.filter((call) => call.method === 'GetCascadeTrajectory').length, 1);
+});
+
+test('cached usage follows rolling boundaries and reprices unchanged steps', async () => {
+  const { extractModelSteps } = await import('../speed-metrics.mjs');
+  const [step] = extractModelSteps(raw.trajectory.steps, raw.trajectory.generatorMetadata);
+  const modelKey = 'test-metered-model';
+  let now = Date.parse('2026-03-08T07:00:00Z');
+  const priceCatalog = (price) => ({
+    schemaVersion: 1,
+    pricing: {
+      [modelKey]: { input: price, cache: price, output: price, family: 'Gemini', short: modelKey },
+    },
+  });
+  const h = backendHarness({
+    clock: () => now,
+    localCatalog: priceCatalog(100),
+    cache: {
+      live: {
+        signature: 'v10-model-identity:disk:0',
+        contextLimitTelemetry: true, turnRailTelemetry: true, contextGroupsTelemetry: true,
+        speedClearedTelemetry: true, subagentRefs: [],
+        steps: [
+          { ...step, modelKey, createdAtMs: now - 86400000, turnIndex: null },
+          { ...step, modelKey, stepIndex: 2, createdAtMs: now + 1, inputTokens: 120, turnIndex: null },
+        ],
+      },
+    },
+  });
+  const build = () => h.buildTelemetryPayloadInternal('live', false, { range: '24h' });
+  const first = await build();
+  assert.equal(first.consumption.account.totalTokens, 900);
+  assert.equal(first.consumption.account.costUsd, 0.09);
+
+  now += 1;
+  const crossing = await build();
+  assert.equal(crossing.consumption.account.totalTokens, 920);
+  assert.equal(crossing.consumption.account.calls, 1);
+
+  now += 1;
+  h.state.localCatalog = priceCatalog(1000);
+  h.rebuildActiveCatalog();
+  const repriced = await build();
+  assert.equal(repriced.consumption.account.totalTokens, 920);
+  assert.equal(repriced.consumption.account.costUsd, 0.92);
+  assert.equal(repriced.activeConversation.recentSteps[0].costUsd, 0.92);
+});
+
 test('modelBreakdown exposes avgTtftSec, cacheHitPct, and subagent scoped breakdowns + fit math helpers', async () => {
   const {
     computeLinearFit,
@@ -958,6 +1105,37 @@ test('assigns unified rootTurnIndex across interleaved main and subagent steps s
   assert.equal(subSteps[1].isRootTurnStart, false);
   assert.equal(subSteps[1].isTurnStart, true);
   assert.equal(subSteps[1].turnPrompt, 'Subagent internal brief');
+
+  const panel = JSON.parse((await h.executeTelemetryAction({
+    conversationId: 'root-turn', stepDetails: 'display'
+  })).body).activeConversation;
+  const full = JSON.parse((await h.executeTelemetryAction({
+    conversationId: 'root-turn'
+  })).body).activeConversation;
+  assert.equal(panel.recentSteps.length, full.recentSteps.length);
+  assert.equal(panel.agents.length, full.agents.length);
+  for (const [displaySteps, fullSteps] of [
+    [panel.recentSteps, full.recentSteps],
+    [panel.agents[1].recentSteps, full.agents[1].recentSteps],
+  ]) {
+    assert.equal(displaySteps.length, fullSteps.length);
+    for (let i = 0; i < fullSteps.length; i++) {
+      assert.equal(displaySteps[i].rootTurnPrompt, fullSteps[i].rootTurnPrompt);
+      assert.equal(displaySteps[i].tokPerSec, fullSteps[i].tokPerSec);
+      assert.equal(displaySteps[i].contextTokens, fullSteps[i].contextTokens);
+      assert.ok(!Object.hasOwn(displaySteps[i], 'contextBreakdown'));
+      assert.ok(Object.hasOwn(fullSteps[i], 'contextBreakdown'));
+    }
+  }
+  const requested = { conversationId: 'root-turn', stepDetails: 'display' };
+  const initial = JSON.parse((await h.executeTelemetryAction({ ...requested, stepRevision: '' })).body);
+  const delta = JSON.parse((await h.executeTelemetryAction({
+    ...requested, stepRevision: initial.stepRevision,
+  })).body);
+  assert.equal(delta.stepsUnchanged, true);
+  assert.equal(delta.activeConversation.recentSteps, undefined);
+  assert.equal(delta.activeConversation.agents[1].recentSteps, undefined);
+  assert.equal(delta.activeConversation.agents[1].stepCount, 2);
 });
 
 test('reconciles 8-group context breakdown with real API prompt+output tokens and auto-refreshes cached dropped groups', async () => {

@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inferCompactionStepModels, normalizeCachedStep } from '../speed-metrics.mjs';
+import { writeTrajectoryCacheFile } from './trajectory-cache-file.mjs';
 import {
   DEFAULT_HOVER_MODULES,
   DEFAULT_OVERVIEW_METRICS,
@@ -227,9 +228,11 @@ export function loadJson(filePath, fallback) {
 export function saveJson(filePath, data) {
   try {
     mkdirSync(DATA_DIR, { recursive: true });
-    const serialized =
-      filePath === CACHE_FILE ? JSON.stringify(data) : JSON.stringify(data, null, 2);
-    writeFileSync(filePath, serialized, 'utf8');
+    if (filePath === CACHE_FILE) {
+      writeTrajectoryCacheFile(filePath, data);
+    } else {
+      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    }
     return true;
   } catch (err) {
     console.error(`Failed writing ${filePath}: ${err.message}`);

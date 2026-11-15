@@ -10,6 +10,7 @@
 
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   extractLiveActivity,
   extractModelSteps,
@@ -905,8 +906,9 @@ export async function enumerateAndSyncConversations({
               !prev.turnRailTelemetry ||
               !prev.contextGroupsTelemetry ||
               metaChanged ||
-              JSON.stringify(prev.steps) !== JSON.stringify(steps);
+              !isDeepStrictEqual(prev.steps, steps);
 
+            if (!stepsChanged) cacheEntry.steps = prev.steps;
             trajectoryCache[conv.cascadeId] = cacheEntry;
             if (stepsChanged) {
               cacheDirty = true;

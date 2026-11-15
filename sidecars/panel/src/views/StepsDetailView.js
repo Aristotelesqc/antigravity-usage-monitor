@@ -29,7 +29,7 @@ import {
   resolveScopedConversation,
   telemetryStore,
 } from '../store/telemetryStore.js';
-import { uiStore } from '../store/uiStore.js';
+import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import {
   MODEL_COLOR_VARS,
   createModelFitChart,
@@ -50,7 +50,7 @@ function mergeSelectedAgentUnits(units) {
   for (const ag of units) {
     if (!ag || typeof ag !== 'object') continue;
     if (Array.isArray(ag.recentSteps)) {
-      combinedSteps.push(...ag.recentSteps);
+      for (const step of ag.recentSteps) combinedSteps.push(step);
     }
     const breakdown = Array.isArray(ag.modelBreakdown) ? ag.modelBreakdown : [];
     for (const m of breakdown) {
@@ -520,7 +520,8 @@ export const StepsDetailView = defineComponent({
       const baseScope = resolveScopedConversation(
         { activeConversation: slice.activeConversation },
         'all',
-        uiSt.ctxInspectorAgentId
+        uiSt.ctxInspectorAgentId,
+        true
       );
       const { hasSubagents, agents, subagents, mainAgent, aggregated } = baseScope;
 
@@ -1027,7 +1028,7 @@ export const StepsDetailView = defineComponent({
         subTabSwitch.setValue(tab);
         patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
         patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
-        if (uiStore.getState().activeView === 'steps' && latestSlice) {
+        if (getVisibleMonitorView() === 'steps' && latestSlice) {
           renderStepsData(latestSlice);
         } else if (tab === 'steps') {
           stepsScroll.refresh();
@@ -1053,7 +1054,7 @@ export const StepsDetailView = defineComponent({
       }),
       (slice) => {
         latestSlice = slice;
-        if (uiStore.getState().activeView !== 'steps') {
+        if (getVisibleMonitorView() !== 'steps') {
           if (!fitUserPicked) {
             fitPinnedWhileVisible = false;
           }
@@ -1066,11 +1067,11 @@ export const StepsDetailView = defineComponent({
     );
 
     let prevScope = uiStore.getState().selectedAgentScope;
-    let prevActiveView = uiStore.getState().activeView;
+    let prevActiveView = getVisibleMonitorView();
 
     const unsubView = uiStore.subscribe(
       (st) => ({
-        activeView: st.activeView,
+        activeView: getVisibleMonitorView(st),
         selectedAgentScope: st.selectedAgentScope,
       }),
       (uiSlice) => {
@@ -1099,7 +1100,7 @@ export const StepsDetailView = defineComponent({
       (st) => st.locale,
       () => {
         refreshStaticLocaleLabels();
-        if (uiStore.getState().activeView === 'steps' && latestSlice) {
+        if (getVisibleMonitorView() === 'steps' && latestSlice) {
           renderStepsData(latestSlice);
         } else {
           isDirty = true;

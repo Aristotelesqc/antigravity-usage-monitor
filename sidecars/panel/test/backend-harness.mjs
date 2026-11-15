@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import * as metrics from '../speed-metrics.mjs';
 import { stripModuleSyntax } from '../scripts/build-bundle.mjs';
 
@@ -61,6 +63,7 @@ export function backendHarness({
   remoteFetch=null,
   execFileImpl=null,
   sourceText=null,
+  clock=null,
   metricsImplementation=metrics,
 }={}) {
   const mainUrl = pluginRootPath ? `file://${pluginRootPath}/sidecars/panel/main.mjs` : 'file:///test/sidecars/panel/main.mjs';
@@ -68,7 +71,11 @@ export function backendHarness({
   const source = stripEsmSyntax(sourceText ?? loadCombinedBackendSource(), mainUrl);
   const state={calls:[],errors:[],saves:[],settings,trajectories,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,deepStats,deepStatsMtimeMs:1};
   const ctx={
-    ...metricsImplementation, URL, AbortSignal, Buffer,
+    ...metricsImplementation, URL, AbortSignal, Buffer, isDeepStrictEqual, randomUUID,
+    ...(clock ? { Date: class extends Date {
+      constructor(...args) { super(...(args.length ? args : [clock()])); }
+      static now() { return clock(); }
+    } } : {}),
     process:{platform:'win32',env:{ANTIGRAVITY_EXECUTABLE_DATA_DIR:'/test-data',ANTIGRAVITY_LS_ADDRESS:'test.invalid',ANTIGRAVITY_CSRF_TOKEN:'test'}},
     console:{error:m=>state.errors.push(m)},
     cpSync:()=>{},
@@ -132,6 +139,9 @@ export function backendHarness({
         state.remoteCatalog = parsed;
       }
     },
+    writeTrajectoryCacheFile:(p,data)=>{
+      state.saves.push({path:p,data:JSON.parse(JSON.stringify(data))});
+    },
     homedir:()=>'/test-home',dirname:path.dirname,join:path.join,basename:path.basename,fileURLToPath:()=>mainPath,
     Response:class {constructor(body,options){this.body=body;this.options=options;}},
     SidecarApp:class {page(){} api(){} run(){}},
@@ -154,6 +164,6 @@ export function backendHarness({
       return {ok:true,json:async()=>data};
     },
   };
-  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns};',ctx);
+  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns};',ctx);
   return {...ctx.api,state};
 }

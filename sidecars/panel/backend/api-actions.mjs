@@ -8,6 +8,8 @@
 
 import { readFileSync, promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { handleAccountCredentialAction } from './account-switch.mjs';
 import {
   HERE,
@@ -110,6 +112,84 @@ function sanitizePositiveFiniteMs(val) {
   return Number.isFinite(num) && num > 0 && num <= MAX_SAFE_DATE_MS ? Math.floor(num) : 0;
 }
 
+function projectDisplayStep(st) {
+  const {
+    stepIndex, createdAtMs, isCompactionStep, modelKey, modelShort, modelLabel,
+    modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
+    streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
+    outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, agentId,
+    agentCascadeId, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
+    turnIndex, isTurnStart, isLatestTurn, turnPrompt, rootTurnIndex, isRootTurnStart,
+    isRootLatestTurn, rootTurnPrompt,
+  } = st;
+  return {
+    stepIndex, createdAtMs, isCompactionStep, modelKey, modelShort, modelLabel,
+    modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
+    streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
+    outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, agentId,
+    agentCascadeId, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
+    turnIndex, isTurnStart, isLatestTurn, turnPrompt, rootTurnIndex, isRootTurnStart,
+    isRootLatestTurn, rootTurnPrompt,
+  };
+}
+
+let lastDisplaySteps = null;
+const displayStepFields = Object.keys(projectDisplayStep({}));
+
+function haveSameDisplaySteps(previous, current) {
+  if (!previous || !current) return previous === current;
+  if (previous.length !== current.length) return false;
+  for (let i = 0; i < current.length; i++) {
+    const before = previous[i];
+    const after = current[i];
+    for (const key of displayStepFields) {
+      if (before[key] !== after[key]) return false;
+    }
+  }
+  return true;
+}
+
+function projectDisplayTelemetry(payload, requestedRevision) {
+  const active = payload.activeConversation;
+  const agents = active.agents;
+  const sourceSteps = [active.recentSteps, ...agents.map((agent) => agent.recentSteps)];
+  let projected;
+  let revision;
+  if (typeof requestedRevision === 'string') {
+    const scope = [
+      payload.account?.status,
+      payload.account?.email || payload.account?.name || '',
+      active.cascadeId,
+      ...agents.map((agent) => agent.agentId),
+    ];
+    const previous = lastDisplaySteps;
+    if (previous && isDeepStrictEqual(scope, previous.scope) &&
+        sourceSteps.every((steps, index) => (steps && previous.sources[index]?.deref() === steps) ||
+          haveSameDisplaySteps(previous.steps[index], steps))) {
+      ({ revision, steps: projected } = previous);
+      previous.sources = sourceSteps.map((steps) => steps ? new WeakRef(steps) : undefined);
+    } else {
+      revision = randomUUID();
+      projected = sourceSteps.map((steps) => steps?.map(projectDisplayStep));
+      lastDisplaySteps = { scope, steps: projected, revision,
+        sources: sourceSteps.map((steps) => steps ? new WeakRef(steps) : undefined) };
+    }
+  }
+  projected ||= sourceSteps.map((steps) => steps?.map(projectDisplayStep));
+  const stepsUnchanged = revision !== undefined && requestedRevision === revision;
+  return {
+    ...payload,
+    ...(revision ? { stepRevision: revision, stepsUnchanged } : {}),
+    activeConversation: {
+      ...active,
+      recentSteps: stepsUnchanged ? undefined : projected[0],
+      agents: agents.map((agent, index) => projected[index + 1]
+        ? { ...agent, recentSteps: stepsUnchanged ? undefined : projected[index + 1] }
+        : agent),
+    },
+  };
+}
+
 export async function executeTelemetryAction(data, { onRestart = null } = {}) {
   const rawConvId = String(
     data?.conversationId || process.env.ANTIGRAVITY_CONVERSATION_ID || ''
@@ -148,11 +228,14 @@ export async function executeTelemetryAction(data, { onRestart = null } = {}) {
       scheduleSidecarRestart(150);
     }
   }
+  const responsePayload = data?.stepDetails === 'display'
+    ? projectDisplayTelemetry(payload, data.stepRevision)
+    : payload;
   return {
     status: 200,
     contentType: 'application/json',
     headers: { 'Cache-Control': 'no-store' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(responsePayload),
   };
 }
 

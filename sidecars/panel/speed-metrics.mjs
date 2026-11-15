@@ -608,7 +608,8 @@ export function extractContextBreakdown(chat) {
  *    - 优先级 3：`chat.model`（`chatModel` 请求级模型标识）
  *    - 优先级 4：`metadata.generatorModel`（步骤 `metadata` 顶层记录的生成模型）
  *    - 优先级 5：`chat.responseModel`（上游返回的具体响应模型名）
- * 2. **5 种测速过滤与排除原因（`timingReason` / `speedReason`）**：
+ * 2. **测速过滤与排除原因（`timingReason` / `speedReason`）**：
+ *    - `'canceled'`：生成已取消，保留用量但不参与测速；
  *    - `'incomplete_or_invalid_timing'`：没有完成生成的证据，或总耗时 `totalDurationSec` 缺失/非正数；
  *    - `'invalid_output_tokens'`：`outputTokens` 不是合法的非负安全整数；
  *    - `'short_timing'`：请求总耗时低于 `MIN_SPEED_DURATION_SECONDS`（0.5s），易受计时器粒度噪声干扰；
@@ -806,9 +807,11 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
     const nativeStreamSec = duration(chat?.streamingDuration);
     const thinkingDurationSec = duration(p.thinkingDuration);
 
-    // 5 种测速过滤原因判定：先校验耗时与 Token 合法性（timingReason），再判定压缩步与短样本（speedReason）
+    // 先校验状态、耗时与 Token 合法性，再判定压缩步与短样本。
     let timingReason = null;
-    if (!complete || !(totalDurationSec > 0)) {
+    if (s.status === 'CORTEX_STEP_STATUS_CANCELED') {
+      timingReason = 'canceled';
+    } else if (!complete || !(totalDurationSec > 0)) {
       timingReason = 'incomplete_or_invalid_timing';
     } else if (!validCount(u.outputTokens)) {
       timingReason = 'invalid_output_tokens';
@@ -1187,7 +1190,10 @@ export function speedMetric(step) {
     !Number.isFinite(step.totalTokPerSec) ||
     !(step.totalDurationSec >= MIN_SPEED_DURATION_SECONDS)
   ) {
-    return missing(step.speedReason || 'incomplete_or_invalid_timing');
+    const reason = step.speedReason || 'incomplete_or_invalid_timing';
+    return missing(step.isCompactionStep && reason === 'incomplete_or_invalid_timing'
+      ? 'compaction_timing_unavailable'
+      : reason);
   }
 
   return {

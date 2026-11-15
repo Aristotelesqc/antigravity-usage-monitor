@@ -120,6 +120,7 @@ export const TopSessionHeader = defineComponent({
       } else if (currentCascadeId) {
         lastActiveCascadeId = currentCascadeId;
       }
+      if (!uiSt.monitorVisible) return;
 
       patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
       patchAttr(refreshBtn, 'aria-label', t('header.ariaRefresh'));
@@ -283,10 +284,18 @@ export const TopSessionHeader = defineComponent({
       (st) => st.locale,
       () => renderHeaderState()
     );
+    const unsubVisibility = uiStore.subscribe(
+      (st) => st.monitorVisible,
+      (visible) => {
+        if (visible) renderHeaderState();
+      },
+      { immediate: false }
+    );
 
     onCleanup(() => {
       unsubTelemetry();
       unsubI18n();
+      unsubVisibility();
       convSelect.destroy();
     });
 

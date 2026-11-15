@@ -34,6 +34,8 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   // Formatters & Common Labels
   'fmt.pending': 'N/A',
   'fmt.speedIncomplete': 'Incomplete timing',
+  'fmt.speedCanceled': 'Canceled',
+  'fmt.speedCompactionTimingUnavailable': 'Untimed compaction',
   'fmt.speedInvalidOutput': 'No valid output',
   'fmt.speedInconsistent': 'Invalid timing',
   'fmt.speedShort': 'Too brief (<0.5s)',
