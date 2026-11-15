@@ -1,21 +1,24 @@
 /**
  * @fileoverview Preferences Tab 2: `SettingsStructureTab.js` ("结构").
- * Provides 4 collapsible customization sections with `+` / `-` / `↑` / `↓`:
- * 1. 挂载与胶囊栏 (`windowMountMode`, `showTopbarMultiSession`, `topbarCapsuleSlots` 1..5)
- * 2. 鼠标悬浮窗 (`hoverModules` 0..4)
- * 3. 实时监控布局 (`overviewModules` 1..4 + `overviewMetrics` 1..4)
- * 4. 调用明细字段 (`stepTableColumns` 2..12)
+ * Organizes the 4 structure settings panes under a dedicated 3rd-level menu bar,
+ * renders live previews powered by the decoupled real UI components (`CapsuleBarWidget`,
+ * `createDynamicWidgetHost` in `hover` / `overview` modes, and `StepTableWidget`)
+ * with simulated telemetry, and supports smooth mouse drag-and-drop reordering.
  */
 
 import { defineComponent } from '../../core/component.js';
-import { h, patchAttr, patchText } from '../../core/domPatch.js';
-import { t } from '../../i18n/index.js';
+import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
+import { getEffectiveLocale, t } from '../../i18n/index.js';
+import { createSvgIcon } from '../../icons/SvgIcon.js';
 import {
   getCapsuleMetricOptions,
   getOverviewMetricOptions,
 } from '../../registries/metricRegistry.js';
 import { getStepColumnOptions } from '../../registries/stepColumnRegistry.js';
-import { getOverviewModuleOptions } from '../../registries/widgetRegistry.js';
+import {
+  createDynamicWidgetHost,
+  getOverviewModuleOptions,
+} from '../../registries/widgetRegistry.js';
 import {
   DEFAULT_CLIENT_HOVER_MODULES,
   DEFAULT_CLIENT_OVERVIEW_METRICS,
@@ -30,10 +33,26 @@ import {
   normalizeClientWindowMountMode,
   saveSettingsPatch,
 } from '../../store/telemetryStore.js';
+import { uiStore } from '../../store/uiStore.js';
 import { CollapsibleSection } from '../../components/settings/CollapsibleSection.js';
 import { EditableSlotList } from '../../components/settings/EditableSlotList.js';
+import { buildStructurePreviewTelemetry } from '../../components/settings/structurePreviewMock.js';
 import { CustomSelect } from '../../components/ui/CustomSelect.js';
 import { SegmentedControl } from '../../components/ui/SegmentedControl.js';
+import { CapsuleBarWidget } from '../../components/widgets/CapsuleBarWidget.js';
+import { StepTableWidget } from '../../components/widgets/StepTableWidget.js';
+
+const STRUCTURE_THIRD_TABS = Object.freeze([
+  { key: 'mount', icon: 'dock', labelKey: 'settings.str.tabMount' },
+  { key: 'hover', icon: 'layers', labelKey: 'settings.str.tabHover' },
+  { key: 'overview', icon: 'pulse', labelKey: 'settings.str.tabOverview' },
+  { key: 'steps', icon: 'table', labelKey: 'settings.str.tabSteps' },
+]);
+
+function normalizeStructureTabKey(raw) {
+  const k = String(raw || '').trim();
+  return k === 'hover' || k === 'overview' || k === 'steps' ? k : 'mount';
+}
 
 function getMountModeOptions() {
   return [
@@ -61,6 +80,7 @@ function isSameList(a, b) {
 export const SettingsStructureTab = defineComponent({
   name: 'SettingsStructureTab',
   setup({ props, onCleanup }) {
+    let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
     let draftShowTopbarMulti = true;
     let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -71,6 +91,26 @@ export const SettingsStructureTab = defineComponent({
     let draftShowStepAgentBadge = true;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
+
+    function isStructureVisible() {
+      const st = uiStore.getState();
+      return st.activeView === 'settings' && st.settingsSubTab === 'structure';
+    }
+
+    function buildDraftTelemetry() {
+      return buildStructurePreviewTelemetry(latestSettings, {
+        windowMountMode: draftWindowMountMode,
+        enableWindowOverlay: draftWindowMountMode !== 'sidebar',
+        showTopbarMultiSession: draftShowTopbarMulti,
+        topbarCapsuleSlots: draftTopbarSlots,
+        hoverModules: draftHoverModules,
+        overviewModules: draftOverviewModules,
+        overviewMetrics: draftOverviewMetrics,
+        showStepTurnRail: draftShowStepTurnRail,
+        showStepAgentBadge: draftShowStepAgentBadge,
+        stepTableColumns: draftStepColumns,
+      });
+    }
 
     async function persistStructurePatch(sectionComp, patchObj, successKey = 'settings.saved') {
       sectionComp.refs.showStatus(t('settings.saving'), 0);
@@ -85,7 +125,51 @@ export const SettingsStructureTab = defineComponent({
       }
     }
 
-    // --- Section 1: 挂载与胶囊栏 (defaultExpanded: true) ---
+    // --- 3rd-Level Navigation Bar ---
+    const thirdNavBtnMap = new Map();
+    const thirdNavBtns = STRUCTURE_THIRD_TABS.map((item) => {
+      const labelEl = h('span', {
+        className: 'structure-thirdnav-label',
+        text: t(item.labelKey),
+      });
+      const btn = h(
+        'button',
+        {
+          type: 'button',
+          className: `structure-thirdnav-btn${item.key === activeThirdTab ? ' is-active' : ''}`,
+          role: 'tab',
+          'aria-selected': item.key === activeThirdTab ? 'true' : 'false',
+          'data-structure-tab': item.key,
+          onClick: () => {
+            if (uiStore.getState().settingsStructureTab !== item.key) {
+              uiStore.setState({ settingsStructureTab: item.key });
+            } else {
+              applyActiveThirdTab(item.key);
+            }
+          },
+        },
+        [createSvgIcon(item.icon, { size: 12 }), labelEl]
+      );
+      thirdNavBtnMap.set(item.key, { btn, labelEl, labelKey: item.labelKey });
+      return btn;
+    });
+
+    const thirdNavBar = h(
+      'div',
+      {
+        className: 'settings-thirdnav-bar',
+        role: 'tablist',
+        'aria-label': t('settings.str.thirdTabAria'),
+      },
+      thirdNavBtns
+    );
+
+    // --- Pane 1: 挂载与胶囊栏 (`mount`) ---
+    const capsulePreviewWidget = CapsuleBarWidget({});
+    const mountPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
+      capsulePreviewWidget.el,
+    ]);
+
     const mountModeLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.mountMode'),
@@ -107,6 +191,7 @@ export const SettingsStructureTab = defineComponent({
         const nextMode = normalizeClientWindowMountMode(val);
         draftWindowMountMode = nextMode;
         syncMountSectionMeta();
+        props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
           windowMountMode: nextMode,
           enableWindowOverlay: nextMode !== 'sidebar',
@@ -133,6 +218,10 @@ export const SettingsStructureTab = defineComponent({
       minItems: 1,
       maxItems: 5,
       addBtnTextFn: (count, max) => t('settings.str.addCapsuleSlot', { count, max }),
+      onPreview: (previewItems) => {
+        draftTopbarSlots = normalizeClientTopbarSlots(previewItems);
+        refreshMountPreview();
+      },
       onChange: (nextItems) => {
         draftTopbarSlots = normalizeClientTopbarSlots(nextItems);
         syncMountSectionMeta();
@@ -144,11 +233,10 @@ export const SettingsStructureTab = defineComponent({
     });
 
     const mountSection = CollapsibleSection({
+      collapsible: false,
       icon: 'dock',
       title: t('settings.str.mountSection'),
       badgeText: t('settings.str.mountBadge', { count: draftTopbarSlots.length }),
-      defaultExpanded: true,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftWindowMountMode = 'dual';
         draftShowTopbarMulti = true;
@@ -167,6 +255,8 @@ export const SettingsStructureTab = defineComponent({
         );
       },
       children: [
+        mountPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [mountModeLabelEl, windowMountSelect.el]),
         h('div', { className: 'settings-inline-row' }, [
           multiToggleLabelEl,
@@ -175,6 +265,11 @@ export const SettingsStructureTab = defineComponent({
         h('div', { className: 'form-row' }, [capsuleSlotsLabelEl, topbarSlotsList.el]),
       ],
     });
+
+    function refreshMountPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'mount') return;
+      capsulePreviewWidget.refs.update({ data: buildDraftTelemetry() });
+    }
 
     function syncMountSectionMeta() {
       windowMountSelect.setProps({
@@ -198,9 +293,31 @@ export const SettingsStructureTab = defineComponent({
         draftShowTopbarMulti === true &&
         isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
       mountSection.refs.setResetDisabled(isDefault);
+      refreshMountPreview();
     }
 
-    // --- Section 2: 鼠标悬浮窗 (0..4 items) ---
+    // --- Pane 2: 鼠标悬浮窗 (`hover`) ---
+    const hoverWidgetsContainerEl = h('div', { className: 'wm-hover-widgets' });
+    const hoverPreviewTipEl = h('div', { className: 'wm-hover-tip is-preview' }, [
+      hoverWidgetsContainerEl,
+    ]);
+    const hoverPreviewEmptyEl = h('div', {
+      className: 'structure-preview-empty',
+      hidden: true,
+      text: t('settings.str.hoverEmptyHint'),
+    });
+    const hoverPreviewHost = createDynamicWidgetHost({
+      containerEl: hoverWidgetsContainerEl,
+      mode: 'hover',
+      preview: true,
+      isVisibleFn: () => isStructureVisible() && activeThirdTab === 'hover',
+      initialModuleKeys: [],
+    });
+    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+      hoverPreviewTipEl,
+      hoverPreviewEmptyEl,
+    ]);
+
     const hoverModulesLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.hoverModulesLabel'),
@@ -213,6 +330,10 @@ export const SettingsStructureTab = defineComponent({
       maxItems: 4,
       emptyHintText: t('settings.str.hoverEmptyHint'),
       addBtnTextFn: (count, max) => t('settings.str.addHoverModule', { count, max }),
+      onPreview: (previewItems) => {
+        draftHoverModules = normalizeClientHoverModules(previewItems);
+        refreshHoverPreview();
+      },
       onChange: (nextItems) => {
         draftHoverModules = normalizeClientHoverModules(nextItems);
         syncHoverSectionMeta();
@@ -224,11 +345,10 @@ export const SettingsStructureTab = defineComponent({
     });
 
     const hoverSection = CollapsibleSection({
+      collapsible: false,
       icon: 'layers',
       title: t('settings.str.hoverSection'),
       badgeText: t('settings.str.hoverBadgeCount', { count: draftHoverModules.length }),
-      defaultExpanded: false,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
         syncHoverSectionMeta();
@@ -239,8 +359,24 @@ export const SettingsStructureTab = defineComponent({
           'settings.resetDone'
         );
       },
-      children: [h('div', { className: 'form-row' }, [hoverModulesLabelEl, hoverModulesList.el])],
+      children: [
+        hoverPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
+        h('div', { className: 'form-row' }, [hoverModulesLabelEl, hoverModulesList.el]),
+      ],
     });
+
+    function refreshHoverPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'hover') return;
+      const hasModules = draftHoverModules.length > 0;
+      patchAttr(hoverPreviewTipEl, 'hidden', !hasModules);
+      patchAttr(hoverPreviewEmptyEl, 'hidden', hasModules);
+      patchText(hoverPreviewEmptyEl, t('settings.str.hoverEmptyHint'));
+      hoverPreviewHost.update({
+        moduleKeys: draftHoverModules,
+        data: buildDraftTelemetry(),
+      });
+    }
 
     function syncHoverSectionMeta() {
       hoverModulesList.refs.setProps({
@@ -254,10 +390,25 @@ export const SettingsStructureTab = defineComponent({
           ? t('settings.str.hoverBadgeOff')
           : t('settings.str.hoverBadgeCount', { count: draftHoverModules.length })
       );
-      hoverSection.refs.setResetDisabled(isSameList(draftHoverModules, DEFAULT_CLIENT_HOVER_MODULES));
+      hoverSection.refs.setResetDisabled(
+        isSameList(draftHoverModules, DEFAULT_CLIENT_HOVER_MODULES)
+      );
+      refreshHoverPreview();
     }
 
-    // --- Section 3: 实时监控布局 (Modules 1..4 + First-Row Metrics 1..4) ---
+    // --- Pane 3: 实时监控布局 (`overview`) ---
+    const overviewPreviewContainerEl = h('div', { className: 'overview-modules-host is-preview' });
+    const overviewPreviewHost = createDynamicWidgetHost({
+      containerEl: overviewPreviewContainerEl,
+      mode: 'overview',
+      preview: true,
+      isVisibleFn: () => isStructureVisible() && activeThirdTab === 'overview',
+      initialModuleKeys: [],
+    });
+    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+      overviewPreviewContainerEl,
+    ]);
+
     const overviewModulesLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.overviewModulesLabel'),
@@ -278,6 +429,11 @@ export const SettingsStructureTab = defineComponent({
       minItems: 1,
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewModule', { count, max }),
+      onPreview: (previewItems) => {
+        draftOverviewModules = normalizeClientOverviewModules(previewItems);
+        patchAttr(overviewMetricsHintEl, 'hidden', draftOverviewModules.includes('metrics'));
+        refreshOverviewPreview();
+      },
       onChange: (nextItems) => {
         draftOverviewModules = normalizeClientOverviewModules(nextItems);
         syncOverviewSectionMeta();
@@ -294,6 +450,10 @@ export const SettingsStructureTab = defineComponent({
       minItems: 1,
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewMetric', { count, max }),
+      onPreview: (previewItems) => {
+        draftOverviewMetrics = normalizeClientOverviewMetrics(previewItems);
+        refreshOverviewPreview();
+      },
       onChange: (nextItems) => {
         draftOverviewMetrics = normalizeClientOverviewMetrics(nextItems);
         syncOverviewSectionMeta();
@@ -305,14 +465,13 @@ export const SettingsStructureTab = defineComponent({
     });
 
     const overviewSection = CollapsibleSection({
+      collapsible: false,
       icon: 'pulse',
       title: t('settings.str.overviewSection'),
       badgeText: t('settings.str.overviewBadge', {
         modCount: draftOverviewModules.length,
         metCount: draftOverviewMetrics.length,
       }),
-      defaultExpanded: false,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
         draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
@@ -328,6 +487,8 @@ export const SettingsStructureTab = defineComponent({
         );
       },
       children: [
+        overviewPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [overviewModulesLabelEl, overviewModulesList.el]),
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [
@@ -337,6 +498,14 @@ export const SettingsStructureTab = defineComponent({
         ]),
       ],
     });
+
+    function refreshOverviewPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'overview') return;
+      overviewPreviewHost.update({
+        moduleKeys: draftOverviewModules,
+        data: buildDraftTelemetry(),
+      });
+    }
 
     function syncOverviewSectionMeta() {
       overviewModulesList.refs.setProps({
@@ -361,9 +530,18 @@ export const SettingsStructureTab = defineComponent({
         isSameList(draftOverviewModules, DEFAULT_CLIENT_OVERVIEW_MODULES) &&
         isSameList(draftOverviewMetrics, DEFAULT_CLIENT_OVERVIEW_METRICS);
       overviewSection.refs.setResetDisabled(isDefault);
+      refreshOverviewPreview();
     }
 
-    // --- Section 4: 调用明细字段 (Turn Rail + Agent Badge Toggles + Step Table Columns 2..12) ---
+    // --- Pane 4: 调用明细字段 (`steps`) ---
+    const stepTablePreview = StepTableWidget({
+      standalone: true,
+      interactiveBadges: false,
+    });
+    const stepsPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
+      stepTablePreview.el,
+    ]);
+
     const stepTurnRailLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepTurnRailToggle'),
@@ -409,6 +587,10 @@ export const SettingsStructureTab = defineComponent({
       minItems: 2,
       maxItems: 12,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
+      onPreview: (previewItems) => {
+        draftStepColumns = normalizeClientStepColumns(previewItems);
+        refreshStepsPreview();
+      },
       onChange: (nextItems) => {
         draftStepColumns = normalizeClientStepColumns(nextItems);
         syncStepsSectionMeta();
@@ -420,11 +602,10 @@ export const SettingsStructureTab = defineComponent({
     });
 
     const stepsSection = CollapsibleSection({
+      collapsible: false,
       icon: 'table',
       title: t('settings.str.stepsSection'),
       badgeText: t('settings.str.stepsBadge', { count: draftStepColumns.length }),
-      defaultExpanded: false,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftShowStepTurnRail = true;
         draftShowStepAgentBadge = true;
@@ -442,6 +623,8 @@ export const SettingsStructureTab = defineComponent({
         );
       },
       children: [
+        stepsPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
         h('div', { className: 'settings-inline-row' }, [
           stepTurnRailLabelEl,
           stepTurnRailToggle.el,
@@ -454,6 +637,26 @@ export const SettingsStructureTab = defineComponent({
         h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
       ],
     });
+
+    function refreshStepsPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'steps') return;
+      const mockData = buildDraftTelemetry();
+      const mockSteps = mockData.activeConversation?.recentSteps || [];
+      stepTablePreview.refs.renderStepTable(
+        mockSteps,
+        'mock-preview-conv',
+        draftStepColumns,
+        getEffectiveLocale(),
+        {
+          effectiveScopes: ['all'],
+          hasSubagents: true,
+          isMergedMultiAgents: true,
+          showStepTurnRail: draftShowStepTurnRail,
+          showStepAgentBadge: draftShowStepAgentBadge,
+          displaySettings: mockData.settings,
+        }
+      );
+    }
 
     function syncStepsSectionMeta() {
       stepTurnRailToggle.setProps({
@@ -475,6 +678,49 @@ export const SettingsStructureTab = defineComponent({
         draftShowStepAgentBadge === true &&
         isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
+      refreshStepsPreview();
+    }
+
+    function syncPreviewTickers() {
+      const visible = isStructureVisible();
+      if (visible && activeThirdTab === 'hover') {
+        hoverPreviewHost.resumeTickers();
+      } else {
+        hoverPreviewHost.pauseTickers();
+      }
+      if (visible && activeThirdTab === 'overview') {
+        overviewPreviewHost.resumeTickers();
+      } else {
+        overviewPreviewHost.pauseTickers();
+      }
+      if (!visible || activeThirdTab !== 'steps') {
+        stepTablePreview.refs.hideTurnTip();
+      }
+    }
+
+    function refreshActivePreview() {
+      if (!isStructureVisible()) return;
+      if (activeThirdTab === 'mount') refreshMountPreview();
+      else if (activeThirdTab === 'hover') refreshHoverPreview();
+      else if (activeThirdTab === 'overview') refreshOverviewPreview();
+      else if (activeThirdTab === 'steps') refreshStepsPreview();
+    }
+
+    function applyActiveThirdTab(nextRawTab) {
+      const nextTab = normalizeStructureTabKey(nextRawTab);
+      activeThirdTab = nextTab;
+      for (const [key, entry] of thirdNavBtnMap.entries()) {
+        const isActive = key === nextTab;
+        patchClasses(entry.btn, { 'is-active': isActive });
+        patchAttr(entry.btn, 'aria-selected', isActive ? 'true' : 'false');
+      }
+      patchAttr(mountSection.el, 'hidden', nextTab !== 'mount');
+      patchAttr(hoverSection.el, 'hidden', nextTab !== 'hover');
+      patchAttr(overviewSection.el, 'hidden', nextTab !== 'overview');
+      patchAttr(stepsSection.el, 'hidden', nextTab !== 'steps');
+      refreshActivePreview();
+      syncPreviewTickers();
+      props.onLayoutChange?.();
     }
 
     const rootEl = h('div', { className: 'settings-tab-stack' }, [
@@ -507,6 +753,11 @@ export const SettingsStructureTab = defineComponent({
     }
 
     function refreshLabels() {
+      patchAttr(thirdNavBar, 'aria-label', t('settings.str.thirdTabAria'));
+      for (const entry of thirdNavBtnMap.values()) {
+        patchText(entry.labelEl, t(entry.labelKey));
+      }
+
       mountSection.refs.setTitle(t('settings.str.mountSection'));
       mountSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
@@ -535,12 +786,41 @@ export const SettingsStructureTab = defineComponent({
       syncStepsSectionMeta();
     }
 
+    let wasStructureVisible = isStructureVisible();
+    const unsubUi = uiStore.subscribe(
+      (st) => ({
+        activeView: st.activeView,
+        settingsSubTab: st.settingsSubTab,
+        settingsStructureTab: st.settingsStructureTab,
+      }),
+      (slice) => {
+        const nowVisible =
+          slice.activeView === 'settings' && slice.settingsSubTab === 'structure';
+        const enteredStructure = nowVisible && !wasStructureVisible;
+        wasStructureVisible = nowVisible;
+        if (normalizeStructureTabKey(slice.settingsStructureTab) !== activeThirdTab) {
+          applyActiveThirdTab(slice.settingsStructureTab);
+        } else {
+          if (enteredStructure) {
+            refreshActivePreview();
+          }
+          syncPreviewTickers();
+        }
+      }
+    );
+
     syncMountSectionMeta();
     syncHoverSectionMeta();
     syncOverviewSectionMeta();
     syncStepsSectionMeta();
+    applyActiveThirdTab(activeThirdTab);
 
     onCleanup(() => {
+      unsubUi();
+      capsulePreviewWidget.destroy();
+      hoverPreviewHost.destroy();
+      overviewPreviewHost.destroy();
+      stepTablePreview.destroy();
       windowMountSelect.destroy();
       multiSessionToggle.destroy();
       topbarSlotsList.destroy();
@@ -559,6 +839,11 @@ export const SettingsStructureTab = defineComponent({
     return {
       el: rootEl,
       refs: {
+        thirdNavBar,
+        capsulePreviewWidget,
+        hoverPreviewHost,
+        overviewPreviewHost,
+        stepTablePreview,
         windowMountSelect,
         multiSessionToggle,
         topbarSlotsList,

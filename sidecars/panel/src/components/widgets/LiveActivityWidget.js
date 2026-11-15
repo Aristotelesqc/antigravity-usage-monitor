@@ -28,6 +28,11 @@ export const LiveActivityWidget = defineComponent({
   name: 'LiveActivityWidget',
   setup({ props, onCleanup }) {
     const interactive = props.interactive !== false;
+    const preview = Boolean(props.preview);
+    const getCtxAgentId =
+      typeof props.getCtxAgentId === 'function'
+        ? props.getCtxAgentId
+        : () => uiStore.getState().ctxInspectorAgentId;
     const isVisibleFn =
       typeof props.isVisibleFn === 'function' ? props.isVisibleFn : () => true;
 
@@ -203,11 +208,10 @@ export const LiveActivityWidget = defineComponent({
         return;
       }
 
-      const uiSt = uiStore.getState();
       const { agents, aggregated } = resolveScopedConversation(
         data,
         'all',
-        uiSt.ctxInspectorAgentId
+        getCtxAgentId()
       );
 
       const rawRunningList =
@@ -310,7 +314,7 @@ export const LiveActivityWidget = defineComponent({
 
           const convTitle = item.title || item.cascadeId?.slice(0, 8) || t('live.currentSession');
           patchText(refs.titleEl, convTitle);
-          if (interactive) {
+          if (interactive && !preview) {
             patchAttr(refs.titleEl, 'title', t('live.switchSessionTitle', { title: convTitle }));
             refs.titleEl.onclick = () => {
               if (item.cascadeId && item.cascadeId !== 'current') {

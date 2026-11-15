@@ -3262,6 +3262,55 @@ input {
   font-weight: 500;
 }
 
+/* --- 结构页三级子导航菜单 (.settings-thirdnav-bar) --- */
+.settings-thirdnav-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.structure-thirdnav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 25px;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-instant) var(--ease-fast),
+    color var(--dur-instant) var(--ease-fast),
+    border-color var(--dur-instant) var(--ease-fast);
+}
+
+.structure-thirdnav-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.structure-thirdnav-btn.is-active {
+  color: var(--accent-primary);
+  background: var(--accent-primary-soft);
+  border-color: var(--accent-primary-border);
+  font-weight: 600;
+}
+
+.structure-thirdnav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-tab-stack {
   display: flex;
   flex-direction: column;
@@ -3390,6 +3439,193 @@ input {
   color: var(--accent-primary);
 }
 
+.collapsible-title-static {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+/* --- 结构页真实 UI 实时预览画布（无套娃外框，直接呈现真实组件） --- */
+.structure-preview-canvas {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.structure-preview-canvas.is-scaled {
+  zoom: 0.86;
+}
+
+.wm-hover-tip.is-preview {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  max-height: none;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  z-index: 1;
+  pointer-events: auto;
+  box-shadow: none;
+  animation: none;
+}
+
+.overview-modules-host.is-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.structure-preview-empty,
+.preview-sidebar-note {
+  padding: 7px 10px;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+  border: 1px dashed var(--border-hairline);
+  border-radius: var(--radius-xs);
+  text-align: center;
+}
+
+.capsule-preview-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.preview-capsule-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  overflow-x: auto;
+  user-select: none;
+}
+
+.preview-capsule-bar.is-composer {
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+}
+
+.preview-capsule-bar.is-composer .wm-multi-btn,
+.preview-capsule-bar.is-composer .wm-capsule-btn {
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hairline);
+}
+
+.preview-capsule-bar.is-composer .wm-multi-btn {
+  padding: 0 7px;
+}
+
+.preview-capsule-bar.is-composer .wm-capsule-btn {
+  padding: 0 8px;
+}
+
+.preview-capsule-bar.is-sidebar-only {
+  opacity: 0.42;
+  filter: grayscale(0.35);
+}
+
+.preview-capsule-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.preview-host-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  flex-shrink: 1;
+  overflow: hidden;
+}
+
+.preview-win-title {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.preview-win-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 4px;
+  flex-shrink: 0;
+}
+
+.preview-win-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-secondary) 26%, transparent);
+}
+
+.preview-composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-primary-soft);
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.step-table-preview-host {
+  position: relative;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--surface-panel);
+  overflow: hidden;
+}
+
+.step-table-preview-host .data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .collapsible-chevron {
   color: var(--text-secondary);
   transition: transform var(--dur-fast) var(--ease-fast);
@@ -3490,6 +3726,54 @@ input {
 
 .editable-slot-row .select-menu {
   max-height: 216px;
+}
+
+.slot-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 22px;
+  margin-left: -2px;
+  color: var(--text-muted);
+  border-radius: var(--radius-xs);
+  cursor: grab;
+  flex-shrink: 0;
+  touch-action: none;
+  transition:
+    color var(--dur-instant) var(--ease-fast),
+    background-color var(--dur-instant) var(--ease-fast);
+}
+
+.editable-slot-row:hover .slot-drag-handle:not(.is-disabled) {
+  color: var(--text-secondary);
+}
+
+.slot-drag-handle:hover:not(.is-disabled) {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.slot-drag-handle.is-disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.editable-slot-list.is-dragging-list,
+.editable-slot-list.is-dragging-list * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+.editable-slot-row.is-dragging {
+  z-index: 40;
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 9%, var(--surface-panel));
+  box-shadow: var(--shadow-popover);
+}
+
+.editable-slot-row.is-dragging .slot-drag-handle {
+  color: var(--accent-primary);
 }
 
 .slot-remove-btn {
@@ -3930,8 +4214,8 @@ input {
   text-align: center;
 }
 
-.wm-seg-speed.state-running {
-  color: var(--metric-speed);
+.wm-seg-speed.state-running:not([class*="tone-"]) {
+  color: var(--accent-primary);
   font-weight: 500;
 }
 
@@ -3987,6 +4271,18 @@ input {
   text-align: center;
 }
 
+.wm-cap-slot.tone-good,
+.wm-cap-slot.tone-good .wm-slot-text {
+  color: var(--metric-ok);
+  font-weight: 500;
+}
+
+.wm-cap-slot.tone-info,
+.wm-cap-slot.tone-info .wm-slot-text {
+  color: var(--metric-info);
+  font-weight: 500;
+}
+
 .wm-cap-slot.tone-warn,
 .wm-cap-slot.tone-warn .wm-slot-text {
   color: var(--metric-warn);
@@ -3997,6 +4293,11 @@ input {
 .wm-cap-slot.tone-danger .wm-slot-text {
   color: var(--metric-danger);
   font-weight: 500;
+}
+
+.wm-cap-slot.tone-muted,
+.wm-cap-slot.tone-muted .wm-slot-text {
+  color: var(--text-muted);
 }
 
 /* 仅在超窄 ring-only 折叠态下使用右上角 5px 提示圆点；常规态由柔和微胶囊 .wm-update-btn 承载 */

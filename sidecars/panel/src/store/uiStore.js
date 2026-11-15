@@ -25,6 +25,7 @@ export const uiStore = createReactiveStore({
   activeView: 'overview',
   stepsSubTab: 'steps', // 'steps' | 'models'
   settingsSubTab: 'general', // 'general' | 'structure' | 'account' | 'other'
+  settingsStructureTab: 'mount', // 'mount' | 'hover' | 'overview' | 'steps'
   selectedAgentScope: 'all', // 'all' | 'main' | <subagent cascadeId>
   ctxInspectorAgentId: 'auto', // 'auto' | 'main' | <subagent cascadeId>
 });

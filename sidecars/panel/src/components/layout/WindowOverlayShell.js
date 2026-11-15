@@ -21,8 +21,12 @@ import {
 import { formatElapsedSec } from '../../core/formatters.js';
 import { deliverCdpBridgeResponses, getWindowBridgeConfig } from '../../core/httpClient.js';
 import { getEffectiveLocale, i18nStore, setI18nLanguage, t } from '../../i18n/index.js';
-import { createSvgIcon, patchSvgIcon, SVG_NS } from '../../icons/SvgIcon.js';
-import { resolveCapsuleMetricPresentation } from '../../registries/metricRegistry.js';
+import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
+import {
+  RING_CIRCUMFERENCE,
+  createCapsuleSlotNode,
+  syncCapsuleSlotNodes,
+} from '../widgets/CapsuleBarWidget.js';
 import { createDynamicWidgetHost } from '../../registries/widgetRegistry.js';
 import {
   DEFAULT_CLIENT_HOVER_MODULES,
@@ -46,8 +50,6 @@ const CAPSULE_HOST_ID = 'ag-usage-monitor-capsule';
 const PORTAL_HOST_ID = 'ag-usage-monitor-portal';
 const FLOATING_CARD_WIDTH = 522;
 const MULTI_PANEL_WIDTH = 464;
-const RING_RADIUS = 5.2;
-const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
 
 /**
  * 带迟滞区间（Hysteresis）的四阶段顶栏双胶囊响应式宽度计算，避免临界宽度反复跳动。
@@ -1183,75 +1185,13 @@ export function mountWindowOverlay() {
     [multiDot, multiLabel]
   );
 
-  // 构建可复用的预占胶囊槽位节点（支持 1..5 项动态槽位，运行期仅就地更新文本与属性）
-  function createCapsuleSlot(slotIndex, initialMetric) {
-    const ringSvg = document.createElementNS(SVG_NS, 'svg');
-    ringSvg.setAttribute('viewBox', '0 0 14 14');
-    ringSvg.setAttribute('class', 'wm-ring-svg');
-    ringSvg.setAttribute('aria-hidden', 'true');
-
-    const ringTrack = document.createElementNS(SVG_NS, 'circle');
-    ringTrack.setAttribute('cx', '7');
-    ringTrack.setAttribute('cy', '7');
-    ringTrack.setAttribute('r', String(RING_RADIUS));
-    ringTrack.setAttribute('class', 'wm-ring-track');
-
-    const ringFill = document.createElementNS(SVG_NS, 'circle');
-    ringFill.setAttribute('cx', '7');
-    ringFill.setAttribute('cy', '7');
-    ringFill.setAttribute('r', String(RING_RADIUS));
-    ringFill.setAttribute('class', 'wm-ring-fill');
-    ringFill.setAttribute('stroke-dasharray', String(RING_CIRCUMFERENCE));
-    ringFill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE));
-
-    ringSvg.appendChild(ringTrack);
-    ringSvg.appendChild(ringFill);
-
-    const isNone = initialMetric === 'none';
-    const isCtx = initialMetric === 'context';
-    const textSpan = h('span', {
-      className: isCtx ? 'wm-slot-text wm-ctx-pct' : 'wm-slot-text',
-      text: isNone
-        ? ''
-        : isCtx
-          ? '--%'
-          : initialMetric === 'tps'
-            ? '-- t/s'
-            : t('capsule.quotaUnknown'),
-    });
-    const el = h(
-      'span',
-      {
-        className: isNone
-          ? 'wm-cap-slot'
-          : isCtx
-            ? 'wm-cap-slot wm-ctx-seg'
-            : initialMetric === 'tps'
-              ? 'wm-cap-slot wm-seg-speed'
-              : 'wm-cap-slot wm-seg-quota',
-        hidden: isNone,
-        'data-slot-idx': String(slotIndex),
-        'data-metric': initialMetric,
-        'data-vis-rank': isNone ? '' : String(slotIndex + 1),
-      },
-      isCtx ? [ringSvg, textSpan] : [textSpan]
-    );
-
-    return {
-      el,
-      ringSvg,
-      ringFill,
-      textSpan,
-      ringMounted: isCtx,
-    };
-  }
-
+  // 构建可复用的预占胶囊槽位节点（由 CapsuleBarWidget 共享创建，支持 1..5 项动态槽位）
   const capsuleSlots = [
-    createCapsuleSlot(0, 'context'),
-    createCapsuleSlot(1, 'tps'),
-    createCapsuleSlot(2, 'quota_auto'),
-    createCapsuleSlot(3, 'none'),
-    createCapsuleSlot(4, 'none'),
+    createCapsuleSlotNode(0, 'context'),
+    createCapsuleSlotNode(1, 'tps'),
+    createCapsuleSlotNode(2, 'quota_auto'),
+    createCapsuleSlotNode(3, 'none'),
+    createCapsuleSlotNode(4, 'none'),
   ];
   const capsuleSeps = [
     h('span', { className: 'wm-sep wm-sep-speed', 'data-sep-for-rank': '2' }),
@@ -2370,53 +2310,7 @@ export function mountWindowOverlay() {
   }
 
   function applyCapsuleSlots(slotKeys, slotCtx) {
-    let visRank = 0;
-    const visRanks = [0, 0, 0, 0, 0];
-    for (let i = 0; i < capsuleSlots.length; i += 1) {
-      const slot = capsuleSlots[i];
-      const metricKey = i < slotKeys.length ? slotKeys[i] : 'none';
-      const pres = resolveCapsuleMetricPresentation(metricKey, slotCtx, RING_CIRCUMFERENCE);
-      if (pres.hidden) {
-        patchAttr(slot.el, 'hidden', true);
-        patchAttr(slot.el, 'data-metric', 'none');
-        patchAttr(slot.el, 'data-vis-rank', '');
-        continue;
-      }
-      visRank += 1;
-      visRanks[i] = visRank;
-      patchAttr(slot.el, 'hidden', false);
-      patchAttr(slot.el, 'data-metric', pres.metric);
-      patchAttr(slot.el, 'data-vis-rank', String(visRank));
-
-      if (pres.showRing && !slot.ringMounted) {
-        slot.el.insertBefore(slot.ringSvg, slot.textSpan);
-        slot.ringMounted = true;
-      } else if (!pres.showRing && slot.ringMounted) {
-        slot.ringSvg.remove();
-        slot.ringMounted = false;
-      }
-
-      const fullSegClass =
-        `${pres.segClass}${pres.running ? ' state-running' : ''}${pres.warn ? ' tone-warn' : ''}${pres.danger ? ' tone-danger' : ''}`;
-      patchAttr(slot.el, 'class', fullSegClass);
-      const fullTextClass =
-        `${pres.textClass}${pres.warn ? ' tone-warn' : ''}${pres.danger ? ' tone-danger' : ''}`;
-      patchAttr(slot.textSpan, 'class', fullTextClass);
-      patchText(slot.textSpan, pres.text);
-
-      if (pres.showRing) {
-        slot.ringFill.setAttribute('stroke-dashoffset', String(pres.dashOffset));
-        patchClasses(slot.ringFill, { 'tone-warn': pres.warn, 'tone-danger': pres.danger });
-      }
-    }
-
-    for (let s = 0; s < capsuleSeps.length; s += 1) {
-      const sepEl = capsuleSeps[s];
-      const nextRank = visRanks[s + 1] || 0;
-      const showSep = nextRank >= 2;
-      patchAttr(sepEl, 'hidden', !showSep);
-      patchAttr(sepEl, 'data-sep-for-rank', showSep ? String(nextRank) : '');
-    }
+    syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
   }
 
   // --- 4. 实时遥测状态绑定（双胶囊与多会话/动态组件浮层就地更新，零硬编码、零布局跳动） ---

@@ -246,6 +246,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: false,
       dashOffset: ringCircumference,
       text: '',
+      toneClass: '',
       running: false,
       warn: false,
       danger: false,
@@ -262,6 +263,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
         showRing: true,
         dashOffset: ringCircumference,
         text: '--%',
+        toneClass: '',
         running: false,
         warn: false,
         danger: false,
@@ -269,6 +271,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
     }
     const isDanger = slotCtx.usedPct >= 88;
     const isWarn = !isDanger && slotCtx.usedPct >= 70;
+    const toneClass = isDanger ? 'tone-danger' : isWarn ? 'tone-warn' : '';
     return {
       hidden: false,
       metric: 'context',
@@ -277,6 +280,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: true,
       dashOffset: slotCtx.dashOffset,
       text: `${Math.round(slotCtx.usedPct)}%`,
+      toneClass,
       running: false,
       warn: isWarn,
       danger: isDanger,
@@ -293,12 +297,14 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
         showRing: false,
         dashOffset: ringCircumference,
         text: '-- t/s',
+        toneClass: '',
         running: false,
         warn: false,
         danger: false,
       };
     }
     const hasValidTps = Number.isFinite(slotCtx.tps) && slotCtx.tps > 0;
+    const toneClass = hasValidTps ? getSpeedToneClass(slotCtx.tps) : '';
     const tpsText = hasValidTps
       ? `${slotCtx.tps >= 100 ? Math.round(slotCtx.tps) : slotCtx.tps.toFixed(1)} t/s`
       : slotCtx.isRunning
@@ -312,15 +318,17 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: false,
       dashOffset: ringCircumference,
       text: tpsText,
+      toneClass,
       running: Boolean(slotCtx.isRunning),
-      warn: false,
-      danger: false,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
   if (metricKey === 'avg_tps') {
     const avgVal = slotCtx.hasTelemetry ? slotCtx.avgTps : null;
     const valid = Number.isFinite(avgVal) && avgVal > 0;
+    const toneClass = valid ? getSpeedToneClass(avgVal) : '';
     return {
       hidden: false,
       metric: 'avg_tps',
@@ -329,9 +337,10 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? `${avgVal >= 100 ? Math.round(avgVal) : avgVal.toFixed(1)} t/s` : '-- t/s',
+      toneClass,
       running: false,
-      warn: false,
-      danger: false,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -339,8 +348,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
     const val = slotCtx.hasTelemetry ? slotCtx.ttft : null;
     const valid = val != null && Number.isFinite(Number(val)) && Number(val) >= 0;
     const numVal = valid ? Number(val) : 0;
-    const isDanger = valid && numVal >= 30;
-    const isWarn = valid && !isDanger && numVal >= 15;
+    const toneClass = valid ? getTtftToneClass(numVal) : '';
     return {
       hidden: false,
       metric: 'ttft',
@@ -349,9 +357,10 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? formatCompactCapsuleTtft(numVal) : '--s',
+      toneClass,
       running: false,
-      warn: isWarn,
-      danger: isDanger,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -361,6 +370,10 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       : metricKey === 'session_cost'
         ? slotCtx.sessionCost
         : slotCtx.stepCost;
+    const toneClass =
+      metricKey === 'cost' && slotCtx.hasTelemetry && costVal != null
+        ? getStepCostToneClass(costVal)
+        : '';
     return {
       hidden: false,
       metric: metricKey,
@@ -369,9 +382,10 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: false,
       dashOffset: ringCircumference,
       text: slotCtx.hasTelemetry ? formatCompactCapsuleCost(costVal) : '--',
+      toneClass,
       running: false,
-      warn: false,
-      danger: false,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -379,9 +393,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
     const cachePct = slotCtx.hasTelemetry ? slotCtx.cacheHitPct : null;
     const valid = cachePct != null && Number.isFinite(Number(cachePct));
     const numVal = valid ? Number(cachePct) : 0;
-    const hasPrompt = slotCtx.latestPromptTokens == null || Number(slotCtx.latestPromptTokens) > 0;
-    const isDanger = valid && hasPrompt && numVal < 30;
-    const isWarn = valid && hasPrompt && !isDanger && numVal < 65;
+    const toneClass = valid ? getCacheToneClass(numVal, slotCtx.latestPromptTokens) : '';
     return {
       hidden: false,
       metric: 'cache_hit',
@@ -390,9 +402,10 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? `${Math.round(numVal)}%` : '--%',
+      toneClass,
       running: false,
-      warn: isWarn,
-      danger: isDanger,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -407,6 +420,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? formatTokens(Number(tokVal)) : '--',
+      toneClass: '',
       running: false,
       warn: false,
       danger: false,
@@ -420,6 +434,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
       : resolveSpecificQuotaSlotSummary(slotCtx.quotas, metricKey);
   const isDanger = Boolean(quotaSum && quotaSum.roundedPct <= 15);
   const isWarn = Boolean(quotaSum && !isDanger && quotaSum.roundedPct <= 30);
+  const toneClass = isDanger ? 'tone-danger' : isWarn ? 'tone-warn' : '';
   return {
     hidden: false,
     metric: metricKey,
@@ -428,6 +443,7 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
     showRing: false,
     dashOffset: ringCircumference,
     text: quotaSum ? quotaSum.shortText : t('capsule.quotaUnknown'),
+    toneClass,
     running: false,
     warn: isWarn,
     danger: isDanger,
@@ -504,6 +520,8 @@ export function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
   }
 
   if (metricKey === 'avg_tps') {
+    const hasAvgSpeed = Number.isFinite(active.avgTokPerSec) && Number(active.avgTokPerSec) > 0;
+    const avgSpeedTone = hasAnySteps && hasAvgSpeed ? getSpeedToneClass(active.avgTokPerSec) : '';
     return {
       key: 'avg_tps',
       label: t('ovMetric.avg_tps'),
@@ -511,7 +529,7 @@ export function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
       iconSize: 11,
       isPulsing: false,
       valueText: formatMetric(active.avgTokPerSec, ' tok/s'),
-      valueClass: 'cell-value',
+      valueClass: avgSpeedTone ? `cell-value ${avgSpeedTone}` : 'cell-value',
       subText: t('ovMetric.subValidSamples', {
         samples: sampleSummary(active.speedSummary),
       }),

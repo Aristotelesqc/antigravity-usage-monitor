@@ -22,15 +22,19 @@ export const OVERVIEW_WIDGET_REGISTRY = Object.freeze({
   metrics: {
     key: 'metrics',
     labelKey: 'module.metrics',
-    create: ({ mode, isVisibleFn }) => MetricMatrixWidget({ mode, isVisibleFn }),
+    create: ({ mode, isVisibleFn, preview, getCtxAgentId }) =>
+      MetricMatrixWidget({ mode, isVisibleFn, preview, getCtxAgentId }),
   },
   context: {
     key: 'context',
     labelKey: 'module.context',
-    create: ({ mode, isVisibleFn }) =>
+    create: ({ mode, isVisibleFn, preview, getCtxAgentId, setCtxAgentId }) =>
       ContextWindowWidget({
         interactiveInspector: mode !== 'hover',
         isVisibleFn,
+        preview,
+        getCtxAgentId,
+        setCtxAgentId,
       }),
   },
   quotas: {
@@ -44,10 +48,12 @@ export const OVERVIEW_WIDGET_REGISTRY = Object.freeze({
   live_tasks: {
     key: 'live_tasks',
     labelKey: 'module.live_tasks',
-    create: ({ mode, isVisibleFn }) =>
+    create: ({ mode, isVisibleFn, preview, getCtxAgentId }) =>
       LiveActivityWidget({
         interactive: mode !== 'hover',
         isVisibleFn,
+        preview,
+        getCtxAgentId,
       }),
   },
 });
@@ -73,11 +79,26 @@ export function getOverviewModuleOptions() {
 export function createDynamicWidgetHost({
   containerEl,
   mode = 'overview',
+  preview = false,
   isVisibleFn = () => true,
   initialModuleKeys = [],
 }) {
   const instances = new Map();
   let currentKeys = [];
+  let previewCtxAgentId = 'auto';
+  let latestUpdatePayload = null;
+
+  const getCtxAgentId = preview ? () => previewCtxAgentId : undefined;
+  const setCtxAgentId = preview
+    ? (nextId) => {
+        previewCtxAgentId = String(nextId || 'auto');
+        if (latestUpdatePayload) {
+          for (const key of currentKeys) {
+            instances.get(key)?.refs?.update?.(latestUpdatePayload);
+          }
+        }
+      }
+    : undefined;
 
   function syncModules(nextKeys) {
     const validKeys = [];
@@ -105,7 +126,13 @@ export function createDynamicWidgetHost({
     // Instantiate newly added widgets
     for (const key of validKeys) {
       if (!instances.has(key)) {
-        const inst = OVERVIEW_WIDGET_REGISTRY[key].create({ mode, isVisibleFn });
+        const inst = OVERVIEW_WIDGET_REGISTRY[key].create({
+          mode,
+          preview,
+          isVisibleFn,
+          getCtxAgentId,
+          setCtxAgentId,
+        });
         instances.set(key, inst);
       }
     }
@@ -135,6 +162,7 @@ export function createDynamicWidgetHost({
   }
 
   function update({ moduleKeys = [], data = null, minuteTick = undefined } = {}) {
+    latestUpdatePayload = { data, minuteTick };
     const validKeys = syncModules(moduleKeys);
     for (const key of validKeys) {
       const inst = instances.get(key);

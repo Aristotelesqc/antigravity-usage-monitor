@@ -290,8 +290,8 @@
   text-align: center;
 }
 
-.wm-seg-speed.state-running {
-  color: var(--metric-speed);
+.wm-seg-speed.state-running:not([class*="tone-"]) {
+  color: var(--accent-primary);
   font-weight: 500;
 }
 
@@ -347,6 +347,18 @@
   text-align: center;
 }
 
+.wm-cap-slot.tone-good,
+.wm-cap-slot.tone-good .wm-slot-text {
+  color: var(--metric-ok);
+  font-weight: 500;
+}
+
+.wm-cap-slot.tone-info,
+.wm-cap-slot.tone-info .wm-slot-text {
+  color: var(--metric-info);
+  font-weight: 500;
+}
+
 .wm-cap-slot.tone-warn,
 .wm-cap-slot.tone-warn .wm-slot-text {
   color: var(--metric-warn);
@@ -357,6 +369,11 @@
 .wm-cap-slot.tone-danger .wm-slot-text {
   color: var(--metric-danger);
   font-weight: 500;
+}
+
+.wm-cap-slot.tone-muted,
+.wm-cap-slot.tone-muted .wm-slot-text {
+  color: var(--text-muted);
 }
 
 /* 仅在超窄 ring-only 折叠态下使用右上角 5px 提示圆点；常规态由柔和微胶囊 .wm-update-btn 承载 */

@@ -23,7 +23,11 @@ import { uiStore } from '../../store/uiStore.js';
 
 export const MetricMatrixWidget = defineComponent({
   name: 'MetricMatrixWidget',
-  setup() {
+  setup({ props }) {
+    const getCtxAgentId =
+      typeof props?.getCtxAgentId === 'function'
+        ? props.getCtxAgentId
+        : () => uiStore.getState().ctxInspectorAgentId;
     const matrixEl = h('section', {
       className: 'telemetry-matrix',
       'aria-label': t('module.metrics'),
@@ -54,11 +58,10 @@ export const MetricMatrixWidget = defineComponent({
       patchAttr(matrixEl, 'data-cols', String(colCount));
       patchStyleVar(matrixEl, '--matrix-cols', String(colCount));
 
-      const uiSt = uiStore.getState();
       const { hasSubagents, scopedConv, ctxAgent } = resolveScopedConversation(
         data,
         'all',
-        uiSt.ctxInspectorAgentId
+        getCtxAgentId()
       );
       const active = scopedConv || data?.activeConversation || {};
       const ctx = ctxAgent?.context || active.context || {};

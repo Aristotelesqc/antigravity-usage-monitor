@@ -208,7 +208,7 @@ export function syncPoolQuotaRow(refs, item, idx, rowEl) {
   );
   patchStyleVar(refs.fill5h, '--fill-w', `${Math.min(100, used5hVal)}%`);
   patchClasses(refs.fill5h, {
-    'tone-warn': used5hVal >= 60 && used5hVal < 85,
+    'tone-warn': used5hVal >= 70 && used5hVal < 85,
     'tone-danger': used5hVal >= 85,
   });
 
@@ -255,7 +255,7 @@ export function syncPoolQuotaRow(refs, item, idx, rowEl) {
   );
   patchStyleVar(refs.fillWk, '--fill-w', `${Math.min(100, usedWkVal)}%`);
   patchClasses(refs.fillWk, {
-    'tone-warn': usedWkVal >= 60 && usedWkVal < 85,
+    'tone-warn': usedWkVal >= 70 && usedWkVal < 85,
     'tone-danger': usedWkVal >= 85,
   });
 }

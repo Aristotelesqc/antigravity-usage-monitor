@@ -1,6 +1,7 @@
 /**
- * @fileoverview Reusable Accordion / Collapsible Section (`CollapsibleSection.js`)
- * for `SettingsStructureTab`.
+ * @fileoverview Reusable Section Card (`CollapsibleSection.js`)
+ * for `SettingsStructureTab` — supports both accordion mode (`collapsible: true`)
+ * and static 3rd-level pane card mode (`collapsible: false`).
  */
 
 import { defineComponent } from '../../core/component.js';
@@ -11,38 +12,44 @@ import { t } from '../../i18n/index.js';
 export const CollapsibleSection = defineComponent({
   name: 'CollapsibleSection',
   setup({ props, onCleanup }) {
-    let expanded = Boolean(props.defaultExpanded);
+    const isCollapsible = props.collapsible !== false;
+    let expanded = isCollapsible ? Boolean(props.defaultExpanded) : true;
     let statusTimer = null;
 
-    const chevronIcon = createSvgIcon('chevron-right', {
-      size: 12,
-      className: 'collapsible-chevron',
-    });
+    const chevronIcon = isCollapsible
+      ? createSvgIcon('chevron-right', {
+          size: 12,
+          className: 'collapsible-chevron',
+        })
+      : null;
     const sectionIcon = props.icon ? createSvgIcon(props.icon, { size: 13 }) : null;
     const titleTextEl = h('span', {
       className: 'collapsible-title-text',
       text: props.title || '',
     });
 
-    const triggerChildren = [chevronIcon];
+    const triggerChildren = [];
+    if (chevronIcon) triggerChildren.push(chevronIcon);
     if (sectionIcon) triggerChildren.push(sectionIcon);
     triggerChildren.push(titleTextEl);
 
-    const triggerBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'collapsible-trigger',
-        'aria-expanded': expanded ? 'true' : 'false',
-        onClick: () => {
-          setExpanded(!expanded);
-          if (typeof props.onToggle === 'function') {
-            props.onToggle(expanded);
-          }
-        },
-      },
-      triggerChildren
-    );
+    const triggerBtn = isCollapsible
+      ? h(
+          'button',
+          {
+            type: 'button',
+            className: 'collapsible-trigger',
+            'aria-expanded': expanded ? 'true' : 'false',
+            onClick: () => {
+              setExpanded(!expanded);
+              if (typeof props.onToggle === 'function') {
+                props.onToggle(expanded);
+              }
+            },
+          },
+          triggerChildren
+        )
+      : h('div', { className: 'collapsible-title-static' }, triggerChildren);
 
     const statusTextEl = h('span', { className: 'collapsible-status', text: '' });
     const badgeEl = h('span', {
@@ -89,12 +96,13 @@ export const CollapsibleSection = defineComponent({
     const sectionEl = h(
       'section',
       {
-        className: `panel collapsible-section${expanded ? ' is-expanded' : ''}`,
+        className: `panel collapsible-section${expanded ? ' is-expanded' : ''}${isCollapsible ? '' : ' is-static-pane'}`,
       },
       [headerRow, bodyEl]
     );
 
     function setExpanded(next) {
+      if (!isCollapsible) return;
       expanded = Boolean(next);
       patchClasses(sectionEl, { 'is-expanded': expanded });
       patchAttr(triggerBtn, 'aria-expanded', expanded ? 'true' : 'false');
@@ -149,13 +157,15 @@ export const CollapsibleSection = defineComponent({
         triggerBtn,
         bodyEl,
         resetBtn,
+        badgeEl,
+        statusTextEl,
         setExpanded,
-        isExpanded: () => expanded,
         setTitle,
         setBadge,
         setResetLabel,
         setResetDisabled,
         showStatus,
+        isExpanded: () => expanded,
       },
     };
   },

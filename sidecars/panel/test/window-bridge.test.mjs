@@ -32,7 +32,10 @@ import {
   getTtftToneClass,
 } from '../src/core/formatters.js';
 import { setI18nLanguage } from '../src/i18n/index.js';
-import { resolveOverviewMetricCell } from '../src/registries/metricRegistry.js';
+import {
+  resolveCapsuleMetricPresentation,
+  resolveOverviewMetricCell,
+} from '../src/registries/metricRegistry.js';
 import { backendHarness } from './backend-harness.mjs';
 
 test('DevToolsActivePort parsing, cross-platform discovery (2.0 + IDE), and strict target/origin filtering', () => {
@@ -752,6 +755,9 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       if (!arr) return;
       const i = arr.indexOf(fn);
       if (i >= 0) arr.splice(i, 1);
+    },
+    dispatchEvent(ev) {
+      for (const fn of [...(docListeners.get(ev.type) || [])]) fn(ev);
     },
   };
 
@@ -1504,6 +1510,9 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       'Settings subnav uses auto-sized equal columns regardless of visible tab count'
     );
     const [generalPane, structurePane, otherPane] = settingsRoot.querySelectorAll('.settings-tab-stack');
+    const thirdNavBar = settingsRoot.querySelector('.settings-thirdnav-bar');
+    assert.ok(thirdNavBar, '3rd-level structure menu bar mounted in SettingsView');
+    assert.equal(thirdNavBar.hasAttribute('hidden'), true, '3rd-level menu hidden when General tab is active');
     assert.equal(generalPane.hasAttribute('hidden'), false, 'General tab active by default');
     assert.equal(structurePane.hasAttribute('hidden'), true);
     assert.equal(otherPane.hasAttribute('hidden'), true);
@@ -1624,19 +1633,41 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.autoUpdatePlugin, false);
     assert.equal(topbarUpdateBtn.hasAttribute('hidden'), false, 'Topbar update pill visible when mode=manual');
 
-    // --- Tab 1: 结构 (4 accordion sections: capsule 1..5, hover 0..4, overview 1..4 + 1..4, step columns 2..12) ---
+    // --- Tab 1: 结构 (3rd-level menu + 4 real-UI live previews + mouse drag reordering) ---
     subNavBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     assert.equal(structurePane.hasAttribute('hidden'), false);
+    assert.equal(thirdNavBar.hasAttribute('hidden'), false, '3rd-level menu visible when Structure tab is active');
+    const thirdNavBtns = thirdNavBar.querySelectorAll('.structure-thirdnav-btn');
+    assert.deepEqual(
+      thirdNavBtns.map((btn) => btn.querySelector('.structure-thirdnav-label').textContent),
+      ['挂载与胶囊', '鼠标悬浮窗', '实时监控布局', '调用明细字段'],
+      '3rd-level menu renders 4 structure sub-tabs'
+    );
+    assert.equal(thirdNavBtns[0].classList.contains('is-active'), true, 'First 3rd-level tab active by default');
+
     const accordionSections = structurePane.querySelectorAll('.collapsible-section');
-    assert.equal(accordionSections.length, 4, 'Structure tab has 4 collapsible sections');
-    assert.equal(accordionSections[0].classList.contains('is-expanded'), true, 'Section 1 expanded by default');
-    assert.equal(accordionSections[1].classList.contains('is-expanded'), false, 'Section 2 collapsed by default');
+    assert.equal(accordionSections.length, 4, 'Structure tab has 4 static pane sections');
+    assert.equal(accordionSections[0].hasAttribute('hidden'), false, 'Pane 0 visible by default');
+    assert.equal(accordionSections[1].hasAttribute('hidden'), true, 'Pane 1 hidden until selected');
+    assert.equal(accordionSections[2].hasAttribute('hidden'), true, 'Pane 2 hidden until selected');
+    assert.equal(accordionSections[3].hasAttribute('hidden'), true, 'Pane 3 hidden until selected');
 
     const sec0 = accordionSections[0];
+    assert.equal(sec0.querySelector('.structure-preview-stage'), null, 'No outer preview wrapper box');
+    assert.equal(sec0.querySelector('.structure-preview-head'), null, 'No redundant mock data label header');
+    const previewCapsuleBar = sec0.querySelector('.preview-capsule-bar');
+    const previewCapsuleSlots = sec0.querySelectorAll('.wm-cap-slot');
+    const previewMultiBtn = sec0.querySelector('.wm-multi-btn');
+    assert.ok(previewCapsuleBar, 'Pane 0 mounts real CapsuleBarWidget preview');
+    assert.equal(previewCapsuleSlots.length, 5, 'Preview CapsuleBarWidget mounts real 5 capsule slots');
+    assert.equal(previewCapsuleSlots[0].querySelector('.wm-ctx-pct').textContent, '56%', 'Preview renders simulated context %');
+    assert.equal(previewCapsuleSlots[1].children[0].textContent, '68.4 t/s', 'Preview renders simulated speed');
+    assert.equal(previewCapsuleSlots[1].classList.contains('tone-good'), true, 'Preview capsule 68.4 t/s shares tone-good green with cards');
+    assert.equal(previewCapsuleSlots[2].children[0].textContent, '余 52%', 'Preview renders simulated quota_auto (min of 5h 64% and weekly 52%)');
     const mountSelectEl = sec0.querySelectorAll('.custom-select')[0];
 
-    // Toggle windowMountSelect: dual -> composer -> sidebar -> dual
+    // Toggle windowMountSelect: dual -> composer -> sidebar -> dual (updating both live host & preview bar)
     assert.ok(mountSelectEl.querySelector('.select-label').textContent.includes('顶部栏 + 侧边栏'));
     mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     mountSelectEl.querySelectorAll('.select-option')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -1644,6 +1675,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.windowMountMode, 'composer', 'windowMountMode persisted as composer');
     assert.equal(mockSettings.enableWindowOverlay, true, 'enableWindowOverlay stays true in composer mode');
     assert.ok(mountSelectEl.querySelector('.select-label').textContent.includes('输入框挂载'), 'UI reflects composer mode');
+    assert.equal(previewCapsuleBar.getAttribute('data-mount-mode'), 'composer', 'Preview bar switches to composer mode');
+    assert.equal(previewCapsuleBar.classList.contains('is-composer'), true);
 
     mountSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     mountSelectEl.querySelectorAll('.select-option')[2].dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -1651,6 +1684,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.windowMountMode, 'sidebar', 'windowMountMode persisted as sidebar');
     assert.equal(mockSettings.enableWindowOverlay, false, 'enableWindowOverlay persisted as false');
     assert.ok(mountSelectEl.querySelector('.select-label').textContent.includes('仅侧边栏'), 'UI reflects sidebar mode');
+    assert.equal(previewCapsuleBar.classList.contains('is-sidebar-only'), true);
+    assert.equal(sec0.querySelector('.preview-sidebar-note').hasAttribute('hidden'), false, 'Sidebar-only preview hint shown');
 
     // Re-open popover after sidebar closed it and switch back to dual
     ov.open();
@@ -1659,6 +1694,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.windowMountMode, 'dual', 'windowMountMode persisted back to dual');
     assert.equal(mockSettings.enableWindowOverlay, true, 'enableWindowOverlay persisted back to true');
+    assert.equal(previewCapsuleBar.getAttribute('data-mount-mode'), 'dual');
 
     // Toggle topbar multi-session switch: show -> hide -> show
     const topbarSegBtns = sec0.querySelectorAll('.seg-btn');
@@ -1667,13 +1703,15 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.showTopbarMultiSession, false);
     assert.equal(multiBtn.hasAttribute('hidden'), true, 'Topbar multi-session button hidden immediately');
+    assert.equal(previewMultiBtn.hasAttribute('hidden'), true, 'Preview multi-session button hidden immediately');
     assert.equal(capsuleHost.getAttribute('data-multi'), 'off');
     topbarSegBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.showTopbarMultiSession, true);
     assert.equal(multiBtn.hasAttribute('hidden'), false, 'Topbar multi-session button restored immediately');
+    assert.equal(previewMultiBtn.hasAttribute('hidden'), false, 'Preview multi-session button restored immediately');
 
-    // Dynamic 1..5 capsule slots via EditableSlotList (+ / - / ↑ / ↓)
+    // Dynamic 1..5 capsule slots via EditableSlotList (+ / - / ↑ / ↓ & mouse drag-and-drop)
     const capSlots = capsuleHost.shadowRoot.querySelectorAll('.wm-cap-slot');
     const capSeps = capsuleHost.shadowRoot.querySelectorAll('.wm-sep');
     assert.equal(capSlots.length, 5, '5 capsule slot nodes pre-reserved');
@@ -1692,6 +1730,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(capSlots[0].getAttribute('data-metric'), 'gemini_5h');
     assert.equal(capSlots[0].children.length, 1, 'Ring SVG detached cleanly when slot leaves context');
     assert.equal(capSlots[0].children[0].textContent, '余 44%');
+    assert.equal(previewCapsuleSlots[0].getAttribute('data-metric'), 'gemini_5h', 'Preview slot 0 mirrors gemini_5h');
+    assert.equal(previewCapsuleSlots[0].children[0].textContent, '余 64%', 'Preview slot 0 renders simulated gemini_5h');
 
     capRowSelects[1].querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     capRowSelects[1].querySelectorAll('.select-option')[2].dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -1712,6 +1752,46 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.deepEqual(mockSettings.topbarCapsuleSlots, ['ttft', 'gemini_5h', 'cost']);
     assert.equal(capSlots[0].children[0].textContent, '0.85s');
     assert.equal(capSlots[1].children[0].textContent, '余 44%');
+
+    // Mouse drag-and-drop reorder: drag Row 0 ('ttft') down below Row 2 ('cost') -> ['gemini_5h', 'cost', 'ttft']
+    const capSlotListEl = capSlotWrap.querySelector('.editable-slot-list');
+    for (const rowEl of capSlotListEl.children) {
+      rowEl.getBoundingClientRect = () => {
+        const curIdx = capSlotListEl.children.indexOf(rowEl);
+        return { left: 0, right: 280, top: curIdx * 30, bottom: curIdx * 30 + 28, width: 280, height: 28 };
+      };
+    }
+    const firstDragHandle = capSlotListEl.children[0].querySelector('.slot-drag-handle');
+    assert.ok(firstDragHandle, 'Drag handle rendered on EditableSlotList row');
+    firstDragHandle.dispatchEvent({ type: 'pointerdown', button: 0, clientY: 14, preventDefault() {}, stopPropagation() {} });
+    mockDocument.dispatchEvent({ type: 'pointermove', clientY: 78, preventDefault() {} });
+    assert.equal(capSlotListEl.classList.contains('is-dragging-list'), true, 'List enters dragging state on pointermove');
+    assert.deepEqual(
+      mockSettings.topbarCapsuleSlots,
+      ['ttft', 'gemini_5h', 'cost'],
+      'Settings API not spammed mid-drag before pointerup'
+    );
+    assert.equal(
+      previewCapsuleSlots[0].getAttribute('data-metric'),
+      'gemini_5h',
+      'Real CapsuleBarWidget preview updates live during mouse drag'
+    );
+    assert.equal(
+      previewCapsuleSlots[2].getAttribute('data-metric'),
+      'ttft',
+      'Dragged metric moved to slot 2 in live preview'
+    );
+    mockDocument.dispatchEvent({ type: 'pointerup', clientY: 78 });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(capSlotListEl.classList.contains('is-dragging-list'), false, 'Dragging state cleared on pointerup');
+    assert.deepEqual(
+      mockSettings.topbarCapsuleSlots,
+      ['gemini_5h', 'cost', 'ttft'],
+      'Mouse drag order persisted once on pointerup'
+    );
+    assert.equal(capSlots[0].getAttribute('data-metric'), 'gemini_5h');
+    assert.equal(capSlots[1].getAttribute('data-metric'), 'cost');
+    assert.equal(capSlots[2].getAttribute('data-metric'), 'ttft');
 
     // Click `+ 添加指标` twice to expand from 3 -> 5 slots
     const capAddBtn = capSlotWrap.querySelector('.slot-add-btn');
@@ -1743,9 +1823,18 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(capSlots[0].children.length, 2, 'Ring SVG re-attached on Slot 0');
     assert.equal(capSlots[0].querySelector('.wm-ctx-pct').textContent, '50%');
 
-    // Section 1: Hover Popup Modules (0..4) — removing all 3 suppresses hover popup while click popover still works
+    // Pane 1 (3rd-level tab 'hover'): Hover Popup Modules (0..4) + real hover UI preview
     const sec1 = accordionSections[1];
-    sec1.querySelector('.collapsible-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    thirdNavBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(thirdNavBtns[1].classList.contains('is-active'), true, 'Hover 3rd-level tab active');
+    assert.equal(sec0.hasAttribute('hidden'), true, 'Mount pane hidden');
+    assert.equal(sec1.hasAttribute('hidden'), false, 'Hover pane visible');
+    const hoverPreviewTip = sec1.querySelector('.wm-hover-tip');
+    const hoverPreviewWidgets = hoverPreviewTip.querySelector('.wm-hover-widgets');
+    assert.equal(hoverPreviewTip.classList.contains('is-preview'), true, 'Real .wm-hover-tip mounted inline in preview');
+    assert.equal(hoverPreviewWidgets.children.length, 3, 'Default 3 real hover widgets mounted in preview');
+
     const hoverSlotWrap = sec1.querySelector('.editable-slot-wrap');
     for (let r = 0; r < 3; r += 1) {
       const remBtns = hoverSlotWrap.querySelectorAll('.slot-remove-btn');
@@ -1754,6 +1843,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     }
     assert.deepEqual(mockSettings.hoverModules, [], 'Hover modules emptied to 0 items');
     assert.equal(hoverSlotWrap.querySelector('.editable-slot-empty').hasAttribute('hidden'), false, '0-module empty hint visible');
+    assert.equal(hoverPreviewTip.hasAttribute('hidden'), true, 'Hover preview tip hidden when 0 modules');
+    assert.equal(sec1.querySelector('.structure-preview-empty').hasAttribute('hidden'), false, 'Empty preview state shown');
     // Temporarily set pluginUpdateMode=off via Settings UI so update banner is also absent, then close popover and hover capsuleBtn
     updateModeSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     updateModeSelectEl.querySelectorAll('.select-option')[2].dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -1769,10 +1860,19 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     sec1.querySelector('.btn-ghost-sm').dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 40));
     assert.deepEqual(mockSettings.hoverModules, ['metrics', 'context', 'quotas']);
+    assert.equal(hoverPreviewTip.hasAttribute('hidden'), false, 'Hover preview tip restored');
+    assert.equal(hoverPreviewWidgets.children.length, 3, '3 real hover widgets restored in preview');
 
-    // Section 2: Live Overview Layout (overviewModules 1..4 + overviewMetrics 1..4)
+    // Pane 2 (3rd-level tab 'overview'): Live Overview Layout + real overview UI preview
     const sec2 = accordionSections[2];
-    sec2.querySelector('.collapsible-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    thirdNavBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(thirdNavBtns[2].classList.contains('is-active'), true, 'Overview 3rd-level tab active');
+    assert.equal(sec1.hasAttribute('hidden'), true);
+    assert.equal(sec2.hasAttribute('hidden'), false);
+    const overviewPreviewHostEl = sec2.querySelector('.overview-modules-host');
+    assert.equal(overviewPreviewHostEl.children.length, 4, 'Overview preview mounts all 4 real overview widgets');
+
     const [ovModWrap, ovMetricWrap] = sec2.querySelectorAll('.editable-slot-wrap');
     // Move row 2 ('quotas') up above 'context' -> ['metrics', 'quotas', 'context', 'live_tasks']
     ovModWrap.querySelectorAll('.slot-move-btn')[6].dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -1784,6 +1884,11 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     ovMetricWrap.querySelectorAll('.slot-remove-btn')[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 25));
     assert.deepEqual(mockSettings.overviewMetrics, ['tps', 'ttft']);
+    assert.equal(overviewPreviewHostEl.children[0].getAttribute('data-cols'), '2', 'Preview MetricMatrixWidget adapts to 2 columns');
+    assert.ok(
+      overviewPreviewHostEl.children[1].querySelector('.panel-title').children[1].textContent.includes('可用额度'),
+      'Preview QuotaPoolsWidget moved above ContextWindowWidget'
+    );
     pillTabs[0].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     const overviewHostEl = allPanes[0].querySelector('.overview-modules-host');
@@ -1799,9 +1904,25 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.deepEqual(mockSettings.overviewModules, ['metrics', 'context', 'quotas', 'live_tasks']);
     assert.deepEqual(mockSettings.overviewMetrics, ['tps', 'ttft', 'avg_tps', 'step_cost']);
 
-    // Section 3: Step Table Columns (2..12) + independent Turn Rail & Main/Sub Agent Badge switches
+    // Pane 3 (3rd-level tab 'steps'): Step Table Columns (2..12) + real StepTableWidget preview
     const sec3 = accordionSections[3];
-    sec3.querySelector('.collapsible-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    thirdNavBtns[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(thirdNavBtns[3].classList.contains('is-active'), true, 'Steps 3rd-level tab active');
+    assert.equal(sec2.hasAttribute('hidden'), true);
+    assert.equal(sec3.hasAttribute('hidden'), false);
+    const previewStepTable = sec3.querySelector('.steps-data-table');
+    assert.ok(previewStepTable, 'Real StepTableWidget mounted in Steps structure preview');
+    assert.equal(previewStepTable.classList.contains('has-turn-rail'), true, 'Preview step table shows turn rail by default');
+    assert.equal(previewStepTable.children[0].children[0].children.length, 7, 'Preview step table renders 7 default columns');
+    assert.equal(previewStepTable.children[1].children.length, 4, 'Preview step table renders 4 simulated steps');
+    const previewFirstTd = previewStepTable.children[1].children[0].children[0];
+    previewFirstTd.onmouseenter?.({ target: previewFirstTd });
+    const previewTurnTip = sec3.querySelector('.turn-prompt-tip');
+    assert.equal(previewTurnTip.hasAttribute('hidden'), false, 'Hovering first cell in preview reveals turn prompt tooltip');
+    assert.ok(previewTurnTip.textContent.includes('并发刷新令牌'), 'Preview turn tooltip displays realistic engineering prompt');
+    previewFirstTd.onmouseleave?.();
+
     const sec3SettingLabels = sec3.querySelectorAll('.form-label').map((el) => el.textContent);
     assert.ok(sec3SettingLabels.includes('对话轮次导轨'), 'Turn rail switch rendered in 调用明细字段');
     assert.ok(sec3SettingLabels.includes('主/子代理标识'), 'Main/Sub agent badge switch rendered in 调用明细字段');
@@ -1811,9 +1932,15 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     sec3SegControls[0].querySelectorAll('.seg-btn')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 25));
     assert.equal(mockSettings.showStepTurnRail, false, 'Turn rail switch updates showStepTurnRail to false');
+    assert.equal(previewStepTable.classList.contains('has-turn-rail'), false, 'Preview step table removes turn rail immediately');
     sec3SegControls[1].querySelectorAll('.seg-btn')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 25));
     assert.equal(mockSettings.showStepAgentBadge, false, 'Agent badge switch updates showStepAgentBadge to false');
+    assert.equal(
+      previewStepTable.querySelector('.agent-badge').hasAttribute('hidden'),
+      true,
+      'Preview step table hides Main/Sub agent badge immediately'
+    );
 
     const stepColWrap = sec3.querySelector('.editable-slot-wrap');
     stepColWrap.querySelector('.slot-add-btn').dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -1821,6 +1948,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     stepColWrap.querySelector('.slot-add-btn').dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 25));
     assert.equal(mockSettings.stepTableColumns.length, 9, 'Added time and duration columns (7 -> 9)');
+    assert.equal(previewStepTable.children[0].children[0].children.length, 9, 'Preview step table expands to 9 columns live');
     pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     const stepTableWhileRailOff = allPanes[2].querySelector('.data-table');
@@ -1848,6 +1976,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     subNavBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     assert.equal(otherPane.hasAttribute('hidden'), false);
+    assert.equal(thirdNavBar.hasAttribute('hidden'), true, '3rd-level menu hidden when switching to Other tab');
     const otherSelects = otherPane.querySelectorAll('.custom-select');
     assert.equal(otherSelects.length, 4);
     const modelFormatSelectEl = otherSelects[0];
@@ -4618,4 +4747,62 @@ test('Step table semantic tone classes (speed/cache/ttft/cost) and domain-aligne
   });
   assert.equal(quotaCell.valueText, '余 42%');
   assert.equal(quotaCell.subText, 'Carbon 5h · 周 85%', 'Identifies pool/window without repeating 余 42%');
+
+  const avgTpsCell = resolveOverviewMetricCell('avg_tps', { active: mockActive });
+  assert.equal(avgTpsCell.valueClass, 'cell-value tone-info', 'avg_tps 57.3 tok/s uses same speed tone-info');
+
+  // 5. Capsule metric slots strictly match overview/hover/steps semantic tones
+  const capBaseCtx = {
+    hasTelemetry: true,
+    usedPct: 55.8,
+    dashOffset: 14,
+    isRunning: false,
+    tps: 43.7,
+    avgTps: 57.3,
+    ttft: 22.3,
+    stepCost: 0.198,
+    sessionCost: 46.9,
+    cacheHitPct: 98.5,
+    latestPromptTokens: 155212,
+    sessionTokens: 25_500_000,
+    quotas: mockQuotas,
+  };
+  assert.equal(
+    resolveCapsuleMetricPresentation('tps', capBaseCtx, 32.67).toneClass,
+    'tone-info',
+    'Idle capsule 43.7 t/s matches hover card tone-info cyan'
+  );
+  assert.equal(
+    resolveCapsuleMetricPresentation('tps', { ...capBaseCtx, isRunning: true, tps: 68.4 }, 32.67).toneClass,
+    'tone-good',
+    'Running capsule 68.4 t/s matches overview/hover tone-good green instead of legacy orange'
+  );
+  assert.equal(
+    resolveCapsuleMetricPresentation('avg_tps', capBaseCtx, 32.67).toneClass,
+    'tone-info'
+  );
+  assert.equal(
+    resolveCapsuleMetricPresentation('cache_hit', capBaseCtx, 32.67).toneClass,
+    'tone-good',
+    'Capsule cache_hit 98.5% matches hover card tone-good green'
+  );
+  assert.equal(
+    resolveCapsuleMetricPresentation('cache_hit', { ...capBaseCtx, cacheHitPct: 77.6 }, 32.67).toneClass,
+    'tone-info'
+  );
+  assert.equal(
+    resolveCapsuleMetricPresentation('ttft', capBaseCtx, 32.67).toneClass,
+    'tone-warn',
+    'Capsule ttft 22.3s uses unified >=18s tone-warn threshold'
+  );
+  assert.equal(
+    resolveCapsuleMetricPresentation('ttft', { ...capBaseCtx, ttft: 16.0 }, 32.67).toneClass,
+    '',
+    'Capsule ttft 16.0s stays neutral (<18s) matching overview/step table'
+  );
+  assert.equal(
+    resolveCapsuleMetricPresentation('cost', capBaseCtx, 32.67).toneClass,
+    'tone-warn',
+    'Capsule step cost $0.198 matches tone-warn'
+  );
 });

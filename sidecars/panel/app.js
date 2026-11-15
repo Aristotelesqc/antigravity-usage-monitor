@@ -93,6 +93,14 @@ const SVG_ICON_DEFS = Object.freeze({
   close: [
     { tag: 'path', attrs: { d: 'M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6' } },
   ],
+  grip: [
+    { tag: 'circle', attrs: { cx: '6', cy: '4', r: '1.05', fill: 'currentColor', stroke: 'none' } },
+    { tag: 'circle', attrs: { cx: '10', cy: '4', r: '1.05', fill: 'currentColor', stroke: 'none' } },
+    { tag: 'circle', attrs: { cx: '6', cy: '8', r: '1.05', fill: 'currentColor', stroke: 'none' } },
+    { tag: 'circle', attrs: { cx: '10', cy: '8', r: '1.05', fill: 'currentColor', stroke: 'none' } },
+    { tag: 'circle', attrs: { cx: '6', cy: '12', r: '1.05', fill: 'currentColor', stroke: 'none' } },
+    { tag: 'circle', attrs: { cx: '10', cy: '12', r: '1.05', fill: 'currentColor', stroke: 'none' } },
+  ],
 });
 
 // --- src/icons/SvgIcon.js ---
@@ -662,6 +670,12 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.gen.latestSub': '已是最新 ({mode})',
 
   // Preferences -> Structure Tab
+  'settings.str.thirdTabAria': '结构子菜单切换',
+  'settings.str.tabMount': '挂载与胶囊',
+  'settings.str.tabHover': '鼠标悬浮窗',
+  'settings.str.tabOverview': '实时监控布局',
+  'settings.str.tabSteps': '调用明细字段',
+  'settings.str.previewMountSidebarHint': '当前为仅侧边栏模式，主窗口不挂载胶囊；切回顶部栏或输入框挂载后将按上方样式呈现',
   'settings.str.mountSection': '挂载与胶囊栏',
   'settings.str.mountBadge': '{count}/5 项',
   'settings.str.mountMode': '面板挂载方式',
@@ -671,32 +685,37 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.multiToggle': '实时运行会话入口',
   'settings.str.show': '显示',
   'settings.str.hide': '隐藏',
-  'settings.str.capsuleSlotsLabel': '胶囊数值与顺序 (左 → 右，1~5 项)',
+  'settings.str.capsuleSlotsLabel': '胶囊数值与顺序 (左 → 右，1~5 项，可拖拽)',
   'settings.str.addCapsuleSlot': '添加槽位 ({count}/{max})',
   'settings.str.hoverSection': '鼠标悬浮窗',
   'settings.str.hoverBadgeOff': '已关闭',
   'settings.str.hoverBadgeCount': '{count} 模块',
-  'settings.str.hoverModulesLabel': '悬浮窗展示模块 (上 → 下，0~4 项)',
+  'settings.str.hoverModulesLabel': '悬浮窗展示模块 (上 → 下，0~4 项，可拖拽)',
   'settings.str.hoverEmptyHint': '已关闭悬浮速览窗（点击胶囊仍可展开完整面板）',
   'settings.str.addHoverModule': '添加模块 ({count}/{max})',
   'settings.str.overviewSection': '实时监控布局',
   'settings.str.overviewBadge': '{modCount} 模块 · {metCount} 指标',
-  'settings.str.overviewModulesLabel': '监控模块与顺序 (上 → 下，至少 1 项)',
+  'settings.str.overviewModulesLabel': '监控模块与顺序 (上 → 下，至少 1 项，可拖拽)',
   'settings.str.addOverviewModule': '添加模块 ({count}/{max})',
-  'settings.str.overviewMetricsLabel': '第一行实时指标 (左 → 右，1~4 项)',
+  'settings.str.overviewMetricsLabel': '第一行实时指标 (左 → 右，1~4 项，可拖拽)',
   'settings.str.overviewMetricsInactiveHint': '当前已移出「实时指标」模块，此配置将在悬浮窗启用或重新添加模块时生效',
   'settings.str.addOverviewMetric': '添加指标 ({count}/{max})',
   'settings.str.stepsSection': '调用明细字段',
   'settings.str.stepsBadge': '{count} 列',
   'settings.str.stepTurnRailToggle': '对话轮次导轨',
   'settings.str.stepAgentBadgeToggle': '主/子代理标识',
-  'settings.str.stepsColsLabel': '「按步查看」显示列 (左 → 右，至少 2 列)',
+  'settings.str.stepsColsLabel': '「按步查看」显示列 (左 → 右，至少 2 列，可拖拽)',
   'settings.str.addStepCol': '添加字段 ({count}/{max})',
+  'settings.slot.dragHint': '按住上下拖动调整顺序',
   'settings.slot.moveUp': '前移',
   'settings.slot.moveDown': '后移',
   'settings.slot.remove': '移除此项',
   'settings.slot.minReached': '至少保留 {min} 项',
   'settings.slot.alreadyAdded': '已添加',
+  'settings.mock.sessionTitle': '重构鉴权中间件与会话缓存',
+  'settings.mock.subRole': '接口审计',
+  'settings.mock.turnPromptLatest': '排查并发刷新令牌时的竞态问题，补齐单元测试',
+  'settings.mock.turnPromptPrev': '梳理路由守卫与过期会话清理逻辑',
 
   // Preferences -> Other Tab
   'settings.oth.modelTitle': '模型标识显示',
@@ -1139,6 +1158,12 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.gen.latestSub': 'Up to date ({mode})',
 
   // Preferences -> Structure Tab
+  'settings.str.thirdTabAria': 'Structure section tabs',
+  'settings.str.tabMount': 'Mount & Bar',
+  'settings.str.tabHover': 'Hover View',
+  'settings.str.tabOverview': 'Overview',
+  'settings.str.tabSteps': 'Step Table',
+  'settings.str.previewMountSidebarHint': 'Window capsule is disabled in Sidebar Only mode; switching back to Titlebar or Composer applies the capsule above',
   'settings.str.mountSection': 'Mount & Capsule Bar',
   'settings.str.mountBadge': '{count}/5 slots',
   'settings.str.mountMode': 'Panel Mount Mode',
@@ -1148,32 +1173,37 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.multiToggle': 'Active Sessions Pill',
   'settings.str.show': 'Show',
   'settings.str.hide': 'Hide',
-  'settings.str.capsuleSlotsLabel': 'Capsule Metrics & Order (Left → Right, 1–5)',
+  'settings.str.capsuleSlotsLabel': 'Capsule Metrics & Order (Left → Right, 1–5, draggable)',
   'settings.str.addCapsuleSlot': 'Add Slot ({count}/{max})',
   'settings.str.hoverSection': 'Hover Quick-View',
   'settings.str.hoverBadgeOff': 'Off',
   'settings.str.hoverBadgeCount': '{count} modules',
-  'settings.str.hoverModulesLabel': 'Hover Popup Modules (Top → Bottom, 0–4)',
+  'settings.str.hoverModulesLabel': 'Hover Popup Modules (Top → Bottom, 0–4, draggable)',
   'settings.str.hoverEmptyHint': 'Hover quick-view disabled (click capsule to open full panel)',
   'settings.str.addHoverModule': 'Add Module ({count}/{max})',
   'settings.str.overviewSection': 'Live Overview Layout',
   'settings.str.overviewBadge': '{modCount} mod · {metCount} cells',
-  'settings.str.overviewModulesLabel': 'Overview Modules & Order (Top → Bottom, min 1)',
+  'settings.str.overviewModulesLabel': 'Overview Modules & Order (Top → Bottom, min 1, draggable)',
   'settings.str.addOverviewModule': 'Add Module ({count}/{max})',
-  'settings.str.overviewMetricsLabel': 'First-Row Metrics (Left → Right, 1–4)',
+  'settings.str.overviewMetricsLabel': 'First-Row Metrics (Left → Right, 1–4, draggable)',
   'settings.str.overviewMetricsInactiveHint': '"Live Metrics" is hidden here; these cells still apply to Hover Quick-View or when re-added',
   'settings.str.addOverviewMetric': 'Add Metric ({count}/{max})',
   'settings.str.stepsSection': 'Step Table Columns',
   'settings.str.stepsBadge': '{count} cols',
   'settings.str.stepTurnRailToggle': 'Turn Rail & Preview',
   'settings.str.stepAgentBadgeToggle': 'Main/Sub Agent Badge',
-  'settings.str.stepsColsLabel': '"Steps" Visible Columns (Left → Right, min 2)',
+  'settings.str.stepsColsLabel': '"Steps" Visible Columns (Left → Right, min 2, draggable)',
   'settings.str.addStepCol': 'Add Column ({count}/{max})',
+  'settings.slot.dragHint': 'Drag up or down to reorder',
   'settings.slot.moveUp': 'Move earlier',
   'settings.slot.moveDown': 'Move later',
   'settings.slot.remove': 'Remove item',
   'settings.slot.minReached': 'Keep at least {min}',
   'settings.slot.alreadyAdded': 'Added',
+  'settings.mock.sessionTitle': 'Refactor Auth Middleware & Session Cache',
+  'settings.mock.subRole': 'API Audit',
+  'settings.mock.turnPromptLatest': 'Fix token refresh race condition under concurrent requests and add tests',
+  'settings.mock.turnPromptPrev': 'Audit route guards and expired session cleanup logic',
 
   // Preferences -> Other Tab
   'settings.oth.modelTitle': 'Model Identity Display',
@@ -2318,6 +2348,7 @@ const uiStore = createReactiveStore({
   activeView: 'overview',
   stepsSubTab: 'steps', // 'steps' | 'models'
   settingsSubTab: 'general', // 'general' | 'structure' | 'account' | 'other'
+  settingsStructureTab: 'mount', // 'mount' | 'hover' | 'overview' | 'steps'
   selectedAgentScope: 'all', // 'all' | 'main' | <subagent cascadeId>
   ctxInspectorAgentId: 'auto', // 'auto' | 'main' | <subagent cascadeId>
 });
@@ -8071,6 +8102,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: false,
       dashOffset: ringCircumference,
       text: '',
+      toneClass: '',
       running: false,
       warn: false,
       danger: false,
@@ -8087,6 +8119,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
         showRing: true,
         dashOffset: ringCircumference,
         text: '--%',
+        toneClass: '',
         running: false,
         warn: false,
         danger: false,
@@ -8094,6 +8127,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
     }
     const isDanger = slotCtx.usedPct >= 88;
     const isWarn = !isDanger && slotCtx.usedPct >= 70;
+    const toneClass = isDanger ? 'tone-danger' : isWarn ? 'tone-warn' : '';
     return {
       hidden: false,
       metric: 'context',
@@ -8102,6 +8136,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: true,
       dashOffset: slotCtx.dashOffset,
       text: `${Math.round(slotCtx.usedPct)}%`,
+      toneClass,
       running: false,
       warn: isWarn,
       danger: isDanger,
@@ -8118,12 +8153,14 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
         showRing: false,
         dashOffset: ringCircumference,
         text: '-- t/s',
+        toneClass: '',
         running: false,
         warn: false,
         danger: false,
       };
     }
     const hasValidTps = Number.isFinite(slotCtx.tps) && slotCtx.tps > 0;
+    const toneClass = hasValidTps ? getSpeedToneClass(slotCtx.tps) : '';
     const tpsText = hasValidTps
       ? `${slotCtx.tps >= 100 ? Math.round(slotCtx.tps) : slotCtx.tps.toFixed(1)} t/s`
       : slotCtx.isRunning
@@ -8137,15 +8174,17 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: false,
       dashOffset: ringCircumference,
       text: tpsText,
+      toneClass,
       running: Boolean(slotCtx.isRunning),
-      warn: false,
-      danger: false,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
   if (metricKey === 'avg_tps') {
     const avgVal = slotCtx.hasTelemetry ? slotCtx.avgTps : null;
     const valid = Number.isFinite(avgVal) && avgVal > 0;
+    const toneClass = valid ? getSpeedToneClass(avgVal) : '';
     return {
       hidden: false,
       metric: 'avg_tps',
@@ -8154,9 +8193,10 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? `${avgVal >= 100 ? Math.round(avgVal) : avgVal.toFixed(1)} t/s` : '-- t/s',
+      toneClass,
       running: false,
-      warn: false,
-      danger: false,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -8164,8 +8204,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
     const val = slotCtx.hasTelemetry ? slotCtx.ttft : null;
     const valid = val != null && Number.isFinite(Number(val)) && Number(val) >= 0;
     const numVal = valid ? Number(val) : 0;
-    const isDanger = valid && numVal >= 30;
-    const isWarn = valid && !isDanger && numVal >= 15;
+    const toneClass = valid ? getTtftToneClass(numVal) : '';
     return {
       hidden: false,
       metric: 'ttft',
@@ -8174,9 +8213,10 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? formatCompactCapsuleTtft(numVal) : '--s',
+      toneClass,
       running: false,
-      warn: isWarn,
-      danger: isDanger,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -8186,6 +8226,10 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       : metricKey === 'session_cost'
         ? slotCtx.sessionCost
         : slotCtx.stepCost;
+    const toneClass =
+      metricKey === 'cost' && slotCtx.hasTelemetry && costVal != null
+        ? getStepCostToneClass(costVal)
+        : '';
     return {
       hidden: false,
       metric: metricKey,
@@ -8194,9 +8238,10 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: false,
       dashOffset: ringCircumference,
       text: slotCtx.hasTelemetry ? formatCompactCapsuleCost(costVal) : '--',
+      toneClass,
       running: false,
-      warn: false,
-      danger: false,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -8204,9 +8249,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
     const cachePct = slotCtx.hasTelemetry ? slotCtx.cacheHitPct : null;
     const valid = cachePct != null && Number.isFinite(Number(cachePct));
     const numVal = valid ? Number(cachePct) : 0;
-    const hasPrompt = slotCtx.latestPromptTokens == null || Number(slotCtx.latestPromptTokens) > 0;
-    const isDanger = valid && hasPrompt && numVal < 30;
-    const isWarn = valid && hasPrompt && !isDanger && numVal < 65;
+    const toneClass = valid ? getCacheToneClass(numVal, slotCtx.latestPromptTokens) : '';
     return {
       hidden: false,
       metric: 'cache_hit',
@@ -8215,9 +8258,10 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? `${Math.round(numVal)}%` : '--%',
+      toneClass,
       running: false,
-      warn: isWarn,
-      danger: isDanger,
+      warn: toneClass === 'tone-warn',
+      danger: toneClass === 'tone-danger',
     };
   }
 
@@ -8232,6 +8276,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       showRing: false,
       dashOffset: ringCircumference,
       text: valid ? formatTokens(Number(tokVal)) : '--',
+      toneClass: '',
       running: false,
       warn: false,
       danger: false,
@@ -8245,6 +8290,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       : resolveSpecificQuotaSlotSummary(slotCtx.quotas, metricKey);
   const isDanger = Boolean(quotaSum && quotaSum.roundedPct <= 15);
   const isWarn = Boolean(quotaSum && !isDanger && quotaSum.roundedPct <= 30);
+  const toneClass = isDanger ? 'tone-danger' : isWarn ? 'tone-warn' : '';
   return {
     hidden: false,
     metric: metricKey,
@@ -8253,6 +8299,7 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
     showRing: false,
     dashOffset: ringCircumference,
     text: quotaSum ? quotaSum.shortText : t('capsule.quotaUnknown'),
+    toneClass,
     running: false,
     warn: isWarn,
     danger: isDanger,
@@ -8329,6 +8376,8 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
   }
 
   if (metricKey === 'avg_tps') {
+    const hasAvgSpeed = Number.isFinite(active.avgTokPerSec) && Number(active.avgTokPerSec) > 0;
+    const avgSpeedTone = hasAnySteps && hasAvgSpeed ? getSpeedToneClass(active.avgTokPerSec) : '';
     return {
       key: 'avg_tps',
       label: t('ovMetric.avg_tps'),
@@ -8336,7 +8385,7 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
       iconSize: 11,
       isPulsing: false,
       valueText: formatMetric(active.avgTokPerSec, ' tok/s'),
-      valueClass: 'cell-value',
+      valueClass: avgSpeedTone ? `cell-value ${avgSpeedTone}` : 'cell-value',
       subText: t('ovMetric.subValidSamples', {
         samples: sampleSummary(active.speedSummary),
       }),
@@ -8487,7 +8536,11 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
 
 const MetricMatrixWidget = defineComponent({
   name: 'MetricMatrixWidget',
-  setup() {
+  setup({ props }) {
+    const getCtxAgentId =
+      typeof props?.getCtxAgentId === 'function'
+        ? props.getCtxAgentId
+        : () => uiStore.getState().ctxInspectorAgentId;
     const matrixEl = h('section', {
       className: 'telemetry-matrix',
       'aria-label': t('module.metrics'),
@@ -8518,11 +8571,10 @@ const MetricMatrixWidget = defineComponent({
       patchAttr(matrixEl, 'data-cols', String(colCount));
       patchStyleVar(matrixEl, '--matrix-cols', String(colCount));
 
-      const uiSt = uiStore.getState();
       const { hasSubagents, scopedConv, ctxAgent } = resolveScopedConversation(
         data,
         'all',
-        uiSt.ctxInspectorAgentId
+        getCtxAgentId()
       );
       const active = scopedConv || data?.activeConversation || {};
       const ctx = ctxAgent?.context || active.context || {};
@@ -8731,6 +8783,14 @@ const ContextWindowWidget = defineComponent({
   name: 'ContextWindowWidget',
   setup({ props, onCleanup }) {
     const interactiveInspector = props.interactiveInspector !== false;
+    const getCtxAgentId =
+      typeof props.getCtxAgentId === 'function'
+        ? props.getCtxAgentId
+        : () => uiStore.getState().ctxInspectorAgentId;
+    const setCtxAgentId =
+      typeof props.setCtxAgentId === 'function'
+        ? props.setCtxAgentId
+        : (nextId) => uiStore.setState({ ctxInspectorAgentId: nextId });
     const isVisibleFn =
       typeof props.isVisibleFn === 'function' ? props.isVisibleFn : () => true;
 
@@ -8828,7 +8888,6 @@ const ContextWindowWidget = defineComponent({
         }
       }
 
-      const uiSt = uiStore.getState();
       const {
         hasSubagents,
         effectiveCtxScope,
@@ -8836,7 +8895,7 @@ const ContextWindowWidget = defineComponent({
         aggregated,
         scopedConv,
         ctxAgent,
-      } = resolveScopedConversation(data, 'all', uiSt.ctxInspectorAgentId);
+      } = resolveScopedConversation(data, 'all', getCtxAgentId());
 
       const active = scopedConv || data.activeConversation || {};
       const ctx = ctxAgent?.context || active.context || {};
@@ -8964,7 +9023,7 @@ const ContextWindowWidget = defineComponent({
                   ctxPillsExpanded = !ctxPillsExpanded;
                   if (latestData) update({ data: latestData });
                 } else {
-                  uiStore.setState({ ctxInspectorAgentId: item.key });
+                  setCtxAgentId(item.key);
                 }
               };
             },
@@ -8976,6 +9035,9 @@ const ContextWindowWidget = defineComponent({
       const totalTokens = Number(ctx.totalTokens || 0);
       const usedPct =
         limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
+      const ctxToneCls =
+        usedPct >= 88 ? 'tone-danger' : usedPct >= 70 ? 'tone-warn' : '';
+      patchAttr(ctxSummaryText, 'class', ctxToneCls ? `text-mono ${ctxToneCls}` : 'text-mono');
       patchText(
         ctxSummaryText,
         `${formatTokens(totalTokens)} / ${formatTokens(limitTokens)} (${usedPct}%)`
@@ -9248,7 +9310,7 @@ function syncPoolQuotaRow(refs, item, idx, rowEl) {
   );
   patchStyleVar(refs.fill5h, '--fill-w', `${Math.min(100, used5hVal)}%`);
   patchClasses(refs.fill5h, {
-    'tone-warn': used5hVal >= 60 && used5hVal < 85,
+    'tone-warn': used5hVal >= 70 && used5hVal < 85,
     'tone-danger': used5hVal >= 85,
   });
 
@@ -9295,7 +9357,7 @@ function syncPoolQuotaRow(refs, item, idx, rowEl) {
   );
   patchStyleVar(refs.fillWk, '--fill-w', `${Math.min(100, usedWkVal)}%`);
   patchClasses(refs.fillWk, {
-    'tone-warn': usedWkVal >= 60 && usedWkVal < 85,
+    'tone-warn': usedWkVal >= 70 && usedWkVal < 85,
     'tone-danger': usedWkVal >= 85,
   });
 }
@@ -9410,6 +9472,11 @@ const LiveActivityWidget = defineComponent({
   name: 'LiveActivityWidget',
   setup({ props, onCleanup }) {
     const interactive = props.interactive !== false;
+    const preview = Boolean(props.preview);
+    const getCtxAgentId =
+      typeof props.getCtxAgentId === 'function'
+        ? props.getCtxAgentId
+        : () => uiStore.getState().ctxInspectorAgentId;
     const isVisibleFn =
       typeof props.isVisibleFn === 'function' ? props.isVisibleFn : () => true;
 
@@ -9585,11 +9652,10 @@ const LiveActivityWidget = defineComponent({
         return;
       }
 
-      const uiSt = uiStore.getState();
       const { agents, aggregated } = resolveScopedConversation(
         data,
         'all',
-        uiSt.ctxInspectorAgentId
+        getCtxAgentId()
       );
 
       const rawRunningList =
@@ -9692,7 +9758,7 @@ const LiveActivityWidget = defineComponent({
 
           const convTitle = item.title || item.cascadeId?.slice(0, 8) || t('live.currentSession');
           patchText(refs.titleEl, convTitle);
-          if (interactive) {
+          if (interactive && !preview) {
             patchAttr(refs.titleEl, 'title', t('live.switchSessionTitle', { title: convTitle }));
             refs.titleEl.onclick = () => {
               if (item.cascadeId && item.cascadeId !== 'current') {
@@ -9879,15 +9945,19 @@ const OVERVIEW_WIDGET_REGISTRY = Object.freeze({
   metrics: {
     key: 'metrics',
     labelKey: 'module.metrics',
-    create: ({ mode, isVisibleFn }) => MetricMatrixWidget({ mode, isVisibleFn }),
+    create: ({ mode, isVisibleFn, preview, getCtxAgentId }) =>
+      MetricMatrixWidget({ mode, isVisibleFn, preview, getCtxAgentId }),
   },
   context: {
     key: 'context',
     labelKey: 'module.context',
-    create: ({ mode, isVisibleFn }) =>
+    create: ({ mode, isVisibleFn, preview, getCtxAgentId, setCtxAgentId }) =>
       ContextWindowWidget({
         interactiveInspector: mode !== 'hover',
         isVisibleFn,
+        preview,
+        getCtxAgentId,
+        setCtxAgentId,
       }),
   },
   quotas: {
@@ -9901,10 +9971,12 @@ const OVERVIEW_WIDGET_REGISTRY = Object.freeze({
   live_tasks: {
     key: 'live_tasks',
     labelKey: 'module.live_tasks',
-    create: ({ mode, isVisibleFn }) =>
+    create: ({ mode, isVisibleFn, preview, getCtxAgentId }) =>
       LiveActivityWidget({
         interactive: mode !== 'hover',
         isVisibleFn,
+        preview,
+        getCtxAgentId,
       }),
   },
 });
@@ -9930,11 +10002,26 @@ function getOverviewModuleOptions() {
 function createDynamicWidgetHost({
   containerEl,
   mode = 'overview',
+  preview = false,
   isVisibleFn = () => true,
   initialModuleKeys = [],
 }) {
   const instances = new Map();
   let currentKeys = [];
+  let previewCtxAgentId = 'auto';
+  let latestUpdatePayload = null;
+
+  const getCtxAgentId = preview ? () => previewCtxAgentId : undefined;
+  const setCtxAgentId = preview
+    ? (nextId) => {
+        previewCtxAgentId = String(nextId || 'auto');
+        if (latestUpdatePayload) {
+          for (const key of currentKeys) {
+            instances.get(key)?.refs?.update?.(latestUpdatePayload);
+          }
+        }
+      }
+    : undefined;
 
   function syncModules(nextKeys) {
     const validKeys = [];
@@ -9962,7 +10049,13 @@ function createDynamicWidgetHost({
     // Instantiate newly added widgets
     for (const key of validKeys) {
       if (!instances.has(key)) {
-        const inst = OVERVIEW_WIDGET_REGISTRY[key].create({ mode, isVisibleFn });
+        const inst = OVERVIEW_WIDGET_REGISTRY[key].create({
+          mode,
+          preview,
+          isVisibleFn,
+          getCtxAgentId,
+          setCtxAgentId,
+        });
         instances.set(key, inst);
       }
     }
@@ -9992,6 +10085,7 @@ function createDynamicWidgetHost({
   }
 
   function update({ moduleKeys = [], data = null, minuteTick = undefined } = {}) {
+    latestUpdatePayload = { data, minuteTick };
     const validKeys = syncModules(moduleKeys);
     for (const key of validKeys) {
       const inst = instances.get(key);
@@ -10338,48 +10432,1209 @@ function getStepColumnOptions() {
   }));
 }
 
+// --- src/components/widgets/CapsuleBarWidget.js ---
+/**
+ * @fileoverview Shared Decoupled Capsule Bar Primitives & Widget (`CapsuleBarWidget.js`).
+ * Powers both the live host window capsule (`WindowOverlayShell.js`) and the
+ * real-UI structure preview (`SettingsStructureTab.js`), ensuring 100% DOM/CSS parity.
+ */
+
+
+const RING_RADIUS = 5.2;
+const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
+
+/**
+ * Create a single reusable capsule metric slot node (`0..4`) with an optional SVG context ring.
+ */
+function createCapsuleSlotNode(slotIndex, initialMetric) {
+  const ringSvg = document.createElementNS(SVG_NS, 'svg');
+  ringSvg.setAttribute('viewBox', '0 0 14 14');
+  ringSvg.setAttribute('class', 'wm-ring-svg');
+  ringSvg.setAttribute('aria-hidden', 'true');
+
+  const ringTrack = document.createElementNS(SVG_NS, 'circle');
+  ringTrack.setAttribute('cx', '7');
+  ringTrack.setAttribute('cy', '7');
+  ringTrack.setAttribute('r', String(RING_RADIUS));
+  ringTrack.setAttribute('class', 'wm-ring-track');
+
+  const ringFill = document.createElementNS(SVG_NS, 'circle');
+  ringFill.setAttribute('cx', '7');
+  ringFill.setAttribute('cy', '7');
+  ringFill.setAttribute('r', String(RING_RADIUS));
+  ringFill.setAttribute('class', 'wm-ring-fill');
+  ringFill.setAttribute('stroke-dasharray', String(RING_CIRCUMFERENCE));
+  ringFill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE));
+
+  ringSvg.appendChild(ringTrack);
+  ringSvg.appendChild(ringFill);
+
+  const isNone = initialMetric === 'none';
+  const isCtx = initialMetric === 'context';
+  const textSpan = h('span', {
+    className: isCtx ? 'wm-slot-text wm-ctx-pct' : 'wm-slot-text',
+    text: isNone
+      ? ''
+      : isCtx
+        ? '--%'
+        : initialMetric === 'tps'
+          ? '-- t/s'
+          : t('capsule.quotaUnknown'),
+  });
+  const el = h(
+    'span',
+    {
+      className: isNone
+        ? 'wm-cap-slot'
+        : isCtx
+          ? 'wm-cap-slot wm-ctx-seg'
+          : initialMetric === 'tps'
+            ? 'wm-cap-slot wm-seg-speed'
+            : 'wm-cap-slot wm-seg-quota',
+      hidden: isNone,
+      'data-slot-idx': String(slotIndex),
+      'data-metric': initialMetric,
+      'data-vis-rank': isNone ? '' : String(slotIndex + 1),
+    },
+    isCtx ? [ringSvg, textSpan] : [textSpan]
+  );
+
+  return {
+    el,
+    ringSvg,
+    ringFill,
+    textSpan,
+    ringMounted: isCtx,
+  };
+}
+
+/**
+ * Patch 5 pre-allocated capsule slots and 4 separators in-place via `metricRegistry`.
+ */
+function syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx) {
+  let visRank = 0;
+  const visRanks = [0, 0, 0, 0, 0];
+  for (let i = 0; i < capsuleSlots.length; i += 1) {
+    const slot = capsuleSlots[i];
+    const metricKey = i < slotKeys.length ? slotKeys[i] : 'none';
+    const pres = resolveCapsuleMetricPresentation(metricKey, slotCtx, RING_CIRCUMFERENCE);
+    if (pres.hidden) {
+      patchAttr(slot.el, 'hidden', true);
+      patchAttr(slot.el, 'data-metric', 'none');
+      patchAttr(slot.el, 'data-vis-rank', '');
+      continue;
+    }
+    visRank += 1;
+    visRanks[i] = visRank;
+    patchAttr(slot.el, 'hidden', false);
+    patchAttr(slot.el, 'data-metric', pres.metric);
+    patchAttr(slot.el, 'data-vis-rank', String(visRank));
+
+    if (pres.showRing && !slot.ringMounted) {
+      slot.el.insertBefore(slot.ringSvg, slot.textSpan);
+      slot.ringMounted = true;
+    } else if (!pres.showRing && slot.ringMounted) {
+      slot.ringSvg.remove();
+      slot.ringMounted = false;
+    }
+
+    const toneCls =
+      pres.toneClass || (pres.danger ? 'tone-danger' : pres.warn ? 'tone-warn' : '');
+    const fullSegClass = `${pres.segClass}${pres.running ? ' state-running' : ''}${toneCls ? ` ${toneCls}` : ''}`;
+    patchAttr(slot.el, 'class', fullSegClass);
+    const fullTextClass = `${pres.textClass}${toneCls ? ` ${toneCls}` : ''}`;
+    patchAttr(slot.textSpan, 'class', fullTextClass);
+    patchText(slot.textSpan, pres.text);
+
+    if (pres.showRing) {
+      slot.ringFill.setAttribute('stroke-dashoffset', String(pres.dashOffset));
+      patchClasses(slot.ringFill, { 'tone-warn': pres.warn, 'tone-danger': pres.danger });
+    }
+  }
+
+  for (let s = 0; s < capsuleSeps.length; s += 1) {
+    const sepEl = capsuleSeps[s];
+    const nextRank = visRanks[s + 1] || 0;
+    const showSep = nextRank >= 2;
+    patchAttr(sepEl, 'hidden', !showSep);
+    patchAttr(sepEl, 'data-sep-for-rank', showSep ? String(nextRank) : '');
+  }
+}
+
+/**
+ * Standalone Capsule Bar Preview Widget mounting the real `.wm-multi-btn` and `.wm-capsule-btn`
+ * inside a contextual host bar (`dual` titlebar, `composer` toolbar, or `sidebar` disabled state).
+ */
+const CapsuleBarWidget = defineComponent({
+  name: 'CapsuleBarWidget',
+  setup() {
+    const multiDot = h('span', { className: 'wm-multi-dot' });
+    const multiLabel = h('span', {
+      className: 'wm-multi-label',
+      text: t('capsule.multiZero'),
+    });
+    const multiBtn = h(
+      'button',
+      {
+        type: 'button',
+        className: 'wm-multi-btn',
+        tabindex: '-1',
+        'aria-hidden': 'true',
+      },
+      [multiDot, multiLabel]
+    );
+
+    const capsuleSlots = [
+      createCapsuleSlotNode(0, 'context'),
+      createCapsuleSlotNode(1, 'tps'),
+      createCapsuleSlotNode(2, 'quota_auto'),
+      createCapsuleSlotNode(3, 'none'),
+      createCapsuleSlotNode(4, 'none'),
+    ];
+    const capsuleSeps = [
+      h('span', { className: 'wm-sep wm-sep-speed', 'data-sep-for-rank': '2' }),
+      h('span', { className: 'wm-sep wm-sep-quota', 'data-sep-for-rank': '3' }),
+      h('span', { className: 'wm-sep', 'data-sep-for-rank': '', hidden: true }),
+      h('span', { className: 'wm-sep', 'data-sep-for-rank': '', hidden: true }),
+    ];
+
+    const capsuleBtn = h(
+      'button',
+      {
+        type: 'button',
+        className: 'wm-capsule-btn',
+        tabindex: '-1',
+        'aria-hidden': 'true',
+      },
+      [
+        capsuleSlots[0].el,
+        capsuleSeps[0],
+        capsuleSlots[1].el,
+        capsuleSeps[1],
+        capsuleSlots[2].el,
+        capsuleSeps[2],
+        capsuleSlots[3].el,
+        capsuleSeps[3],
+        capsuleSlots[4].el,
+      ]
+    );
+
+    const capsuleCluster = h('div', { className: 'preview-capsule-cluster' }, [
+      multiBtn,
+      capsuleBtn,
+    ]);
+
+    // Contextual host chrome affordances for Titlebar vs Composer vs Sidebar-only
+    const titlebarLeftMock = h('div', { className: 'preview-host-left is-titlebar' }, [
+      h('span', { className: 'preview-win-title', text: 'Antigravity' }),
+    ]);
+    const composerLeftMock = h(
+      'div',
+      { className: 'preview-host-left is-composer', hidden: true },
+      [
+        h('span', { className: 'preview-composer-chip' }, [
+          h('span', { text: 'Auto' }),
+          createSvgIcon('chevron-down', { size: 10 }),
+        ]),
+        h('span', { className: 'preview-composer-chip' }, [
+          h('span', { text: 'Carbon (High)' }),
+          createSvgIcon('chevron-down', { size: 10 }),
+        ]),
+      ]
+    );
+
+    const titlebarRightMock = h('div', { className: 'preview-win-controls', 'aria-hidden': 'true' }, [
+      h('span', { className: 'preview-win-dot' }),
+      h('span', { className: 'preview-win-dot' }),
+      h('span', { className: 'preview-win-dot' }),
+    ]);
+    const composerSendMock = h(
+      'span',
+      { className: 'preview-composer-send', 'aria-hidden': 'true', hidden: true },
+      [createSvgIcon('arrow-up', { size: 11 })]
+    );
+
+    const hostBarEl = h(
+      'div',
+      { className: 'preview-capsule-bar', 'data-mount-mode': 'dual' },
+      [titlebarLeftMock, composerLeftMock, capsuleCluster, titlebarRightMock, composerSendMock]
+    );
+
+    const sidebarHintEl = h('div', {
+      className: 'preview-sidebar-note',
+      hidden: true,
+      text: t('settings.str.previewMountSidebarHint'),
+    });
+
+    const rootEl = h('div', { className: 'capsule-preview-widget' }, [hostBarEl, sidebarHintEl]);
+
+    function update({ data } = {}) {
+      const settings = data?.settings || {};
+      const mountMode = normalizeClientWindowMountMode(
+        settings.windowMountMode,
+        settings.enableWindowOverlay
+      );
+      const showMulti = settings.showTopbarMultiSession !== false;
+      const slotKeys = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
+
+      const isComposer = mountMode === 'composer';
+      const isSidebar = mountMode === 'sidebar';
+      patchAttr(hostBarEl, 'data-mount-mode', mountMode);
+      patchClasses(hostBarEl, {
+        'is-composer': isComposer,
+        'is-sidebar-only': isSidebar,
+      });
+
+      patchAttr(titlebarLeftMock, 'hidden', isComposer);
+      patchAttr(titlebarRightMock, 'hidden', isComposer);
+      patchAttr(composerLeftMock, 'hidden', !isComposer);
+      patchAttr(composerSendMock, 'hidden', !isComposer);
+      patchAttr(sidebarHintEl, 'hidden', !isSidebar);
+      patchText(sidebarHintEl, t('settings.str.previewMountSidebarHint'));
+
+      patchAttr(multiBtn, 'hidden', !showMulti);
+
+      if (!data) {
+        patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
+        patchText(multiLabel, t('capsule.multiZero'));
+        syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, { hasTelemetry: false });
+        return;
+      }
+
+      const { scopedConv, ctxAgent, aggregated } = resolveScopedConversation(
+        data,
+        'all',
+        'auto'
+      );
+      const activeConv = data.activeConversation || {};
+      const capActive = scopedConv || aggregated || activeConv;
+      const ctx = ctxAgent?.context || capActive.context || activeConv.context || {};
+      const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
+      const totalTokens = Number(ctx.totalTokens || 0);
+      const usedPct =
+        limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
+      const dashOffset = +(
+        RING_CIRCUMFERENCE *
+        (1 - Math.max(0, Math.min(100, usedPct)) / 100)
+      ).toFixed(2);
+
+      const rawRunningList = Array.isArray(data.runningConversations)
+        ? data.runningConversations
+        : [];
+      const runningCount = rawRunningList.length;
+      const runningSubCount = rawRunningList.reduce(
+        (acc, item) => acc + Number(item.runningSubagentCount || 0),
+        0
+      );
+      const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+
+      patchClasses(multiBtn, {
+        'is-running': runningCount > 0 && !hasWaiting,
+        'is-waiting': runningCount > 0 && hasWaiting,
+      });
+      const multiBtnText =
+        runningCount > 0
+          ? runningSubCount > 0
+            ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+            : t('capsule.multiRunning', { count: runningCount })
+          : t('capsule.multiZero');
+      patchText(multiLabel, multiBtnText);
+
+      const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
+      const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
+      const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
+      const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
+      const sessionTokens =
+        Number(capActive.stepCount || 0) > 0 ||
+        capActive.totalTokens != null ||
+        capInTok + capCacheTok + capOutTok > 0
+          ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
+          : null;
+
+      patchClasses(capsuleBtn, { 'is-running': isRunning });
+      syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, {
+        hasTelemetry: true,
+        usedPct,
+        dashOffset,
+        isRunning,
+        tps: capActive.latestTokPerSec ?? null,
+        avgTps: capActive.avgTokPerSec ?? null,
+        ttft: capActive.latestTtftSec ?? null,
+        stepCost: capActive.latestStepCostUsd ?? null,
+        sessionCost: capActive.sessionCostUsd ?? null,
+        cacheHitPct:
+          Number(capActive.stepCount || 0) > 0
+            ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
+            : null,
+        latestPromptTokens: capActive.latestPromptTokens ?? null,
+        sessionTokens,
+        quotas: data.quotas,
+      });
+    }
+
+    return {
+      el: rootEl,
+      refs: {
+        update,
+        multiBtn,
+        capsuleBtn,
+        capsuleSlots,
+        capsuleSeps,
+        hostBarEl,
+      },
+    };
+  },
+});
+
+// --- src/components/widgets/StepTableWidget.js ---
+/**
+ * @fileoverview Reusable Decoupled Step Table Widget (`StepTableWidget.js`).
+ * Powers both `StepsDetailView` ("按步查看") and `SettingsStructureTab` live preview,
+ * dynamically rendering 2..12 columns via `stepColumnRegistry.js`, turn rail + prompt
+ * preview tooltips, and independent Main/Sub agent badges.
+ */
+
+
+function formatTurnPromptText(rawPrompt) {
+  const text = String(rawPrompt || '').trim();
+  if (!text || !isEnglishLocale()) return text;
+  if (text === '[图片/附件提问]') return t('steps.turnMediaOnly');
+  if (text.endsWith(' [附图]')) {
+    return `${text.slice(0, -5)} ${t('steps.turnMediaSuffix')}`;
+  }
+  return text;
+}
+
+const StepTableWidget = defineComponent({
+  name: 'StepTableWidget',
+  setup({ props, onCleanup }) {
+    const standalone = Boolean(props.standalone);
+    const interactiveBadges = props.interactiveBadges !== false;
+    const onSelectAgentScopes =
+      typeof props.onSelectAgentScopes === 'function' ? props.onSelectAgentScopes : null;
+
+    const stepsTheadRow = h('tr');
+    const stepsTbody = h('tbody');
+
+    function syncTableHeaderColumns(colKeys) {
+      const locale = getEffectiveLocale();
+      patchKeyedList(stepsTheadRow, colKeys, {
+        keyFn: (colKey) => colKey,
+        sigFn: (colKey) => `${locale}:${colKey}:${STEP_COLUMN_REGISTRY[colKey].thLabel()}`,
+        createRow: (colKey) => {
+          const th = h('th', { text: STEP_COLUMN_REGISTRY[colKey].thLabel() });
+          return { el: th, refs: { th } };
+        },
+        updateRow: (refs, colKey) => {
+          patchText(refs.th, STEP_COLUMN_REGISTRY[colKey].thLabel());
+        },
+      });
+    }
+
+    syncTableHeaderColumns(DEFAULT_STEP_COLUMN_KEYS);
+
+    const stepsTableEl = h('table', { className: 'data-table steps-data-table' }, [
+      h('thead', {}, [stepsTheadRow]),
+      stepsTbody,
+    ]);
+    const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [stepsTableEl]);
+
+    const turnTipEl = h('div', {
+      className: 'turn-prompt-tip',
+      role: 'tooltip',
+      hidden: true,
+    });
+    const hideTurnTip = () => patchAttr(turnTipEl, 'hidden', true);
+
+    const standaloneHostEl = standalone
+      ? h('div', { className: 'step-table-preview-host' }, [stepsTablePane, turnTipEl])
+      : null;
+
+    let boundsContainerGetter =
+      typeof props.getBoundsEl === 'function'
+        ? props.getBoundsEl
+        : () => standaloneHostEl || stepsTablePane;
+
+    function setBoundsElGetter(fn) {
+      if (typeof fn === 'function') {
+        boundsContainerGetter = fn;
+      }
+    }
+
+    function showTurnTip(anchorCell, promptText) {
+      const text = String(promptText || '').trim();
+      const boundsEl = boundsContainerGetter?.();
+      if (!anchorCell || !text) {
+        hideTurnTip();
+        return;
+      }
+      patchText(turnTipEl, text);
+      patchAttr(turnTipEl, 'hidden', false);
+      if (
+        boundsEl &&
+        typeof boundsEl.getBoundingClientRect === 'function' &&
+        typeof anchorCell.getBoundingClientRect === 'function'
+      ) {
+        const panelRect = boundsEl.getBoundingClientRect();
+        const cellRect = anchorCell.getBoundingClientRect();
+        if (panelRect.width > 0 && panelRect.height > 0) {
+          const tipH = turnTipEl.offsetHeight || 36;
+          const tipW = turnTipEl.offsetWidth || 180;
+          const placeAbove =
+            panelRect.bottom - cellRect.bottom < tipH + 10 &&
+            cellRect.top - panelRect.top > tipH + 6;
+          const topPx = placeAbove
+            ? Math.max(4, Math.round(cellRect.top - panelRect.top - tipH - 4))
+            : Math.round(cellRect.bottom - panelRect.top + 4);
+          const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
+          const leftPx = Math.min(
+            maxLeft,
+            Math.max(6, Math.round(cellRect.left - panelRect.left + 4))
+          );
+          turnTipEl.style.top = `${topPx}px`;
+          turnTipEl.style.left = `${leftPx}px`;
+        }
+      }
+    }
+
+    stepsTablePane.addEventListener('scroll', hideTurnTip);
+    stepsTbody.addEventListener('mouseleave', hideTurnTip);
+
+    function renderStepTable(
+      tableSteps,
+      cascadeId,
+      colKeys,
+      locale,
+      {
+        effectiveScopes = ['all'],
+        hasSubagents = false,
+        isMergedMultiAgents = false,
+        showStepTurnRail = true,
+        showStepAgentBadge = true,
+        displaySettings = {},
+      } = {}
+    ) {
+      const colOrderSig = colKeys.join(',');
+      const wantedSet = new Set(colKeys);
+      syncTableHeaderColumns(colKeys);
+
+      const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
+      const cellCtx = {
+        hasSubagents,
+        showAgentBadge,
+        effectiveScopes,
+        scopeSigKey: effectiveScopes.join(','),
+        displaySettings,
+        onSelectAgentScopes,
+      };
+
+      const useRootTurn = Boolean(hasSubagents && isMergedMultiAgents);
+      const getStepTurnIdx = (st) =>
+        useRootTurn ? (st?.rootTurnIndex ?? st?.turnIndex) : st?.turnIndex;
+      const getStepIsStart = (st) =>
+        Boolean(useRootTurn ? (st?.isRootTurnStart ?? st?.isTurnStart) : st?.isTurnStart);
+      const getStepIsLatest = (st) =>
+        Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
+      const getStepPrompt = (st) =>
+        (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
+      const turnKeyOf = (st) => {
+        if (!showStepTurnRail) return '';
+        const tIdx = getStepTurnIdx(st);
+        if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
+        return useRootTurn ? `root:${tIdx}` : `${st?.agentId || 'main'}:${tIdx}`;
+      };
+
+      const decoratedSteps = tableSteps.map((st, idx) => {
+        const tKey = turnKeyOf(st);
+        const hasTurn = Boolean(tKey);
+        const hasUp = Boolean(hasTurn && idx > 0 && turnKeyOf(tableSteps[idx - 1]) === tKey);
+        const hasDown = Boolean(
+          hasTurn && idx + 1 < tableSteps.length && turnKeyOf(tableSteps[idx + 1]) === tKey
+        );
+        return {
+          st,
+          rowKey: `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
+          hasTurn,
+          hasUp,
+          hasDown,
+          isStart: Boolean(hasTurn && (getStepIsStart(st) || !hasDown)),
+          isLatest: hasTurn && getStepIsLatest(st),
+          prompt: hasTurn ? formatTurnPromptText(getStepPrompt(st)) : '',
+        };
+      });
+
+      const railActive = Boolean(showStepTurnRail && decoratedSteps.some((d) => d.hasTurn));
+      if (!railActive) {
+        hideTurnTip();
+      }
+      patchClasses(stepsTableEl, { 'has-turn-rail': railActive });
+
+      patchKeyedList(stepsTbody, decoratedSteps, {
+        keyFn: (item) => item.rowKey,
+        sigFn: (item) => {
+          const { st } = item;
+          const parts = colKeys
+            .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
+            .join('|');
+          const badgeSig = `${showAgentBadge}:${interactiveBadges}:${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`;
+          return `${locale}:${colOrderSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
+        },
+        createRow: () => {
+          const tr = h('tr');
+          const railLineEl = h('span', { className: 'turn-rail-line', hidden: true });
+          const railDotEl = h('span', { className: 'turn-rail-dot', hidden: true });
+          const railEl = h(
+            'span',
+            { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
+            [railLineEl, railDotEl]
+          );
+          const agentBadgeEl = h('span', {
+            className: 'agent-badge',
+            hidden: true,
+            style: 'margin-right: 4px;',
+          });
+          return {
+            el: tr,
+            refs: {
+              cellMap: new Map(),
+              colOrderSig: '',
+              railEl,
+              railLineEl,
+              railDotEl,
+              agentBadgeEl,
+              hoverTd: null,
+            },
+          };
+        },
+        updateRow: (refs, item, _idx, tr) => {
+          const { st, hasTurn, hasUp, hasDown, isStart, isLatest, prompt } = item;
+
+          if (refs.colOrderSig !== colOrderSig) {
+            if (refs.hoverTd) {
+              refs.hoverTd.onmouseenter = null;
+              refs.hoverTd.onmousemove = null;
+              refs.hoverTd.onmouseleave = null;
+              refs.hoverTd = null;
+            }
+            for (const [oldColKey, entry] of refs.cellMap) {
+              if (!wantedSet.has(oldColKey)) {
+                if (refs.railEl.parentNode === entry.td) {
+                  entry.td.removeChild(refs.railEl);
+                }
+                if (refs.agentBadgeEl.parentNode === entry.td) {
+                  entry.td.removeChild(refs.agentBadgeEl);
+                }
+                tr.removeChild(entry.td);
+                refs.cellMap.delete(oldColKey);
+              }
+            }
+
+            for (const [i, colKey] of colKeys.entries()) {
+              if (!refs.cellMap.has(colKey)) {
+                refs.cellMap.set(colKey, STEP_COLUMN_REGISTRY[colKey].createCell());
+              }
+              const targetTd = refs.cellMap.get(colKey).td;
+              const currentTd = tr.children[i] || null;
+              if (currentTd !== targetTd) {
+                tr.insertBefore(targetTd, currentTd);
+              }
+            }
+            refs.colOrderSig = colOrderSig;
+          }
+
+          for (const colKey of colKeys) {
+            const cellEntry = refs.cellMap.get(colKey);
+            STEP_COLUMN_REGISTRY[colKey].updateCell(cellEntry.refs, st, cellCtx);
+          }
+
+          const firstColKey = colKeys[0];
+          const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
+          if (firstTd) {
+            if (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl) {
+              firstTd.insertBefore(refs.railEl, firstTd.firstChild);
+            }
+            const afterRail = refs.railEl.nextSibling ?? firstTd.children[1] ?? null;
+            if (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl) {
+              firstTd.insertBefore(refs.agentBadgeEl, afterRail);
+            }
+          }
+
+          patchAttr(refs.agentBadgeEl, 'hidden', !showAgentBadge || !firstTd);
+          if (showAgentBadge && firstTd) {
+            const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
+            const clickableCls = interactiveBadges && onSelectAgentScopes ? ' is-clickable' : '';
+            patchAttr(refs.agentBadgeEl, 'class', `agent-badge${clickableCls} ${badgeCls}`);
+            const badgeText = isEnglishLocale()
+              ? formatAgentBadgeText({
+                  isMain: !st.isSubagent,
+                  index: st.agentIndex || 0,
+                  badgeText: st.agentBadge,
+                })
+              : st.agentBadge || (st.isSubagent ? '子' : '主');
+            patchText(refs.agentBadgeEl, badgeText);
+
+            if (interactiveBadges && onSelectAgentScopes) {
+              const targetScope = st.agentId || 'main';
+              const isSoleTarget =
+                effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
+              const agentName = isEnglishLocale()
+                ? formatAgentLabel({
+                    isMain: !st.isSubagent,
+                    index: st.agentIndex || 0,
+                    role: st.agentRole || '',
+                  })
+                : st.agentLabel || t('steps.unitAgent');
+              patchAttr(
+                refs.agentBadgeEl,
+                'title',
+                isSoleTarget
+                  ? t('steps.badgeBackAll')
+                  : t('steps.badgeFilterAgent', { agent: agentName })
+              );
+              refs.agentBadgeEl.onclick = (e) => {
+                if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && effectiveScopes[0] !== 'all') {
+                  const next = effectiveScopes.includes(targetScope)
+                    ? effectiveScopes.filter((id) => id !== targetScope)
+                    : [...effectiveScopes, targetScope];
+                  onSelectAgentScopes(next.length > 0 ? next : ['all']);
+                } else {
+                  onSelectAgentScopes(isSoleTarget ? ['all'] : [targetScope]);
+                }
+              };
+            } else {
+              patchAttr(refs.agentBadgeEl, 'title', null);
+              refs.agentBadgeEl.onclick = null;
+            }
+          } else {
+            refs.agentBadgeEl.onclick = null;
+          }
+
+          const showRowRail = Boolean(railActive && hasTurn && firstTd);
+          patchAttr(refs.railEl, 'hidden', !showRowRail);
+          if (showRowRail) {
+            patchClasses(refs.railEl, {
+              'is-latest': isLatest,
+              'has-up': hasUp,
+              'has-down': hasDown,
+            });
+            patchAttr(refs.railLineEl, 'hidden', !hasUp && !hasDown);
+            const showOrigin = isStart;
+            const showCap = !showOrigin && !hasUp && hasDown;
+            patchAttr(refs.railDotEl, 'hidden', !showOrigin && !showCap);
+            patchClasses(refs.railDotEl, {
+              'is-origin': showOrigin,
+              'is-cap': showCap,
+            });
+          }
+
+          const targetHoverTd = firstTd;
+          if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
+            refs.hoverTd.onmouseenter = null;
+            refs.hoverTd.onmousemove = null;
+            refs.hoverTd.onmouseleave = null;
+          }
+          refs.hoverTd = targetHoverTd;
+
+          if (targetHoverTd) {
+            const badgeEl = refs.agentBadgeEl;
+            if (firstColKey === 'step') {
+              targetHoverTd.onmouseenter = (ev) => {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
+                  hideTurnTip();
+                  return;
+                }
+                showTurnTip(targetHoverTd, prompt);
+              };
+              targetHoverTd.onmousemove = (ev) => {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
+                  hideTurnTip();
+                }
+              };
+              targetHoverTd.onmouseleave = hideTurnTip;
+            } else {
+              targetHoverTd.onmouseenter = null;
+              targetHoverTd.onmousemove = (ev) => {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
+                  hideTurnTip();
+                  return;
+                }
+                const rect = targetHoverTd.getBoundingClientRect?.();
+                const relX = rect ? (ev?.clientX ?? 0) - rect.left : 0;
+                if (relX <= 18) {
+                  showTurnTip(targetHoverTd, prompt);
+                } else {
+                  hideTurnTip();
+                }
+              };
+              targetHoverTd.onmouseleave = hideTurnTip;
+            }
+          }
+        },
+      });
+    }
+
+    onCleanup(() => {
+      stepsTablePane.removeEventListener('scroll', hideTurnTip);
+      stepsTbody.removeEventListener('mouseleave', hideTurnTip);
+    });
+
+    return {
+      el: standaloneHostEl || stepsTablePane,
+      refs: {
+        stepsTablePane,
+        stepsTableEl,
+        stepsTheadRow,
+        stepsTbody,
+        turnTipEl,
+        syncTableHeaderColumns,
+        renderStepTable,
+        hideTurnTip,
+        setBoundsElGetter,
+      },
+    };
+  },
+});
+
+// --- src/components/settings/structurePreviewMock.js ---
+/**
+ * @fileoverview Realistic Simulated Telemetry Builder (`structurePreviewMock.js`)
+ * for `SettingsStructureTab` real-UI live previews.
+ * Exercises all 13 capsule metrics, 8 overview metrics, 10 context channels + subagents,
+ * multi-pool quotas, live running task + subagent, and 12 step table columns.
+ */
+
+
+function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) {
+  const anchorMinMs = Math.floor(Date.now() / 60000) * 60000;
+  const reset5hIso = new Date(anchorMinMs + (2 * 60 + 42) * 60000).toISOString();
+  const resetWkIso = new Date(anchorMinMs + (4 * 24 * 60 + 180) * 60000).toISOString();
+  const resetClaude5hIso = new Date(anchorMinMs + (1 * 60 + 18) * 60000).toISOString();
+
+  const mergedSettings = {
+    ...(baseSettings && typeof baseSettings === 'object' ? baseSettings : {}),
+    ...draftOverrides,
+  };
+
+  const sessionTitle = t('settings.mock.sessionTitle');
+  const subRole = t('settings.mock.subRole');
+  const promptLatest = t('settings.mock.turnPromptLatest');
+  const promptPrev = t('settings.mock.turnPromptPrev');
+
+  const mainContext = {
+    totalTokens: 142800,
+    limitTokens: 256000,
+    compactionLimitTokens: 256000,
+    usedPct: 55.8,
+    toolResultsTokens: 86400,
+    assistantTokens: 24200,
+    systemToolsTokens: 11800,
+    checkpointTokens: 7600,
+    systemPromptTokens: 5800,
+    skillsTokens: 3100,
+    userRulesTokens: 1900,
+    userInputTokens: 1120,
+    mcpToolsTokens: 540,
+    subagentTokens: 340,
+  };
+
+  const subContext = {
+    totalTokens: 72704,
+    limitTokens: 256000,
+    compactionLimitTokens: 256000,
+    usedPct: 28.4,
+    toolResultsTokens: 51200,
+    assistantTokens: 11400,
+    systemToolsTokens: 5600,
+    systemPromptTokens: 3400,
+    userInputTokens: 1104,
+    checkpointTokens: 0,
+    skillsTokens: 0,
+    userRulesTokens: 0,
+    mcpToolsTokens: 0,
+    subagentTokens: 0,
+  };
+
+  const mockSteps = [
+    {
+      stepIndex: 24,
+      agentCascadeId: 'mock-main',
+      agentId: 'main',
+      agentIndex: 0,
+      isSubagent: false,
+      agentBadge: '主',
+      agentLabel: t('fmt.mainAgent'),
+      modelLabel: 'Gemini 4 Carbon (High)',
+      modelShort: 'gemini-4-carbon',
+      rawModel: 'MODEL_PLACEHOLDER_M37',
+      upstreamModel: 'gemini-4-carbon-high',
+      tokPerSec: 68.4,
+      ttftSec: 1.15,
+      totalDurationSec: 12.6,
+      streamDurationSec: 11.45,
+      contextTokens: 142800,
+      inputTokens: 7800,
+      cacheReadTokens: 133580,
+      outputTokens: 1420,
+      thinkingTokens: 860,
+      responseTokens: 560,
+      cacheHitPct: 94.5,
+      costUsd: 0.042,
+      createdAtMs: anchorMinMs - 14_000,
+      turnIndex: 2,
+      rootTurnIndex: 2,
+      isTurnStart: false,
+      isRootTurnStart: false,
+      isLatestTurn: true,
+      isRootLatestTurn: true,
+      turnPrompt: promptLatest,
+      rootTurnPrompt: promptLatest,
+    },
+    {
+      stepIndex: 8,
+      agentCascadeId: 'mock-sub-1',
+      agentId: 'sub-1',
+      agentIndex: 1,
+      isSubagent: true,
+      agentBadge: '子1',
+      agentRole: subRole,
+      agentLabel: subRole,
+      modelLabel: 'Gemini 3.8 Flash',
+      modelShort: 'gemini-3.8-flash',
+      rawModel: 'MODEL_PLACEHOLDER_M42',
+      upstreamModel: 'gemini-3.8-flash-n',
+      tokPerSec: 96.2,
+      ttftSec: 0.68,
+      totalDurationSec: 5.4,
+      streamDurationSec: 4.72,
+      contextTokens: 72704,
+      inputTokens: 8600,
+      cacheReadTokens: 63400,
+      outputTokens: 704,
+      thinkingTokens: 240,
+      responseTokens: 464,
+      cacheHitPct: 88.1,
+      costUsd: 0.009,
+      createdAtMs: anchorMinMs - 42_000,
+      turnIndex: 1,
+      rootTurnIndex: 2,
+      isTurnStart: true,
+      isRootTurnStart: false,
+      isLatestTurn: true,
+      isRootLatestTurn: true,
+      turnPrompt: promptLatest,
+      rootTurnPrompt: promptLatest,
+    },
+    {
+      stepIndex: 22,
+      agentCascadeId: 'mock-main',
+      agentId: 'main',
+      agentIndex: 0,
+      isSubagent: false,
+      agentBadge: '主',
+      agentLabel: t('fmt.mainAgent'),
+      modelLabel: 'Gemini 4 Carbon (High)',
+      modelShort: 'gemini-4-carbon',
+      rawModel: 'MODEL_PLACEHOLDER_M37',
+      upstreamModel: 'gemini-4-carbon-high',
+      tokPerSec: 46.5,
+      ttftSec: 3.4,
+      totalDurationSec: 15.8,
+      streamDurationSec: 12.4,
+      contextTokens: 128400,
+      inputTokens: 49200,
+      cacheReadTokens: 78100,
+      outputTokens: 1100,
+      thinkingTokens: 720,
+      responseTokens: 380,
+      cacheHitPct: 61.4,
+      costUsd: 0.068,
+      createdAtMs: anchorMinMs - 88_000,
+      turnIndex: 2,
+      rootTurnIndex: 2,
+      isTurnStart: true,
+      isRootTurnStart: true,
+      isLatestTurn: true,
+      isRootLatestTurn: true,
+      turnPrompt: promptLatest,
+      rootTurnPrompt: promptLatest,
+    },
+    {
+      stepIndex: 19,
+      agentCascadeId: 'mock-main',
+      agentId: 'main',
+      agentIndex: 0,
+      isSubagent: false,
+      agentBadge: '主',
+      agentLabel: t('fmt.mainAgent'),
+      modelLabel: 'Gemini 4 Carbon (High)',
+      modelShort: 'gemini-4-carbon',
+      rawModel: 'MODEL_PLACEHOLDER_M37',
+      upstreamModel: 'gemini-4-carbon-high',
+      tokPerSec: 17.8,
+      ttftSec: 19.4,
+      totalDurationSec: 31.2,
+      streamDurationSec: 11.8,
+      contextTokens: 96200,
+      inputTokens: 95400,
+      cacheReadTokens: 0,
+      outputTokens: 800,
+      thinkingTokens: 540,
+      responseTokens: 260,
+      cacheHitPct: 0,
+      costUsd: 0.198,
+      createdAtMs: anchorMinMs - 215_000,
+      turnIndex: 1,
+      rootTurnIndex: 1,
+      isTurnStart: true,
+      isRootTurnStart: true,
+      isLatestTurn: false,
+      isRootLatestTurn: false,
+      turnPrompt: promptPrev,
+      rootTurnPrompt: promptPrev,
+    },
+  ];
+
+  const mainAgent = {
+    agentId: 'main',
+    cascadeId: 'mock-main',
+    isMain: true,
+    index: 0,
+    badgeText: '主',
+    role: t('fmt.mainAgent'),
+    isRunning: true,
+    stepCount: 16,
+    speedSampleCount: 15,
+    latestTokPerSec: 68.4,
+    avgTokPerSec: 54.8,
+    latestTtftSec: 1.15,
+    avgTtftSec: 1.62,
+    latestStepCostUsd: 0.042,
+    sessionCostUsd: 1.16,
+    latestCacheHitPct: 94.5,
+    sessionCacheHitPct: 89.2,
+    latestPromptTokens: 141380,
+    inputTokens: 152400,
+    cacheReadTokens: 1260000,
+    outputTokens: 22100,
+    totalTokens: 1434500,
+    latestModelLabel: 'Gemini 4 Carbon (High)',
+    latestModelShort: 'gemini-4-carbon',
+    latestRawModel: 'MODEL_PLACEHOLDER_M37',
+    latestUpstreamModel: 'gemini-4-carbon-high',
+    activeModelLabel: 'Gemini 4 Carbon (High)',
+    activeModelShort: 'gemini-4-carbon',
+    context: mainContext,
+    recentSteps: mockSteps.filter((s) => !s.isSubagent),
+  };
+
+  const subAgent1 = {
+    agentId: 'sub-1',
+    cascadeId: 'mock-sub-1',
+    isMain: false,
+    index: 1,
+    badgeText: '子1',
+    shortLabel: `${t('fmt.subAgent')} #1`,
+    role: subRole,
+    isRunning: false,
+    stepCount: 8,
+    speedSampleCount: 8,
+    latestTokPerSec: 96.2,
+    avgTokPerSec: 88.5,
+    latestTtftSec: 0.68,
+    avgTtftSec: 0.82,
+    latestStepCostUsd: 0.009,
+    sessionCostUsd: 0.12,
+    latestCacheHitPct: 88.1,
+    sessionCacheHitPct: 86.4,
+    latestPromptTokens: 72000,
+    inputTokens: 34000,
+    cacheReadTokens: 280000,
+    outputTokens: 6300,
+    totalTokens: 320300,
+    latestModelLabel: 'Gemini 3.8 Flash',
+    latestModelShort: 'gemini-3.8-flash',
+    latestRawModel: 'MODEL_PLACEHOLDER_M42',
+    latestUpstreamModel: 'gemini-3.8-flash-n',
+    activeModelLabel: 'Gemini 3.8 Flash',
+    activeModelShort: 'gemini-3.8-flash',
+    context: subContext,
+    recentSteps: mockSteps.filter((s) => s.isSubagent),
+  };
+
+  const aggregated = {
+    ...mainAgent,
+    stepCount: 24,
+    speedSampleCount: 23,
+    avgTokPerSec: 59.6,
+    avgTtftSec: 1.38,
+    sessionCostUsd: 1.28,
+    sessionCacheHitPct: 88.9,
+    inputTokens: 186400,
+    cacheReadTokens: 1540000,
+    outputTokens: 28400,
+    totalTokens: 1754800,
+    activeAgentBadge: '主',
+    recentSteps: mockSteps,
+  };
+
+  return {
+    settings: mergedSettings,
+    account: {
+      planName: 'Google AI Pro',
+      aiCredits: 1200,
+    },
+    quotas: {
+      activePool: {
+        family: 'Gemini',
+        poolKey: 'Gemini',
+        poolLabel: 'Gemini',
+        usedPct: 36,
+        remainingPct: 64,
+        resetTime: reset5hIso,
+        weeklyUsedPct: 48,
+        weeklyRemainingPct: 52,
+        weeklyResetTime: resetWkIso,
+      },
+      pools: [
+        {
+          poolKey: 'Gemini',
+          poolLabel: 'Gemini',
+          family: 'Gemini',
+          usedPct: 36,
+          remainingPct: 64,
+          resetTime: reset5hIso,
+          weeklyUsedPct: 48,
+          weeklyRemainingPct: 52,
+          weeklyResetTime: resetWkIso,
+          cycle5h: { tokens: 1754800, costUsd: 1.28, calls: 24 },
+          cycleWeekly: { tokens: 14200000, costUsd: 11.4, calls: 186 },
+        },
+        {
+          poolKey: 'Claude & GPT',
+          poolLabel: 'Claude & GPT',
+          family: 'Claude & GPT',
+          usedPct: 68,
+          remainingPct: 32,
+          resetTime: resetClaude5hIso,
+          weeklyUsedPct: 41,
+          weeklyRemainingPct: 59,
+          weeklyResetTime: resetWkIso,
+          cycle5h: { tokens: 620000, costUsd: 2.15, calls: 11 },
+          cycleWeekly: { tokens: 5800000, costUsd: 18.6, calls: 92 },
+        },
+      ],
+      weekly: {
+        isOfficial: true,
+        usedPct: 48,
+        remainingPct: 52,
+        resetTime: resetWkIso,
+        tokens: 20000000,
+        costUsd: 30.0,
+        calls: 278,
+      },
+    },
+    runningConversations: [
+      {
+        cascadeId: 'mock-preview-conv',
+        title: sessionTitle,
+        isCurrentSelected: true,
+        isMainRunning: true,
+        isRunning: true,
+        subagentCount: 1,
+        runningSubagentCount: 0,
+        latestTokPerSec: 68.4,
+        contextUsedPct: 55.8,
+        mainActivity: {
+          phase: 'generating',
+          label: t('live.generating'),
+          stepProgress: '#24',
+          detail: 'src/auth/tokenRefresh.ts',
+          startedAtMs: Date.now() - 8000,
+          signature: 'mock-preview:24',
+        },
+        subagents: [
+          {
+            cascadeId: 'mock-sub-1',
+            index: 1,
+            badgeText: '子1',
+            shortLabel: `${t('fmt.subAgent')} #1`,
+            role: subRole,
+            isRunning: false,
+            stepCount: 8,
+            lastModifiedMs: anchorMinMs - 42_000,
+            liveActivity: {
+              phase: 'done',
+              label: t('live.done'),
+              detail: '',
+              stepProgress: '',
+              startedAtMs: anchorMinMs - 42_000,
+              signature: 'mock-sub-1:8',
+            },
+          },
+        ],
+      },
+    ],
+    activeConversation: {
+      ...mainAgent,
+      cascadeId: 'mock-preview-conv',
+      title: sessionTitle,
+      hasSubagents: true,
+      agents: [mainAgent, subAgent1],
+      aggregated,
+      recentSteps: mockSteps,
+    },
+  };
+}
+
 // --- src/components/settings/CollapsibleSection.js ---
 /**
- * @fileoverview Reusable Accordion / Collapsible Section (`CollapsibleSection.js`)
- * for `SettingsStructureTab`.
+ * @fileoverview Reusable Section Card (`CollapsibleSection.js`)
+ * for `SettingsStructureTab` — supports both accordion mode (`collapsible: true`)
+ * and static 3rd-level pane card mode (`collapsible: false`).
  */
 
 
 const CollapsibleSection = defineComponent({
   name: 'CollapsibleSection',
   setup({ props, onCleanup }) {
-    let expanded = Boolean(props.defaultExpanded);
+    const isCollapsible = props.collapsible !== false;
+    let expanded = isCollapsible ? Boolean(props.defaultExpanded) : true;
     let statusTimer = null;
 
-    const chevronIcon = createSvgIcon('chevron-right', {
-      size: 12,
-      className: 'collapsible-chevron',
-    });
+    const chevronIcon = isCollapsible
+      ? createSvgIcon('chevron-right', {
+          size: 12,
+          className: 'collapsible-chevron',
+        })
+      : null;
     const sectionIcon = props.icon ? createSvgIcon(props.icon, { size: 13 }) : null;
     const titleTextEl = h('span', {
       className: 'collapsible-title-text',
       text: props.title || '',
     });
 
-    const triggerChildren = [chevronIcon];
+    const triggerChildren = [];
+    if (chevronIcon) triggerChildren.push(chevronIcon);
     if (sectionIcon) triggerChildren.push(sectionIcon);
     triggerChildren.push(titleTextEl);
 
-    const triggerBtn = h(
-      'button',
-      {
-        type: 'button',
-        className: 'collapsible-trigger',
-        'aria-expanded': expanded ? 'true' : 'false',
-        onClick: () => {
-          setExpanded(!expanded);
-          if (typeof props.onToggle === 'function') {
-            props.onToggle(expanded);
-          }
-        },
-      },
-      triggerChildren
-    );
+    const triggerBtn = isCollapsible
+      ? h(
+          'button',
+          {
+            type: 'button',
+            className: 'collapsible-trigger',
+            'aria-expanded': expanded ? 'true' : 'false',
+            onClick: () => {
+              setExpanded(!expanded);
+              if (typeof props.onToggle === 'function') {
+                props.onToggle(expanded);
+              }
+            },
+          },
+          triggerChildren
+        )
+      : h('div', { className: 'collapsible-title-static' }, triggerChildren);
 
     const statusTextEl = h('span', { className: 'collapsible-status', text: '' });
     const badgeEl = h('span', {
@@ -10426,12 +11681,13 @@ const CollapsibleSection = defineComponent({
     const sectionEl = h(
       'section',
       {
-        className: `panel collapsible-section${expanded ? ' is-expanded' : ''}`,
+        className: `panel collapsible-section${expanded ? ' is-expanded' : ''}${isCollapsible ? '' : ' is-static-pane'}`,
       },
       [headerRow, bodyEl]
     );
 
     function setExpanded(next) {
+      if (!isCollapsible) return;
       expanded = Boolean(next);
       patchClasses(sectionEl, { 'is-expanded': expanded });
       patchAttr(triggerBtn, 'aria-expanded', expanded ? 'true' : 'false');
@@ -10486,13 +11742,15 @@ const CollapsibleSection = defineComponent({
         triggerBtn,
         bodyEl,
         resetBtn,
+        badgeEl,
+        statusTextEl,
         setExpanded,
-        isExpanded: () => expanded,
         setTitle,
         setBadge,
         setResetLabel,
         setResetDisabled,
         showStatus,
+        isExpanded: () => expanded,
       },
     };
   },
@@ -10500,11 +11758,30 @@ const CollapsibleSection = defineComponent({
 
 // --- src/components/settings/EditableSlotList.js ---
 /**
- * @fileoverview Reusable `+` / `-` / `↑` / `↓` Dynamic Slot List (`EditableSlotList.js`).
+ * @fileoverview Reusable Drag-Sortable & `+` / `-` / `↑` / `↓` Dynamic Slot List (`EditableSlotList.js`).
  * Powers Topbar Capsule Slots (1..5), Hover Popup Modules (0..4),
  * Live Overview Modules (1..4), First-Row Metrics (1..4), and Step Table Columns (2..12).
+ * Supports smooth pointer-based drag reordering with live preview callbacks (`onPreview`)
+ * and single-commit persistence on drop (`onChange`).
  */
 
+
+function isNodeWithin(target, container) {
+  let cur = target;
+  while (cur) {
+    if (cur === container) return true;
+    cur = cur.parentNode || cur.host || null;
+  }
+  return false;
+}
+
+function areSlotListsEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
 
 const EditableSlotList = defineComponent({
   name: 'EditableSlotList',
@@ -10515,6 +11792,7 @@ const EditableSlotList = defineComponent({
     let currentOptions = Array.isArray(props.options) ? [...props.options] : [];
     let emptyHintText = String(props.emptyHintText || '');
     let addBtnTextFn = typeof props.addBtnTextFn === 'function' ? props.addBtnTextFn : null;
+    let activeDrag = null;
 
     const listEl = h('div', { className: 'editable-slot-list' });
     const emptyEl = h('div', {
@@ -10548,13 +11826,162 @@ const EditableSlotList = defineComponent({
     function emitChange(nextItems) {
       currentItems = [...nextItems];
       syncRows();
+      if (typeof props.onPreview === 'function') {
+        props.onPreview([...currentItems]);
+      }
       if (typeof props.onChange === 'function') {
         props.onChange([...currentItems]);
       }
     }
 
+    function teardownActiveDrag({ revert = false } = {}) {
+      if (!activeDrag) return;
+      const { startItems, hasMoved, cleanupListeners } = activeDrag;
+      activeDrag = null;
+      cleanupListeners();
+      patchClasses(listEl, { 'is-dragging-list': false });
+      for (const r of rowPool) {
+        patchClasses(r.rowEl, { 'is-dragging': false });
+      }
+      if (revert && hasMoved && !areSlotListsEqual(startItems, currentItems)) {
+        currentItems = [...startItems];
+        syncRows();
+        if (typeof props.onPreview === 'function') {
+          props.onPreview([...currentItems]);
+        }
+      }
+    }
+
+    function startPointerDrag(e, initialRowIdx) {
+      if (e && e.button != null && e.button !== 0) return;
+      if (currentItems.length <= 1) return;
+      if (activeDrag) {
+        teardownActiveDrag({ revert: false });
+      }
+
+      const startY = Number(e?.clientY ?? 0);
+      const startItems = [...currentItems];
+      let dragIdx = initialRowIdx;
+      let hasMoved = false;
+
+      const onPointerMove = (ev) => {
+        if (!activeDrag) return;
+        const clientY = Number(ev?.clientY ?? startY);
+        if (!hasMoved) {
+          if (Math.abs(clientY - startY) < 4) return;
+          hasMoved = true;
+          activeDrag.hasMoved = true;
+          for (let k = 0; k < currentItems.length; k += 1) {
+            rowPool[k]?.selectComp?.close?.();
+          }
+          patchClasses(listEl, { 'is-dragging-list': true });
+          if (rowPool[dragIdx]) {
+            patchClasses(rowPool[dragIdx].rowEl, { 'is-dragging': true });
+          }
+        }
+        ev?.preventDefault?.();
+
+        let targetIdx = dragIdx;
+        const count = currentItems.length;
+        for (let i = 0; i < dragIdx; i += 1) {
+          const rect = rowPool[i]?.rowEl?.getBoundingClientRect?.();
+          if (rect && rect.height > 0 && clientY < rect.top + rect.height * 0.5) {
+            targetIdx = i;
+            break;
+          }
+        }
+        if (targetIdx === dragIdx) {
+          for (let i = count - 1; i > dragIdx; i -= 1) {
+            const rect = rowPool[i]?.rowEl?.getBoundingClientRect?.();
+            if (rect && rect.height > 0 && clientY > rect.top + rect.height * 0.5) {
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+
+        if (targetIdx !== dragIdx) {
+          if (rowPool[dragIdx]) {
+            patchClasses(rowPool[dragIdx].rowEl, { 'is-dragging': false });
+          }
+          const next = [...currentItems];
+          const [moved] = next.splice(dragIdx, 1);
+          next.splice(targetIdx, 0, moved);
+          dragIdx = targetIdx;
+          activeDrag.dragIdx = dragIdx;
+          currentItems = next;
+          syncRows();
+          if (rowPool[dragIdx]) {
+            patchClasses(rowPool[dragIdx].rowEl, { 'is-dragging': true });
+          }
+          if (typeof props.onPreview === 'function') {
+            props.onPreview([...currentItems]);
+          }
+        }
+      };
+
+      const onPointerUp = () => {
+        if (!activeDrag) return;
+        const moved = activeDrag.hasMoved;
+        const changed = !areSlotListsEqual(startItems, currentItems);
+        teardownActiveDrag({ revert: false });
+        if (moved && changed) {
+          emitChange([...currentItems]);
+        }
+      };
+
+      const onPointerCancel = () => {
+        teardownActiveDrag({ revert: true });
+      };
+
+      const onKeyDown = (ev) => {
+        if (ev?.key === 'Escape') {
+          teardownActiveDrag({ revert: true });
+        }
+      };
+
+      const docTarget =
+        typeof document !== 'undefined' && typeof document.addEventListener === 'function'
+          ? document
+          : null;
+
+      if (docTarget) {
+        docTarget.addEventListener('pointermove', onPointerMove);
+        docTarget.addEventListener('pointerup', onPointerUp);
+        docTarget.addEventListener('pointercancel', onPointerCancel);
+        docTarget.addEventListener('keydown', onKeyDown);
+      }
+
+      activeDrag = {
+        startItems,
+        dragIdx,
+        hasMoved: false,
+        cleanupListeners: () => {
+          if (docTarget && typeof docTarget.removeEventListener === 'function') {
+            docTarget.removeEventListener('pointermove', onPointerMove);
+            docTarget.removeEventListener('pointerup', onPointerUp);
+            docTarget.removeEventListener('pointercancel', onPointerCancel);
+            docTarget.removeEventListener('keydown', onKeyDown);
+          }
+        },
+      };
+    }
+
     function createSlotRow() {
       let rowIndex = 0;
+      const dragHandle = h(
+        'span',
+        {
+          className: 'slot-drag-handle',
+          'aria-hidden': 'true',
+          onPointerdown: (e) => {
+            e.preventDefault?.();
+            e.stopPropagation?.();
+            startPointerDrag(e, rowIndex);
+          },
+        },
+        [createSvgIcon('grip', { size: 12 })]
+      );
       const indexBadge = h('span', { className: 'slot-index-badge text-mono', text: '1' });
       const selectComp = CustomSelect({
         modelValue: '',
@@ -10619,14 +12046,25 @@ const EditableSlotList = defineComponent({
         [createSvgIcon('minus', { size: 12 })]
       );
 
-      const rowEl = h('div', { className: 'editable-slot-row' }, [
-        indexBadge,
-        selectComp.el,
-        h('span', { className: 'slot-order-btns' }, [upBtn, downBtn, removeBtn]),
-      ]);
+      const orderBtnsEl = h('span', { className: 'slot-order-btns' }, [upBtn, downBtn, removeBtn]);
+
+      const rowEl = h(
+        'div',
+        {
+          className: 'editable-slot-row',
+          onPointerdown: (e) => {
+            if (isNodeWithin(e?.target, selectComp.el) || isNodeWithin(e?.target, orderBtnsEl)) {
+              return;
+            }
+            startPointerDrag(e, rowIndex);
+          },
+        },
+        [dragHandle, indexBadge, selectComp.el, orderBtnsEl]
+      );
 
       return {
         rowEl,
+        dragHandle,
         indexBadge,
         selectComp,
         upBtn,
@@ -10656,6 +12094,8 @@ const EditableSlotList = defineComponent({
         tailChild?.remove?.();
       }
 
+      const canDrag = count > 1;
+      const dragTitle = canDrag ? t('settings.slot.dragHint') : '';
       const canRemove = count > minItems;
       const removeTitle = canRemove
         ? t('settings.slot.remove')
@@ -10667,6 +12107,8 @@ const EditableSlotList = defineComponent({
         entry.setIndex(i);
         patchAttr(entry.rowEl, 'data-slot-row', String(i));
         patchText(entry.indexBadge, String(i + 1));
+        patchClasses(entry.dragHandle, { 'is-disabled': !canDrag });
+        patchAttr(entry.dragHandle, 'title', dragTitle || null);
 
         const otherUsed = new Set(currentItems.filter((_, idx) => idx !== i));
         const rowOpts = currentOptions.map((opt) => {
@@ -10718,7 +12160,7 @@ const EditableSlotList = defineComponent({
     }
 
     function setProps(next = {}) {
-      if (Array.isArray(next.items)) {
+      if (!activeDrag && Array.isArray(next.items)) {
         currentItems = [...next.items];
       }
       if (Array.isArray(next.options)) {
@@ -10736,6 +12178,7 @@ const EditableSlotList = defineComponent({
     syncRows();
 
     onCleanup(() => {
+      teardownActiveDrag({ revert: false });
       for (const entry of rowPool) {
         entry.selectComp.destroy();
       }
@@ -11325,13 +12768,24 @@ const SettingsGeneralTab = defineComponent({
 // --- src/views/settings/SettingsStructureTab.js ---
 /**
  * @fileoverview Preferences Tab 2: `SettingsStructureTab.js` ("结构").
- * Provides 4 collapsible customization sections with `+` / `-` / `↑` / `↓`:
- * 1. 挂载与胶囊栏 (`windowMountMode`, `showTopbarMultiSession`, `topbarCapsuleSlots` 1..5)
- * 2. 鼠标悬浮窗 (`hoverModules` 0..4)
- * 3. 实时监控布局 (`overviewModules` 1..4 + `overviewMetrics` 1..4)
- * 4. 调用明细字段 (`stepTableColumns` 2..12)
+ * Organizes the 4 structure settings panes under a dedicated 3rd-level menu bar,
+ * renders live previews powered by the decoupled real UI components (`CapsuleBarWidget`,
+ * `createDynamicWidgetHost` in `hover` / `overview` modes, and `StepTableWidget`)
+ * with simulated telemetry, and supports smooth mouse drag-and-drop reordering.
  */
 
+
+const STRUCTURE_THIRD_TABS = Object.freeze([
+  { key: 'mount', icon: 'dock', labelKey: 'settings.str.tabMount' },
+  { key: 'hover', icon: 'layers', labelKey: 'settings.str.tabHover' },
+  { key: 'overview', icon: 'pulse', labelKey: 'settings.str.tabOverview' },
+  { key: 'steps', icon: 'table', labelKey: 'settings.str.tabSteps' },
+]);
+
+function normalizeStructureTabKey(raw) {
+  const k = String(raw || '').trim();
+  return k === 'hover' || k === 'overview' || k === 'steps' ? k : 'mount';
+}
 
 function getMountModeOptions() {
   return [
@@ -11359,6 +12813,7 @@ function isSameList(a, b) {
 const SettingsStructureTab = defineComponent({
   name: 'SettingsStructureTab',
   setup({ props, onCleanup }) {
+    let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
     let draftShowTopbarMulti = true;
     let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -11369,6 +12824,26 @@ const SettingsStructureTab = defineComponent({
     let draftShowStepAgentBadge = true;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
+
+    function isStructureVisible() {
+      const st = uiStore.getState();
+      return st.activeView === 'settings' && st.settingsSubTab === 'structure';
+    }
+
+    function buildDraftTelemetry() {
+      return buildStructurePreviewTelemetry(latestSettings, {
+        windowMountMode: draftWindowMountMode,
+        enableWindowOverlay: draftWindowMountMode !== 'sidebar',
+        showTopbarMultiSession: draftShowTopbarMulti,
+        topbarCapsuleSlots: draftTopbarSlots,
+        hoverModules: draftHoverModules,
+        overviewModules: draftOverviewModules,
+        overviewMetrics: draftOverviewMetrics,
+        showStepTurnRail: draftShowStepTurnRail,
+        showStepAgentBadge: draftShowStepAgentBadge,
+        stepTableColumns: draftStepColumns,
+      });
+    }
 
     async function persistStructurePatch(sectionComp, patchObj, successKey = 'settings.saved') {
       sectionComp.refs.showStatus(t('settings.saving'), 0);
@@ -11383,7 +12858,51 @@ const SettingsStructureTab = defineComponent({
       }
     }
 
-    // --- Section 1: 挂载与胶囊栏 (defaultExpanded: true) ---
+    // --- 3rd-Level Navigation Bar ---
+    const thirdNavBtnMap = new Map();
+    const thirdNavBtns = STRUCTURE_THIRD_TABS.map((item) => {
+      const labelEl = h('span', {
+        className: 'structure-thirdnav-label',
+        text: t(item.labelKey),
+      });
+      const btn = h(
+        'button',
+        {
+          type: 'button',
+          className: `structure-thirdnav-btn${item.key === activeThirdTab ? ' is-active' : ''}`,
+          role: 'tab',
+          'aria-selected': item.key === activeThirdTab ? 'true' : 'false',
+          'data-structure-tab': item.key,
+          onClick: () => {
+            if (uiStore.getState().settingsStructureTab !== item.key) {
+              uiStore.setState({ settingsStructureTab: item.key });
+            } else {
+              applyActiveThirdTab(item.key);
+            }
+          },
+        },
+        [createSvgIcon(item.icon, { size: 12 }), labelEl]
+      );
+      thirdNavBtnMap.set(item.key, { btn, labelEl, labelKey: item.labelKey });
+      return btn;
+    });
+
+    const thirdNavBar = h(
+      'div',
+      {
+        className: 'settings-thirdnav-bar',
+        role: 'tablist',
+        'aria-label': t('settings.str.thirdTabAria'),
+      },
+      thirdNavBtns
+    );
+
+    // --- Pane 1: 挂载与胶囊栏 (`mount`) ---
+    const capsulePreviewWidget = CapsuleBarWidget({});
+    const mountPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
+      capsulePreviewWidget.el,
+    ]);
+
     const mountModeLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.mountMode'),
@@ -11405,6 +12924,7 @@ const SettingsStructureTab = defineComponent({
         const nextMode = normalizeClientWindowMountMode(val);
         draftWindowMountMode = nextMode;
         syncMountSectionMeta();
+        props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
           windowMountMode: nextMode,
           enableWindowOverlay: nextMode !== 'sidebar',
@@ -11431,6 +12951,10 @@ const SettingsStructureTab = defineComponent({
       minItems: 1,
       maxItems: 5,
       addBtnTextFn: (count, max) => t('settings.str.addCapsuleSlot', { count, max }),
+      onPreview: (previewItems) => {
+        draftTopbarSlots = normalizeClientTopbarSlots(previewItems);
+        refreshMountPreview();
+      },
       onChange: (nextItems) => {
         draftTopbarSlots = normalizeClientTopbarSlots(nextItems);
         syncMountSectionMeta();
@@ -11442,11 +12966,10 @@ const SettingsStructureTab = defineComponent({
     });
 
     const mountSection = CollapsibleSection({
+      collapsible: false,
       icon: 'dock',
       title: t('settings.str.mountSection'),
       badgeText: t('settings.str.mountBadge', { count: draftTopbarSlots.length }),
-      defaultExpanded: true,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftWindowMountMode = 'dual';
         draftShowTopbarMulti = true;
@@ -11465,6 +12988,8 @@ const SettingsStructureTab = defineComponent({
         );
       },
       children: [
+        mountPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [mountModeLabelEl, windowMountSelect.el]),
         h('div', { className: 'settings-inline-row' }, [
           multiToggleLabelEl,
@@ -11473,6 +12998,11 @@ const SettingsStructureTab = defineComponent({
         h('div', { className: 'form-row' }, [capsuleSlotsLabelEl, topbarSlotsList.el]),
       ],
     });
+
+    function refreshMountPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'mount') return;
+      capsulePreviewWidget.refs.update({ data: buildDraftTelemetry() });
+    }
 
     function syncMountSectionMeta() {
       windowMountSelect.setProps({
@@ -11496,9 +13026,31 @@ const SettingsStructureTab = defineComponent({
         draftShowTopbarMulti === true &&
         isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
       mountSection.refs.setResetDisabled(isDefault);
+      refreshMountPreview();
     }
 
-    // --- Section 2: 鼠标悬浮窗 (0..4 items) ---
+    // --- Pane 2: 鼠标悬浮窗 (`hover`) ---
+    const hoverWidgetsContainerEl = h('div', { className: 'wm-hover-widgets' });
+    const hoverPreviewTipEl = h('div', { className: 'wm-hover-tip is-preview' }, [
+      hoverWidgetsContainerEl,
+    ]);
+    const hoverPreviewEmptyEl = h('div', {
+      className: 'structure-preview-empty',
+      hidden: true,
+      text: t('settings.str.hoverEmptyHint'),
+    });
+    const hoverPreviewHost = createDynamicWidgetHost({
+      containerEl: hoverWidgetsContainerEl,
+      mode: 'hover',
+      preview: true,
+      isVisibleFn: () => isStructureVisible() && activeThirdTab === 'hover',
+      initialModuleKeys: [],
+    });
+    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+      hoverPreviewTipEl,
+      hoverPreviewEmptyEl,
+    ]);
+
     const hoverModulesLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.hoverModulesLabel'),
@@ -11511,6 +13063,10 @@ const SettingsStructureTab = defineComponent({
       maxItems: 4,
       emptyHintText: t('settings.str.hoverEmptyHint'),
       addBtnTextFn: (count, max) => t('settings.str.addHoverModule', { count, max }),
+      onPreview: (previewItems) => {
+        draftHoverModules = normalizeClientHoverModules(previewItems);
+        refreshHoverPreview();
+      },
       onChange: (nextItems) => {
         draftHoverModules = normalizeClientHoverModules(nextItems);
         syncHoverSectionMeta();
@@ -11522,11 +13078,10 @@ const SettingsStructureTab = defineComponent({
     });
 
     const hoverSection = CollapsibleSection({
+      collapsible: false,
       icon: 'layers',
       title: t('settings.str.hoverSection'),
       badgeText: t('settings.str.hoverBadgeCount', { count: draftHoverModules.length }),
-      defaultExpanded: false,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
         syncHoverSectionMeta();
@@ -11537,8 +13092,24 @@ const SettingsStructureTab = defineComponent({
           'settings.resetDone'
         );
       },
-      children: [h('div', { className: 'form-row' }, [hoverModulesLabelEl, hoverModulesList.el])],
+      children: [
+        hoverPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
+        h('div', { className: 'form-row' }, [hoverModulesLabelEl, hoverModulesList.el]),
+      ],
     });
+
+    function refreshHoverPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'hover') return;
+      const hasModules = draftHoverModules.length > 0;
+      patchAttr(hoverPreviewTipEl, 'hidden', !hasModules);
+      patchAttr(hoverPreviewEmptyEl, 'hidden', hasModules);
+      patchText(hoverPreviewEmptyEl, t('settings.str.hoverEmptyHint'));
+      hoverPreviewHost.update({
+        moduleKeys: draftHoverModules,
+        data: buildDraftTelemetry(),
+      });
+    }
 
     function syncHoverSectionMeta() {
       hoverModulesList.refs.setProps({
@@ -11552,10 +13123,25 @@ const SettingsStructureTab = defineComponent({
           ? t('settings.str.hoverBadgeOff')
           : t('settings.str.hoverBadgeCount', { count: draftHoverModules.length })
       );
-      hoverSection.refs.setResetDisabled(isSameList(draftHoverModules, DEFAULT_CLIENT_HOVER_MODULES));
+      hoverSection.refs.setResetDisabled(
+        isSameList(draftHoverModules, DEFAULT_CLIENT_HOVER_MODULES)
+      );
+      refreshHoverPreview();
     }
 
-    // --- Section 3: 实时监控布局 (Modules 1..4 + First-Row Metrics 1..4) ---
+    // --- Pane 3: 实时监控布局 (`overview`) ---
+    const overviewPreviewContainerEl = h('div', { className: 'overview-modules-host is-preview' });
+    const overviewPreviewHost = createDynamicWidgetHost({
+      containerEl: overviewPreviewContainerEl,
+      mode: 'overview',
+      preview: true,
+      isVisibleFn: () => isStructureVisible() && activeThirdTab === 'overview',
+      initialModuleKeys: [],
+    });
+    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+      overviewPreviewContainerEl,
+    ]);
+
     const overviewModulesLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.overviewModulesLabel'),
@@ -11576,6 +13162,11 @@ const SettingsStructureTab = defineComponent({
       minItems: 1,
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewModule', { count, max }),
+      onPreview: (previewItems) => {
+        draftOverviewModules = normalizeClientOverviewModules(previewItems);
+        patchAttr(overviewMetricsHintEl, 'hidden', draftOverviewModules.includes('metrics'));
+        refreshOverviewPreview();
+      },
       onChange: (nextItems) => {
         draftOverviewModules = normalizeClientOverviewModules(nextItems);
         syncOverviewSectionMeta();
@@ -11592,6 +13183,10 @@ const SettingsStructureTab = defineComponent({
       minItems: 1,
       maxItems: 4,
       addBtnTextFn: (count, max) => t('settings.str.addOverviewMetric', { count, max }),
+      onPreview: (previewItems) => {
+        draftOverviewMetrics = normalizeClientOverviewMetrics(previewItems);
+        refreshOverviewPreview();
+      },
       onChange: (nextItems) => {
         draftOverviewMetrics = normalizeClientOverviewMetrics(nextItems);
         syncOverviewSectionMeta();
@@ -11603,14 +13198,13 @@ const SettingsStructureTab = defineComponent({
     });
 
     const overviewSection = CollapsibleSection({
+      collapsible: false,
       icon: 'pulse',
       title: t('settings.str.overviewSection'),
       badgeText: t('settings.str.overviewBadge', {
         modCount: draftOverviewModules.length,
         metCount: draftOverviewMetrics.length,
       }),
-      defaultExpanded: false,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
         draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
@@ -11626,6 +13220,8 @@ const SettingsStructureTab = defineComponent({
         );
       },
       children: [
+        overviewPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [overviewModulesLabelEl, overviewModulesList.el]),
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [
@@ -11635,6 +13231,14 @@ const SettingsStructureTab = defineComponent({
         ]),
       ],
     });
+
+    function refreshOverviewPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'overview') return;
+      overviewPreviewHost.update({
+        moduleKeys: draftOverviewModules,
+        data: buildDraftTelemetry(),
+      });
+    }
 
     function syncOverviewSectionMeta() {
       overviewModulesList.refs.setProps({
@@ -11659,9 +13263,18 @@ const SettingsStructureTab = defineComponent({
         isSameList(draftOverviewModules, DEFAULT_CLIENT_OVERVIEW_MODULES) &&
         isSameList(draftOverviewMetrics, DEFAULT_CLIENT_OVERVIEW_METRICS);
       overviewSection.refs.setResetDisabled(isDefault);
+      refreshOverviewPreview();
     }
 
-    // --- Section 4: 调用明细字段 (Turn Rail + Agent Badge Toggles + Step Table Columns 2..12) ---
+    // --- Pane 4: 调用明细字段 (`steps`) ---
+    const stepTablePreview = StepTableWidget({
+      standalone: true,
+      interactiveBadges: false,
+    });
+    const stepsPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
+      stepTablePreview.el,
+    ]);
+
     const stepTurnRailLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepTurnRailToggle'),
@@ -11707,6 +13320,10 @@ const SettingsStructureTab = defineComponent({
       minItems: 2,
       maxItems: 12,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
+      onPreview: (previewItems) => {
+        draftStepColumns = normalizeClientStepColumns(previewItems);
+        refreshStepsPreview();
+      },
       onChange: (nextItems) => {
         draftStepColumns = normalizeClientStepColumns(nextItems);
         syncStepsSectionMeta();
@@ -11718,11 +13335,10 @@ const SettingsStructureTab = defineComponent({
     });
 
     const stepsSection = CollapsibleSection({
+      collapsible: false,
       icon: 'table',
       title: t('settings.str.stepsSection'),
       badgeText: t('settings.str.stepsBadge', { count: draftStepColumns.length }),
-      defaultExpanded: false,
-      onToggle: () => props.onLayoutChange?.(),
       onReset: () => {
         draftShowStepTurnRail = true;
         draftShowStepAgentBadge = true;
@@ -11740,6 +13356,8 @@ const SettingsStructureTab = defineComponent({
         );
       },
       children: [
+        stepsPreviewCanvas,
+        h('div', { className: 'settings-divider' }),
         h('div', { className: 'settings-inline-row' }, [
           stepTurnRailLabelEl,
           stepTurnRailToggle.el,
@@ -11752,6 +13370,26 @@ const SettingsStructureTab = defineComponent({
         h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
       ],
     });
+
+    function refreshStepsPreview() {
+      if (!isStructureVisible() || activeThirdTab !== 'steps') return;
+      const mockData = buildDraftTelemetry();
+      const mockSteps = mockData.activeConversation?.recentSteps || [];
+      stepTablePreview.refs.renderStepTable(
+        mockSteps,
+        'mock-preview-conv',
+        draftStepColumns,
+        getEffectiveLocale(),
+        {
+          effectiveScopes: ['all'],
+          hasSubagents: true,
+          isMergedMultiAgents: true,
+          showStepTurnRail: draftShowStepTurnRail,
+          showStepAgentBadge: draftShowStepAgentBadge,
+          displaySettings: mockData.settings,
+        }
+      );
+    }
 
     function syncStepsSectionMeta() {
       stepTurnRailToggle.setProps({
@@ -11773,6 +13411,49 @@ const SettingsStructureTab = defineComponent({
         draftShowStepAgentBadge === true &&
         isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
+      refreshStepsPreview();
+    }
+
+    function syncPreviewTickers() {
+      const visible = isStructureVisible();
+      if (visible && activeThirdTab === 'hover') {
+        hoverPreviewHost.resumeTickers();
+      } else {
+        hoverPreviewHost.pauseTickers();
+      }
+      if (visible && activeThirdTab === 'overview') {
+        overviewPreviewHost.resumeTickers();
+      } else {
+        overviewPreviewHost.pauseTickers();
+      }
+      if (!visible || activeThirdTab !== 'steps') {
+        stepTablePreview.refs.hideTurnTip();
+      }
+    }
+
+    function refreshActivePreview() {
+      if (!isStructureVisible()) return;
+      if (activeThirdTab === 'mount') refreshMountPreview();
+      else if (activeThirdTab === 'hover') refreshHoverPreview();
+      else if (activeThirdTab === 'overview') refreshOverviewPreview();
+      else if (activeThirdTab === 'steps') refreshStepsPreview();
+    }
+
+    function applyActiveThirdTab(nextRawTab) {
+      const nextTab = normalizeStructureTabKey(nextRawTab);
+      activeThirdTab = nextTab;
+      for (const [key, entry] of thirdNavBtnMap.entries()) {
+        const isActive = key === nextTab;
+        patchClasses(entry.btn, { 'is-active': isActive });
+        patchAttr(entry.btn, 'aria-selected', isActive ? 'true' : 'false');
+      }
+      patchAttr(mountSection.el, 'hidden', nextTab !== 'mount');
+      patchAttr(hoverSection.el, 'hidden', nextTab !== 'hover');
+      patchAttr(overviewSection.el, 'hidden', nextTab !== 'overview');
+      patchAttr(stepsSection.el, 'hidden', nextTab !== 'steps');
+      refreshActivePreview();
+      syncPreviewTickers();
+      props.onLayoutChange?.();
     }
 
     const rootEl = h('div', { className: 'settings-tab-stack' }, [
@@ -11805,6 +13486,11 @@ const SettingsStructureTab = defineComponent({
     }
 
     function refreshLabels() {
+      patchAttr(thirdNavBar, 'aria-label', t('settings.str.thirdTabAria'));
+      for (const entry of thirdNavBtnMap.values()) {
+        patchText(entry.labelEl, t(entry.labelKey));
+      }
+
       mountSection.refs.setTitle(t('settings.str.mountSection'));
       mountSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
@@ -11833,12 +13519,41 @@ const SettingsStructureTab = defineComponent({
       syncStepsSectionMeta();
     }
 
+    let wasStructureVisible = isStructureVisible();
+    const unsubUi = uiStore.subscribe(
+      (st) => ({
+        activeView: st.activeView,
+        settingsSubTab: st.settingsSubTab,
+        settingsStructureTab: st.settingsStructureTab,
+      }),
+      (slice) => {
+        const nowVisible =
+          slice.activeView === 'settings' && slice.settingsSubTab === 'structure';
+        const enteredStructure = nowVisible && !wasStructureVisible;
+        wasStructureVisible = nowVisible;
+        if (normalizeStructureTabKey(slice.settingsStructureTab) !== activeThirdTab) {
+          applyActiveThirdTab(slice.settingsStructureTab);
+        } else {
+          if (enteredStructure) {
+            refreshActivePreview();
+          }
+          syncPreviewTickers();
+        }
+      }
+    );
+
     syncMountSectionMeta();
     syncHoverSectionMeta();
     syncOverviewSectionMeta();
     syncStepsSectionMeta();
+    applyActiveThirdTab(activeThirdTab);
 
     onCleanup(() => {
+      unsubUi();
+      capsulePreviewWidget.destroy();
+      hoverPreviewHost.destroy();
+      overviewPreviewHost.destroy();
+      stepTablePreview.destroy();
       windowMountSelect.destroy();
       multiSessionToggle.destroy();
       topbarSlotsList.destroy();
@@ -11857,6 +13572,11 @@ const SettingsStructureTab = defineComponent({
     return {
       el: rootEl,
       refs: {
+        thirdNavBar,
+        capsulePreviewWidget,
+        hoverPreviewHost,
+        overviewPreviewHost,
+        stepTablePreview,
         windowMountSelect,
         multiSessionToggle,
         topbarSlotsList,
@@ -13950,16 +15670,6 @@ function getFitMetricSwitchOptions() {
   ];
 }
 
-function formatTurnPromptText(rawPrompt) {
-  const text = String(rawPrompt || '').trim();
-  if (!text || !isEnglishLocale()) return text;
-  if (text === '[图片/附件提问]') return t('steps.turnMediaOnly');
-  if (text.endsWith(' [附图]')) {
-    return `${text.slice(0, -5)} ${t('steps.turnMediaSuffix')}`;
-  }
-  return text;
-}
-
 const StepsDetailView = defineComponent({
   name: 'StepsDetailView',
   setup({ onCleanup }) {
@@ -14030,77 +15740,24 @@ const StepsDetailView = defineComponent({
       },
     });
 
-    // --- 子视图 1：单步明细表（动态表头与行内列插槽由 `stepColumnRegistry.js` 驱动） ---
-    const stepsTheadRow = h('tr');
-    const stepsTbody = h('tbody');
-
-    function syncTableHeaderColumns(colKeys) {
-      const locale = getEffectiveLocale();
-      patchKeyedList(stepsTheadRow, colKeys, {
-        keyFn: (colKey) => colKey,
-        sigFn: (colKey) => `${locale}:${colKey}:${STEP_COLUMN_REGISTRY[colKey].thLabel()}`,
-        createRow: (colKey) => {
-          const th = h('th', { text: STEP_COLUMN_REGISTRY[colKey].thLabel() });
-          return { el: th, refs: { th } };
-        },
-        updateRow: (refs, colKey) => {
-          patchText(refs.th, STEP_COLUMN_REGISTRY[colKey].thLabel());
-        },
-      });
-    }
-
-    syncTableHeaderColumns(DEFAULT_STEP_COLUMN_KEYS);
-
-    const stepsTableEl = h('table', { className: 'data-table steps-data-table' }, [
-      h('thead', {}, [stepsTheadRow]),
+    // --- 子视图 1：单步明细表（委托给可复用的 `StepTableWidget` 解耦组件） ---
+    const stepTableWidget = StepTableWidget({
+      onSelectAgentScopes: applyAgentScopesSelection,
+    });
+    const {
+      stepsTablePane,
+      stepsTableEl,
+      stepsTheadRow,
       stepsTbody,
-    ]);
-    const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [stepsTableEl]);
+      turnTipEl,
+      hideTurnTip,
+      syncTableHeaderColumns,
+      renderStepTable,
+    } = stepTableWidget.refs;
     const stepsScroll = CustomScrollbar({
       contentEl: stepsTablePane,
       className: 'table-scroll-host',
     });
-
-    const turnTipEl = h('div', {
-      className: 'turn-prompt-tip',
-      role: 'tooltip',
-      hidden: true,
-    });
-    const hideTurnTip = () => patchAttr(turnTipEl, 'hidden', true);
-
-    function showTurnTip(anchorCell, promptText) {
-      const text = String(promptText || '').trim();
-      if (!anchorCell || !text) {
-        hideTurnTip();
-        return;
-      }
-      patchText(turnTipEl, text);
-      patchAttr(turnTipEl, 'hidden', false);
-      if (
-        typeof panelEl.getBoundingClientRect === 'function' &&
-        typeof anchorCell.getBoundingClientRect === 'function'
-      ) {
-        const panelRect = panelEl.getBoundingClientRect();
-        const cellRect = anchorCell.getBoundingClientRect();
-        if (panelRect.width > 0 && panelRect.height > 0) {
-          const tipH = turnTipEl.offsetHeight || 36;
-          const tipW = turnTipEl.offsetWidth || 180;
-          const placeAbove =
-            panelRect.bottom - cellRect.bottom < tipH + 10 &&
-            cellRect.top - panelRect.top > tipH + 6;
-          const topPx = placeAbove
-            ? Math.max(4, Math.round(cellRect.top - panelRect.top - tipH - 4))
-            : Math.round(cellRect.bottom - panelRect.top + 4);
-          const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
-          const leftPx = Math.min(
-            maxLeft,
-            Math.max(6, Math.round(cellRect.left - panelRect.left + 4))
-          );
-          turnTipEl.style.top = `${topPx}px`;
-          turnTipEl.style.left = `${leftPx}px`;
-        }
-      }
-    }
 
     // --- 子视图 2：总汇总分析面板 ---
     let selectedLineMetric = 'totalTokens';
@@ -14250,8 +15907,7 @@ const StepsDetailView = defineComponent({
         turnTipEl,
       ]
     );
-    stepsTablePane.addEventListener('scroll', hideTurnTip);
-    stepsTbody.addEventListener('mouseleave', hideTurnTip);
+    stepTableWidget.refs.setBoundsElGetter(() => panelEl);
 
     const rootEl = h('div', { className: 'view-pane' }, [panelEl]);
 
@@ -14322,268 +15978,6 @@ const StepsDetailView = defineComponent({
           ],
         });
       }
-    }
-
-    function renderStepTable(tableSteps, cascadeId, colKeys, locale, {
-      effectiveScopes,
-      hasSubagents,
-      isMergedMultiAgents,
-      showStepTurnRail,
-      showStepAgentBadge,
-      displaySettings,
-    }) {
-      const colOrderSig = colKeys.join(',');
-      const wantedSet = new Set(colKeys);
-      syncTableHeaderColumns(colKeys);
-
-      const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
-      const cellCtx = {
-        hasSubagents,
-        showAgentBadge,
-        effectiveScopes,
-        scopeSigKey: effectiveScopes.join(','),
-        displaySettings,
-        onSelectAgentScopes: applyAgentScopesSelection,
-      };
-
-      const useRootTurn = Boolean(hasSubagents && isMergedMultiAgents);
-      const getStepTurnIdx = (st) =>
-        useRootTurn ? (st?.rootTurnIndex ?? st?.turnIndex) : st?.turnIndex;
-      const getStepIsStart = (st) =>
-        Boolean(useRootTurn ? (st?.isRootTurnStart ?? st?.isTurnStart) : st?.isTurnStart);
-      const getStepIsLatest = (st) =>
-        Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
-      const getStepPrompt = (st) =>
-        (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
-      const turnKeyOf = (st) => {
-        if (!showStepTurnRail) return '';
-        const tIdx = getStepTurnIdx(st);
-        if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
-        return useRootTurn ? `root:${tIdx}` : `${st?.agentId || 'main'}:${tIdx}`;
-      };
-
-      const decoratedSteps = tableSteps.map((st, idx) => {
-        const tKey = turnKeyOf(st);
-        const hasTurn = Boolean(tKey);
-        const hasUp = Boolean(hasTurn && idx > 0 && turnKeyOf(tableSteps[idx - 1]) === tKey);
-        const hasDown = Boolean(
-          hasTurn && idx + 1 < tableSteps.length && turnKeyOf(tableSteps[idx + 1]) === tKey
-        );
-        return {
-          st,
-          rowKey: `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
-          hasTurn,
-          hasUp,
-          hasDown,
-          isStart: Boolean(hasTurn && (getStepIsStart(st) || !hasDown)),
-          isLatest: hasTurn && getStepIsLatest(st),
-          prompt: hasTurn ? formatTurnPromptText(getStepPrompt(st)) : '',
-        };
-      });
-
-      const railActive = Boolean(showStepTurnRail && decoratedSteps.some((d) => d.hasTurn));
-      if (!railActive) {
-        hideTurnTip();
-      }
-      patchClasses(stepsTableEl, { 'has-turn-rail': railActive });
-
-      patchKeyedList(stepsTbody, decoratedSteps, {
-        keyFn: (item) => item.rowKey,
-        sigFn: (item) => {
-          const { st } = item;
-          const parts = colKeys
-            .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
-            .join('|');
-          const badgeSig = `${showAgentBadge}:${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`;
-          return `${locale}:${colOrderSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
-        },
-        createRow: () => {
-          const tr = h('tr');
-          const railLineEl = h('span', { className: 'turn-rail-line', hidden: true });
-          const railDotEl = h('span', { className: 'turn-rail-dot', hidden: true });
-          const railEl = h(
-            'span',
-            { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
-            [railLineEl, railDotEl]
-          );
-          const agentBadgeEl = h('span', {
-            className: 'agent-badge is-clickable',
-            hidden: true,
-            style: 'margin-right: 4px;',
-          });
-          return {
-            el: tr,
-            refs: {
-              cellMap: new Map(),
-              colOrderSig: '',
-              railEl,
-              railLineEl,
-              railDotEl,
-              agentBadgeEl,
-              hoverTd: null,
-            },
-          };
-        },
-        updateRow: (refs, item, _idx, tr) => {
-          const { st, hasTurn, hasUp, hasDown, isStart, isLatest, prompt } = item;
-
-          if (refs.colOrderSig !== colOrderSig) {
-            if (refs.hoverTd) {
-              refs.hoverTd.onmouseenter = null;
-              refs.hoverTd.onmousemove = null;
-              refs.hoverTd.onmouseleave = null;
-              refs.hoverTd = null;
-            }
-            for (const [oldColKey, entry] of refs.cellMap) {
-              if (!wantedSet.has(oldColKey)) {
-                if (refs.railEl.parentNode === entry.td) {
-                  entry.td.removeChild(refs.railEl);
-                }
-                if (refs.agentBadgeEl.parentNode === entry.td) {
-                  entry.td.removeChild(refs.agentBadgeEl);
-                }
-                tr.removeChild(entry.td);
-                refs.cellMap.delete(oldColKey);
-              }
-            }
-
-            for (const [i, colKey] of colKeys.entries()) {
-              if (!refs.cellMap.has(colKey)) {
-                refs.cellMap.set(colKey, STEP_COLUMN_REGISTRY[colKey].createCell());
-              }
-              const targetTd = refs.cellMap.get(colKey).td;
-              const currentTd = tr.children[i] || null;
-              if (currentTd !== targetTd) {
-                tr.insertBefore(targetTd, currentTd);
-              }
-            }
-            refs.colOrderSig = colOrderSig;
-          }
-
-          for (const colKey of colKeys) {
-            const cellEntry = refs.cellMap.get(colKey);
-            STEP_COLUMN_REGISTRY[colKey].updateCell(cellEntry.refs, st, cellCtx);
-          }
-
-          const firstColKey = colKeys[0];
-          const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
-          if (firstTd) {
-            if (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl) {
-              firstTd.insertBefore(refs.railEl, firstTd.firstChild);
-            }
-            const afterRail = refs.railEl.nextSibling ?? firstTd.children[1] ?? null;
-            if (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl) {
-              firstTd.insertBefore(refs.agentBadgeEl, afterRail);
-            }
-          }
-
-          patchAttr(refs.agentBadgeEl, 'hidden', !showAgentBadge || !firstTd);
-          if (showAgentBadge && firstTd) {
-            const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
-            patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
-            const badgeText = isEnglishLocale()
-              ? formatAgentBadgeText({
-                  isMain: !st.isSubagent,
-                  index: st.agentIndex || 0,
-                  badgeText: st.agentBadge,
-                })
-              : st.agentBadge || (st.isSubagent ? '子' : '主');
-            patchText(refs.agentBadgeEl, badgeText);
-
-            const targetScope = st.agentId || 'main';
-            const isSoleTarget =
-              effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
-            const agentName = isEnglishLocale()
-              ? formatAgentLabel({
-                  isMain: !st.isSubagent,
-                  index: st.agentIndex || 0,
-                  role: st.agentRole || '',
-                })
-              : st.agentLabel || t('steps.unitAgent');
-            patchAttr(
-              refs.agentBadgeEl,
-              'title',
-              isSoleTarget
-                ? t('steps.badgeBackAll')
-                : t('steps.badgeFilterAgent', { agent: agentName })
-            );
-            refs.agentBadgeEl.onclick = (e) => {
-              if (typeof applyAgentScopesSelection !== 'function') return;
-              if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && effectiveScopes[0] !== 'all') {
-                const next = effectiveScopes.includes(targetScope)
-                  ? effectiveScopes.filter((id) => id !== targetScope)
-                  : [...effectiveScopes, targetScope];
-                applyAgentScopesSelection(next.length > 0 ? next : ['all']);
-              } else {
-                applyAgentScopesSelection(isSoleTarget ? ['all'] : [targetScope]);
-              }
-            };
-          } else {
-            refs.agentBadgeEl.onclick = null;
-          }
-
-          const showRowRail = Boolean(railActive && hasTurn && firstTd);
-          patchAttr(refs.railEl, 'hidden', !showRowRail);
-          if (showRowRail) {
-            patchClasses(refs.railEl, {
-              'is-latest': isLatest,
-              'has-up': hasUp,
-              'has-down': hasDown,
-            });
-            patchAttr(refs.railLineEl, 'hidden', !hasUp && !hasDown);
-            const showOrigin = isStart;
-            const showCap = !showOrigin && !hasUp && hasDown;
-            patchAttr(refs.railDotEl, 'hidden', !showOrigin && !showCap);
-            patchClasses(refs.railDotEl, {
-              'is-origin': showOrigin,
-              'is-cap': showCap,
-            });
-          }
-
-          const targetHoverTd = firstTd;
-          if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
-            refs.hoverTd.onmouseenter = null;
-            refs.hoverTd.onmousemove = null;
-            refs.hoverTd.onmouseleave = null;
-          }
-          refs.hoverTd = targetHoverTd;
-
-          if (targetHoverTd) {
-            const badgeEl = refs.agentBadgeEl;
-            if (firstColKey === 'step') {
-              targetHoverTd.onmouseenter = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                  return;
-                }
-                showTurnTip(targetHoverTd, prompt);
-              };
-              targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                }
-              };
-              targetHoverTd.onmouseleave = hideTurnTip;
-            } else {
-              targetHoverTd.onmouseenter = null;
-              targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt || ev?.target === badgeEl) {
-                  hideTurnTip();
-                  return;
-                }
-                const rect = targetHoverTd.getBoundingClientRect?.();
-                const relX = rect ? (ev?.clientX ?? 0) - rect.left : 0;
-                if (relX <= 18) {
-                  showTurnTip(targetHoverTd, prompt);
-                } else {
-                  hideTurnTip();
-                }
-              };
-              targetHoverTd.onmouseleave = hideTurnTip;
-            }
-          }
-        },
-      });
     }
 
     function renderStepsData(slice) {
@@ -15196,12 +16590,11 @@ const StepsDetailView = defineComponent({
     );
 
     onCleanup(() => {
-      stepsTablePane.removeEventListener('scroll', hideTurnTip);
-      stepsTbody.removeEventListener('mouseleave', hideTurnTip);
       unsubUi();
       unsubTelemetry();
       unsubView();
       unsubI18n();
+      stepTableWidget.destroy();
       sessionLineChart.destroy?.();
       modelFitChart.destroy?.();
       inlineScopeSelect.destroy();
@@ -15295,6 +16688,7 @@ const SettingsView = defineComponent({
       subNavSwitch.setValue(target);
       patchAttr(generalTab.el, 'hidden', target !== 'general');
       patchAttr(structureTab.el, 'hidden', target !== 'structure');
+      patchAttr(structureTab.refs.thirdNavBar, 'hidden', target !== 'structure');
       patchAttr(accountTab.el, 'hidden', !SHOW_ACCOUNT_TAB || target !== 'account');
       patchAttr(otherTab.el, 'hidden', target !== 'other');
       const nextShowingAccount = SHOW_ACCOUNT_TAB && target === 'account' && activeView === 'settings';
@@ -15319,6 +16713,7 @@ const SettingsView = defineComponent({
 
     const rootEl = h('div', { className: 'settings-view-root' }, [
       subNavBar,
+      structureTab.refs.thirdNavBar,
       viewScrollbar.el,
     ]);
 
@@ -15571,8 +16966,6 @@ const CAPSULE_HOST_ID = 'ag-usage-monitor-capsule';
 const PORTAL_HOST_ID = 'ag-usage-monitor-portal';
 const FLOATING_CARD_WIDTH = 522;
 const MULTI_PANEL_WIDTH = 464;
-const RING_RADIUS = 5.2;
-const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
 
 /**
  * 带迟滞区间（Hysteresis）的四阶段顶栏双胶囊响应式宽度计算，避免临界宽度反复跳动。
@@ -16708,75 +18101,13 @@ function mountWindowOverlay() {
     [multiDot, multiLabel]
   );
 
-  // 构建可复用的预占胶囊槽位节点（支持 1..5 项动态槽位，运行期仅就地更新文本与属性）
-  function createCapsuleSlot(slotIndex, initialMetric) {
-    const ringSvg = document.createElementNS(SVG_NS, 'svg');
-    ringSvg.setAttribute('viewBox', '0 0 14 14');
-    ringSvg.setAttribute('class', 'wm-ring-svg');
-    ringSvg.setAttribute('aria-hidden', 'true');
-
-    const ringTrack = document.createElementNS(SVG_NS, 'circle');
-    ringTrack.setAttribute('cx', '7');
-    ringTrack.setAttribute('cy', '7');
-    ringTrack.setAttribute('r', String(RING_RADIUS));
-    ringTrack.setAttribute('class', 'wm-ring-track');
-
-    const ringFill = document.createElementNS(SVG_NS, 'circle');
-    ringFill.setAttribute('cx', '7');
-    ringFill.setAttribute('cy', '7');
-    ringFill.setAttribute('r', String(RING_RADIUS));
-    ringFill.setAttribute('class', 'wm-ring-fill');
-    ringFill.setAttribute('stroke-dasharray', String(RING_CIRCUMFERENCE));
-    ringFill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE));
-
-    ringSvg.appendChild(ringTrack);
-    ringSvg.appendChild(ringFill);
-
-    const isNone = initialMetric === 'none';
-    const isCtx = initialMetric === 'context';
-    const textSpan = h('span', {
-      className: isCtx ? 'wm-slot-text wm-ctx-pct' : 'wm-slot-text',
-      text: isNone
-        ? ''
-        : isCtx
-          ? '--%'
-          : initialMetric === 'tps'
-            ? '-- t/s'
-            : t('capsule.quotaUnknown'),
-    });
-    const el = h(
-      'span',
-      {
-        className: isNone
-          ? 'wm-cap-slot'
-          : isCtx
-            ? 'wm-cap-slot wm-ctx-seg'
-            : initialMetric === 'tps'
-              ? 'wm-cap-slot wm-seg-speed'
-              : 'wm-cap-slot wm-seg-quota',
-        hidden: isNone,
-        'data-slot-idx': String(slotIndex),
-        'data-metric': initialMetric,
-        'data-vis-rank': isNone ? '' : String(slotIndex + 1),
-      },
-      isCtx ? [ringSvg, textSpan] : [textSpan]
-    );
-
-    return {
-      el,
-      ringSvg,
-      ringFill,
-      textSpan,
-      ringMounted: isCtx,
-    };
-  }
-
+  // 构建可复用的预占胶囊槽位节点（由 CapsuleBarWidget 共享创建，支持 1..5 项动态槽位）
   const capsuleSlots = [
-    createCapsuleSlot(0, 'context'),
-    createCapsuleSlot(1, 'tps'),
-    createCapsuleSlot(2, 'quota_auto'),
-    createCapsuleSlot(3, 'none'),
-    createCapsuleSlot(4, 'none'),
+    createCapsuleSlotNode(0, 'context'),
+    createCapsuleSlotNode(1, 'tps'),
+    createCapsuleSlotNode(2, 'quota_auto'),
+    createCapsuleSlotNode(3, 'none'),
+    createCapsuleSlotNode(4, 'none'),
   ];
   const capsuleSeps = [
     h('span', { className: 'wm-sep wm-sep-speed', 'data-sep-for-rank': '2' }),
@@ -17895,53 +19226,7 @@ function mountWindowOverlay() {
   }
 
   function applyCapsuleSlots(slotKeys, slotCtx) {
-    let visRank = 0;
-    const visRanks = [0, 0, 0, 0, 0];
-    for (let i = 0; i < capsuleSlots.length; i += 1) {
-      const slot = capsuleSlots[i];
-      const metricKey = i < slotKeys.length ? slotKeys[i] : 'none';
-      const pres = resolveCapsuleMetricPresentation(metricKey, slotCtx, RING_CIRCUMFERENCE);
-      if (pres.hidden) {
-        patchAttr(slot.el, 'hidden', true);
-        patchAttr(slot.el, 'data-metric', 'none');
-        patchAttr(slot.el, 'data-vis-rank', '');
-        continue;
-      }
-      visRank += 1;
-      visRanks[i] = visRank;
-      patchAttr(slot.el, 'hidden', false);
-      patchAttr(slot.el, 'data-metric', pres.metric);
-      patchAttr(slot.el, 'data-vis-rank', String(visRank));
-
-      if (pres.showRing && !slot.ringMounted) {
-        slot.el.insertBefore(slot.ringSvg, slot.textSpan);
-        slot.ringMounted = true;
-      } else if (!pres.showRing && slot.ringMounted) {
-        slot.ringSvg.remove();
-        slot.ringMounted = false;
-      }
-
-      const fullSegClass =
-        `${pres.segClass}${pres.running ? ' state-running' : ''}${pres.warn ? ' tone-warn' : ''}${pres.danger ? ' tone-danger' : ''}`;
-      patchAttr(slot.el, 'class', fullSegClass);
-      const fullTextClass =
-        `${pres.textClass}${pres.warn ? ' tone-warn' : ''}${pres.danger ? ' tone-danger' : ''}`;
-      patchAttr(slot.textSpan, 'class', fullTextClass);
-      patchText(slot.textSpan, pres.text);
-
-      if (pres.showRing) {
-        slot.ringFill.setAttribute('stroke-dashoffset', String(pres.dashOffset));
-        patchClasses(slot.ringFill, { 'tone-warn': pres.warn, 'tone-danger': pres.danger });
-      }
-    }
-
-    for (let s = 0; s < capsuleSeps.length; s += 1) {
-      const sepEl = capsuleSeps[s];
-      const nextRank = visRanks[s + 1] || 0;
-      const showSep = nextRank >= 2;
-      patchAttr(sepEl, 'hidden', !showSep);
-      patchAttr(sepEl, 'data-sep-for-rank', showSep ? String(nextRank) : '');
-    }
+    syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
   }
 
   // --- 4. 实时遥测状态绑定（双胶囊与多会话/动态组件浮层就地更新，零硬编码、零布局跳动） ---

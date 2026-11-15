@@ -178,6 +178,14 @@ export const ContextWindowWidget = defineComponent({
   name: 'ContextWindowWidget',
   setup({ props, onCleanup }) {
     const interactiveInspector = props.interactiveInspector !== false;
+    const getCtxAgentId =
+      typeof props.getCtxAgentId === 'function'
+        ? props.getCtxAgentId
+        : () => uiStore.getState().ctxInspectorAgentId;
+    const setCtxAgentId =
+      typeof props.setCtxAgentId === 'function'
+        ? props.setCtxAgentId
+        : (nextId) => uiStore.setState({ ctxInspectorAgentId: nextId });
     const isVisibleFn =
       typeof props.isVisibleFn === 'function' ? props.isVisibleFn : () => true;
 
@@ -275,7 +283,6 @@ export const ContextWindowWidget = defineComponent({
         }
       }
 
-      const uiSt = uiStore.getState();
       const {
         hasSubagents,
         effectiveCtxScope,
@@ -283,7 +290,7 @@ export const ContextWindowWidget = defineComponent({
         aggregated,
         scopedConv,
         ctxAgent,
-      } = resolveScopedConversation(data, 'all', uiSt.ctxInspectorAgentId);
+      } = resolveScopedConversation(data, 'all', getCtxAgentId());
 
       const active = scopedConv || data.activeConversation || {};
       const ctx = ctxAgent?.context || active.context || {};
@@ -411,7 +418,7 @@ export const ContextWindowWidget = defineComponent({
                   ctxPillsExpanded = !ctxPillsExpanded;
                   if (latestData) update({ data: latestData });
                 } else {
-                  uiStore.setState({ ctxInspectorAgentId: item.key });
+                  setCtxAgentId(item.key);
                 }
               };
             },
@@ -423,6 +430,9 @@ export const ContextWindowWidget = defineComponent({
       const totalTokens = Number(ctx.totalTokens || 0);
       const usedPct =
         limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
+      const ctxToneCls =
+        usedPct >= 88 ? 'tone-danger' : usedPct >= 70 ? 'tone-warn' : '';
+      patchAttr(ctxSummaryText, 'class', ctxToneCls ? `text-mono ${ctxToneCls}` : 'text-mono');
       patchText(
         ctxSummaryText,
         `${formatTokens(totalTokens)} / ${formatTokens(limitTokens)} (${usedPct}%)`

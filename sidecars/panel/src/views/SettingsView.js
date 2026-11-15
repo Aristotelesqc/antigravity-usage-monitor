@@ -66,6 +66,7 @@ export const SettingsView = defineComponent({
       subNavSwitch.setValue(target);
       patchAttr(generalTab.el, 'hidden', target !== 'general');
       patchAttr(structureTab.el, 'hidden', target !== 'structure');
+      patchAttr(structureTab.refs.thirdNavBar, 'hidden', target !== 'structure');
       patchAttr(accountTab.el, 'hidden', !SHOW_ACCOUNT_TAB || target !== 'account');
       patchAttr(otherTab.el, 'hidden', target !== 'other');
       const nextShowingAccount = SHOW_ACCOUNT_TAB && target === 'account' && activeView === 'settings';
@@ -90,6 +91,7 @@ export const SettingsView = defineComponent({
 
     const rootEl = h('div', { className: 'settings-view-root' }, [
       subNavBar,
+      structureTab.refs.thirdNavBar,
       viewScrollbar.el,
     ]);
 
