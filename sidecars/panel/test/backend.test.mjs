@@ -1098,6 +1098,11 @@ test('reconciles 8-group context breakdown with real API prompt+output tokens an
   assert.equal(ctx.totalTokens, 158328);
   assert.equal(ctx.usedPct, 61.8);
   assert.equal(payload.conversations[0].contextUsedPct, 61.8);
+  assert.equal(payload.activeConversation.inputTokens, 4989);
+  assert.equal(payload.activeConversation.cacheReadTokens, 150223);
+  assert.equal(payload.activeConversation.outputTokens, 3116);
+  assert.equal(payload.activeConversation.totalTokens, 158328);
+  assert.equal(payload.activeConversation.latestPromptTokens, 155212);
 
   // Previously dropped Skills & User Rules are restored and scaled cleanly
   assert.ok(ctx.skillsTokens >= 2290 && ctx.skillsTokens <= 2300, `skills=${ctx.skillsTokens}`);

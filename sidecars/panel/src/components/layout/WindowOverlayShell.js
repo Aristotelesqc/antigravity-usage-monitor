@@ -2784,8 +2784,9 @@ export function mountWindowOverlay() {
       null;
     const cacheHitPct =
       Number(capActive.stepCount || 0) > 0
-        ? capActive.sessionCacheHitPct ?? capActive.latestCacheHitPct ?? null
-        : capActive.latestCacheHitPct ?? null;
+        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
+        : null;
+    const latestPromptTokens = capActive.latestPromptTokens ?? null;
     const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
     const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
     const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
@@ -2808,6 +2809,7 @@ export function mountWindowOverlay() {
       stepCost: capsuleStepCost,
       sessionCost,
       cacheHitPct,
+      latestPromptTokens,
       sessionTokens,
       quotas: telemetry.quotas,
     });

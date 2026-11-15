@@ -5,11 +5,16 @@
  * speed reason sub-lines, token combo tooltips, and high-cost highlights.
  */
 
-import { h, patchAttr, patchClasses, patchText } from '../core/domPatch.js';
+import { h, patchAttr, patchText } from '../core/domPatch.js';
 import {
+  formatCachePct,
   formatMetric,
   formatTokens,
   formatUsd,
+  getCacheToneClass,
+  getSpeedToneClass,
+  getStepCostToneClass,
+  getTtftToneClass,
   resolveModelDisplayInfo,
   speedReasonText,
 } from '../core/formatters.js';
@@ -115,7 +120,7 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     sigPart: (st) => `${st.tokPerSec}:${st.selectedSpeedReason || ''}`,
     createCell: () => {
       const speedMain = h('strong', {
-        className: 'cell-value accent-speed',
+        className: 'cell-value tone-muted',
         style: 'font-size: var(--fs-base-sm);',
       });
       const speedReason = h('div', {
@@ -132,6 +137,7 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     },
     updateCell: (refs, st) => {
       patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
+      patchAttr(refs.speedMain, 'class', `cell-value ${getSpeedToneClass(st.tokPerSec)}`);
       const reason = speedReasonText(st.selectedSpeedReason);
       patchText(refs.speedReason, reason);
       patchAttr(refs.speedReason, 'hidden', !reason);
@@ -150,6 +156,8 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     },
     updateCell: (refs, st) => {
       patchText(refs.valEl, formatMetric(st.ttftSec, 's'));
+      const tone = getTtftToneClass(st.ttftSec);
+      patchAttr(refs.valEl, 'class', tone || null);
     },
   },
 
@@ -252,21 +260,24 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     key: 'cache',
     thLabel: () => t('stepCol.cache.th'),
     optLabel: () => t('stepCol.cache.opt'),
-    sigPart: (st) => `${st.cacheHitPct ?? 0}`,
+    sigPart: (st) =>
+      `${st.cacheHitPct ?? 0}:${(st.inputTokens || 0) + (st.cacheReadTokens || 0) > 0 ? 1 : 0}`,
     createCell: () => {
-      const valEl = h('span');
-      const td = h(
-        'td',
-        {
-          className: 'cell-value accent-ok',
-          style: 'font-size: var(--fs-base-sm);',
-        },
-        [valEl]
-      );
+      const valEl = h('span', {
+        className: 'cell-value tone-muted',
+        style: 'font-size: var(--fs-base-sm);',
+      });
+      const td = h('td', {}, [valEl]);
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      patchText(refs.valEl, `${Number(st.cacheHitPct ?? 0)}%`);
+      const promptTokens = Number(st.inputTokens || 0) + Number(st.cacheReadTokens || 0);
+      patchText(refs.valEl, formatCachePct(st.cacheHitPct ?? 0));
+      patchAttr(
+        refs.valEl,
+        'class',
+        `cell-value ${getCacheToneClass(st.cacheHitPct ?? 0, promptTokens)}`
+      );
     },
   },
 
@@ -276,14 +287,15 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.cost.opt'),
     sigPart: (st) => `${st.costUsd}`,
     createCell: () => {
-      const valEl = h('span');
-      const td = h('td', { style: 'font-weight: 600;' }, [valEl]);
+      const valEl = h('span', { style: 'font-weight: 600;' });
+      const td = h('td', {}, [valEl]);
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
       const costVal = st.costUsd;
       patchText(refs.valEl, formatUsd(costVal, { precise: true }));
-      patchClasses(refs.td, { 'accent-speed': costVal >= 0.15 });
+      const tone = getStepCostToneClass(costVal);
+      patchAttr(refs.valEl, 'class', tone || null);
     },
   },
 });

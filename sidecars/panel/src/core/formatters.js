@@ -14,6 +14,53 @@ export function formatMetric(value, unit = '') {
   return Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : '—';
 }
 
+export function formatCachePct(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  const num = Math.max(0, Math.min(100, +Number(value).toFixed(1)));
+  return `${num}%`;
+}
+
+export function getSpeedToneClass(tokPerSec) {
+  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
+    return 'tone-muted';
+  }
+  const v = Number(tokPerSec);
+  if (v >= 60) return 'tone-good';
+  if (v >= 35) return 'tone-info';
+  if (v >= 20) return 'tone-warn';
+  return 'tone-danger';
+}
+
+export function getCacheToneClass(cacheHitPct, promptTokens = null) {
+  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
+    return 'tone-muted';
+  }
+  const v = Number(cacheHitPct);
+  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
+    return 'tone-muted';
+  }
+  if (v >= 85) return 'tone-good';
+  if (v >= 65) return 'tone-info';
+  if (v >= 30) return 'tone-warn';
+  return 'tone-danger';
+}
+
+export function getStepCostToneClass(costUsd) {
+  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
+  const v = Number(costUsd);
+  if (v >= 0.3) return 'tone-danger';
+  if (v >= 0.15) return 'tone-warn';
+  return '';
+}
+
+export function getTtftToneClass(ttftSec) {
+  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '';
+  const v = Number(ttftSec);
+  if (v >= 30) return 'tone-danger';
+  if (v >= 18) return 'tone-warn';
+  return '';
+}
+
 export function formatTokens(num) {
   const n = Number(num || 0);
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;

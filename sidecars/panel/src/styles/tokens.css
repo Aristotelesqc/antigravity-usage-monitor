@@ -73,13 +73,17 @@
   --metric-speed: hsl(14 76% 52%);
   --metric-speed-soft: color-mix(in srgb, var(--metric-speed) 14%, transparent);
 
-  --metric-ok: hsl(145 64% 38%);
+  --metric-ok: hsl(145 64% 41%);
   --metric-ok-soft: color-mix(in srgb, var(--metric-ok) 14%, transparent);
 
-  --metric-warn: hsl(34 86% 44%);
+  --metric-info: hsl(197 82% 46%);
+  --metric-info-soft: color-mix(in srgb, var(--metric-info) 14%, transparent);
+
+  --metric-warn: hsl(35 88% 47%);
   --metric-warn-soft: color-mix(in srgb, var(--metric-warn) 15%, transparent);
 
-  --metric-danger: var(--destructive, var(--vscode-errorForeground, hsl(0 74% 50%)));
+  --metric-danger: hsl(4 78% 55%);
+  --metric-danger-soft: color-mix(in srgb, var(--metric-danger) 14%, transparent);
 
   /* Context Window 10-Channel Palette */
   --ctx-assistant: hsl(217 82% 54%);

@@ -351,12 +351,37 @@
   text-overflow: ellipsis;
 }
 
-.cell-value.accent-speed {
+.cell-value.accent-speed,
+.accent-speed {
   color: var(--metric-speed);
 }
 
-.cell-value.accent-ok {
+.cell-value.accent-ok,
+.accent-ok,
+.cell-value.tone-good,
+.tone-good {
   color: var(--metric-ok);
+}
+
+.cell-value.tone-info,
+.tone-info {
+  color: var(--metric-info);
+}
+
+.cell-value.tone-warn,
+.tone-warn {
+  color: var(--metric-warn);
+}
+
+.cell-value.tone-danger,
+.tone-danger {
+  color: var(--metric-danger);
+}
+
+.cell-value.tone-muted,
+.tone-muted {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .cell-sub {

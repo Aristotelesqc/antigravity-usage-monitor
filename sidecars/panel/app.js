@@ -382,11 +382,10 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'ovMetric.context_usage': '上下文占用',
   'ovMetric.quota_tightest': '紧俏额度',
   'ovMetric.subAvgTtft': '均值 {val}',
+  'ovMetric.subAvgCache': '均值 {val}',
   'ovMetric.subValidSamples': '有效 {samples}',
-  'ovMetric.subCacheAndTotal': '缓存 {cache}% · 累计 {cost}',
-  'ovMetric.subStepsAndCache': '{steps} 步 · 缓存 {cache}%',
-  'ovMetric.subStepCost': '单步 {cost}',
-  'ovMetric.subPromptHit': '当步 {latest}% · 均值 {avg}%',
+  'ovMetric.subTotalCost': '累计 {cost}',
+  'ovMetric.subStepCost': '本次 {cost}',
   'ovMetric.subInOutTokens': '入 {inTok} · 出 {outTok}',
   'ovMetric.subCtxRatio': '{used} / {limit}',
   'ovMetric.subQuotaPool': '{label}',
@@ -860,11 +859,10 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'ovMetric.context_usage': 'Context Usage',
   'ovMetric.quota_tightest': 'Tightest Quota',
   'ovMetric.subAvgTtft': 'Avg {val}',
+  'ovMetric.subAvgCache': 'Avg {val}',
   'ovMetric.subValidSamples': 'Valid {samples}',
-  'ovMetric.subCacheAndTotal': 'Cache {cache}% · Total {cost}',
-  'ovMetric.subStepsAndCache': '{steps} steps · Cache {cache}%',
-  'ovMetric.subStepCost': 'Latest {cost}',
-  'ovMetric.subPromptHit': 'Latest {latest}% · Avg {avg}%',
+  'ovMetric.subTotalCost': 'Total {cost}',
+  'ovMetric.subStepCost': 'Step {cost}',
   'ovMetric.subInOutTokens': 'In {inTok} · Out {outTok}',
   'ovMetric.subCtxRatio': '{used} / {limit}',
   'ovMetric.subQuotaPool': '{label}',
@@ -1662,6 +1660,53 @@ const EN_MONTH_SHORT = Object.freeze([
 
 function formatMetric(value, unit = '') {
   return Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : '—';
+}
+
+function formatCachePct(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  const num = Math.max(0, Math.min(100, +Number(value).toFixed(1)));
+  return `${num}%`;
+}
+
+function getSpeedToneClass(tokPerSec) {
+  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
+    return 'tone-muted';
+  }
+  const v = Number(tokPerSec);
+  if (v >= 60) return 'tone-good';
+  if (v >= 35) return 'tone-info';
+  if (v >= 20) return 'tone-warn';
+  return 'tone-danger';
+}
+
+function getCacheToneClass(cacheHitPct, promptTokens = null) {
+  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
+    return 'tone-muted';
+  }
+  const v = Number(cacheHitPct);
+  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
+    return 'tone-muted';
+  }
+  if (v >= 85) return 'tone-good';
+  if (v >= 65) return 'tone-info';
+  if (v >= 30) return 'tone-warn';
+  return 'tone-danger';
+}
+
+function getStepCostToneClass(costUsd) {
+  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
+  const v = Number(costUsd);
+  if (v >= 0.3) return 'tone-danger';
+  if (v >= 0.15) return 'tone-warn';
+  return '';
+}
+
+function getTtftToneClass(ttftSec) {
+  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '';
+  const v = Number(ttftSec);
+  if (v >= 30) return 'tone-danger';
+  if (v >= 18) return 'tone-warn';
+  return '';
 }
 
 function formatTokens(num) {
@@ -7848,6 +7893,7 @@ function resolveQuotaCapsuleSummary(quotas) {
   if (!quotas) return null;
   const activePool = quotas.activePool;
   const weekly = quotas.weekly;
+  const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
   const candidates = [];
   const defaultPoolName = isEnglishLocale() ? 'Active Pool' : '当前池';
   const wkTag = isEnglishLocale() ? 'Wk' : '周';
@@ -7873,13 +7919,32 @@ function resolveQuotaCapsuleSummary(quotas) {
       windowTag: wkTag,
     });
   }
+  if (!candidates.length && pools.length > 0) {
+    for (const p of pools) {
+      const pLabel = p?.poolLabel || p?.family || defaultPoolName;
+      if (p && Number.isFinite(Number(p.remainingPct))) {
+        candidates.push({ pct: Number(p.remainingPct), label: pLabel, windowTag: '5h' });
+      }
+      if (p && Number.isFinite(Number(p.weeklyRemainingPct))) {
+        candidates.push({ pct: Number(p.weeklyRemainingPct), label: pLabel, windowTag: wkTag });
+      }
+    }
+  }
   if (!candidates.length) return null;
   candidates.sort((a, b) => a.pct - b.pct);
   const tightest = candidates[0];
+  const runnerUp = candidates.length > 1 ? candidates[1] : null;
   const rounded = Math.max(0, Math.min(100, Math.round(tightest.pct)));
+  const runnerPct = runnerUp ? Math.max(0, Math.min(100, Math.round(runnerUp.pct))) : null;
+  const subLabelText = runnerUp
+    ? runnerUp.label === tightest.label
+      ? `${tightest.label} ${tightest.windowTag} · ${runnerUp.windowTag} ${runnerPct}%`
+      : `${tightest.label} ${tightest.windowTag} · ${runnerUp.label} ${runnerUp.windowTag} ${runnerPct}%`
+    : `${tightest.label} · ${tightest.windowTag}`;
   return {
     roundedPct: rounded,
     shortText: t('capsule.quotaLeft', { pct: rounded }),
+    subLabelText,
     detailText: candidates
       .map((c) => {
         const cPct = Math.max(0, Math.min(100, Math.round(c.pct)));
@@ -8138,6 +8203,10 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
   if (metricKey === 'cache_hit') {
     const cachePct = slotCtx.hasTelemetry ? slotCtx.cacheHitPct : null;
     const valid = cachePct != null && Number.isFinite(Number(cachePct));
+    const numVal = valid ? Number(cachePct) : 0;
+    const hasPrompt = slotCtx.latestPromptTokens == null || Number(slotCtx.latestPromptTokens) > 0;
+    const isDanger = valid && hasPrompt && numVal < 30;
+    const isWarn = valid && hasPrompt && !isDanger && numVal < 65;
     return {
       hidden: false,
       metric: 'cache_hit',
@@ -8145,10 +8214,10 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
       textClass: 'wm-slot-text wm-cache-text',
       showRing: false,
       dashOffset: ringCircumference,
-      text: valid ? `${Math.round(Number(cachePct))}%` : '--%',
+      text: valid ? `${Math.round(numVal)}%` : '--%',
       running: false,
-      warn: false,
-      danger: false,
+      warn: isWarn,
+      danger: isDanger,
     };
   }
 
@@ -8223,6 +8292,8 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
     const badgeStr = translateRawAgentBadge(active.activeAgentBadge);
     const modelAndAgent =
       hasSubagents && badgeStr ? `[${badgeStr}] ${activeModelDisplay}` : activeModelDisplay;
+    const hasSpeed = Number.isFinite(active.latestTokPerSec) && Number(active.latestTokPerSec) > 0;
+    const speedTone = hasAnySteps && hasSpeed ? getSpeedToneClass(active.latestTokPerSec) : '';
     return {
       key: 'tps',
       label: t('ovMetric.tps'),
@@ -8230,13 +8301,18 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
       iconSize: 10,
       isPulsing: Boolean(active.isRunning),
       valueText: formatMetric(active.latestTokPerSec, ' tok/s'),
-      valueClass: 'cell-value accent-speed',
-      subText: reason ? `${modelAndAgent} · ${reason}` : modelAndAgent,
+      valueClass: speedTone ? `cell-value ${speedTone}` : 'cell-value',
+      subText: reason
+        ? !hasSpeed
+          ? `${reason} · ${modelAndAgent}`
+          : `${modelAndAgent} · ${reason}`
+        : modelAndAgent,
       subClass: 'cell-sub',
     };
   }
 
   if (metricKey === 'ttft') {
+    const ttftTone = hasAnySteps ? getTtftToneClass(active.latestTtftSec) : '';
     return {
       key: 'ttft',
       label: t('ovMetric.ttft'),
@@ -8244,7 +8320,7 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
       iconSize: 11,
       isPulsing: false,
       valueText: formatMetric(active.latestTtftSec, 's'),
-      valueClass: 'cell-value',
+      valueClass: ttftTone ? `cell-value ${ttftTone}` : 'cell-value',
       subText: t('ovMetric.subAvgTtft', {
         val: formatMetric(active.ttftSummary?.avgSec, 's'),
       }),
@@ -8268,64 +8344,65 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
     };
   }
 
-  if (metricKey === 'step_cost') {
+  if (metricKey === 'step_cost' || metricKey === 'session_cost') {
     const stepCost = active.latestStepCostUsd;
-    return {
-      key: 'step_cost',
-      label: t('ovMetric.step_cost'),
-      icon: 'bolt',
-      iconSize: 11,
-      isPulsing: false,
-      valueText: !hasAnySteps && stepCost == null ? '—' : formatUsd(stepCost, { precise: true }),
-      valueClass: 'cell-value',
-      subText: t('ovMetric.subCacheAndTotal', {
-        cache: active.latestCacheHitPct ?? 0,
-        cost: formatUsd(active.sessionCostUsd || 0),
-      }),
-      subClass: 'cell-sub accent-ok',
-    };
-  }
-
-  if (metricKey === 'session_cost') {
     const sessCost = Number(active.sessionCostUsd || 0);
     const stepCnt = Number(active.stepCount || 0);
     const isAllUnpriced =
       stepCnt > 0 && Number(active.sessionUnpricedCalls || 0) >= stepCnt && !(sessCost > 0);
+    const stepCostText =
+      !hasAnySteps && stepCost == null ? '—' : formatUsd(stepCost, { precise: true });
+    const totalCostText =
+      !hasAnySteps && active.sessionCostUsd == null
+        ? '—'
+        : formatUsd(isAllUnpriced ? null : sessCost, {
+            precise: sessCost > 0 && sessCost < 0.1,
+          });
+
+    if (metricKey === 'step_cost') {
+      const costTone = hasAnySteps ? getStepCostToneClass(stepCost) : '';
+      return {
+        key: 'step_cost',
+        label: t('ovMetric.step_cost'),
+        icon: 'bolt',
+        iconSize: 11,
+        isPulsing: false,
+        valueText: stepCostText,
+        valueClass: costTone ? `cell-value ${costTone}` : 'cell-value',
+        subText: t('ovMetric.subTotalCost', { cost: totalCostText }),
+        subClass: 'cell-sub',
+      };
+    }
+
     return {
       key: 'session_cost',
       label: t('ovMetric.session_cost'),
       icon: 'bolt',
       iconSize: 11,
       isPulsing: false,
-      valueText:
-        !hasAnySteps && active.sessionCostUsd == null
-          ? '—'
-          : formatUsd(isAllUnpriced ? null : sessCost, {
-              precise: sessCost > 0 && sessCost < 0.1,
-            }),
+      valueText: totalCostText,
       valueClass: 'cell-value',
-      subText: t('ovMetric.subStepsAndCache', {
-        steps: stepCnt,
-        cache: Math.round(Number(active.sessionCacheHitPct ?? active.latestCacheHitPct ?? 0)),
-      }),
-      subClass: 'cell-sub accent-ok',
+      subText: t('ovMetric.subStepCost', { cost: stepCostText }),
+      subClass: 'cell-sub',
     };
   }
 
   if (metricKey === 'cache_hit') {
-    const avgCache = Number(active.sessionCacheHitPct ?? active.latestCacheHitPct ?? 0);
-    const latestCache = Number(active.latestCacheHitPct ?? 0);
+    const latestCache = active.latestCacheHitPct;
+    const avgCache = active.sessionCacheHitPct ?? active.latestCacheHitPct;
+    const hasLatest = hasAnySteps && latestCache != null && Number.isFinite(Number(latestCache));
+    const hasAvg = hasAnySteps && avgCache != null && Number.isFinite(Number(avgCache));
+    const cacheTone = hasLatest ? getCacheToneClass(latestCache, active.latestPromptTokens) : '';
     return {
       key: 'cache_hit',
       label: t('ovMetric.cache_hit'),
       icon: 'layers',
       iconSize: 11,
       isPulsing: false,
-      valueText: !hasAnySteps ? '—' : `${Math.round(avgCache)}%`,
-      valueClass: 'cell-value accent-ok',
-      subText: t('ovMetric.subPromptHit', {
-        latest: Math.round(latestCache),
-        avg: Math.round(avgCache),
+      valueText: hasLatest ? formatCachePct(latestCache) : '—',
+      valueClass: cacheTone ? `cell-value ${cacheTone}` : 'cell-value',
+      subText: t('ovMetric.subAvgCache', {
+        val: hasAvg ? formatCachePct(avgCache) : '—',
       }),
       subClass: 'cell-sub',
     };
@@ -8395,7 +8472,7 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
     valueText: quotaSum ? quotaSum.shortText : '—',
     valueClass: quotaToneCls,
     subText: quotaSum
-      ? t('ovMetric.subQuotaPool', { label: quotaSum.detailText })
+      ? t('ovMetric.subQuotaPool', { label: quotaSum.subLabelText })
       : t('ovMetric.subQuotaPending'),
     subClass: 'cell-sub',
   };
@@ -10074,7 +10151,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     sigPart: (st) => `${st.tokPerSec}:${st.selectedSpeedReason || ''}`,
     createCell: () => {
       const speedMain = h('strong', {
-        className: 'cell-value accent-speed',
+        className: 'cell-value tone-muted',
         style: 'font-size: var(--fs-base-sm);',
       });
       const speedReason = h('div', {
@@ -10091,6 +10168,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     },
     updateCell: (refs, st) => {
       patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
+      patchAttr(refs.speedMain, 'class', `cell-value ${getSpeedToneClass(st.tokPerSec)}`);
       const reason = speedReasonText(st.selectedSpeedReason);
       patchText(refs.speedReason, reason);
       patchAttr(refs.speedReason, 'hidden', !reason);
@@ -10109,6 +10187,8 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     },
     updateCell: (refs, st) => {
       patchText(refs.valEl, formatMetric(st.ttftSec, 's'));
+      const tone = getTtftToneClass(st.ttftSec);
+      patchAttr(refs.valEl, 'class', tone || null);
     },
   },
 
@@ -10211,21 +10291,24 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     key: 'cache',
     thLabel: () => t('stepCol.cache.th'),
     optLabel: () => t('stepCol.cache.opt'),
-    sigPart: (st) => `${st.cacheHitPct ?? 0}`,
+    sigPart: (st) =>
+      `${st.cacheHitPct ?? 0}:${(st.inputTokens || 0) + (st.cacheReadTokens || 0) > 0 ? 1 : 0}`,
     createCell: () => {
-      const valEl = h('span');
-      const td = h(
-        'td',
-        {
-          className: 'cell-value accent-ok',
-          style: 'font-size: var(--fs-base-sm);',
-        },
-        [valEl]
-      );
+      const valEl = h('span', {
+        className: 'cell-value tone-muted',
+        style: 'font-size: var(--fs-base-sm);',
+      });
+      const td = h('td', {}, [valEl]);
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      patchText(refs.valEl, `${Number(st.cacheHitPct ?? 0)}%`);
+      const promptTokens = Number(st.inputTokens || 0) + Number(st.cacheReadTokens || 0);
+      patchText(refs.valEl, formatCachePct(st.cacheHitPct ?? 0));
+      patchAttr(
+        refs.valEl,
+        'class',
+        `cell-value ${getCacheToneClass(st.cacheHitPct ?? 0, promptTokens)}`
+      );
     },
   },
 
@@ -10235,14 +10318,15 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.cost.opt'),
     sigPart: (st) => `${st.costUsd}`,
     createCell: () => {
-      const valEl = h('span');
-      const td = h('td', { style: 'font-weight: 600;' }, [valEl]);
+      const valEl = h('span', { style: 'font-weight: 600;' });
+      const td = h('td', {}, [valEl]);
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
       const costVal = st.costUsd;
       patchText(refs.valEl, formatUsd(costVal, { precise: true }));
-      patchClasses(refs.td, { 'accent-speed': costVal >= 0.15 });
+      const tone = getStepCostToneClass(costVal);
+      patchAttr(refs.valEl, 'class', tone || null);
     },
   },
 });
@@ -18225,8 +18309,9 @@ function mountWindowOverlay() {
       null;
     const cacheHitPct =
       Number(capActive.stepCount || 0) > 0
-        ? capActive.sessionCacheHitPct ?? capActive.latestCacheHitPct ?? null
-        : capActive.latestCacheHitPct ?? null;
+        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
+        : null;
+    const latestPromptTokens = capActive.latestPromptTokens ?? null;
     const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
     const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
     const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
@@ -18249,6 +18334,7 @@ function mountWindowOverlay() {
       stepCost: capsuleStepCost,
       sessionCost,
       cacheHitPct,
+      latestPromptTokens,
       sessionTokens,
       quotas: telemetry.quotas,
     });

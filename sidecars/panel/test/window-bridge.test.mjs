@@ -25,6 +25,14 @@ import {
 } from '../backend/ls-discovery.mjs';
 import { handleMcpJsonRpcMessage } from '../mcp-entry.mjs';
 import { computeCapsuleLayoutMode } from '../src/components/layout/WindowOverlayShell.js';
+import {
+  getCacheToneClass,
+  getSpeedToneClass,
+  getStepCostToneClass,
+  getTtftToneClass,
+} from '../src/core/formatters.js';
+import { setI18nLanguage } from '../src/i18n/index.js';
+import { resolveOverviewMetricCell } from '../src/registries/metricRegistry.js';
 import { backendHarness } from './backend-harness.mjs';
 
 test('DevToolsActivePort parsing, cross-platform discovery (2.0 + IDE), and strict target/origin filtering', () => {
@@ -4510,4 +4518,104 @@ test('Antigravity IDE composer mount mode (输入框挂载) docks inside extensi
     await new Promise((resolve) => cdpSrv.close(resolve));
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('Step table semantic tone classes (speed/cache/ttft/cost) and domain-aligned overview metric subtexts', () => {
+  // 1. Speed 4-tier + muted semantic grading
+  assert.equal(getSpeedToneClass(null), 'tone-muted');
+  assert.equal(getSpeedToneClass(0), 'tone-muted');
+  assert.equal(getSpeedToneClass(86.1), 'tone-good');
+  assert.equal(getSpeedToneClass(54.9), 'tone-info');
+  assert.equal(getSpeedToneClass(24.3), 'tone-warn');
+  assert.equal(getSpeedToneClass(7.6), 'tone-danger');
+
+  // 2. Cache hit 4-tier + 0-prompt muted grading
+  assert.equal(getCacheToneClass(null), 'tone-muted');
+  assert.equal(getCacheToneClass(0, 0), 'tone-muted');
+  assert.equal(getCacheToneClass(0, 208700), 'tone-danger');
+  assert.equal(getCacheToneClass(59.8, 75400), 'tone-warn');
+  assert.equal(getCacheToneClass(77.6, 96400), 'tone-info');
+  assert.equal(getCacheToneClass(96.8, 155212), 'tone-good');
+
+  // 3. Step cost & TTFT alert grading
+  assert.equal(getStepCostToneClass(0.056), '');
+  assert.equal(getStepCostToneClass(0.18), 'tone-warn');
+  assert.equal(getStepCostToneClass(0.421), 'tone-danger');
+  assert.equal(getTtftToneClass(12.1), '');
+  assert.equal(getTtftToneClass(22.3), 'tone-warn');
+  assert.equal(getTtftToneClass(34.0), 'tone-danger');
+
+  // 4. Overview metric cells: current step in primary value, strictly domain-aligned subtexts
+  setI18nLanguage('zh-CN');
+  const mockActive = {
+    stepCount: 787,
+    isRunning: false,
+    activeAgentBadge: '主',
+    activeModelShort: 'gemini-4-carbon',
+    latestTokPerSec: 54.9,
+    latestTtftSec: 12.1,
+    ttftSummary: { avgSec: 14.4 },
+    avgTokPerSec: 57.3,
+    speedSummary: { sampleCount: 787, excludedCount: 0 },
+    latestStepCostUsd: 0.056,
+    sessionCostUsd: 46.9,
+    sessionUnpricedCalls: 0,
+    latestCacheHitPct: 96.8,
+    sessionCacheHitPct: 92.4,
+    latestPromptTokens: 155212,
+    inputTokens: 1_200_000,
+    cacheReadTokens: 23_900_000,
+    outputTokens: 400_000,
+    totalTokens: 25_500_000,
+    context: { totalTokens: 158328, compactionLimitTokens: 256000, limitTokens: 256000 },
+  };
+  const mockQuotas = {
+    activePool: {
+      poolLabel: 'Carbon',
+      family: 'Carbon',
+      remainingPct: 42,
+      weeklyRemainingPct: 85,
+    },
+  };
+
+  const stepCostCell = resolveOverviewMetricCell('step_cost', {
+    active: mockActive,
+    hasSubagents: true,
+  });
+  assert.equal(stepCostCell.valueText, '$0.056');
+  assert.equal(stepCostCell.subText, '累计 $46.90', 'No unrelated cache % inside 本次费用');
+  assert.equal(stepCostCell.subClass, 'cell-sub', 'Neutral subtext color instead of green accent-ok');
+
+  const sessCostCell = resolveOverviewMetricCell('session_cost', {
+    active: mockActive,
+    hasSubagents: true,
+  });
+  assert.equal(sessCostCell.valueText, '$46.90');
+  assert.equal(sessCostCell.subText, '本次 $0.056', 'No unrelated cache % inside 累计费用');
+  assert.equal(sessCostCell.subClass, 'cell-sub');
+
+  const cacheCell = resolveOverviewMetricCell('cache_hit', {
+    active: mockActive,
+    hasSubagents: true,
+  });
+  assert.equal(cacheCell.valueText, '96.8%', 'Current step cache hit shown as primary big value');
+  assert.equal(cacheCell.valueClass, 'cell-value tone-good');
+  assert.equal(cacheCell.subText, '均值 92.4%', 'Session average shown cleanly in subtext without repetition');
+
+  const coldCacheCell = resolveOverviewMetricCell('cache_hit', {
+    active: { ...mockActive, latestCacheHitPct: 0, latestPromptTokens: 208700 },
+  });
+  assert.equal(coldCacheCell.valueText, '0%');
+  assert.equal(coldCacheCell.valueClass, 'cell-value tone-danger', '0% cold cache miss turns danger red');
+
+  const tokCell = resolveOverviewMetricCell('session_tokens', { active: mockActive });
+  assert.equal(tokCell.valueText, '25.5M');
+  assert.equal(tokCell.subText, '入 25.1M · 出 400.0k');
+
+  const quotaCell = resolveOverviewMetricCell('quota_tightest', {
+    active: mockActive,
+    quotas: mockQuotas,
+  });
+  assert.equal(quotaCell.valueText, '余 42%');
+  assert.equal(quotaCell.subText, 'Carbon 5h · 周 85%', 'Identifies pool/window without repeating 余 42%');
 });

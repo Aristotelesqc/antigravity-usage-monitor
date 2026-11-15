@@ -103,6 +103,7 @@ function enrichActiveConversationSteps(
   let sessionUnpricedCalls = 0;
   let sessionInputTokens = 0;
   let sessionCacheReadTokens = 0;
+  let sessionOutputTokens = 0;
 
   const knownUpstreamByModelKey = sharedUpstreamMap || buildKnownUpstreamModelMap();
   for (const s of activeSteps) {
@@ -120,6 +121,7 @@ function enrichActiveConversationSteps(
     if (costUsd === null) sessionUnpricedCalls++;
     sessionInputTokens += st.inputTokens;
     sessionCacheReadTokens += st.cacheReadTokens;
+    sessionOutputTokens += resolveStepOutputTokens(st);
 
     const tokPerSec = metric.value;
     const totalPrompt = st.inputTokens + st.cacheReadTokens;
@@ -208,6 +210,7 @@ function enrichActiveConversationSteps(
     sessionUnpricedCalls,
     sessionInputTokens,
     sessionCacheReadTokens,
+    sessionOutputTokens,
   };
 }
 
@@ -524,6 +527,17 @@ function buildAgentUnitTelemetry({
       latestStepCostUsd: enrichedRes.latestEnriched?.costUsd ?? null,
       sessionCostUsd: roundSessionCost(enrichedRes.sessionCostUsd),
       sessionUnpricedCalls: enrichedRes.sessionUnpricedCalls,
+      inputTokens: enrichedRes.sessionInputTokens,
+      cacheReadTokens: enrichedRes.sessionCacheReadTokens,
+      outputTokens: enrichedRes.sessionOutputTokens,
+      totalTokens:
+        enrichedRes.sessionInputTokens +
+        enrichedRes.sessionCacheReadTokens +
+        enrichedRes.sessionOutputTokens,
+      latestPromptTokens: enrichedRes.latestEnriched
+        ? Number(enrichedRes.latestEnriched.inputTokens || 0) +
+          Number(enrichedRes.latestEnriched.cacheReadTokens || 0)
+        : 0,
       latestCacheHitPct: ctxRes.latestCacheHitPct,
       sessionCacheHitPct: ctxRes.sessionCacheHitPct,
       activeModelShort: enrichedRes.latestEnriched?.modelShort || '模型未知',
@@ -618,6 +632,7 @@ export async function buildTelemetryPayloadInternal(
     sessionUnpricedCalls,
     sessionInputTokens,
     sessionCacheReadTokens,
+    sessionOutputTokens,
   } = mainUnit.enrichedRes;
   const { latestCacheHitPct, sessionCacheHitPct, context } = mainUnit.ctxRes;
   const mainAgentTelemetry = mainUnit.telemetryUnit;
@@ -631,6 +646,7 @@ export async function buildTelemetryPayloadInternal(
   let totalRawSessionCostUsd = sessionCostUsd;
   let totalFamilyInputTokens = sessionInputTokens;
   let totalFamilyCacheReadTokens = sessionCacheReadTokens;
+  let totalFamilyOutputTokens = sessionOutputTokens;
 
   for (let idx = 0; idx < subagentSummaries.length; idx++) {
     const subSum = subagentSummaries[idx];
@@ -672,6 +688,7 @@ export async function buildTelemetryPayloadInternal(
     totalRawSessionCostUsd += subUnit.enrichedRes.sessionCostUsd;
     totalFamilyInputTokens += subUnit.enrichedRes.sessionInputTokens;
     totalFamilyCacheReadTokens += subUnit.enrichedRes.sessionCacheReadTokens;
+    totalFamilyOutputTokens += subUnit.enrichedRes.sessionOutputTokens;
     subAgentTelemetries.push(subUnit.telemetryUnit);
   }
 
@@ -818,6 +835,11 @@ export async function buildTelemetryPayloadInternal(
       latestStepCostUsd: latestMetricAgent.latestStepCostUsd,
       sessionCostUsd: totalCostUsd,
       sessionUnpricedCalls: totalUnpricedCalls,
+      inputTokens: totalFamilyInputTokens,
+      cacheReadTokens: totalFamilyCacheReadTokens,
+      outputTokens: totalFamilyOutputTokens,
+      totalTokens: totalFamilyInputTokens + totalFamilyCacheReadTokens + totalFamilyOutputTokens,
+      latestPromptTokens: latestMetricAgent.latestPromptTokens ?? 0,
       latestCacheHitPct: latestMetricAgent.latestCacheHitPct,
       sessionCacheHitPct: combinedSessionCacheHitPct,
       activeModelShort: latestMetricAgent.activeModelShort,
@@ -1327,6 +1349,13 @@ export async function buildTelemetryPayloadInternal(
       latestStepCostUsd: latestEnriched?.costUsd ?? null,
       sessionCostUsd: roundSessionCost(sessionCostUsd),
       sessionUnpricedCalls,
+      inputTokens: sessionInputTokens,
+      cacheReadTokens: sessionCacheReadTokens,
+      outputTokens: sessionOutputTokens,
+      totalTokens: sessionInputTokens + sessionCacheReadTokens + sessionOutputTokens,
+      latestPromptTokens: latestEnriched
+        ? Number(latestEnriched.inputTokens || 0) + Number(latestEnriched.cacheReadTokens || 0)
+        : 0,
       latestCacheHitPct,
       sessionCacheHitPct,
       activeModelShort: latestEnriched?.modelShort || '模型未知',

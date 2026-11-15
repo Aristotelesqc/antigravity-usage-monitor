@@ -74,13 +74,17 @@
   --metric-speed: hsl(14 76% 52%);
   --metric-speed-soft: color-mix(in srgb, var(--metric-speed) 14%, transparent);
 
-  --metric-ok: hsl(145 64% 38%);
+  --metric-ok: hsl(145 64% 41%);
   --metric-ok-soft: color-mix(in srgb, var(--metric-ok) 14%, transparent);
 
-  --metric-warn: hsl(34 86% 44%);
+  --metric-info: hsl(197 82% 46%);
+  --metric-info-soft: color-mix(in srgb, var(--metric-info) 14%, transparent);
+
+  --metric-warn: hsl(35 88% 47%);
   --metric-warn-soft: color-mix(in srgb, var(--metric-warn) 15%, transparent);
 
-  --metric-danger: var(--destructive, var(--vscode-errorForeground, hsl(0 74% 50%)));
+  --metric-danger: hsl(4 78% 55%);
+  --metric-danger-soft: color-mix(in srgb, var(--metric-danger) 14%, transparent);
 
   /* Context Window 10-Channel Palette */
   --ctx-assistant: hsl(217 82% 54%);
@@ -1498,12 +1502,37 @@ input {
   text-overflow: ellipsis;
 }
 
-.cell-value.accent-speed {
+.cell-value.accent-speed,
+.accent-speed {
   color: var(--metric-speed);
 }
 
-.cell-value.accent-ok {
+.cell-value.accent-ok,
+.accent-ok,
+.cell-value.tone-good,
+.tone-good {
   color: var(--metric-ok);
+}
+
+.cell-value.tone-info,
+.tone-info {
+  color: var(--metric-info);
+}
+
+.cell-value.tone-warn,
+.tone-warn {
+  color: var(--metric-warn);
+}
+
+.cell-value.tone-danger,
+.tone-danger {
+  color: var(--metric-danger);
+}
+
+.cell-value.tone-muted,
+.tone-muted {
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .cell-sub {
