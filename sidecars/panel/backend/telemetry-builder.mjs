@@ -165,7 +165,7 @@ function enrichActiveConversationSteps(
       inCostUsd: inCostUsd === null ? null : +inCostUsd.toFixed(4),
       cacheCostUsd: cacheCostUsd === null ? null : +cacheCostUsd.toFixed(4),
       outCostUsd: outCostUsd === null ? null : +outCostUsd.toFixed(4),
-      contextTokens: st.inputTokens + st.cacheReadTokens + st.outputTokens,
+      contextTokens: st.inputTokens + st.cacheReadTokens + resolveStepOutputTokens(st),
     };
   });
 
@@ -211,8 +211,77 @@ function enrichActiveConversationSteps(
   };
 }
 
+const CONTEXT_CHANNEL_KEYS = [
+  'userInput',
+  'assistant',
+  'toolResults',
+  'subagent',
+  'checkpoint',
+  'systemTools',
+  'mcpTools',
+  'skills',
+  'systemPrompt',
+  'userRules',
+];
+
+function resolveStepOutputTokens(st) {
+  const explicitOut = Number(st?.outputTokens || 0);
+  if (explicitOut > 0) return explicitOut;
+  return Number(st?.thinkingTokens || 0) + Number(st?.responseTokens || 0);
+}
+
+/**
+ * 使用最大余数法（Hamilton 方法）将各非零上下文分桶等比缩放至目标整数总和，
+ * 保证 0 值通道绝不被凭空分配 Token，且缩放后各分桶之和精确等于 `targetTotal`。
+ */
+function scaleBucketsExact(buckets, keys, targetTotal) {
+  const safeTarget = Math.max(0, Math.round(Number(targetTotal || 0)));
+  const out = {};
+  let currentSum = 0;
+  for (const k of keys) {
+    const val = Math.max(0, Number(buckets[k] || 0));
+    out[k] = val;
+    currentSum += val;
+  }
+  if (safeTarget === 0 || currentSum <= 0) {
+    for (const k of keys) out[k] = 0;
+    return out;
+  }
+  if (currentSum === safeTarget) {
+    for (const k of keys) out[k] = Math.round(out[k]);
+    return out;
+  }
+  const remainders = [];
+  let assigned = 0;
+  for (const k of keys) {
+    const rawVal = out[k];
+    if (rawVal <= 0) {
+      out[k] = 0;
+      continue;
+    }
+    const exact = (rawVal * safeTarget) / currentSum;
+    const floored = Math.floor(exact);
+    out[k] = floored;
+    assigned += floored;
+    remainders.push({ key: k, rem: exact - floored, orig: rawVal });
+  }
+  let diff = safeTarget - assigned;
+  if (diff > 0 && remainders.length > 0) {
+    remainders.sort((a, b) => b.rem - a.rem || b.orig - a.orig);
+    for (let i = 0; i < diff; i++) {
+      out[remainders[i % remainders.length].key] += 1;
+    }
+  }
+  return out;
+}
+
 /**
  * 从当前活跃会话的最新步骤提取上下文 10 通道拆解、自动压缩水位与缓存命中率。
+ *
+ * `chatStartMetadata.contextWindowMetadata` 记录在步骤请求发送前且基于宿主离线估算器：
+ * 1. 先按该步模型 API 真实计费输入（`inputTokens + cacheReadTokens`）对请求前 10 通道做等比整数对齐，消除离线估算偏差；
+ * 2. 再将该步自身新生成的输出（`outputTokens`）补入 `assistantTokens`，并滚动推进后续无独立拆解的步骤，
+ *    使上下文窗口总占用与调用明细表的单步 `contextTokens` 严格一致。
  *
  * @param {object[]} enrichedActiveSteps
  * @param {object|null} latestEnriched
@@ -226,6 +295,7 @@ function extractActiveContextTelemetry(
   sessionCacheReadTokens
 ) {
   let latestBreakdown = latestEnriched?.contextBreakdown || null;
+  let breakdownIdx = latestBreakdown ? enrichedActiveSteps.length - 1 : -1;
   if (!latestBreakdown && !latestEnriched?.isCompactionStep) {
     for (let i = enrichedActiveSteps.length - 1; i >= 0; i--) {
       if (enrichedActiveSteps[i]?.isCompactionStep) {
@@ -233,26 +303,92 @@ function extractActiveContextTelemetry(
       }
       if (enrichedActiveSteps[i]?.contextBreakdown) {
         latestBreakdown = enrichedActiveSteps[i].contextBreakdown;
+        breakdownIdx = i;
         break;
       }
     }
   }
-  const ctxMessages = Number(latestBreakdown?.messagesTokens || 0);
+  const rawMessages = Number(latestBreakdown?.messagesTokens || 0);
   const hasGranularMsgBreakdown =
     Boolean(latestBreakdown) &&
     Object.prototype.hasOwnProperty.call(latestBreakdown, 'toolResultsTokens');
-  const ctxUserInput = hasGranularMsgBreakdown
-    ? Number(latestBreakdown?.userInputTokens || 0)
-    : ctxMessages;
-  const ctxAssistant = Number(latestBreakdown?.assistantTokens || 0);
-  const ctxToolResults = Number(latestBreakdown?.toolResultsTokens || 0);
-  const ctxSubagent = Number(latestBreakdown?.subagentTokens || 0);
-  const ctxCheckpoint = Number(latestBreakdown?.checkpointTokens || 0);
-  const ctxSystemTools = Number(latestBreakdown?.systemToolsTokens || 0);
-  const ctxMcpTools = Number(latestBreakdown?.mcpToolsTokens || 0);
-  const ctxSkills = Number(latestBreakdown?.skillsTokens || 0);
-  const ctxSystemPrompt = Number(latestBreakdown?.systemPromptTokens || 0);
-  const ctxUserRules = Number(latestBreakdown?.userRulesTokens || 0);
+  let channels = {
+    userInput: hasGranularMsgBreakdown
+      ? Number(latestBreakdown?.userInputTokens || 0)
+      : rawMessages,
+    assistant: Number(latestBreakdown?.assistantTokens || 0),
+    toolResults: Number(latestBreakdown?.toolResultsTokens || 0),
+    subagent: Number(latestBreakdown?.subagentTokens || 0),
+    checkpoint: Number(latestBreakdown?.checkpointTokens || 0),
+    systemTools: Number(latestBreakdown?.systemToolsTokens || 0),
+    mcpTools: Number(latestBreakdown?.mcpToolsTokens || 0),
+    skills: Number(latestBreakdown?.skillsTokens || 0),
+    systemPrompt: Number(latestBreakdown?.systemPromptTokens || 0),
+    userRules: Number(latestBreakdown?.userRulesTokens || 0),
+  };
+  const msgSubtotal =
+    channels.userInput +
+    channels.assistant +
+    channels.toolResults +
+    channels.subagent +
+    channels.checkpoint;
+  if (rawMessages > msgSubtotal) {
+    channels.userInput += rawMessages - msgSubtotal;
+  }
+  const rawBreakdownTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + channels[k], 0);
+
+  if (
+    latestBreakdown &&
+    breakdownIdx >= 0 &&
+    !latestEnriched?.isCompactionStep &&
+    rawBreakdownTotal > 0
+  ) {
+    const bdStep = enrichedActiveSteps[breakdownIdx];
+    const bdPromptTokens =
+      Number(bdStep?.inputTokens || 0) + Number(bdStep?.cacheReadTokens || 0);
+    const bdOutTokens = resolveStepOutputTokens(bdStep);
+    // 仅当模型 API 返回了完整的请求级输入（排除省略 cacheReadTokens 的残缺网关或极小合成桩数据）时对齐至真实分词口径
+    if (bdPromptTokens >= rawBreakdownTotal * 0.5) {
+      channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, bdPromptTokens);
+      channels.assistant += bdOutTokens;
+      let runningTotal = bdPromptTokens + bdOutTokens;
+
+      for (let m = breakdownIdx + 1; m < enrichedActiveSteps.length; m++) {
+        const stepM = enrichedActiveSteps[m];
+        if (!stepM || stepM.isCompactionStep) break;
+        const mPrompt =
+          Number(stepM.inputTokens || 0) + Number(stepM.cacheReadTokens || 0);
+        const mOut = resolveStepOutputTokens(stepM);
+        if (mPrompt >= runningTotal * 0.5) {
+          if (mPrompt > runningTotal) {
+            const delta = mPrompt - runningTotal;
+            if (enrichedActiveSteps[m - 1]?.hasToolCalls) {
+              channels.toolResults += delta;
+            } else {
+              channels.userInput += delta;
+            }
+          } else if (mPrompt < runningTotal) {
+            channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, mPrompt);
+          }
+          channels.assistant += mOut;
+          runningTotal = mPrompt + mOut;
+        }
+      }
+    }
+  }
+
+  const ctxUserInput = channels.userInput;
+  const ctxAssistant = channels.assistant;
+  const ctxToolResults = channels.toolResults;
+  const ctxSubagent = channels.subagent;
+  const ctxCheckpoint = channels.checkpoint;
+  const ctxMessages =
+    ctxUserInput + ctxAssistant + ctxToolResults + ctxSubagent + ctxCheckpoint;
+  const ctxSystemTools = channels.systemTools;
+  const ctxMcpTools = channels.mcpTools;
+  const ctxSkills = channels.skills;
+  const ctxSystemPrompt = channels.systemPrompt;
+  const ctxUserRules = channels.userRules;
   const ctxBreakdownTotal =
     ctxMessages + ctxSystemTools + ctxMcpTools + ctxSkills + ctxSystemPrompt + ctxUserRules;
 
@@ -260,11 +396,12 @@ function extractActiveContextTelemetry(
   const ctxFreshInput = latestEnriched?.inputTokens || 0;
   const ctxThinking = latestEnriched?.thinkingTokens || 0;
   const ctxResponse = latestEnriched?.responseTokens || 0;
+  const ctxOut = resolveStepOutputTokens(latestEnriched);
   const ctxTotal =
-    ctxBreakdownTotal > 0 ? ctxBreakdownTotal : ctxCached + ctxFreshInput + ctxThinking + ctxResponse;
+    ctxBreakdownTotal > 0 ? ctxBreakdownTotal : ctxCached + ctxFreshInput + ctxOut;
   const compactionLimitTokens = Number(latestEnriched?.maxContextBudgetTokens || 256000);
   const compactionUsedTokens = Number(
-    latestEnriched?.estimatedContextTokens || ctxBreakdownTotal || ctxCached + ctxFreshInput
+    ctxTotal || latestEnriched?.estimatedContextTokens || ctxCached + ctxFreshInput
   );
   const compactionUsedPct =
     compactionLimitTokens > 0
@@ -943,13 +1080,21 @@ export async function buildTelemetryPayloadInternal(
           Number(cb.systemPromptTokens || 0) +
           Number(cb.userRulesTokens || 0)
         : 0;
-      const fallbackTotal =
-        Number(lastRootStep.inputTokens || 0) +
-        Number(lastRootStep.cacheReadTokens || 0) +
-        Number(lastRootStep.thinkingTokens || 0) +
-        Number(lastRootStep.responseTokens || 0);
+      const apiPrompt =
+        Number(lastRootStep.inputTokens || 0) + Number(lastRootStep.cacheReadTokens || 0);
+      const apiOut = resolveStepOutputTokens(lastRootStep);
+      const fallbackTotal = apiPrompt + apiOut;
+      const estTotal = Math.max(cbTotal, Number(lastRootStep.estimatedContextTokens || 0));
+      const hasAlignedApiPrompt =
+        !lastRootStep.isCompactionStep &&
+        apiPrompt > 0 &&
+        (estTotal === 0 || apiPrompt >= estTotal * 0.5);
       const usedTokens = Number(
-        cbTotal > 0 ? cbTotal : lastRootStep.estimatedContextTokens || fallbackTotal
+        hasAlignedApiPrompt
+          ? fallbackTotal
+          : cbTotal > 0
+            ? cbTotal
+            : lastRootStep.estimatedContextTokens || fallbackTotal
       );
       contextUsedPct =
         limitTokens > 0 ? Math.min(100, +((usedTokens / limitTokens) * 100).toFixed(1)) : 0;

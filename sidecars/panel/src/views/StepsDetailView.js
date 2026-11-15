@@ -28,7 +28,9 @@ import {
   STEP_COLUMN_REGISTRY,
 } from '../registries/stepColumnRegistry.js';
 import {
+  formatAgentBadgeText,
   formatAgentLabel,
+  getAgentBadgeClass,
   normalizeClientStepColumns,
   resolveScopedConversation,
   telemetryStore,
@@ -635,7 +637,8 @@ export const StepsDetailView = defineComponent({
           const parts = colKeys
             .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
             .join('|');
-          return `${locale}:${colOrderSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
+          const badgeSig = `${showAgentBadge}:${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`;
+          return `${locale}:${colOrderSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: () => {
           const tr = h('tr');
@@ -646,6 +649,11 @@ export const StepsDetailView = defineComponent({
             { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
             [railLineEl, railDotEl]
           );
+          const agentBadgeEl = h('span', {
+            className: 'agent-badge is-clickable',
+            hidden: true,
+            style: 'margin-right: 4px;',
+          });
           return {
             el: tr,
             refs: {
@@ -654,6 +662,7 @@ export const StepsDetailView = defineComponent({
               railEl,
               railLineEl,
               railDotEl,
+              agentBadgeEl,
               hoverTd: null,
             },
           };
@@ -672,6 +681,9 @@ export const StepsDetailView = defineComponent({
               if (!wantedSet.has(oldColKey)) {
                 if (refs.railEl.parentNode === entry.td) {
                   entry.td.removeChild(refs.railEl);
+                }
+                if (refs.agentBadgeEl.parentNode === entry.td) {
+                  entry.td.removeChild(refs.agentBadgeEl);
                 }
                 tr.removeChild(entry.td);
                 refs.cellMap.delete(oldColKey);
@@ -698,8 +710,59 @@ export const StepsDetailView = defineComponent({
 
           const firstColKey = colKeys[0];
           const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
-          if (firstTd && refs.railEl.parentNode !== firstTd) {
-            firstTd.insertBefore(refs.railEl, firstTd.firstChild);
+          if (firstTd) {
+            if (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl) {
+              firstTd.insertBefore(refs.railEl, firstTd.firstChild);
+            }
+            const afterRail = refs.railEl.nextSibling ?? firstTd.children[1] ?? null;
+            if (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl) {
+              firstTd.insertBefore(refs.agentBadgeEl, afterRail);
+            }
+          }
+
+          patchAttr(refs.agentBadgeEl, 'hidden', !showAgentBadge || !firstTd);
+          if (showAgentBadge && firstTd) {
+            const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
+            patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
+            const badgeText = isEnglishLocale()
+              ? formatAgentBadgeText({
+                  isMain: !st.isSubagent,
+                  index: st.agentIndex || 0,
+                  badgeText: st.agentBadge,
+                })
+              : st.agentBadge || (st.isSubagent ? '子' : '主');
+            patchText(refs.agentBadgeEl, badgeText);
+
+            const targetScope = st.agentId || 'main';
+            const isSoleTarget =
+              effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
+            const agentName = isEnglishLocale()
+              ? formatAgentLabel({
+                  isMain: !st.isSubagent,
+                  index: st.agentIndex || 0,
+                  role: st.agentRole || '',
+                })
+              : st.agentLabel || t('steps.unitAgent');
+            patchAttr(
+              refs.agentBadgeEl,
+              'title',
+              isSoleTarget
+                ? t('steps.badgeBackAll')
+                : t('steps.badgeFilterAgent', { agent: agentName })
+            );
+            refs.agentBadgeEl.onclick = (e) => {
+              if (typeof applyAgentScopesSelection !== 'function') return;
+              if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && effectiveScopes[0] !== 'all') {
+                const next = effectiveScopes.includes(targetScope)
+                  ? effectiveScopes.filter((id) => id !== targetScope)
+                  : [...effectiveScopes, targetScope];
+                applyAgentScopesSelection(next.length > 0 ? next : ['all']);
+              } else {
+                applyAgentScopesSelection(isSoleTarget ? ['all'] : [targetScope]);
+              }
+            };
+          } else {
+            refs.agentBadgeEl.onclick = null;
           }
 
           const showRowRail = Boolean(railActive && hasTurn && firstTd);
@@ -720,8 +783,7 @@ export const StepsDetailView = defineComponent({
             });
           }
 
-          const stepEntry = refs.cellMap.get('step') || null;
-          const targetHoverTd = stepEntry ? stepEntry.td : firstTd;
+          const targetHoverTd = firstTd;
           if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
             refs.hoverTd.onmouseenter = null;
             refs.hoverTd.onmousemove = null;
@@ -730,8 +792,8 @@ export const StepsDetailView = defineComponent({
           refs.hoverTd = targetHoverTd;
 
           if (targetHoverTd) {
-            if (stepEntry) {
-              const badgeEl = stepEntry.refs.agentBadgeEl;
+            const badgeEl = refs.agentBadgeEl;
+            if (firstColKey === 'step') {
               targetHoverTd.onmouseenter = (ev) => {
                 if (!showRowRail || !prompt || ev?.target === badgeEl) {
                   hideTurnTip();
@@ -748,7 +810,7 @@ export const StepsDetailView = defineComponent({
             } else {
               targetHoverTd.onmouseenter = null;
               targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt) {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
                   hideTurnTip();
                   return;
                 }

@@ -564,6 +564,11 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     get firstChild() { return this.children[0] || null; }
     get firstElementChild() { return this.children[0] || null; }
     get lastElementChild() { return this.children[this.children.length - 1] || null; }
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const idx = this.parentNode.children.indexOf(this);
+      return idx >= 0 ? this.parentNode.children[idx + 1] || null : null;
+    }
     get isConnected() {
       let cur = this;
       while (cur) {
@@ -1991,9 +1996,9 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(stepHeaders[4].textContent, '上下文 / 思考 / 正文');
     const stepRows = stepsPane.querySelectorAll('.data-table')[0].children[1].children;
     assert.equal(stepRows.length, 2);
-    assert.equal(stepRows[0].children[4].textContent, '37.8k / 420 / 265');
+    assert.equal(stepRows[0].children[4].children[0].textContent, '37.8k / 420 / 265');
     assert.equal(stepRows[0].children[4].getAttribute('title'), '上下文 37800 · 思考 420 · 正文 265');
-    assert.equal(stepRows[1].children[4].textContent, '117.7k / 14.5k / 57');
+    assert.equal(stepRows[1].children[4].children[0].textContent, '117.7k / 14.5k / 57');
 
     // Verify minimalist Turn Rail (.has-turn-rail, cap & origin dots) and hover prompt preview tooltip
     const stepsDataTable = stepsPane.querySelectorAll('.data-table')[0];
@@ -2341,10 +2346,40 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       'Turn rail remains visible independently of [主]/[子] badge switch'
     );
 
-    // Restore showStepAgentBadge=true before subsequent route tests
+    // Restore showStepAgentBadge=true and verify [主]/[子] badge + Turn Rail still render in col 0 even when 'step' (步序) column is replaced!
     pillTabs[3].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     sec3SegControls[1].querySelectorAll('.seg-btn')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+
+    // Remove first column 'step' (步序) via .slot-remove-btn[0] so 'model' (模型) becomes column 0
+    sec3
+      .querySelector('.editable-slot-wrap')
+      .querySelectorAll('.slot-remove-btn')[0]
+      .dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+
+    pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    const headerCellsNoStep = stepsPane.querySelectorAll('.data-table')[0].children[0].children[0].children;
+    assert.equal(headerCellsNoStep[0].textContent, '模型', 'First column is now 模型 after removing 步序');
+    assert.equal(
+      multiStepRows[0].children[0].querySelector('.agent-badge').hasAttribute('hidden'),
+      false,
+      '[子1] badge stays visible in leading 模型 column even when 步序 (step) column is absent!'
+    );
+    assert.equal(multiStepRows[0].children[0].querySelector('.agent-badge').textContent, '子1');
+    assert.equal(multiStepRows[1].children[0].querySelector('.agent-badge').textContent, '主');
+    assert.equal(
+      multiStepRows[0].children[0].querySelector('.turn-rail').hasAttribute('hidden'),
+      false,
+      'Turn rail also stays visible in leading 模型 column'
+    );
+
+    // Reset section 4 back to default columns before subsequent route tests
+    pillTabs[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    sec3.querySelector('.btn-ghost-sm').dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 260));
     pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));

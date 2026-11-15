@@ -10016,65 +10016,14 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     key: 'step',
     thLabel: () => t('stepCol.step.th'),
     optLabel: () => t('stepCol.step.opt'),
-    sigPart: (st, ctx) =>
-      `${Boolean(ctx.showAgentBadge)}:${ctx.scopeSigKey}:${st.agentId || 'main'}:${st.stepIndex}:${st.agentBadge || ''}:${st.agentLabel || ''}`,
+    sigPart: (st) => `${st.stepIndex}`,
     createCell: () => {
-      const agentBadgeEl = h('span', {
-        className: 'agent-badge is-clickable',
-        hidden: true,
-        style: 'margin-right: 4px;',
-      });
-      const stepNumText = h('span');
-      const td = h('td', {}, [agentBadgeEl, stepNumText]);
-      return { td, refs: { agentBadgeEl, stepNumText } };
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
-    updateCell: (refs, st, ctx) => {
-      const { showAgentBadge, effectiveScopes, onSelectAgentScopes } = ctx;
-      patchAttr(refs.agentBadgeEl, 'hidden', !showAgentBadge);
-      if (showAgentBadge) {
-        const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
-        patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
-        const badgeText = isEnglishLocale()
-          ? formatAgentBadgeText({
-              isMain: !st.isSubagent,
-              index: st.agentIndex || 0,
-              badgeText: st.agentBadge,
-            })
-          : st.agentBadge || (st.isSubagent ? '子' : '主');
-        patchText(refs.agentBadgeEl, badgeText);
-
-        const targetScope = st.agentId || 'main';
-        const isSoleTarget =
-          effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
-        const agentName = isEnglishLocale()
-          ? formatAgentLabel({
-              isMain: !st.isSubagent,
-              index: st.agentIndex || 0,
-              role: st.agentRole || '',
-            })
-          : st.agentLabel || t('steps.unitAgent');
-        patchAttr(
-          refs.agentBadgeEl,
-          'title',
-          isSoleTarget
-            ? t('steps.badgeBackAll')
-            : t('steps.badgeFilterAgent', { agent: agentName })
-        );
-        refs.agentBadgeEl.onclick = (e) => {
-          if (typeof onSelectAgentScopes !== 'function') return;
-          if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && effectiveScopes[0] !== 'all') {
-            const next = effectiveScopes.includes(targetScope)
-              ? effectiveScopes.filter((id) => id !== targetScope)
-              : [...effectiveScopes, targetScope];
-            onSelectAgentScopes(next.length > 0 ? next : ['all']);
-          } else {
-            onSelectAgentScopes(isSoleTarget ? ['all'] : [targetScope]);
-          }
-        };
-      } else {
-        refs.agentBadgeEl.onclick = null;
-      }
-      patchText(refs.stepNumText, `#${Number(st.stepIndex)}`);
+    updateCell: (refs, st) => {
+      patchText(refs.valEl, `#${Number(st.stepIndex)}`);
     },
   },
 
@@ -10084,12 +10033,13 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.time.opt'),
     sigPart: (st) => `${st.createdAtMs || 0}`,
     createCell: () => {
-      const td = h('td', { className: 'text-muted' });
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', { className: 'text-muted' }, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
       const { text, title } = formatStepClockTime(st.createdAtMs);
-      patchText(refs.td, text);
+      patchText(refs.valEl, text);
       patchAttr(refs.td, 'title', title || null);
     },
   },
@@ -10103,14 +10053,16 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
       return `${disp.text}:${disp.title}`;
     },
     createCell: () => {
-      const td = h('td', {
-        style: 'max-width: 120px; overflow: hidden; text-overflow: ellipsis;',
+      const valEl = h('span', {
+        style:
+          'display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;',
       });
-      return { td, refs: { td } };
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st, ctx) => {
       const modelDisplay = resolveModelDisplayInfo(st, ctx.displaySettings, { fallback: '—' });
-      patchText(refs.td, modelDisplay.text);
+      patchText(refs.valEl, modelDisplay.text);
       patchAttr(refs.td, 'title', modelDisplay.title);
     },
   },
@@ -10129,8 +10081,13 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
         className: 'text-muted',
         style: 'font-size: var(--fs-2xs);',
       });
-      const td = h('td', {}, [speedMain, speedReason]);
-      return { td, refs: { speedMain, speedReason } };
+      const wrapEl = h(
+        'span',
+        { style: 'display: inline-block; vertical-align: middle;' },
+        [speedMain, speedReason]
+      );
+      const td = h('td', {}, [wrapEl]);
+      return { td, refs: { td, speedMain, speedReason } };
     },
     updateCell: (refs, st) => {
       patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
@@ -10146,11 +10103,12 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.ttft.opt'),
     sigPart: (st) => `${st.ttftSec}`,
     createCell: () => {
-      const td = h('td');
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      patchText(refs.td, formatMetric(st.ttftSec, 's'));
+      patchText(refs.valEl, formatMetric(st.ttftSec, 's'));
     },
   },
 
@@ -10160,12 +10118,13 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.duration.opt'),
     sigPart: (st) => `${st.totalDurationSec ?? st.streamDurationSec ?? ''}`,
     createCell: () => {
-      const td = h('td');
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
       const dur = st.totalDurationSec ?? st.streamDurationSec ?? null;
-      patchText(refs.td, formatMetric(dur, 's'));
+      patchText(refs.valEl, formatMetric(dur, 's'));
     },
   },
 
@@ -10176,8 +10135,9 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     sigPart: (st) =>
       `${st.contextTokens}:${st.outputTokens}:${st.thinkingTokens}:${st.responseTokens}`,
     createCell: () => {
-      const td = h('td');
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
       const outTok = Math.max(0, Number(st.outputTokens || 0));
@@ -10187,7 +10147,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
           ? Math.max(0, Number(st.responseTokens))
           : Math.max(0, outTok - thinkTok);
       patchText(
-        refs.td,
+        refs.valEl,
         `${formatTokens(st.contextTokens)} / ${formatTokens(thinkTok)} / ${formatTokens(respTok)}`
       );
       patchAttr(
@@ -10208,11 +10168,12 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.input_tokens.opt'),
     sigPart: (st) => `${st.inputTokens || 0}`,
     createCell: () => {
-      const td = h('td');
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      patchText(refs.td, formatTokens(st.inputTokens || 0));
+      patchText(refs.valEl, formatTokens(st.inputTokens || 0));
     },
   },
 
@@ -10222,11 +10183,12 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.cache_tokens.opt'),
     sigPart: (st) => `${st.cacheReadTokens || 0}`,
     createCell: () => {
-      const td = h('td');
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      patchText(refs.td, formatTokens(st.cacheReadTokens || 0));
+      patchText(refs.valEl, formatTokens(st.cacheReadTokens || 0));
     },
   },
 
@@ -10236,11 +10198,12 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.output_tokens.opt'),
     sigPart: (st) => `${st.outputTokens || 0}`,
     createCell: () => {
-      const td = h('td');
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      patchText(refs.td, formatTokens(st.outputTokens || 0));
+      patchText(refs.valEl, formatTokens(st.outputTokens || 0));
     },
   },
 
@@ -10250,14 +10213,19 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.cache.opt'),
     sigPart: (st) => `${st.cacheHitPct ?? 0}`,
     createCell: () => {
-      const td = h('td', {
-        className: 'cell-value accent-ok',
-        style: 'font-size: var(--fs-base-sm);',
-      });
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h(
+        'td',
+        {
+          className: 'cell-value accent-ok',
+          style: 'font-size: var(--fs-base-sm);',
+        },
+        [valEl]
+      );
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      patchText(refs.td, `${Number(st.cacheHitPct ?? 0)}%`);
+      patchText(refs.valEl, `${Number(st.cacheHitPct ?? 0)}%`);
     },
   },
 
@@ -10267,12 +10235,13 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.cost.opt'),
     sigPart: (st) => `${st.costUsd}`,
     createCell: () => {
-      const td = h('td', { style: 'font-weight: 600;' });
-      return { td, refs: { td } };
+      const valEl = h('span');
+      const td = h('td', { style: 'font-weight: 600;' }, [valEl]);
+      return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
       const costVal = st.costUsd;
-      patchText(refs.td, formatUsd(costVal, { precise: true }));
+      patchText(refs.valEl, formatUsd(costVal, { precise: true }));
       patchClasses(refs.td, { 'accent-speed': costVal >= 0.15 });
     },
   },
@@ -14341,7 +14310,8 @@ const StepsDetailView = defineComponent({
           const parts = colKeys
             .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
             .join('|');
-          return `${locale}:${colOrderSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
+          const badgeSig = `${showAgentBadge}:${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`;
+          return `${locale}:${colOrderSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: () => {
           const tr = h('tr');
@@ -14352,6 +14322,11 @@ const StepsDetailView = defineComponent({
             { className: 'turn-rail', 'aria-hidden': 'true', hidden: true },
             [railLineEl, railDotEl]
           );
+          const agentBadgeEl = h('span', {
+            className: 'agent-badge is-clickable',
+            hidden: true,
+            style: 'margin-right: 4px;',
+          });
           return {
             el: tr,
             refs: {
@@ -14360,6 +14335,7 @@ const StepsDetailView = defineComponent({
               railEl,
               railLineEl,
               railDotEl,
+              agentBadgeEl,
               hoverTd: null,
             },
           };
@@ -14378,6 +14354,9 @@ const StepsDetailView = defineComponent({
               if (!wantedSet.has(oldColKey)) {
                 if (refs.railEl.parentNode === entry.td) {
                   entry.td.removeChild(refs.railEl);
+                }
+                if (refs.agentBadgeEl.parentNode === entry.td) {
+                  entry.td.removeChild(refs.agentBadgeEl);
                 }
                 tr.removeChild(entry.td);
                 refs.cellMap.delete(oldColKey);
@@ -14404,8 +14383,59 @@ const StepsDetailView = defineComponent({
 
           const firstColKey = colKeys[0];
           const firstTd = firstColKey ? refs.cellMap.get(firstColKey)?.td || null : null;
-          if (firstTd && refs.railEl.parentNode !== firstTd) {
-            firstTd.insertBefore(refs.railEl, firstTd.firstChild);
+          if (firstTd) {
+            if (refs.railEl.parentNode !== firstTd || firstTd.firstChild !== refs.railEl) {
+              firstTd.insertBefore(refs.railEl, firstTd.firstChild);
+            }
+            const afterRail = refs.railEl.nextSibling ?? firstTd.children[1] ?? null;
+            if (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl) {
+              firstTd.insertBefore(refs.agentBadgeEl, afterRail);
+            }
+          }
+
+          patchAttr(refs.agentBadgeEl, 'hidden', !showAgentBadge || !firstTd);
+          if (showAgentBadge && firstTd) {
+            const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
+            patchAttr(refs.agentBadgeEl, 'class', `agent-badge is-clickable ${badgeCls}`);
+            const badgeText = isEnglishLocale()
+              ? formatAgentBadgeText({
+                  isMain: !st.isSubagent,
+                  index: st.agentIndex || 0,
+                  badgeText: st.agentBadge,
+                })
+              : st.agentBadge || (st.isSubagent ? '子' : '主');
+            patchText(refs.agentBadgeEl, badgeText);
+
+            const targetScope = st.agentId || 'main';
+            const isSoleTarget =
+              effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
+            const agentName = isEnglishLocale()
+              ? formatAgentLabel({
+                  isMain: !st.isSubagent,
+                  index: st.agentIndex || 0,
+                  role: st.agentRole || '',
+                })
+              : st.agentLabel || t('steps.unitAgent');
+            patchAttr(
+              refs.agentBadgeEl,
+              'title',
+              isSoleTarget
+                ? t('steps.badgeBackAll')
+                : t('steps.badgeFilterAgent', { agent: agentName })
+            );
+            refs.agentBadgeEl.onclick = (e) => {
+              if (typeof applyAgentScopesSelection !== 'function') return;
+              if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && effectiveScopes[0] !== 'all') {
+                const next = effectiveScopes.includes(targetScope)
+                  ? effectiveScopes.filter((id) => id !== targetScope)
+                  : [...effectiveScopes, targetScope];
+                applyAgentScopesSelection(next.length > 0 ? next : ['all']);
+              } else {
+                applyAgentScopesSelection(isSoleTarget ? ['all'] : [targetScope]);
+              }
+            };
+          } else {
+            refs.agentBadgeEl.onclick = null;
           }
 
           const showRowRail = Boolean(railActive && hasTurn && firstTd);
@@ -14426,8 +14456,7 @@ const StepsDetailView = defineComponent({
             });
           }
 
-          const stepEntry = refs.cellMap.get('step') || null;
-          const targetHoverTd = stepEntry ? stepEntry.td : firstTd;
+          const targetHoverTd = firstTd;
           if (refs.hoverTd && refs.hoverTd !== targetHoverTd) {
             refs.hoverTd.onmouseenter = null;
             refs.hoverTd.onmousemove = null;
@@ -14436,8 +14465,8 @@ const StepsDetailView = defineComponent({
           refs.hoverTd = targetHoverTd;
 
           if (targetHoverTd) {
-            if (stepEntry) {
-              const badgeEl = stepEntry.refs.agentBadgeEl;
+            const badgeEl = refs.agentBadgeEl;
+            if (firstColKey === 'step') {
               targetHoverTd.onmouseenter = (ev) => {
                 if (!showRowRail || !prompt || ev?.target === badgeEl) {
                   hideTurnTip();
@@ -14454,7 +14483,7 @@ const StepsDetailView = defineComponent({
             } else {
               targetHoverTd.onmouseenter = null;
               targetHoverTd.onmousemove = (ev) => {
-                if (!showRowRail || !prompt) {
+                if (!showRowRail || !prompt || ev?.target === badgeEl) {
                   hideTurnTip();
                   return;
                 }

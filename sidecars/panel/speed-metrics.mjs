@@ -169,15 +169,29 @@ function estimateUtf8Tokens(text) {
  * @param {unknown} name 分块名称或标题
  * @returns {'skills' | 'userRules' | 'mcpTools' | 'systemPrompt'} 归属的上下文分类键名
  */
-function classifyPromptSection(name) {
-  const key = String(name || '').trim().toLowerCase();
+function classifyPromptSection(name, type = '') {
+  const key = String(name || type || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^token_type_/, '')
+    .replace(/[\s-]+/g, '_');
   if (key === 'skills' || key === 'skill') {
     return 'skills';
   }
-  if (key === 'user_rules' || key === 'user_rule' || key === 'rules') {
+  if (
+    key === 'user_rules' ||
+    key === 'user_rule' ||
+    key === 'rules' ||
+    key === 'rule'
+  ) {
     return 'userRules';
   }
-  if (key === 'mcp_servers' || key === 'mcp' || key.startsWith('mcp_')) {
+  if (
+    key === 'mcp_servers' ||
+    key === 'mcp_tools' ||
+    key === 'mcp' ||
+    key.startsWith('mcp_')
+  ) {
     return 'mcpTools';
   }
   return 'systemPrompt';
@@ -328,7 +342,7 @@ export function extractContextBreakdown(chat) {
         for (const c of children) {
           const tok = Math.max(0, Number(c?.numTokens || 0));
           childSum += tok;
-          const bucket = classifyPromptSection(c?.name ?? c?.title);
+          const bucket = classifyPromptSection(c?.name ?? c?.title, c?.type);
           if (bucket === 'skills') {
             skillsTokens += tok;
           } else if (bucket === 'userRules') {
@@ -345,6 +359,32 @@ export function extractContextBreakdown(chat) {
       } else {
         systemPromptTokens += gTokens;
       }
+    } else if (
+      gType === 'TOKEN_TYPE_SKILLS' ||
+      gName === 'skills' ||
+      gName === 'skill'
+    ) {
+      hasPromptGroup = true;
+      skillsTokens += gTokens;
+    } else if (
+      gType === 'TOKEN_TYPE_RULES' ||
+      gType === 'TOKEN_TYPE_USER_RULES' ||
+      gName === 'rules' ||
+      gName === 'user rules' ||
+      gName === 'user_rules'
+    ) {
+      hasPromptGroup = true;
+      userRulesTokens += gTokens;
+    } else if (
+      gType === 'TOKEN_TYPE_SUBAGENTS' ||
+      gType === 'TOKEN_TYPE_PLUGINS' ||
+      gName === 'subagents' ||
+      gName === 'plugins' ||
+      gName === 'featured plugins' ||
+      gName === 'featured_plugins'
+    ) {
+      hasPromptGroup = true;
+      systemPromptTokens += gTokens;
     } else if (
       gType === 'TOKEN_TYPE_TOOLS' ||
       gName === 'tools' ||
@@ -450,6 +490,19 @@ export function extractContextBreakdown(chat) {
         }
       } else if (gTokens > 0) {
         userInputTokens += gTokens;
+      }
+    } else if (gTokens > 0) {
+      // 兜底接收未来新增的顶层提示词分组，确保 tokenBreakdown.groups 不丢任何分组
+      hasPromptGroup = true;
+      const fallbackBucket = classifyPromptSection(g?.name, g?.type);
+      if (fallbackBucket === 'skills') {
+        skillsTokens += gTokens;
+      } else if (fallbackBucket === 'userRules') {
+        userRulesTokens += gTokens;
+      } else if (fallbackBucket === 'mcpTools') {
+        mcpToolsTokens += gTokens;
+      } else {
+        systemPromptTokens += gTokens;
       }
     }
   }

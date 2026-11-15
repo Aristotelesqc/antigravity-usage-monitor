@@ -879,6 +879,7 @@ export async function enumerateAndSyncConversations({
               contextLimitTelemetry: true,
               speedClearedTelemetry: true,
               turnRailTelemetry: true,
+              contextGroupsTelemetry: true,
               steps,
               subagentRefs,
             };
@@ -902,6 +903,7 @@ export async function enumerateAndSyncConversations({
               !prev.contextLimitTelemetry ||
               !prev.speedClearedTelemetry ||
               !prev.turnRailTelemetry ||
+              !prev.contextGroupsTelemetry ||
               metaChanged ||
               JSON.stringify(prev.steps) !== JSON.stringify(steps);
 
@@ -956,6 +958,27 @@ export async function enumerateAndSyncConversations({
     if (!lastCachedStep) return false;
     return !Object.prototype.hasOwnProperty.call(lastCachedStep, 'turnIndex');
   }
+  function hasDroppedContextGroups(cached) {
+    if (cached?.contextGroupsTelemetry) return false;
+    const steps = cached?.steps || [];
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const st = steps[i];
+      if (!st || st.isCompactionStep) break;
+      if (st.contextBreakdown) {
+        const cb = st.contextBreakdown;
+        const cbSum =
+          Number(cb.totalTokens || 0) ||
+          Number(cb.messagesTokens || 0) +
+            Number(cb.systemToolsTokens || 0) +
+            Number(cb.mcpToolsTokens || 0) +
+            Number(cb.skillsTokens || 0) +
+            Number(cb.systemPromptTokens || 0) +
+            Number(cb.userRulesTokens || 0);
+        return Number(st.estimatedContextTokens || 0) > cbSum;
+      }
+    }
+    return false;
+  }
 
   let remainingTimingRefreshes = LEGACY_MIGRATION_BATCH_SIZE;
   const toFetch = rawConversations.filter((conv) => {
@@ -969,7 +992,12 @@ export async function enumerateAndSyncConversations({
       lowerCid === selectedRootId ||
       Boolean(conv.rootConversationId && conv.rootConversationId.toLowerCase() === selectedRootId);
     if (!cached.contextLimitTelemetry && lowerCid === contextTelemetryCascadeId) return true;
-    if ((!cached.turnRailTelemetry || hasMissingTurnRailFields(cached)) && isSelectedFamily) {
+    if (
+      (!cached.turnRailTelemetry ||
+        hasMissingTurnRailFields(cached) ||
+        hasDroppedContextGroups(cached)) &&
+      isSelectedFamily
+    ) {
       return true;
     }
     const hasCurrentSchema = String(cached.signature || '').startsWith(
@@ -1087,7 +1115,9 @@ export async function enumerateAndSyncConversations({
             String(existingSubCache.signature || '').startsWith(`${CACHE_SCHEMA_VERSION}:`) &&
             !hasMissingStepFields(existingSubCache) &&
             (!isSelectedSubFamily ||
-              (Boolean(existingSubCache.turnRailTelemetry) && !hasMissingTurnRailFields(existingSubCache)));
+              (Boolean(existingSubCache.turnRailTelemetry) &&
+                !hasMissingTurnRailFields(existingSubCache) &&
+                !hasDroppedContextGroups(existingSubCache)));
 
           if (hasValidSubCache) {
             let subMetaUpdated = false;

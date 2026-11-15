@@ -959,3 +959,177 @@ test('assigns unified rootTurnIndex across interleaved main and subagent steps s
   assert.equal(subSteps[1].isTurnStart, true);
   assert.equal(subSteps[1].turnPrompt, 'Subagent internal brief');
 });
+
+test('reconciles 8-group context breakdown with real API prompt+output tokens and auto-refreshes cached dropped groups', async () => {
+  const stepIndex = 2504;
+  const createdAt = '2026-11-15T07:55:00Z';
+  const finishedAt = '2026-11-15T07:55:56Z';
+  const raw311b = {
+    trajectory: {
+      steps: [
+        {
+          status: 'CORTEX_STEP_STATUS_DONE',
+          type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+          metadata: {
+            sourceTrajectoryStepInfo: { stepIndex },
+            createdAt,
+            finishedGeneratingAt: finishedAt,
+            modelUsage: {
+              model: 'MODEL_PLACEHOLDER_M427',
+              inputTokens: '4989',
+              cacheReadTokens: '150223',
+              outputTokens: '3116',
+              thinkingOutputTokens: '1573',
+              responseOutputTokens: '1543',
+            },
+          },
+          plannerResponse: { response: 'final answer', thinkingDuration: '12s' },
+        },
+      ],
+      generatorMetadata: [
+        {
+          stepIndices: [stepIndex],
+          chatModel: {
+            responseModel: 'gemini-4-carbon',
+            timeToFirstToken: '12.1s',
+            streamingDuration: '44.6s',
+            chatStartMetadata: {
+              contextWindowMetadata: {
+                estimatedTokensUsed: 148852,
+                maxContextTokens: 256000,
+                tokenBreakdown: {
+                  totalTokens: 148852,
+                  groups: [
+                    { type: 'TOKEN_TYPE_SYSTEM_PROMPT', name: 'System Prompt', numTokens: 5505 },
+                    { type: 'TOKEN_TYPE_MCP_TOOLS', name: 'Mcp Tools', numTokens: 234 },
+                    { type: 'TOKEN_TYPE_SUBAGENTS', name: 'Subagents', numTokens: 1741 },
+                    { type: 'TOKEN_TYPE_SKILLS', name: 'Skills', numTokens: 2201 },
+                    { type: 'TOKEN_TYPE_PLUGINS', name: 'Plugins', numTokens: 1601 },
+                    { type: 'TOKEN_TYPE_RULES', name: 'Rules', numTokens: 2282 },
+                    { type: 'TOKEN_TYPE_TOOLS', name: 'Tools', numTokens: 8857 },
+                    {
+                      type: 'TOKEN_TYPE_CHAT_MESSAGES',
+                      name: 'Chat Messages',
+                      numTokens: 126431,
+                      children: [
+                        { name: '2449: CHECKPOINT', numTokens: 5087 },
+                        { name: '2450: USER_INPUT', numTokens: 281 },
+                        { name: '2455: SYSTEM_MESSAGE', numTokens: 179 },
+                        { name: '2502: PLANNER_RESPONSE', numTokens: 15017 },
+                        { name: '2503: GENERIC', numTokens: 105867 },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  // Simulate legacy cached entry where SKILLS/RULES/SUBAGENTS/PLUGINS were dropped (141027 < 148852)
+  const staleCacheEntry = {
+    signature: `v13-clean:2505:${finishedAt}`,
+    title: '用量图表与调用记录优化建议',
+    lastModifiedMs: Date.parse(finishedAt),
+    contextLimitTelemetry: true,
+    speedClearedTelemetry: true,
+    turnRailTelemetry: true,
+    subagentRefs: [],
+    steps: [
+      {
+        stepIndex,
+        isCompactionStep: false,
+        modelKey: 'MODEL_PLACEHOLDER_M427',
+        modelSource: 'usage.model',
+        responseModel: 'gemini-4-carbon',
+        modelIdentityVersion: 5,
+        createdAt,
+        createdAtMs: Date.parse(createdAt),
+        inputTokens: 4989,
+        cacheReadTokens: 150223,
+        outputTokens: 3116,
+        thinkingTokens: 1573,
+        responseTokens: 1543,
+        estimatedContextTokens: 148852,
+        maxContextBudgetTokens: 256000,
+        reportedContextLimitTokens: 256000,
+        turnIndex: 1,
+        isTurnStart: true,
+        contextBreakdown: {
+          messagesTokens: 126431,
+          userInputTokens: 281,
+          assistantTokens: 15017,
+          toolResultsTokens: 105867,
+          subagentTokens: 179,
+          checkpointTokens: 5087,
+          systemToolsTokens: 8857,
+          mcpToolsTokens: 234,
+          skillsTokens: 0,
+          systemPromptTokens: 5505,
+          userRulesTokens: 0,
+          totalTokens: 141027,
+        },
+      },
+    ],
+  };
+
+  const h = backendHarness({
+    cache: { c311b: staleCacheEntry },
+    trajectories: { c311b: raw311b },
+    summaries: {
+      c311b: {
+        stepCount: 2505,
+        lastModifiedTime: finishedAt,
+        status: 'IDLE',
+        annotations: { title: '用量图表与调用记录优化建议' },
+      },
+    },
+  });
+
+  const payload = await h.buildTelemetryPayloadInternal('c311b');
+  const ctx = payload.activeConversation.context;
+  const step0 = payload.activeConversation.recentSteps[0];
+
+  // Context window total matches step table contextTokens (155,212 prompt + 3,116 output = 158,328)
+  assert.equal(step0.contextTokens, 158328);
+  assert.equal(ctx.totalTokens, 158328);
+  assert.equal(ctx.usedPct, 61.8);
+  assert.equal(payload.conversations[0].contextUsedPct, 61.8);
+
+  // Previously dropped Skills & User Rules are restored and scaled cleanly
+  assert.ok(ctx.skillsTokens >= 2290 && ctx.skillsTokens <= 2300, `skills=${ctx.skillsTokens}`);
+  assert.ok(ctx.userRulesTokens >= 2375 && ctx.userRulesTokens <= 2385, `rules=${ctx.userRulesTokens}`);
+  assert.ok(ctx.systemPromptTokens >= 9220 && ctx.systemPromptTokens <= 9230, `sys=${ctx.systemPromptTokens}`);
+
+  // All 10 breakdown channels sum exact-to-the-token to ctx.totalTokens (158,328)
+  const channelSum =
+    ctx.userInputTokens +
+    ctx.assistantTokens +
+    ctx.toolResultsTokens +
+    ctx.subagentTokens +
+    ctx.checkpointTokens +
+    ctx.systemToolsTokens +
+    ctx.mcpToolsTokens +
+    ctx.skillsTokens +
+    ctx.systemPromptTokens +
+    ctx.userRulesTokens;
+  assert.equal(channelSum, 158328);
+  assert.equal(
+    ctx.messagesTokens,
+    ctx.userInputTokens +
+      ctx.assistantTokens +
+      ctx.toolResultsTokens +
+      ctx.subagentTokens +
+      ctx.checkpointTokens
+  );
+
+  // Subsequent poll does not re-fetch now that contextGroupsTelemetry is persisted
+  const fetchCountAfterFirst = h.state.calls.filter((c) => c.method === 'GetCascadeTrajectory').length;
+  assert.equal(fetchCountAfterFirst, 1);
+  await h.buildTelemetryPayloadInternal('c311b');
+  const fetchCountAfterSecond = h.state.calls.filter((c) => c.method === 'GetCascadeTrajectory').length;
+  assert.equal(fetchCountAfterSecond, 1);
+});
