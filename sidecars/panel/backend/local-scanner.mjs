@@ -537,7 +537,7 @@ function extractTrajectorySubagentMeta(trajRes, fallback = {}) {
  *
  * @param {{
  *   summariesObj?: Record<string, object>,
- *   currentAccountName?: string,
+ *   currentAccountName?: string|null,
  *   requestedConvId?: string,
  *   forceRefresh?: boolean
  * }} params
@@ -610,13 +610,11 @@ export async function enumerateAndSyncConversations({
   }
 
   // 仅从归属于当前账号的缓存会话收集 subagentRefs，防止跨账号切换时将其他账号的子代理复活进当前会话列表
-  for (const [cacheKey, entry] of Object.entries(trajectoryCache)) {
-    const cacheKeyLower = String(cacheKey || '').toLowerCase();
+  for (const entry of Object.values(trajectoryCache)) {
     if (
       entry?.accountName &&
-      currentAccountName &&
-      entry.accountName !== currentAccountName &&
-      !summariesByLower.has(cacheKeyLower)
+      currentAccountName !== '' &&
+      entry.accountName !== currentAccountName
     ) {
       continue;
     }
@@ -635,9 +633,8 @@ export async function enumerateAndSyncConversations({
     const cached = trajectoryCache[cascadeId];
     if (
       cached?.accountName &&
-      currentAccountName &&
-      cached.accountName !== currentAccountName &&
-      !item
+      currentAccountName !== '' &&
+      cached.accountName !== currentAccountName
     ) {
       continue;
     }
@@ -1262,8 +1259,9 @@ export async function enumerateAndSyncConversations({
         ))) ||
     conversations[0] ||
     null;
-  const safeReqId =
-    requestedConvId && !/[\\/]|\.\./.test(String(requestedConvId)) ? requestedConvId : null;
+  const requestedOwner = trajectoryCache[canonicalIdByLower.get(reqLower)]?.accountName;
+  const safeReqId = requestedConvId && !/[\\/]|\.\./.test(String(requestedConvId)) &&
+    (!requestedOwner || currentAccountName === '' || requestedOwner === currentAccountName) ? requestedConvId : null;
   const activeCascadeId = activeConvSummary?.cascadeId || safeReqId || null;
 
   return {

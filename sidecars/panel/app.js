@@ -551,8 +551,55 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   // Preferences (3-Tab Modular Settings)
   'settings.subTab.general': '常规',
   'settings.subTab.structure': '结构',
+  'settings.subTab.account': '账号',
   'settings.subTab.other': '其他',
   'settings.subTab.aria': '偏好设置分类切换',
+  'settings.account.current': '当前账号',
+  'settings.account.signedOut': '未登录',
+  'settings.account.unknown': '暂未获取账号状态',
+  'settings.account.email': '账号邮箱',
+  'settings.account.credential': 'OAuth 凭证',
+  'settings.account.importHint': '粘贴 Antigravity 的刷新令牌或含 refresh_token 的 OAuth JSON。插件会验证账号邮箱，并在本机加密保存。',
+  'settings.account.save': '导入凭证',
+  'settings.account.capture': '保存当前凭证',
+  'settings.account.reload': '刷新列表',
+  'settings.account.switch': '切换',
+  'settings.account.remove': '移除',
+  'settings.account.active': '当前使用',
+  'settings.account.written': '凭证已写入',
+  'settings.account.pending': '已写入 {email} 的凭证，等待宿主更新。如果一直未更新，请重开当前 Antigravity。',
+  'settings.account.savedCredentials': '已保存的凭证',
+  'settings.account.empty': '暂无已保存的凭证。',
+  'settings.account.loading': '正在读取已保存的凭证…',
+  'settings.account.saved': '凭证已保存。',
+  'settings.account.removed': '已移除保存的凭证。',
+  'settings.account.switched': '已切换账号，正在刷新当前额度。',
+  'settings.account.switching': '正在替换凭证并确认宿主账号…',
+  'settings.account.verifying': '正在验证凭证所属账号…',
+  'settings.account.loadQuota': '查额度',
+  'settings.account.loadingQuota': '正在查询此凭证的额度…',
+  'settings.account.emptyCredentialQuota': '这个账号暂无可显示的额度池。',
+  'settings.account.quota': '额度池剩余',
+  'settings.account.quota5h': '5 小时 {percent}%',
+  'settings.account.quotaWeekly': '每周 {percent}%',
+  'settings.account.noQuota': '暂未获取当前账号的额度池。',
+  'settings.account.quotaStale': '额度刷新失败，显示的是当前账号上次获取的数据。',
+  'settings.account.unsupported': '凭证切换目前支持 Windows 上的 Antigravity 共享登录。',
+  'settings.account.invalidEmail': '请先选择一个已保存的账号。',
+  'settings.account.invalidCredential': '请输入有效的 Antigravity 个人账号 OAuth 凭证。',
+  'settings.account.credentialTooLarge': '凭证超过 Windows 凭据管理器的 2560 字节上限。',
+  'settings.account.notFound': '该凭证已移除，请刷新列表。',
+  'settings.account.noCurrentCredential': '暂时无法读取当前账号的共享凭证。',
+  'settings.account.busy': '另一个窗口正在操作凭证，请稍后重试。',
+  'settings.account.storeFailed': '凭证操作失败，请重试。',
+  'settings.account.rollbackFailed': '凭证写入和回滚均失败。请在 Antigravity 中确认当前账号后再继续。',
+  'settings.account.credentialAccessDenied': 'Windows 拒绝访问凭据管理器。请在当前 Windows 用户会话中打开 Antigravity 后重试。',
+  'settings.account.credentialChanged': '这份凭证已在其他窗口更新，请刷新列表后重试。',
+  'settings.account.credentialRejected': 'Google 未接受此凭证。请检查令牌是否属于 Antigravity 且仍然有效。',
+  'settings.account.identityMismatch': '凭证所属账号与宿主或保存的账号不一致。请重新导入该凭证。',
+  'settings.account.oauthClientUnavailable': '未能从本机 Antigravity 读取 OAuth 客户端配置。',
+  'settings.account.oauthUnavailable': '暂时无法完成 Google OAuth 验证，请检查网络后重试。',
+  'settings.account.quotaUnavailable': '暂时无法取得此账号的额度，请稍候重试。',
   'settings.saving': '保存中…',
   'settings.saved': '已保存',
   'settings.saveFailed': '保存失败',
@@ -978,7 +1025,54 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   // Preferences (3-Tab Modular Settings)
   'settings.subTab.general': 'General',
   'settings.subTab.structure': 'Structure',
+  'settings.subTab.account': 'Account',
   'settings.subTab.other': 'Other',
+  'settings.account.current': 'Current account',
+  'settings.account.signedOut': 'Signed out',
+  'settings.account.unknown': 'Account status unavailable',
+  'settings.account.email': 'Account email',
+  'settings.account.credential': 'OAuth credential',
+  'settings.account.importHint': 'Paste an Antigravity refresh token or OAuth JSON containing a refresh_token. The account email is verified and the credential is encrypted on this device.',
+  'settings.account.save': 'Import credential',
+  'settings.account.capture': 'Save current credential',
+  'settings.account.reload': 'Refresh list',
+  'settings.account.switch': 'Switch',
+  'settings.account.remove': 'Remove',
+  'settings.account.active': 'In use',
+  'settings.account.written': 'Credential written',
+  'settings.account.pending': 'The credential for {email} was written. If Antigravity stays on the previous account, reopen it.',
+  'settings.account.savedCredentials': 'Saved credentials',
+  'settings.account.empty': 'No saved credentials.',
+  'settings.account.loading': 'Loading saved credentials…',
+  'settings.account.saved': 'Credential saved.',
+  'settings.account.removed': 'Saved credential removed.',
+  'settings.account.switched': 'Account switched. Refreshing the current quota.',
+  'settings.account.switching': 'Replacing the credential and confirming the active account…',
+  'settings.account.verifying': 'Verifying the credential owner…',
+  'settings.account.loadQuota': 'Check quota',
+  'settings.account.loadingQuota': 'Checking quota for this credential…',
+  'settings.account.emptyCredentialQuota': 'There are no quota pools to display for this account.',
+  'settings.account.quota': 'Quota remaining by pool',
+  'settings.account.quota5h': '5 hours {percent}%',
+  'settings.account.quotaWeekly': 'Weekly {percent}%',
+  'settings.account.noQuota': 'Quota pools are unavailable for the current account.',
+  'settings.account.quotaStale': 'Quota refresh failed. Showing the last data for the current account.',
+  'settings.account.unsupported': 'Credential switching currently supports Antigravity shared sign-in on Windows.',
+  'settings.account.invalidEmail': 'Select a saved account first.',
+  'settings.account.invalidCredential': 'Enter a valid Antigravity OAuth credential for a personal account.',
+  'settings.account.credentialTooLarge': 'The credential exceeds the Windows Credential Manager limit of 2560 bytes.',
+  'settings.account.notFound': 'This credential was removed. Refresh the list.',
+  'settings.account.noCurrentCredential': 'The shared credential for the current account is unavailable.',
+  'settings.account.busy': 'Another window is updating credentials. Try again shortly.',
+  'settings.account.storeFailed': 'The credential operation failed. Try again.',
+  'settings.account.rollbackFailed': 'Writing and restoring the credential both failed. Check the active account in Antigravity before continuing.',
+  'settings.account.credentialAccessDenied': 'Windows denied access to Credential Manager. Open Antigravity in your Windows user session and try again.',
+  'settings.account.credentialChanged': 'This credential was updated in another window. Refresh the list and try again.',
+  'settings.account.credentialRejected': 'Google rejected this credential. Check that the Antigravity refresh token is still valid.',
+  'settings.account.identityMismatch': 'The credential belongs to a different account. Import the credential again.',
+  'settings.account.oauthClientUnavailable': 'The local Antigravity OAuth client configuration could not be read.',
+  'settings.account.oauthUnavailable': 'Google OAuth verification is unavailable. Check your network and try again.',
+  'settings.account.quotaUnavailable': 'Quota for this account is unavailable. Try again shortly.',
   'settings.subTab.aria': 'Preferences category tabs',
   'settings.saving': 'Saving…',
   'settings.saved': 'Saved',
@@ -1995,7 +2089,7 @@ function deliverCdpBridgeResponses(responses) {
   return delivered;
 }
 
-function callViaCdpBridge(bridge, path, { method, body, signal }) {
+function callViaCdpBridge(bridge, path, { method, body, signal, cdpTimeoutMs }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       const abortErr = new Error('Request aborted');
@@ -2017,7 +2111,7 @@ function callViaCdpBridge(bridge, path, { method, body, signal }) {
       bridge.rpcPending.delete(reqId);
       cleanupQueueItem();
       reject(new Error('CDP bridge timeout'));
-    }, 8000);
+    }, cdpTimeoutMs);
 
     const onAbort = () => {
       clearTimeout(timeoutId);
@@ -2056,7 +2150,7 @@ function callViaCdpBridge(bridge, path, { method, body, signal }) {
   });
 }
 
-async function callSidecarApi(path, { method = 'GET', body, abortKey = '' } = {}) {
+async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTimeoutMs = 8000 } = {}) {
   const upperMethod = method.toUpperCase();
   const dedupKey = upperMethod === 'GET' && !abortKey ? path : '';
 
@@ -2093,7 +2187,7 @@ async function callSidecarApi(path, { method = 'GET', body, abortKey = '' } = {}
     if (bridge) {
       headers['X-Usage-Monitor-Token'] = bridge.token;
       if (bridge.transportMode === 'cdp') {
-        return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal });
+        return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal, cdpTimeoutMs });
       }
     }
 
@@ -2111,7 +2205,7 @@ async function callSidecarApi(path, { method = 'GET', body, abortKey = '' } = {}
       }
       // 当宿主环境的 CSP connect-src、混合内容策略或本地代理阻断 HTTP 直连时，无缝切至 CDP 通道
       bridge.transportMode = 'cdp';
-      return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal });
+      return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal, cdpTimeoutMs });
     }
     if (signal?.aborted) {
       const abortErr = new Error('Request aborted');
@@ -2170,7 +2264,7 @@ function getViewTabs() {
 const uiStore = createReactiveStore({
   activeView: 'overview',
   stepsSubTab: 'steps', // 'steps' | 'models'
-  settingsSubTab: 'general', // 'general' | 'structure' | 'other'
+  settingsSubTab: 'general', // 'general' | 'structure' | 'account' | 'other'
   selectedAgentScope: 'all', // 'all' | 'main' | <subagent cascadeId>
   ctxInspectorAgentId: 'auto', // 'auto' | 'main' | <subagent cascadeId>
 });
@@ -2863,6 +2957,9 @@ function isEquivalentTelemetry(prev, next) {
 
   // 8. 比对账号订阅档位与动态多配额池
   if (
+    prev.account?.email !== next.account?.email ||
+    prev.account?.name !== next.account?.name ||
+    prev.account?.status !== next.account?.status ||
     prev.account?.tierName !== next.account?.tierName ||
     prev.account?.planName !== next.account?.planName ||
     prev.account?.aiCredits !== next.account?.aiCredits
@@ -3040,6 +3137,12 @@ async function fetchTelemetry({ force = false } = {}) {
     }
 
     const latestSt = telemetryStore.getState();
+    const previousAccount = latestSt.telemetry?.account;
+    const nextAccount = payload?.account;
+    const accountChanged = previousAccount?.status === 'signedIn' &&
+      (nextAccount?.status === 'signedOut' || (nextAccount?.status === 'signedIn' &&
+        (previousAccount.email || previousAccount.name) !== (nextAccount.email || nextAccount.name)));
+    const accountPatch = accountChanged ? { selectedConversationId: '' } : {};
     if (force) {
       const elapsed = Date.now() - startMs;
       if (elapsed < 220) {
@@ -3050,6 +3153,7 @@ async function fetchTelemetry({ force = false } = {}) {
       }
       if (feedbackTimer) clearTimeout(feedbackTimer);
       telemetryStore.setState({
+        ...accountPatch,
         telemetry: payload,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: 'synced',
@@ -3062,6 +3166,7 @@ async function fetchTelemetry({ force = false } = {}) {
       const isSame = isEquivalentTelemetry(latestSt.telemetry, payload);
       const nextTelemetry = isSame ? latestSt.telemetry : payload;
       telemetryStore.setState({
+        ...accountPatch,
         telemetry: nextTelemetry,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
@@ -11612,6 +11717,238 @@ const SettingsStructureTab = defineComponent({
   },
 });
 
+// --- src/views/settings/SettingsAccountTab.js ---
+/** @fileoverview Saved account credentials and the host's active account quota. */
+
+
+const key = (name) => `settings.account.${name}`;
+const errors = new Set([
+  'unsupported', 'invalidEmail', 'invalidCredential', 'credentialTooLarge', 'notFound',
+  'noCurrentCredential', 'busy', 'storeFailed', 'rollbackFailed', 'credentialAccessDenied',
+  'credentialChanged', 'credentialRejected', 'identityMismatch', 'oauthClientUnavailable',
+  'oauthUnavailable', 'quotaUnavailable',
+]);
+
+function renderQuotaRows(container, quotaPools) {
+  const locale = getEffectiveLocale();
+  const pools = quotaPools.filter((pool) => Number.isFinite(pool.remainingPct) || Number.isFinite(pool.weeklyRemainingPct));
+  patchKeyedList(container, pools, {
+    keyFn: (pool) => pool.poolKey || pool.poolLabel,
+    sigFn: (pool) => JSON.stringify([locale, pool.poolLabel, pool.remainingPct, pool.weeklyRemainingPct]),
+    createRow: () => {
+      const label = h('span');
+      const remaining = h('span', { className: 'settings-account-quota' });
+      return { el: h('div', { className: 'settings-action-block' }, [label, remaining]), refs: { label, remaining } };
+    },
+    updateRow: ({ label, remaining }, pool) => {
+      patchText(label, pool.poolLabel || pool.poolKey);
+      const values = [];
+      if (Number.isFinite(pool.remainingPct)) values.push(t(key('quota5h'), { percent: pool.remainingPct }));
+      if (Number.isFinite(pool.weeklyRemainingPct)) values.push(t(key('quotaWeekly'), { percent: pool.weeklyRemainingPct }));
+      patchText(remaining, values.join(' · '));
+    },
+  });
+  return pools.length;
+}
+
+const SettingsAccountTab = defineComponent({
+  name: 'SettingsAccountTab',
+  setup({ props, onCleanup }) {
+    let account = null;
+    let quotas = null;
+    let accounts = [];
+    let selectedEmail = '';
+    let supported = null;
+    let operation = '';
+    let status = '';
+    let disposed = false;
+    const savedQuotas = new Map();
+
+    const title = h('span', { className: 'panel-title' });
+    const identityLabel = h('div', { className: 'settings-action-title' });
+    const identity = h('div', { className: 'settings-action-desc settings-account-identity' });
+    const plan = h('div', { className: 'settings-action-desc' });
+    const quotaTitle = h('div', { className: 'settings-action-title' });
+    const quotaRows = h('div', { className: 'settings-account-list' });
+    const quotaMessage = h('div', { className: 'settings-action-desc' });
+    const savedTitle = h('span', { className: 'panel-title' });
+    const savedRows = h('div', { className: 'settings-account-list' });
+    const savedMessage = h('div', { className: 'settings-action-desc' });
+    const pending = h('div', { className: 'settings-action-desc', role: 'status' });
+    const feedback = h('div', { className: 'settings-action-desc', role: 'status' });
+    const capture = h('button', { type: 'button', className: 'btn-secondary', onClick: () => request('capture') });
+    const reload = h('button', { type: 'button', className: 'btn-secondary', onClick: () => request('list') });
+    const credentialLabel = h('span');
+    const importHint = h('div', { className: 'settings-action-desc' });
+    const credential = h('input', { type: 'password', required: true, autocomplete: 'off', spellcheck: 'false', maxlength: 16384 });
+    const save = h('button', { type: 'submit', className: 'btn-secondary' });
+    const form = h('form', { className: 'settings-account-form', autocomplete: 'off', onSubmit: importCredential }, [
+      h('label', {}, [credentialLabel, credential]),
+      importHint,
+      save,
+    ]);
+
+    function render() {
+      const signedIn = account?.status === 'signedIn';
+      const activeEmail = signedIn ? account.email?.trim().toLowerCase() : '';
+      const canWrite = supported === true && !operation;
+      const locale = getEffectiveLocale();
+      patchText(title, t(key('current')));
+      patchText(identityLabel, t(key('email')));
+      patchText(identity, signedIn ? account.email || account.name :
+        t(key(account?.status === 'signedOut' ? 'signedOut' : 'unknown')));
+      patchText(plan, signedIn ? account.tierName || account.planName || '' : '');
+      patchAttr(plan, 'hidden', !plan.textContent);
+
+      patchText(quotaTitle, t(key('quota')));
+      const poolCount = renderQuotaRows(quotaRows, signedIn ? quotas?.pools || [] : []);
+      patchText(quotaMessage, t(key(poolCount ? 'quotaStale' : 'noQuota')));
+      patchAttr(quotaMessage, 'hidden', poolCount > 0 && !quotas?.meta?.isStale);
+
+      patchText(savedTitle, t(key('savedCredentials')));
+      patchText(capture, t(key('capture')));
+      patchText(reload, t(key('reload')));
+      patchText(save, t(key('save')));
+      patchText(credentialLabel, t(key('credential')));
+      patchText(importHint, t(key('importHint')));
+      patchAttr(capture, 'disabled', !canWrite || !activeEmail);
+      patchAttr(reload, 'disabled', Boolean(operation));
+      patchAttr(form, 'hidden', supported === false);
+      patchAttr(save, 'disabled', !canWrite);
+      patchAttr(credential, 'disabled', !canWrite);
+      patchText(savedMessage, t(key(supported === null ? 'loading' : 'empty')));
+      patchAttr(savedMessage, 'hidden', accounts.length > 0 || supported === false || Boolean(status));
+      const message = status || (operation === 'switch' ? 'switching' : operation === 'quota' ? 'loadingQuota' :
+        operation === 'save' || operation === 'capture' ? 'verifying' : '');
+      patchText(feedback, message ? t(key(message)) : '');
+      patchAttr(feedback, 'hidden', !message);
+      const waiting = selectedEmail && activeEmail !== selectedEmail;
+      patchText(pending, waiting ? t(key('pending'), { email: selectedEmail }) : '');
+      patchAttr(pending, 'hidden', !waiting);
+
+      patchKeyedList(savedRows, accounts, {
+        keyFn: (addr) => addr,
+        sigFn: (addr) => JSON.stringify([locale, activeEmail, selectedEmail, canWrite, savedQuotas.get(addr)]),
+        createRow: (addr) => {
+          const state = h('div', { className: 'settings-action-desc' });
+          const select = h('button', {
+            type: 'button', className: 'btn-secondary settings-account-switch', onClick: () => request('switch', { email: addr }),
+          });
+          const remove = h('button', {
+            type: 'button', className: 'btn-secondary', onClick: () => request('remove', { email: addr }),
+          });
+          const loadQuota = h('button', {
+            type: 'button', className: 'btn-secondary settings-account-load-quota', onClick: () => request('quota', { email: addr }),
+          });
+          const rows = h('div', { className: 'settings-account-list' });
+          const empty = h('div', { className: 'settings-action-desc' });
+          return {
+            el: h('div', { className: 'settings-account-entry' }, [
+              h('div', { className: 'settings-action-block' }, [
+                h('div', { className: 'settings-action-info' }, [h('div', { className: 'settings-account-identity', text: addr }), state]),
+                h('div', { className: 'settings-account-buttons' }, [loadQuota, select, remove]),
+              ]), rows, empty,
+            ]),
+            refs: { state, select, remove, loadQuota, rows, empty },
+          };
+        },
+        updateRow: (row, addr) => {
+          const active = addr === activeEmail;
+          const written = addr === selectedEmail && !active;
+          patchText(row.state, active ? t(key('active')) : written ? t(key('written')) : '');
+          patchAttr(row.state, 'hidden', !active && !written);
+          patchText(row.select, t(key('switch')));
+          patchText(row.remove, t(key('remove')));
+          patchText(row.loadQuota, t(key('loadQuota')));
+          patchAttr(row.select, 'disabled', !canWrite);
+          patchAttr(row.remove, 'disabled', !canWrite);
+          patchAttr(row.loadQuota, 'disabled', !canWrite);
+          const cached = savedQuotas.get(addr);
+          const count = renderQuotaRows(row.rows, cached || []);
+          patchText(row.empty, t(key('emptyCredentialQuota')));
+          patchAttr(row.empty, 'hidden', !cached || count > 0);
+        },
+      });
+      props.onLayoutChange?.();
+    }
+
+    async function request(action, fields) {
+      if (operation) return;
+      operation = action;
+      status = '';
+      render();
+      try {
+        const result = action === 'list'
+          ? await callSidecarApi('/api/accounts')
+          : await callSidecarApi('/api/accounts/update', { method: 'POST', body: { action, ...fields }, cdpTimeoutMs: 40000 });
+        if (disposed) return;
+        if (result?.error) {
+          if (result.error === 'unsupported') supported = false;
+          status = errors.has(result.error) ? result.error : 'storeFailed';
+          return;
+        }
+        if (action === 'quota') {
+          savedQuotas.set(result.email, result.pools);
+          return;
+        }
+        supported = result?.supported === true;
+        accounts = result?.accounts || [];
+        selectedEmail = result?.selectedEmail || '';
+        if (action === 'save' || action === 'capture') status = 'saved';
+        if (action === 'remove') {
+          savedQuotas.delete(fields.email);
+          status = 'removed';
+        }
+        if (action === 'switch') {
+          status = result.confirmed ? 'switched' : '';
+          void fetchTelemetry({ force: true }).catch(() => {});
+        }
+      } catch {
+        status = 'storeFailed';
+      } finally {
+        operation = '';
+        if (!disposed) render();
+      }
+    }
+
+    function importCredential(event) {
+      event.preventDefault();
+      if (operation) return;
+      const input = credential.value;
+      credential.value = '';
+      void request('save', { credential: input });
+    }
+
+    function renderAccount(value, quotaData) {
+      if (account === value && quotas === quotaData) return;
+      account = value;
+      quotas = quotaData;
+      render();
+    }
+
+    const root = h('div', { className: 'settings-tab-stack' }, [
+      h('section', { className: 'panel' }, [
+        h('div', { className: 'panel-header' }, [title]),
+        h('div', { className: 'settings-action-block' }, [
+          h('div', { className: 'settings-action-info' }, [identityLabel, identity, plan]),
+        ]),
+        quotaTitle, quotaRows, quotaMessage, pending,
+      ]),
+      h('section', { className: 'panel' }, [
+        h('div', { className: 'panel-header' }, [savedTitle]),
+        h('div', { className: 'settings-account-buttons' }, [capture, reload]),
+        savedRows, savedMessage, form, feedback,
+      ]),
+    ]);
+    render();
+    onCleanup(() => {
+      disposed = true;
+      credential.value = '';
+    });
+    return { el: root, refs: { renderAccount, refreshLabels: render, load: () => request('list') } };
+  },
+});
+
 // --- src/views/settings/SettingsOtherTab.js ---
 /**
  * @fileoverview Preferences Tab 3: `SettingsOtherTab.js` ("其他").
@@ -14481,16 +14818,19 @@ const StepsDetailView = defineComponent({
 
 // --- src/views/SettingsView.js ---
 /**
- * @fileoverview View 4: Modular 3-Tab `SettingsView.js` ("常规" / "结构" / "其他").
- * Orchestrates `SettingsGeneralTab`, `SettingsStructureTab`, and `SettingsOtherTab`
+ * @fileoverview View 4: Modular preferences ("常规" / "结构" / "账号" / "其他").
+ * Orchestrates the four preference tabs
  * with top sub-navigation and a shared `CustomScrollbar` viewport.
  */
 
+
+const SHOW_ACCOUNT_TAB = false;
 
 function getSettingsSubTabOptions() {
   return [
     { value: 'general', label: t('settings.subTab.general') },
     { value: 'structure', label: t('settings.subTab.structure') },
+    ...(SHOW_ACCOUNT_TAB ? [{ value: 'account', label: t('settings.subTab.account') }] : []),
     { value: 'other', label: t('settings.subTab.other') },
   ];
 }
@@ -14520,25 +14860,41 @@ const SettingsView = defineComponent({
 
     const generalTab = SettingsGeneralTab({ onLayoutChange: refreshScroll });
     const structureTab = SettingsStructureTab({ onLayoutChange: refreshScroll });
+    const accountTab = SettingsAccountTab({ onLayoutChange: refreshScroll });
     const otherTab = SettingsOtherTab({ onLayoutChange: refreshScroll });
 
-    function applyActiveSubTab(subTab) {
+    let showingAccount = false;
+    function applyActiveSubTab(subTab, activeView) {
       const target =
-        subTab === 'structure' || subTab === 'other' ? subTab : 'general';
+        subTab === 'structure' ||
+        subTab === 'other' ||
+        (SHOW_ACCOUNT_TAB && subTab === 'account')
+          ? subTab
+          : 'general';
       subNavSwitch.setValue(target);
       patchAttr(generalTab.el, 'hidden', target !== 'general');
       patchAttr(structureTab.el, 'hidden', target !== 'structure');
+      patchAttr(accountTab.el, 'hidden', !SHOW_ACCOUNT_TAB || target !== 'account');
       patchAttr(otherTab.el, 'hidden', target !== 'other');
+      const nextShowingAccount = SHOW_ACCOUNT_TAB && target === 'account' && activeView === 'settings';
+      if (nextShowingAccount && !showingAccount) void accountTab.refs.load();
+      showingAccount = nextShowingAccount;
       refreshScroll();
     }
 
-    const contentContainer = h('div', {}, [generalTab.el, structureTab.el, otherTab.el]);
+    const contentContainer = h(
+      'div',
+      {},
+      SHOW_ACCOUNT_TAB
+        ? [generalTab.el, structureTab.el, accountTab.el, otherTab.el]
+        : [generalTab.el, structureTab.el, otherTab.el]
+    );
     viewScrollbar = CustomScrollbar({
       contentEl: contentContainer,
       className: 'view-pane',
     });
 
-    applyActiveSubTab(initialSubTab);
+    applyActiveSubTab(initialSubTab, uiStore.getState().activeView);
 
     const rootEl = h('div', { className: 'settings-view-root' }, [
       subNavBar,
@@ -14548,6 +14904,8 @@ const SettingsView = defineComponent({
     let latestSettings = null;
     let latestCloudStatus = null;
     let latestContextWindowModels = [];
+    const initialTelemetry = telemetryStore.getState().telemetry;
+    accountTab.refs.renderAccount(initialTelemetry?.account, initialTelemetry?.quotas);
 
     function syncAllTabs(settings, cloudStatus) {
       if (settings) {
@@ -14566,11 +14924,14 @@ const SettingsView = defineComponent({
         settings: st.telemetry?.settings,
         cloudStatus: st.telemetry?.cloudStatus,
         contextWindowModels: st.telemetry?.contextWindowModels,
+        account: st.telemetry?.account,
+        quotas: st.telemetry?.quotas,
       }),
       (slice) => {
         latestSettings = slice.settings;
         latestCloudStatus = slice.cloudStatus;
         latestContextWindowModels = slice.contextWindowModels || [];
+        accountTab.refs.renderAccount(slice.account, slice.quotas);
         if (slice.settings) {
           generalTab.refs.renderSettings(slice.settings);
           structureTab.refs.renderSettings(slice.settings);
@@ -14589,7 +14950,7 @@ const SettingsView = defineComponent({
         settingsSubTab: st.settingsSubTab,
       }),
       (slice) => {
-        applyActiveSubTab(slice.settingsSubTab);
+        applyActiveSubTab(slice.settingsSubTab, slice.activeView);
         if (slice.activeView === 'settings') {
           syncAllTabs(latestSettings, latestCloudStatus);
         }
@@ -14605,6 +14966,7 @@ const SettingsView = defineComponent({
         });
         generalTab.refs.refreshLabels();
         structureTab.refs.refreshLabels();
+        accountTab.refs.refreshLabels();
         otherTab.refs.refreshLabels();
         refreshScroll();
       }
@@ -14617,6 +14979,7 @@ const SettingsView = defineComponent({
       subNavSwitch.destroy();
       generalTab.destroy();
       structureTab.destroy();
+      accountTab.destroy();
       otherTab.destroy();
       viewScrollbar.destroy();
     });
@@ -14627,6 +14990,7 @@ const SettingsView = defineComponent({
         subNavSwitch,
         generalTab,
         structureTab,
+        accountTab,
         otherTab,
         viewScrollbar,
         // Convenience aliases for external callers / tests

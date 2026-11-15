@@ -689,6 +689,9 @@ function isEquivalentTelemetry(prev, next) {
 
   // 8. 比对账号订阅档位与动态多配额池
   if (
+    prev.account?.email !== next.account?.email ||
+    prev.account?.name !== next.account?.name ||
+    prev.account?.status !== next.account?.status ||
     prev.account?.tierName !== next.account?.tierName ||
     prev.account?.planName !== next.account?.planName ||
     prev.account?.aiCredits !== next.account?.aiCredits
@@ -866,6 +869,12 @@ export async function fetchTelemetry({ force = false } = {}) {
     }
 
     const latestSt = telemetryStore.getState();
+    const previousAccount = latestSt.telemetry?.account;
+    const nextAccount = payload?.account;
+    const accountChanged = previousAccount?.status === 'signedIn' &&
+      (nextAccount?.status === 'signedOut' || (nextAccount?.status === 'signedIn' &&
+        (previousAccount.email || previousAccount.name) !== (nextAccount.email || nextAccount.name)));
+    const accountPatch = accountChanged ? { selectedConversationId: '' } : {};
     if (force) {
       const elapsed = Date.now() - startMs;
       if (elapsed < 220) {
@@ -876,6 +885,7 @@ export async function fetchTelemetry({ force = false } = {}) {
       }
       if (feedbackTimer) clearTimeout(feedbackTimer);
       telemetryStore.setState({
+        ...accountPatch,
         telemetry: payload,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: 'synced',
@@ -888,6 +898,7 @@ export async function fetchTelemetry({ force = false } = {}) {
       const isSame = isEquivalentTelemetry(latestSt.telemetry, payload);
       const nextTelemetry = isSame ? latestSt.telemetry : payload;
       telemetryStore.setState({
+        ...accountPatch,
         telemetry: nextTelemetry,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',

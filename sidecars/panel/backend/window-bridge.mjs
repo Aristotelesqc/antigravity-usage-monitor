@@ -29,6 +29,8 @@ const ALLOWED_BRIDGE_PATHS = new Set([
   '/api/telemetry',
   '/api/settings',
   '/api/settings/reset',
+  '/api/accounts',
+  '/api/accounts/update',
   '/api/context-window',
   '/api/cloud-sync',
   '/api/plugin-update',

@@ -1,6 +1,6 @@
 /**
- * @fileoverview View 4: Modular 3-Tab `SettingsView.js` ("常规" / "结构" / "其他").
- * Orchestrates `SettingsGeneralTab`, `SettingsStructureTab`, and `SettingsOtherTab`
+ * @fileoverview View 4: Modular preferences ("常规" / "结构" / "账号" / "其他").
+ * Orchestrates the four preference tabs
  * with top sub-navigation and a shared `CustomScrollbar` viewport.
  */
 
@@ -11,14 +11,18 @@ import { telemetryStore } from '../store/telemetryStore.js';
 import { uiStore } from '../store/uiStore.js';
 import { CustomScrollbar } from '../components/ui/CustomScrollbar.js';
 import { SegmentedControl } from '../components/ui/SegmentedControl.js';
+import { SettingsAccountTab } from './settings/SettingsAccountTab.js';
 import { SettingsGeneralTab } from './settings/SettingsGeneralTab.js';
 import { SettingsOtherTab } from './settings/SettingsOtherTab.js';
 import { SettingsStructureTab } from './settings/SettingsStructureTab.js';
+
+export const SHOW_ACCOUNT_TAB = false;
 
 function getSettingsSubTabOptions() {
   return [
     { value: 'general', label: t('settings.subTab.general') },
     { value: 'structure', label: t('settings.subTab.structure') },
+    ...(SHOW_ACCOUNT_TAB ? [{ value: 'account', label: t('settings.subTab.account') }] : []),
     { value: 'other', label: t('settings.subTab.other') },
   ];
 }
@@ -48,25 +52,41 @@ export const SettingsView = defineComponent({
 
     const generalTab = SettingsGeneralTab({ onLayoutChange: refreshScroll });
     const structureTab = SettingsStructureTab({ onLayoutChange: refreshScroll });
+    const accountTab = SettingsAccountTab({ onLayoutChange: refreshScroll });
     const otherTab = SettingsOtherTab({ onLayoutChange: refreshScroll });
 
-    function applyActiveSubTab(subTab) {
+    let showingAccount = false;
+    function applyActiveSubTab(subTab, activeView) {
       const target =
-        subTab === 'structure' || subTab === 'other' ? subTab : 'general';
+        subTab === 'structure' ||
+        subTab === 'other' ||
+        (SHOW_ACCOUNT_TAB && subTab === 'account')
+          ? subTab
+          : 'general';
       subNavSwitch.setValue(target);
       patchAttr(generalTab.el, 'hidden', target !== 'general');
       patchAttr(structureTab.el, 'hidden', target !== 'structure');
+      patchAttr(accountTab.el, 'hidden', !SHOW_ACCOUNT_TAB || target !== 'account');
       patchAttr(otherTab.el, 'hidden', target !== 'other');
+      const nextShowingAccount = SHOW_ACCOUNT_TAB && target === 'account' && activeView === 'settings';
+      if (nextShowingAccount && !showingAccount) void accountTab.refs.load();
+      showingAccount = nextShowingAccount;
       refreshScroll();
     }
 
-    const contentContainer = h('div', {}, [generalTab.el, structureTab.el, otherTab.el]);
+    const contentContainer = h(
+      'div',
+      {},
+      SHOW_ACCOUNT_TAB
+        ? [generalTab.el, structureTab.el, accountTab.el, otherTab.el]
+        : [generalTab.el, structureTab.el, otherTab.el]
+    );
     viewScrollbar = CustomScrollbar({
       contentEl: contentContainer,
       className: 'view-pane',
     });
 
-    applyActiveSubTab(initialSubTab);
+    applyActiveSubTab(initialSubTab, uiStore.getState().activeView);
 
     const rootEl = h('div', { className: 'settings-view-root' }, [
       subNavBar,
@@ -76,6 +96,8 @@ export const SettingsView = defineComponent({
     let latestSettings = null;
     let latestCloudStatus = null;
     let latestContextWindowModels = [];
+    const initialTelemetry = telemetryStore.getState().telemetry;
+    accountTab.refs.renderAccount(initialTelemetry?.account, initialTelemetry?.quotas);
 
     function syncAllTabs(settings, cloudStatus) {
       if (settings) {
@@ -94,11 +116,14 @@ export const SettingsView = defineComponent({
         settings: st.telemetry?.settings,
         cloudStatus: st.telemetry?.cloudStatus,
         contextWindowModels: st.telemetry?.contextWindowModels,
+        account: st.telemetry?.account,
+        quotas: st.telemetry?.quotas,
       }),
       (slice) => {
         latestSettings = slice.settings;
         latestCloudStatus = slice.cloudStatus;
         latestContextWindowModels = slice.contextWindowModels || [];
+        accountTab.refs.renderAccount(slice.account, slice.quotas);
         if (slice.settings) {
           generalTab.refs.renderSettings(slice.settings);
           structureTab.refs.renderSettings(slice.settings);
@@ -117,7 +142,7 @@ export const SettingsView = defineComponent({
         settingsSubTab: st.settingsSubTab,
       }),
       (slice) => {
-        applyActiveSubTab(slice.settingsSubTab);
+        applyActiveSubTab(slice.settingsSubTab, slice.activeView);
         if (slice.activeView === 'settings') {
           syncAllTabs(latestSettings, latestCloudStatus);
         }
@@ -133,6 +158,7 @@ export const SettingsView = defineComponent({
         });
         generalTab.refs.refreshLabels();
         structureTab.refs.refreshLabels();
+        accountTab.refs.refreshLabels();
         otherTab.refs.refreshLabels();
         refreshScroll();
       }
@@ -145,6 +171,7 @@ export const SettingsView = defineComponent({
       subNavSwitch.destroy();
       generalTab.destroy();
       structureTab.destroy();
+      accountTab.destroy();
       otherTab.destroy();
       viewScrollbar.destroy();
     });
@@ -155,6 +182,7 @@ export const SettingsView = defineComponent({
         subNavSwitch,
         generalTab,
         structureTab,
+        accountTab,
         otherTab,
         viewScrollbar,
         // Convenience aliases for external callers / tests

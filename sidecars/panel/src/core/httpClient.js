@@ -57,7 +57,7 @@ export function deliverCdpBridgeResponses(responses) {
   return delivered;
 }
 
-function callViaCdpBridge(bridge, path, { method, body, signal }) {
+function callViaCdpBridge(bridge, path, { method, body, signal, cdpTimeoutMs }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       const abortErr = new Error('Request aborted');
@@ -79,7 +79,7 @@ function callViaCdpBridge(bridge, path, { method, body, signal }) {
       bridge.rpcPending.delete(reqId);
       cleanupQueueItem();
       reject(new Error('CDP bridge timeout'));
-    }, 8000);
+    }, cdpTimeoutMs);
 
     const onAbort = () => {
       clearTimeout(timeoutId);
@@ -118,7 +118,7 @@ function callViaCdpBridge(bridge, path, { method, body, signal }) {
   });
 }
 
-export async function callSidecarApi(path, { method = 'GET', body, abortKey = '' } = {}) {
+export async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTimeoutMs = 8000 } = {}) {
   const upperMethod = method.toUpperCase();
   const dedupKey = upperMethod === 'GET' && !abortKey ? path : '';
 
@@ -155,7 +155,7 @@ export async function callSidecarApi(path, { method = 'GET', body, abortKey = ''
     if (bridge) {
       headers['X-Usage-Monitor-Token'] = bridge.token;
       if (bridge.transportMode === 'cdp') {
-        return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal });
+        return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal, cdpTimeoutMs });
       }
     }
 
@@ -173,7 +173,7 @@ export async function callSidecarApi(path, { method = 'GET', body, abortKey = ''
       }
       // 当宿主环境的 CSP connect-src、混合内容策略或本地代理阻断 HTTP 直连时，无缝切至 CDP 通道
       bridge.transportMode = 'cdp';
-      return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal });
+      return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal, cdpTimeoutMs });
     }
     if (signal?.aborted) {
       const abortErr = new Error('Request aborted');

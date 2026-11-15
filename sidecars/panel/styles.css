@@ -3081,9 +3081,9 @@ input {
 
 /* --- src/styles/views-settings.css --- */
 /*
- * 模块化偏好设置三栏样式表 (views-settings.css).
+ * 模块化偏好设置样式表 (views-settings.css).
  * 包含：
- * 1. 顶部常规 / 结构 / 其他三栏切换导航条 (.settings-view-root, .settings-subnav-bar)
+ * 1. 顶部偏好设置切换导航条 (.settings-view-root, .settings-subnav-bar)
  * 2. 主题强调色色卡选择器 (.theme-color-picker, .theme-host-chip, .theme-swatch-btn)
  * 3. 结构页手风琴折叠面板 (.collapsible-section, .collapsible-trigger, .collapsible-body)
  * 4. 通用 + / - / ↑ / ↓ 自添加排序列表 (.editable-slot-list, .editable-slot-row, .slot-add-btn)
@@ -3113,7 +3113,8 @@ input {
 .settings-subnav-bar .segmented {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 3px;
 }
 
@@ -3429,6 +3430,60 @@ input {
   font-size: var(--fs-sm);
   color: var(--text-secondary);
   line-height: 1.35;
+}
+
+.settings-account-identity {
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.settings-account-list,
+.settings-account-form,
+.settings-account-form label {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.settings-account-list:empty {
+  display: none;
+}
+
+.settings-account-entry {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.settings-account-form label {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.settings-account-form input {
+  min-width: 0;
+  padding: var(--space-2);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.settings-account-form button {
+  justify-self: start;
+}
+
+.settings-account-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.settings-account-quota {
+  text-align: right;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-context-model .select-option-meta {

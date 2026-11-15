@@ -2,5 +2,7 @@
 node_modules/
 plan/
 *.log
+*.dpapi
+.account-test-*
 .DS_Store
 Thumbs.db

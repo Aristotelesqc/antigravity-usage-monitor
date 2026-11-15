@@ -187,7 +187,7 @@ function createUsageBucket() {
  *
  * @param {ReturnType<typeof createUsageBucket>} bucket
  * @param {object} st 步骤对象
- * @param {ReturnType<ReturnType<typeof createStepModelResolver>>} mInfo 模型信息
+ * @param {ReturnType<StepModelResolver>} mInfo 模型信息
  * @param {number|null} stepCost 单步美元成本（未知时为 `null`）
  * @param {string} cascadeId 会话标识
  */
@@ -389,7 +389,7 @@ export function buildScopedModelBreakdown(steps, resolveStepModel) {
  * @param {{
  *   filterOpts?: { range?: string, startMs?: number, endMs?: number },
  *   cycleAnchors?: { fiveHourResetMs?: number, weeklyResetMs?: number },
- *   currentAccountName?: string,
+ *   currentAccountName?: string|null,
  *   activeCascadeId?: string|null,
  *   activeFamilyCascadeIds?: Set<string>|null,
  *   resolveStepModel: StepModelResolver
@@ -502,9 +502,8 @@ export function aggregateMultiWindowUsage({
     const ownerAccount = ext.accountName || knownLive?.accountName || '';
     if (
       ownerAccount &&
-      currentAccountName &&
-      ownerAccount !== currentAccountName &&
-      !familySet.has(extCidLower)
+      currentAccountName !== '' &&
+      ownerAccount !== currentAccountName
     ) {
       continue;
     }
@@ -519,9 +518,8 @@ export function aggregateMultiWindowUsage({
   for (const [cidLower, entry] of allLiveByLower.entries()) {
     if (
       entry?.accountName &&
-      currentAccountName &&
-      entry.accountName !== currentAccountName &&
-      !familySet.has(cidLower)
+      currentAccountName !== '' &&
+      entry.accountName !== currentAccountName
     ) {
       continue;
     }

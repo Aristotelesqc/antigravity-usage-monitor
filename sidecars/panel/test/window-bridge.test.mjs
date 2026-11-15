@@ -317,9 +317,9 @@ test('CDP multi-window sync injects, skips healthy windows, hot-upgrades on vers
         }
         const ctx = windowContexts.get(this.targetId);
         const value = vm.runInContext(expr, ctx);
-        queueMicrotask(() =>
+        Promise.resolve(value).then((result) =>
           this._emit('message', {
-            data: JSON.stringify({ id: msg.id, result: { result: { value } } }),
+            data: JSON.stringify({ id: msg.id, result: { result: { value: result } } }),
           })
         );
       }
@@ -337,11 +337,13 @@ test('CDP multi-window sync injects, skips healthy windows, hot-upgrades on vers
       res.end(
         JSON.stringify([
           {
+            id: 'win1',
             type: 'page',
             url: 'https://127.0.0.1:61001/c/11111111-1111-1111-1111-111111111111',
             webSocketDebuggerUrl: `ws://127.0.0.1:${cdpPort}/devtools/page/win1`,
           },
           {
+            id: 'win2',
             type: 'page',
             url: 'https://127.0.0.1:61002/c/22222222-2222-2222-2222-222222222222',
             webSocketDebuggerUrl: `ws://127.0.0.1:${cdpPort}/devtools/page/win2`,
@@ -705,6 +707,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
 
   let reloadCalled = false;
   let currentBundleVer = 'ver-100';
+  let currentAccountEmail = 'test@example.com';
   let liveSubagentPollActive = false;
   const fetchedUrls = [];
   const fetchedHeaders = [];
@@ -769,6 +772,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
   };
   const mockSettings = { ...defaultMockSettings };
   let cacheRebuildCalls = 0;
+  let selectedEmail = '';
+  const accountRequests = [];
 
   const mockWindow = {
     innerWidth: 1440,
@@ -796,6 +801,17 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       const urlStr = String(url);
       fetchedUrls.push(urlStr);
       fetchedHeaders.push(opts.headers || {});
+      if (urlStr.endsWith('/api/accounts') || urlStr.endsWith('/api/accounts/update')) {
+        if (opts.method === 'POST') {
+          const update = JSON.parse(opts.body);
+          accountRequests.push(update);
+          if (update.action === 'quota') {
+            return { ok: true, status: 200, json: async () => ({ email: update.email, pools: [{ poolKey: 'Gemini', remainingPct: 70 }] }) };
+          }
+          if (update.action === 'switch') selectedEmail = update.email;
+        }
+        return { ok: true, status: 200, json: async () => ({ supported: true, accounts: ['next@example.com'], selectedEmail }) };
+      }
       if (urlStr.includes('/api/settings/reset') && String(opts.method || '').toUpperCase() === 'POST') {
         for (const k of Object.keys(mockSettings)) delete mockSettings[k];
         Object.assign(mockSettings, {
@@ -856,7 +872,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
             { id: 'MODEL_PLACEHOLDER_M432', label: 'Other', options: [] },
           ],
           cloudStatus: { updateAvailable: true, currentPluginVersion: '1.4.2', latestPluginVersion: '1.5.0' },
-          account: { tierName: 'Google AI Ultra', planName: 'Pro', totalConversations: 5 },
+          account: { status: 'signedIn', email: currentAccountEmail, tierName: 'Google AI Ultra', planName: 'Pro', totalConversations: 5 },
           runningConversations: [
             {
               cascadeId: 'bbbbbbbb-2222-3333-4444-cccccccccccc',
@@ -1195,7 +1211,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
                 poolKey: 'Gemini',
                 poolLabel: 'Gemini',
                 usedPct: 56,
-                remainingPct: 44,
+                remainingPct: currentAccountEmail === 'test@example.com' ? 44 : 0,
                 resetTime: new Date(Date.now() + 2 * 3600_000).toISOString(),
                 weeklyUsedPct: 74,
                 weeklyRemainingPct: 26,
@@ -1419,7 +1435,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(selectRoot.classList.contains('is-open'), true, 'CustomSelect stays open via composedPath');
     selectTrigger.dispatchEvent({ type: 'click', stopPropagation() {} });
 
-    // Verify modular 3-tab SettingsView (常规 / 结构 / 其他) & decoupled registries
+    // Verify modular 3-tab SettingsView (常规 / 结构 / 其他) with Account tab hidden
     const pillTabs = popoverEl.querySelectorAll('.pill-tab');
     pillTabs[pillTabs.length - 1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
@@ -1427,10 +1443,12 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const allPanes = popoverEl.querySelectorAll('.view-pane');
     const settingsRoot = popoverEl.querySelector('.settings-view-root');
     const subNavBtns = settingsRoot.querySelector('.settings-subnav-bar').querySelectorAll('.seg-btn');
-    assert.equal(subNavBtns.length, 3, 'SettingsView renders 3 sub-tabs: 常规 / 结构 / 其他');
-    assert.equal(subNavBtns[0].textContent, '常规');
-    assert.equal(subNavBtns[1].textContent, '结构');
-    assert.equal(subNavBtns[2].textContent, '其他');
+    assert.deepEqual(subNavBtns.map((button) => button.textContent), ['常规', '结构', '其他']);
+    assert.match(
+      stylesCss,
+      /\.settings-subnav-bar\s+\.segmented\s*\{[^}]*grid-auto-flow:\s*column;[^}]*grid-auto-columns:\s*minmax\(0,\s*1fr\);/,
+      'Settings subnav uses auto-sized equal columns regardless of visible tab count'
+    );
     const [generalPane, structurePane, otherPane] = settingsRoot.querySelectorAll('.settings-tab-stack');
     assert.equal(generalPane.hasAttribute('hidden'), false, 'General tab active by default');
     assert.equal(structurePane.hasAttribute('hidden'), true);
@@ -1746,7 +1764,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(mockSettings.stepTableColumns.length, 7);
 
-    // --- Tab 2: 其他 (modelFormat, orchestratorId, contextBaseline reserved pill, cache rebuild, reset all) ---
+    // --- 其他 (model format, context limits, cache rebuild, reset) ---
     subNavBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     assert.equal(otherPane.hasAttribute('hidden'), false);
@@ -2179,6 +2197,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
 
     // Verify bundle version bump NEVER calls window.location.reload() in overlay mode
     currentBundleVer = 'ver-200';
+    currentAccountEmail = 'next@example.com';
     mockLocation.pathname = '/c/cccccccc-4444-5555-6666-dddddddddddd';
     for (const fn of winListeners.get('popstate') || []) fn({});
     await new Promise((r) => setTimeout(r, 40));
@@ -2369,6 +2388,7 @@ test('Multi-port CDP discovery tolerates stale 2.0 DevToolsActivePort while inje
   // Live Antigravity IDE CDP server exposing workbench.html + workbench-jetski-agent.html + ignored sharedProcess.html
   const ideContextObj = {
     location: { pathname: '/out/vs/code/electron-browser/workbench/workbench.html' },
+    setTimeout,
     document: {
       querySelector(sel) {
         if (sel.includes('conversation-view')) {

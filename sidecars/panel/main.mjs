@@ -14,6 +14,7 @@
 import { Response, SidecarApp } from 'sidecar_sdk';
 import {
   bootWindowBridgeRuntime,
+  executeAccountCredentialAction,
   executeCloudSyncAction,
   executeModelContextWindowAction,
   executePluginUpdateAction,
@@ -100,6 +101,24 @@ app.api('/api/settings', (data, req) => {
   }
   return out.updated;
 });
+
+async function serveAccountCredentials(data, req) {
+  if (!isLocalHostRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
+      status: 403,
+      contentType: 'application/json',
+    });
+  }
+  const out = await executeAccountCredentialAction(data);
+  return new Response(out.body, {
+    status: out.status,
+    contentType: out.contentType,
+    headers: out.headers,
+  });
+}
+
+app.api('/api/accounts', (_data, req) => serveAccountCredentials(undefined, req), 'GET');
+app.api('/api/accounts/update', serveAccountCredentials, 'POST');
 
 app.api('/api/context-window', async (data, req) => {
   if (!isLocalHostRequest(req)) {

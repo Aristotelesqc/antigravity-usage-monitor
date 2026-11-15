@@ -402,6 +402,36 @@ test('switching accounts within 10s immediately invalidates quotaSummaryCache', 
   assert.equal(second.quotas.pools[0].weeklyRemainingPct, 8.7);
 });
 
+test('late quota results from another account cannot replace the current account cache', async () => {
+  const quota = (remainingFraction) => ({ groups: [{
+    displayName: 'Gemini Models',
+    buckets: [{ bucketId: 'gemini-weekly', window: 'weekly', remainingFraction }],
+  }] });
+  const pro = { name: 'Same name', userTier: { id: 'g1-pro-tier', name: 'Google AI Pro' } };
+  let resolvePrevious;
+  const h = backendHarness({
+    userStatus: { ...pro, email: 'a@example.com' },
+    quotaSummary: new Promise((resolve) => { resolvePrevious = resolve; }),
+  });
+  const previous = h.buildTelemetryPayloadInternal('none');
+  while (!h.state.calls.some(({ method }) => method === 'RetrieveUserQuotaSummary')) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  h.state.userStatus = { ...pro, email: 'b@example.com' };
+  h.state.quotaSummary = quota(0.24);
+  const switched = await h.buildTelemetryPayloadInternal('none');
+  assert.equal(switched.account.email, 'b@example.com');
+  assert.equal(switched.quotas.pools.find(({ poolKey }) => poolKey === 'Gemini').weeklyRemainingPct, 24);
+
+  resolvePrevious(quota(0.75));
+  const stale = await previous;
+  assert.equal(stale.quotas.meta.hasOfficialData, false);
+  const refreshed = await h.buildTelemetryPayloadInternal('none');
+  assert.equal(refreshed.account.email, 'b@example.com');
+  assert.equal(refreshed.quotas.pools.find(({ poolKey }) => poolKey === 'Gemini').weeklyRemainingPct, 24);
+});
+
 test('Orchestrator quota pool binding follows active phase: Carbon/Argon while planning, Gemini when offloaded to Hydrogen', async () => {
   const ORCH_CARBON = 'MODEL_PLACEHOLDER_M667';
   const ORCH_ARGON = 'MODEL_PLACEHOLDER_M681';

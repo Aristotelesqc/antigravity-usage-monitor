@@ -8,6 +8,7 @@
 
 import { readFileSync, promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
+import { handleAccountCredentialAction } from './account-switch.mjs';
 import {
   HERE,
   SETTINGS_FILE,
@@ -337,12 +338,28 @@ export async function executePluginUpdateAction() {
   };
 }
 
+export async function executeAccountCredentialAction(data) {
+  const result = await handleAccountCredentialAction(data);
+  return {
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'Cache-Control': 'no-store' },
+    body: JSON.stringify(result),
+  };
+}
+
 export async function dispatchBridgeApiRequest(pathname, method, data, opts = undefined) {
   if (pathname === '/api/telemetry' && method === 'GET') {
     return executeTelemetryAction(data, opts);
   }
   if (pathname === '/api/settings' && method === 'POST') {
     return executeSettingsAction(data);
+  }
+  if (pathname === '/api/accounts' && method === 'GET') {
+    return executeAccountCredentialAction();
+  }
+  if (pathname === '/api/accounts/update' && method === 'POST') {
+    return executeAccountCredentialAction(data);
   }
   if (pathname === '/api/context-window' && method === 'POST') {
     return executeModelContextWindowAction(data);

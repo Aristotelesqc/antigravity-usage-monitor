@@ -20,7 +20,6 @@ import {
   computeRuntimeCodeVersion,
   inFlightRequests,
   loadSettings,
-  quotaSummaryCache,
   roundMetric,
   trajectoryCache,
 } from './config.mjs';
@@ -393,38 +392,16 @@ export async function buildTelemetryPayloadInternal(
   filterOpts = {}
 ) {
   const settings = loadSettings();
-  const [userStatusRes, allTrajRes, initialOfficialQuotaInfo, contextModelCatalog] = await Promise.all([
-    callLsRpc('GetUserStatus', {}).catch(() => ({})),
+  const userStatus = await callLsRpc('GetUserStatus', {}).then((data) => data?.userStatus).catch(() => null);
+  const currentAccountName = userStatus?.email || userStatus?.name || '';
+  const accountStatus = currentAccountName ? 'signedIn' :
+    userStatus && !userStatus.userTier && !userStatus.planStatus ? 'signedOut' : 'unknown';
+  const accountScope = accountStatus === 'signedOut' ? null : currentAccountName;
+  const [allTrajRes, officialQuotaInfo, contextModelCatalog] = await Promise.all([
     callLsRpc('GetAllCascadeTrajectories', {}).catch(() => ({})),
-    getOfficialQuotaSummary(forceQuotaRefresh),
+    userStatus ? getOfficialQuotaSummary(forceQuotaRefresh, currentAccountName) : null,
     getContextModelCatalog(),
   ]);
-
-  const userStatus = userStatusRes?.userStatus || {};
-  const currentAccountName = userStatus?.email || userStatus?.name || '';
-  let officialQuotaInfo = initialOfficialQuotaInfo;
-
-  // 若检测到账号发生切换：仅当并发的 initialOfficialQuotaInfo 命中了旧账号本地缓存 (fromCache === true) 时才需清空并重刷；
-  // 若本轮已经实时穿透请求了上游 RPC (fromCache === false)，直接更新归属账号即可，避免二次重复 RPC
-  const accountChanged = Boolean(
-    currentAccountName &&
-      quotaSummaryCache.accountName &&
-      quotaSummaryCache.accountName !== currentAccountName
-  );
-  if (accountChanged) {
-    if (initialOfficialQuotaInfo?.fromCache) {
-      quotaSummaryCache.data = null;
-      quotaSummaryCache.ts = 0;
-      quotaSummaryCache.lastAttemptTs = 0;
-      quotaSummaryCache.error = null;
-      quotaSummaryCache.accountName = currentAccountName;
-      officialQuotaInfo = await getOfficialQuotaSummary(true);
-    } else {
-      quotaSummaryCache.accountName = currentAccountName;
-    }
-  } else if (currentAccountName && officialQuotaInfo?.data && !officialQuotaInfo.refreshFailed) {
-    quotaSummaryCache.accountName = currentAccountName;
-  }
 
   const officialQuota = officialQuotaInfo?.data || null;
   const clientConfigs = userStatus?.cascadeModelConfigData?.clientModelConfigs || [];
@@ -439,7 +416,7 @@ export async function buildTelemetryPayloadInternal(
   const { conversations, activeConvSummary, activeCascadeId } =
     await enumerateAndSyncConversations({
       summariesObj: allTrajRes?.trajectorySummaries || {},
-      currentAccountName,
+      currentAccountName: accountScope,
       requestedConvId,
       forceRefresh: forceQuotaRefresh,
     });
@@ -734,7 +711,7 @@ export async function buildTelemetryPayloadInternal(
   } = aggregateMultiWindowUsage({
     filterOpts,
     cycleAnchors,
-    currentAccountName,
+    currentAccountName: accountScope,
     activeCascadeId,
     activeFamilyCascadeIds,
     resolveStepModel,
@@ -1081,6 +1058,8 @@ export async function buildTelemetryPayloadInternal(
     }),
     cloudStatus: getCloudStatus(),
     account: {
+      status: accountStatus,
+      email: userStatus?.email || '',
       name: userStatus?.name || '',
       tierName: rawTierName || 'Google AI',
       planName: resolvedPlanName,
