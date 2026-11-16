@@ -44,6 +44,7 @@ import { getVisibleMonitorView, uiStore } from '../../store/uiStore.js';
 import { CollapsibleSection } from '../../components/settings/CollapsibleSection.js';
 import { EditableSlotList } from '../../components/settings/EditableSlotList.js';
 import { buildStructurePreviewTelemetry } from '../../components/settings/structurePreviewMock.js';
+import { CustomNumberInput } from '../../components/ui/CustomNumberInput.js';
 import { CustomSelect } from '../../components/ui/CustomSelect.js';
 import { SegmentedControl } from '../../components/ui/SegmentedControl.js';
 import { CapsuleBarWidget } from '../../components/widgets/CapsuleBarWidget.js';
@@ -243,18 +244,15 @@ export const SettingsStructureTab = defineComponent({
       },
     });
 
-    const popoverWidthInput = h('input', {
-      type: 'number',
-      className: 'settings-text-input',
-      min: String(MIN_CLIENT_POPOVER_WIDTH),
-      max: String(MAX_CLIENT_POPOVER_WIDTH),
-      step: '10',
-      value: String(draftPopoverWidth),
-      'aria-label': t('settings.str.popoverWidthLabel'),
-      onChange: () => {
-        const nextWidth = normalizeClientPopoverWidth(popoverWidthInput.value);
+    const popoverWidthStepper = CustomNumberInput({
+      modelValue: draftPopoverWidth,
+      min: MIN_CLIENT_POPOVER_WIDTH,
+      max: MAX_CLIENT_POPOVER_WIDTH,
+      step: 10,
+      ariaLabel: t('settings.str.popoverWidthLabel'),
+      onUpdateModelValue: (val) => {
+        const nextWidth = normalizeClientPopoverWidth(val);
         draftPopoverWidth = nextWidth;
-        popoverWidthInput.value = String(nextWidth);
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
@@ -262,18 +260,12 @@ export const SettingsStructureTab = defineComponent({
           popoverWidth: draftPopoverWidth,
         });
       },
-      onKeydown: (e) => {
-        if (e?.key === 'Enter') {
-          e.preventDefault();
-          popoverWidthInput.blur();
-        }
-      },
     });
 
     const popoverWidthNumWrap = h(
       'span',
       { className: 'settings-number-wrap', hidden: draftPopoverWidthMode !== 'custom' },
-      [popoverWidthInput, h('span', { className: 'settings-number-unit', text: 'px' })]
+      [popoverWidthStepper.el, h('span', { className: 'settings-number-unit', text: 'px' })]
     );
 
     const popoverWidthModeToggle = SegmentedControl({
@@ -346,7 +338,7 @@ export const SettingsStructureTab = defineComponent({
         draftWindowMountMode = 'dual';
         draftPopoverWidthMode = 'auto';
         draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
-        popoverWidthInput.value = String(DEFAULT_CLIENT_POPOVER_WIDTH);
+        popoverWidthStepper.setProps({ modelValue: DEFAULT_CLIENT_POPOVER_WIDTH });
         draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
         draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -407,8 +399,11 @@ export const SettingsStructureTab = defineComponent({
         options: getPopoverWidthModeOptions(),
       });
       patchAttr(popoverWidthNumWrap, 'hidden', draftPopoverWidthMode !== 'custom');
-      if (document?.activeElement !== popoverWidthInput) {
-        popoverWidthInput.value = String(draftPopoverWidth);
+      if (document?.activeElement !== popoverWidthStepper.refs.textField) {
+        popoverWidthStepper.setProps({
+          modelValue: draftPopoverWidth,
+          ariaLabel: t('settings.str.popoverWidthLabel'),
+        });
       }
       multiSessionToggle.setProps({
         modelValue: draftShowTopbarMulti ? 'show' : 'hide',
@@ -1029,7 +1024,7 @@ export const SettingsStructureTab = defineComponent({
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
       patchText(popoverWidthLabelEl, t('settings.str.popoverWidthLabel'));
       patchText(popoverWidthHintEl, t('settings.str.popoverWidthHint'));
-      patchAttr(popoverWidthInput, 'aria-label', t('settings.str.popoverWidthLabel'));
+      popoverWidthStepper.setProps({ ariaLabel: t('settings.str.popoverWidthLabel') });
       patchText(multiToggleLabelEl, t('settings.str.multiToggle'));
       patchText(cliCapsuleLabelEl, t('settings.str.cliCapsuleToggle'));
       patchText(capsuleSlotsLabelEl, t('settings.str.capsuleSlotsLabel'));
@@ -1097,6 +1092,7 @@ export const SettingsStructureTab = defineComponent({
       overviewPreviewHost.destroy();
       stepTablePreview.destroy();
       windowMountSelect.destroy();
+      popoverWidthStepper.destroy();
       popoverWidthModeToggle.destroy();
       multiSessionToggle.destroy();
       cliCapsuleToggle.destroy();

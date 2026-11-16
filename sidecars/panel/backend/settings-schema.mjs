@@ -508,6 +508,7 @@ export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   showStepSpeedColor: false,
   stepTokenComboFormat: DEFAULT_STEP_TOKEN_COMBO_FORMAT,
   stepTableColumns: DEFAULT_STEP_TABLE_COLUMNS,
+  contextWindowRiskAccepted: false,
   modelContextWindows: Object.freeze({}),
 });
 
@@ -543,6 +544,7 @@ export function createDefaultSettingsObject() {
     showStepSpeedColor: DEFAULT_SETTINGS_SCHEMA.showStepSpeedColor,
     stepTokenComboFormat: DEFAULT_SETTINGS_SCHEMA.stepTokenComboFormat,
     stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
+    contextWindowRiskAccepted: DEFAULT_SETTINGS_SCHEMA.contextWindowRiskAccepted,
     modelContextWindows: {},
   };
 }
@@ -600,6 +602,7 @@ export function normalizeFullSettings(rawInput) {
     showStepSpeedColor: safeRaw.showStepSpeedColor === true,
     stepTokenComboFormat: normalizeStepTokenComboFormat(safeRaw.stepTokenComboFormat),
     stepTableColumns: normalizeStepTableColumns(safeRaw.stepTableColumns),
+    contextWindowRiskAccepted: safeRaw.contextWindowRiskAccepted === true,
     modelContextWindows: normalizeModelContextWindows(safeRaw.modelContextWindows),
   };
 }

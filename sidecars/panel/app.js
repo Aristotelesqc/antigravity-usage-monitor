@@ -759,6 +759,9 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.orchCompact': '精简代号 (如 orchestrator-argon)',
   'settings.oth.orchFull': '原始完整 ID (如 gemini-pro-orchestrator)',
   'settings.oth.baselineTitle': '模型上下文设置',
+  'settings.oth.ctxRiskTitle': '非官方能力风险提示',
+  'settings.oth.ctxRiskBody': 'Google 官方并未授权在 Antigravity App / IDE 中修改模型上下文上限。擅自修改可能导致 Antigravity 或 GCP 服务被禁用，甚至触发账号封禁；启用该功能即默认由你自行承担全部风险。你最好清楚自己在做什么！',
+  'settings.oth.ctxRiskAcceptBtn': '我已知晓风险，继续使用',
   'settings.oth.ctxModel': '模型',
   'settings.oth.ctxBaselineLabel': '上下文窗口上限',
   'settings.oth.ctxChooseModel': '选择模型',
@@ -1280,6 +1283,9 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.orchCompact': 'Compact Alias (e.g. orchestrator-argon)',
   'settings.oth.orchFull': 'Full Upstream ID (e.g. gemini-pro-orchestrator)',
   'settings.oth.baselineTitle': 'Model Context Settings',
+  'settings.oth.ctxRiskTitle': 'Unofficial Override Risk Warning',
+  'settings.oth.ctxRiskBody': 'Google has not authorized modifying model context limits in Antigravity App / IDE. Altering context limits may get your Antigravity access, GCP services, or Google account disabled or banned; enabling this feature means you assume all associated risks. Make sure you know what you are doing!',
+  'settings.oth.ctxRiskAcceptBtn': 'I Understand the Risk, Unlock',
   'settings.oth.ctxModel': 'Model',
   'settings.oth.ctxBaselineLabel': 'Context Window Limit',
   'settings.oth.ctxChooseModel': 'Choose a model',
@@ -2978,6 +2984,9 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
   if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
   if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if (Boolean(pSet?.contextWindowRiskAccepted) !== Boolean(nSet?.contextWindowRiskAccepted)) {
+    return false;
+  }
   if (
     JSON.stringify(pSet?.modelContextWindows) !== JSON.stringify(nSet?.modelContextWindows) ||
     JSON.stringify(prev.contextWindowModels) !== JSON.stringify(next.contextWindowModels)
@@ -3727,6 +3736,9 @@ async function saveSettingsPatch(patch) {
   if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidth')) {
     safePatch.popoverWidth = normalizeClientPopoverWidth(safePatch.popoverWidth);
   }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'contextWindowRiskAccepted')) {
+    safePatch.contextWindowRiskAccepted = Boolean(safePatch.contextWindowRiskAccepted);
+  }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
     safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);
   }
@@ -4232,10 +4244,6 @@ const CustomSelect = defineComponent({
 
     function toggleOpen(nextOpen) {
       isOpen = Boolean(nextOpen);
-      patchClasses(rootEl, { 'is-open': isOpen });
-      patchAttr(triggerBtn, 'aria-expanded', isOpen ? 'true' : 'false');
-      patchAttr(menuEl, 'hidden', !isOpen);
-      patchSvgIcon(chevronIcon, isOpen ? 'chevron-up' : 'chevron-down');
       if (isOpen) {
         const opts = getProps().options || [];
         const selSet = getSelectedSet();
@@ -4245,6 +4253,10 @@ const CustomSelect = defineComponent({
         );
         renderMenuOptions();
       }
+      patchClasses(rootEl, { 'is-open': isOpen });
+      patchAttr(triggerBtn, 'aria-expanded', isOpen ? 'true' : 'false');
+      patchAttr(menuEl, 'hidden', !isOpen);
+      patchSvgIcon(chevronIcon, isOpen ? 'chevron-up' : 'chevron-down');
     }
 
     function chooseOption(option) {
@@ -4539,6 +4551,7 @@ const CustomNumberInput = defineComponent({
           commitManualInput();
         }
       },
+      onChange: () => commitManualInput(),
       onBlur: () => commitManualInput(),
     });
 
@@ -4564,12 +4577,13 @@ const CustomNumberInput = defineComponent({
     }
 
     function syncFieldDisplay(val = getProps().modelValue) {
-      const { min, max } = getProps();
+      const { min, max, ariaLabel } = getProps();
       const normalized = clampValue(val);
       if (textField.value !== String(normalized)) {
         textField.value = String(normalized);
       }
       patchAttr(textField, 'aria-valuenow', normalized);
+      if (ariaLabel) patchAttr(textField, 'aria-label', ariaLabel);
       if (Number.isFinite(min)) patchAttr(textField, 'aria-valuemin', min);
       if (Number.isFinite(max)) patchAttr(textField, 'aria-valuemax', max);
     }
@@ -13563,18 +13577,15 @@ const SettingsStructureTab = defineComponent({
       },
     });
 
-    const popoverWidthInput = h('input', {
-      type: 'number',
-      className: 'settings-text-input',
-      min: String(MIN_CLIENT_POPOVER_WIDTH),
-      max: String(MAX_CLIENT_POPOVER_WIDTH),
-      step: '10',
-      value: String(draftPopoverWidth),
-      'aria-label': t('settings.str.popoverWidthLabel'),
-      onChange: () => {
-        const nextWidth = normalizeClientPopoverWidth(popoverWidthInput.value);
+    const popoverWidthStepper = CustomNumberInput({
+      modelValue: draftPopoverWidth,
+      min: MIN_CLIENT_POPOVER_WIDTH,
+      max: MAX_CLIENT_POPOVER_WIDTH,
+      step: 10,
+      ariaLabel: t('settings.str.popoverWidthLabel'),
+      onUpdateModelValue: (val) => {
+        const nextWidth = normalizeClientPopoverWidth(val);
         draftPopoverWidth = nextWidth;
-        popoverWidthInput.value = String(nextWidth);
         syncMountSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(mountSection, {
@@ -13582,18 +13593,12 @@ const SettingsStructureTab = defineComponent({
           popoverWidth: draftPopoverWidth,
         });
       },
-      onKeydown: (e) => {
-        if (e?.key === 'Enter') {
-          e.preventDefault();
-          popoverWidthInput.blur();
-        }
-      },
     });
 
     const popoverWidthNumWrap = h(
       'span',
       { className: 'settings-number-wrap', hidden: draftPopoverWidthMode !== 'custom' },
-      [popoverWidthInput, h('span', { className: 'settings-number-unit', text: 'px' })]
+      [popoverWidthStepper.el, h('span', { className: 'settings-number-unit', text: 'px' })]
     );
 
     const popoverWidthModeToggle = SegmentedControl({
@@ -13666,7 +13671,7 @@ const SettingsStructureTab = defineComponent({
         draftWindowMountMode = 'dual';
         draftPopoverWidthMode = 'auto';
         draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
-        popoverWidthInput.value = String(DEFAULT_CLIENT_POPOVER_WIDTH);
+        popoverWidthStepper.setProps({ modelValue: DEFAULT_CLIENT_POPOVER_WIDTH });
         draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
         draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -13727,8 +13732,11 @@ const SettingsStructureTab = defineComponent({
         options: getPopoverWidthModeOptions(),
       });
       patchAttr(popoverWidthNumWrap, 'hidden', draftPopoverWidthMode !== 'custom');
-      if (document?.activeElement !== popoverWidthInput) {
-        popoverWidthInput.value = String(draftPopoverWidth);
+      if (document?.activeElement !== popoverWidthStepper.refs.textField) {
+        popoverWidthStepper.setProps({
+          modelValue: draftPopoverWidth,
+          ariaLabel: t('settings.str.popoverWidthLabel'),
+        });
       }
       multiSessionToggle.setProps({
         modelValue: draftShowTopbarMulti ? 'show' : 'hide',
@@ -14349,7 +14357,7 @@ const SettingsStructureTab = defineComponent({
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
       patchText(popoverWidthLabelEl, t('settings.str.popoverWidthLabel'));
       patchText(popoverWidthHintEl, t('settings.str.popoverWidthHint'));
-      patchAttr(popoverWidthInput, 'aria-label', t('settings.str.popoverWidthLabel'));
+      popoverWidthStepper.setProps({ ariaLabel: t('settings.str.popoverWidthLabel') });
       patchText(multiToggleLabelEl, t('settings.str.multiToggle'));
       patchText(cliCapsuleLabelEl, t('settings.str.cliCapsuleToggle'));
       patchText(capsuleSlotsLabelEl, t('settings.str.capsuleSlotsLabel'));
@@ -14417,6 +14425,7 @@ const SettingsStructureTab = defineComponent({
       overviewPreviewHost.destroy();
       stepTablePreview.destroy();
       windowMountSelect.destroy();
+      popoverWidthStepper.destroy();
       popoverWidthModeToggle.destroy();
       multiSessionToggle.destroy();
       cliCapsuleToggle.destroy();
@@ -14724,6 +14733,8 @@ const SettingsOtherTab = defineComponent({
   setup({ onCleanup, getProps }) {
     let draftModelDisplayMode = 'short';
     let draftOrchestratorIdMode = 'compact';
+    let draftContextRiskAccepted = false;
+    let acceptingContextRisk = false;
     let latestSettings = null;
     let contextWindowModels = [];
     let contextModelId = '';
@@ -14849,7 +14860,7 @@ const SettingsOtherTab = defineComponent({
       className: 'settings-context-model',
       options: [],
       onUpdateModelValue: (id) => {
-        if (savingContextWindow) return;
+        if (!draftContextRiskAccepted || savingContextWindow) return;
         contextModelId = id;
         contextFeedback = '';
         renderContextWindows();
@@ -14858,7 +14869,7 @@ const SettingsOtherTab = defineComponent({
     const ctxWindowSelect = CustomSelect({
       options: [],
       onUpdateModelValue: async (value) => {
-        if (savingContextWindow || !contextModelId) return;
+        if (!draftContextRiskAccepted || savingContextWindow || !contextModelId) return;
         savingContextWindow = true;
         contextFeedback = 'settings.saving';
         renderContextWindows();
@@ -14876,8 +14887,82 @@ const SettingsOtherTab = defineComponent({
     });
     const ctxModelRow = h('div', { className: 'form-row' }, [ctxModelLabel, ctxModelSelect.el]);
     const ctxWindowRow = h('div', { className: 'form-row' }, [ctxWindowLabel, ctxWindowSelect.el]);
+    const ctxControlsBody = h('div', { className: 'ctx-controls-body is-locked' }, [
+      ctxModelRow,
+      ctxWindowRow,
+      h('div', { className: 'form-row' }, [ctxHint]),
+    ]);
+
+    const ctxRiskTitleEl = h('strong', {
+      className: 'ctx-risk-title',
+      text: t('settings.oth.ctxRiskTitle'),
+    });
+    const ctxRiskBodyEl = h('p', {
+      className: 'ctx-risk-desc',
+      text: t('settings.oth.ctxRiskBody'),
+    });
+    const ctxRiskAcceptBtnText = h('span', { text: t('settings.oth.ctxRiskAcceptBtn') });
+    const ctxRiskAcceptBtn = h(
+      'button',
+      {
+        type: 'button',
+        className: 'btn-secondary btn-danger-confirm ctx-risk-accept-btn',
+        onClick: async () => {
+          if (acceptingContextRisk || draftContextRiskAccepted) return;
+          acceptingContextRisk = true;
+          draftContextRiskAccepted = true;
+          latestSettings = { ...(latestSettings || {}), contextWindowRiskAccepted: true };
+          contextFeedback = 'settings.saving';
+          renderContextWindows();
+          try {
+            await saveSettingsPatch({ contextWindowRiskAccepted: true });
+            contextFeedback = 'settings.saved';
+          } catch {
+            draftContextRiskAccepted = false;
+            latestSettings = { ...(latestSettings || {}), contextWindowRiskAccepted: false };
+            contextFeedback = 'settings.saveFailed';
+          } finally {
+            acceptingContextRisk = false;
+            renderContextWindows();
+          }
+        },
+      },
+      [createSvgIcon('warning', { size: 12 }), ctxRiskAcceptBtnText]
+    );
+    const ctxRiskMask = h(
+      'div',
+      {
+        className: 'ctx-risk-mask',
+        role: 'region',
+        'aria-label': t('settings.oth.ctxRiskTitle'),
+      },
+      [
+        h('div', { className: 'ctx-risk-head' }, [
+          createSvgIcon('warning', { size: 14, className: 'ctx-risk-icon' }),
+          ctxRiskTitleEl,
+        ]),
+        ctxRiskBodyEl,
+        ctxRiskAcceptBtn,
+      ]
+    );
+    const ctxRiskStage = h('div', { className: 'ctx-risk-stage' }, [ctxControlsBody, ctxRiskMask]);
 
     function renderContextWindows() {
+      const unlocked = Boolean(draftContextRiskAccepted);
+      if (!unlocked) {
+        ctxModelSelect.close();
+        ctxWindowSelect.close();
+      }
+      patchClasses(ctxControlsBody, { 'is-locked': !unlocked });
+      patchAttr(ctxControlsBody, 'inert', !unlocked);
+      patchAttr(ctxControlsBody, 'aria-hidden', unlocked ? null : 'true');
+      patchAttr(ctxRiskMask, 'hidden', unlocked);
+      patchAttr(ctxRiskMask, 'aria-label', t('settings.oth.ctxRiskTitle'));
+      patchText(ctxRiskTitleEl, t('settings.oth.ctxRiskTitle'));
+      patchText(ctxRiskBodyEl, t('settings.oth.ctxRiskBody'));
+      patchText(ctxRiskAcceptBtnText, t('settings.oth.ctxRiskAcceptBtn'));
+      patchAttr(ctxRiskAcceptBtn, 'disabled', acceptingContextRisk);
+
       const saved = latestSettings?.modelContextWindows || {};
       const models = new Map(contextWindowModels.map((model) => [model.id, model]));
       const knownIds = new Set(contextWindowModels.flatMap(({ id, members = [] }) => [id, ...members]));
@@ -14936,8 +15021,8 @@ const SettingsOtherTab = defineComponent({
         ],
       });
       ctxWindowSelect.setProps({ modelValue: selected, options: choices });
-      patchAttr(ctxModelSelect.refs.triggerBtn, 'disabled', savingContextWindow);
-      patchAttr(ctxWindowSelect.refs.triggerBtn, 'disabled', savingContextWindow || (!options.length && !selected));
+      patchAttr(ctxModelSelect.refs.triggerBtn, 'disabled', !unlocked || savingContextWindow);
+      patchAttr(ctxWindowSelect.refs.triggerBtn, 'disabled', !unlocked || savingContextWindow || (!options.length && !selected));
       patchAttr(ctxModelSelect.refs.triggerBtn, 'aria-label', t('settings.oth.ctxModel'));
       patchAttr(ctxWindowSelect.refs.triggerBtn, 'aria-label', t('settings.oth.ctxBaselineLabel'));
       patchAttr(ctxModelRow, 'hidden', !models.size);
@@ -14961,9 +15046,7 @@ const SettingsOtherTab = defineComponent({
         ]),
         ctxStatus,
       ]),
-      ctxModelRow,
-      ctxWindowRow,
-      h('div', { className: 'form-row' }, [ctxHint]),
+      ctxRiskStage,
     ]);
     renderContextWindows();
 
@@ -15104,6 +15187,9 @@ const SettingsOtherTab = defineComponent({
         settings.showUpstreamModel
       );
       draftOrchestratorIdMode = normalizeClientOrchestratorIdMode(settings.orchestratorIdMode);
+      if (!acceptingContextRisk) {
+        draftContextRiskAccepted = Boolean(settings.contextWindowRiskAccepted);
+      }
       stepModelSelect.setProps({
         modelValue: draftModelDisplayMode,
         options: getStepModelDisplayOptions(),

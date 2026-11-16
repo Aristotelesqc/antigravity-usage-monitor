@@ -737,15 +737,101 @@
   display: none !important;
 }
 
-.settings-number-wrap .settings-text-input {
-  width: 68px;
+.settings-number-wrap .number-input {
   height: 24px;
-  padding: 0 6px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+  background: var(--surface-subtle);
+}
+
+.settings-number-wrap .num-step-btn {
+  width: 22px;
+  background: transparent;
+}
+
+.settings-number-wrap .num-field {
+  width: 48px;
+  min-width: 48px;
+  padding: 0 4px;
+  text-align: center;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: var(--fs-md);
 }
 
 .settings-number-unit {
   font-size: var(--fs-sm);
   color: var(--text-secondary);
+}
+
+/* --- 其他页：模型上下文设置风险警告遮罩 --- */
+.ctx-risk-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  position: relative;
+}
+
+.ctx-controls-body {
+  grid-area: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  transition:
+    filter var(--dur-fast) var(--ease-fast),
+    opacity var(--dur-fast) var(--ease-fast);
+}
+
+.ctx-controls-body.is-locked {
+  filter: blur(4px);
+  opacity: 0.24;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ctx-risk-mask {
+  grid-area: 1 / 1;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xs);
+  border: 1px solid color-mix(in srgb, var(--metric-warn) 42%, var(--border-hairline));
+  background: color-mix(in srgb, var(--surface-panel) 88%, var(--metric-warn) 7%);
+}
+
+.ctx-risk-mask[hidden] {
+  display: none !important;
+}
+
+.ctx-risk-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--metric-warn);
+}
+
+.ctx-risk-icon {
+  color: var(--metric-warn);
+  flex-shrink: 0;
+}
+
+.ctx-risk-title {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--metric-warn);
+}
+
+.ctx-risk-desc {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.ctx-risk-accept-btn {
+  margin-top: 2px;
+  height: 26px;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-md);
 }

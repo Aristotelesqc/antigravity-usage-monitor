@@ -798,6 +798,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     weeklyLimitMode: 'official',
     weeklyTokenBudget: 150000000,
     weeklyCostBudget: 100,
+    contextWindowRiskAccepted: false,
     modelContextWindows: {},
   };
   const mockSettings = { ...defaultMockSettings };
@@ -1708,11 +1709,13 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.enableWindowOverlay, true, 'enableWindowOverlay persisted back to true');
     assert.equal(previewCapsuleBar.getAttribute('data-mount-mode'), 'dual');
 
-    // Toggle popover width mode (auto -> custom 640px -> auto), topbar multi-session switch (show -> hide -> show), and CLI bottom capsule switch (on -> off -> on)
+    // Toggle popover width mode (auto -> custom 640px -> step +10px -> auto), topbar multi-session switch (show -> hide -> show), and CLI bottom capsule switch (on -> off -> on)
     const topbarSegBtns = sec0.querySelectorAll('.seg-btn');
     assert.equal(topbarSegBtns.length, 6, 'Popover width + Topbar multi-session + CLI bottom capsule toggles render 6 buttons');
-    const popWidthInput = sec0.querySelector('.settings-text-input');
-    assert.ok(popWidthInput, 'Numeric popover width input exists');
+    const popWidthInput = sec0.querySelector('.num-field');
+    const popWidthStepBtns = sec0.querySelectorAll('.num-step-btn');
+    assert.ok(popWidthInput, 'CustomNumberInput field exists without native <input type="number">');
+    assert.equal(popWidthStepBtns.length, 2, 'CustomNumberInput renders - / + step buttons');
     topbarSegBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.popoverWidthMode, 'custom', 'Popover width mode switches to custom');
@@ -1721,6 +1724,10 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.popoverWidth, 640, 'Custom popover width persisted');
     assert.equal(popoverEl.style.width, '640px', 'Popover width immediately reflects custom 640px');
+    popWidthStepBtns[1].dispatchEvent({ type: 'click', preventDefault() {}, stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.popoverWidth, 650, 'Stepper + button increments custom width by 10px');
+    assert.equal(popoverEl.style.width, '650px', 'Popover width immediately reflects stepped 650px');
     topbarSegBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.popoverWidthMode, 'auto', 'Popover width mode restored to auto');
@@ -2076,6 +2083,23 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       select.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
       select.querySelectorAll('.select-option')[index].dispatchEvent({ type: 'click', stopPropagation() {} });
     };
+    const ctxRiskMask = otherPane.querySelector('.ctx-risk-mask');
+    const ctxControlsBody = otherPane.querySelector('.ctx-controls-body');
+    const ctxRiskAcceptBtn = otherPane.querySelector('.ctx-risk-accept-btn');
+    assert.ok(ctxRiskMask && ctxControlsBody && ctxRiskAcceptBtn, 'Context window risk warning mask and accept button exist');
+    assert.equal(ctxRiskMask.hasAttribute('hidden'), false, 'Risk mask visible before consent');
+    assert.equal(ctxControlsBody.classList.contains('is-locked'), true, 'Context controls locked before consent');
+    assert.equal(contextModel.querySelector('.select-trigger').hasAttribute('disabled'), true, 'Model select disabled before consent');
+    selectOption(contextModel, 1);
+    assert.equal(contextWindow.parentNode.hasAttribute('hidden'), true, 'Cannot select context model while locked');
+
+    ctxRiskAcceptBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.contextWindowRiskAccepted, true, 'Accepting risk persists contextWindowRiskAccepted');
+    assert.equal(ctxRiskMask.hasAttribute('hidden'), true, 'Risk mask hidden after consent');
+    assert.equal(ctxControlsBody.classList.contains('is-locked'), false, 'Context controls unlocked after consent');
+    assert.equal(contextModel.querySelector('.select-trigger').hasAttribute('disabled'), false, 'Model select enabled after consent');
+
     assert.equal(contextWindow.parentNode.hasAttribute('hidden'), true);
     contextModel.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     assert.match(contextModel.querySelectorAll('.select-option')[1].querySelector('.select-option-meta').textContent, /默认.*256,000/);
@@ -2098,7 +2122,9 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     selectOption(contextModel, 3);
     assert.equal(contextWindow.querySelector('.select-trigger').hasAttribute('disabled'), true);
 
-    const maintBtns = otherPane.querySelectorAll('.btn-secondary');
+    const maintBtns = otherPane
+      .querySelectorAll('.btn-secondary')
+      .filter((btn) => !btn.classList.contains('ctx-risk-accept-btn'));
     const rebuildBtn = maintBtns[0];
     const resetAllBtn = maintBtns[1];
     rebuildBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -2112,6 +2138,8 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     resetAllBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 260));
     assert.equal(mockSettings.orchestratorIdMode, 'compact', '2nd click resets orchestratorIdMode to default');
+    assert.equal(mockSettings.contextWindowRiskAccepted, false, 'Reset restores contextWindowRiskAccepted to false');
+    assert.equal(ctxRiskMask.hasAttribute('hidden'), false, 'Risk mask re-locks after factory reset');
 
     // Verify ConsumptionView omits "+ 待定" / "3993 步费用待定" and StepsDetailView protects header title
     pillTabs[1].dispatchEvent({ type: 'click', stopPropagation() {} });

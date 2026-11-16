@@ -38,6 +38,8 @@ export const SettingsOtherTab = defineComponent({
   setup({ onCleanup, getProps }) {
     let draftModelDisplayMode = 'short';
     let draftOrchestratorIdMode = 'compact';
+    let draftContextRiskAccepted = false;
+    let acceptingContextRisk = false;
     let latestSettings = null;
     let contextWindowModels = [];
     let contextModelId = '';
@@ -163,7 +165,7 @@ export const SettingsOtherTab = defineComponent({
       className: 'settings-context-model',
       options: [],
       onUpdateModelValue: (id) => {
-        if (savingContextWindow) return;
+        if (!draftContextRiskAccepted || savingContextWindow) return;
         contextModelId = id;
         contextFeedback = '';
         renderContextWindows();
@@ -172,7 +174,7 @@ export const SettingsOtherTab = defineComponent({
     const ctxWindowSelect = CustomSelect({
       options: [],
       onUpdateModelValue: async (value) => {
-        if (savingContextWindow || !contextModelId) return;
+        if (!draftContextRiskAccepted || savingContextWindow || !contextModelId) return;
         savingContextWindow = true;
         contextFeedback = 'settings.saving';
         renderContextWindows();
@@ -190,8 +192,82 @@ export const SettingsOtherTab = defineComponent({
     });
     const ctxModelRow = h('div', { className: 'form-row' }, [ctxModelLabel, ctxModelSelect.el]);
     const ctxWindowRow = h('div', { className: 'form-row' }, [ctxWindowLabel, ctxWindowSelect.el]);
+    const ctxControlsBody = h('div', { className: 'ctx-controls-body is-locked' }, [
+      ctxModelRow,
+      ctxWindowRow,
+      h('div', { className: 'form-row' }, [ctxHint]),
+    ]);
+
+    const ctxRiskTitleEl = h('strong', {
+      className: 'ctx-risk-title',
+      text: t('settings.oth.ctxRiskTitle'),
+    });
+    const ctxRiskBodyEl = h('p', {
+      className: 'ctx-risk-desc',
+      text: t('settings.oth.ctxRiskBody'),
+    });
+    const ctxRiskAcceptBtnText = h('span', { text: t('settings.oth.ctxRiskAcceptBtn') });
+    const ctxRiskAcceptBtn = h(
+      'button',
+      {
+        type: 'button',
+        className: 'btn-secondary btn-danger-confirm ctx-risk-accept-btn',
+        onClick: async () => {
+          if (acceptingContextRisk || draftContextRiskAccepted) return;
+          acceptingContextRisk = true;
+          draftContextRiskAccepted = true;
+          latestSettings = { ...(latestSettings || {}), contextWindowRiskAccepted: true };
+          contextFeedback = 'settings.saving';
+          renderContextWindows();
+          try {
+            await saveSettingsPatch({ contextWindowRiskAccepted: true });
+            contextFeedback = 'settings.saved';
+          } catch {
+            draftContextRiskAccepted = false;
+            latestSettings = { ...(latestSettings || {}), contextWindowRiskAccepted: false };
+            contextFeedback = 'settings.saveFailed';
+          } finally {
+            acceptingContextRisk = false;
+            renderContextWindows();
+          }
+        },
+      },
+      [createSvgIcon('warning', { size: 12 }), ctxRiskAcceptBtnText]
+    );
+    const ctxRiskMask = h(
+      'div',
+      {
+        className: 'ctx-risk-mask',
+        role: 'region',
+        'aria-label': t('settings.oth.ctxRiskTitle'),
+      },
+      [
+        h('div', { className: 'ctx-risk-head' }, [
+          createSvgIcon('warning', { size: 14, className: 'ctx-risk-icon' }),
+          ctxRiskTitleEl,
+        ]),
+        ctxRiskBodyEl,
+        ctxRiskAcceptBtn,
+      ]
+    );
+    const ctxRiskStage = h('div', { className: 'ctx-risk-stage' }, [ctxControlsBody, ctxRiskMask]);
 
     function renderContextWindows() {
+      const unlocked = Boolean(draftContextRiskAccepted);
+      if (!unlocked) {
+        ctxModelSelect.close();
+        ctxWindowSelect.close();
+      }
+      patchClasses(ctxControlsBody, { 'is-locked': !unlocked });
+      patchAttr(ctxControlsBody, 'inert', !unlocked);
+      patchAttr(ctxControlsBody, 'aria-hidden', unlocked ? null : 'true');
+      patchAttr(ctxRiskMask, 'hidden', unlocked);
+      patchAttr(ctxRiskMask, 'aria-label', t('settings.oth.ctxRiskTitle'));
+      patchText(ctxRiskTitleEl, t('settings.oth.ctxRiskTitle'));
+      patchText(ctxRiskBodyEl, t('settings.oth.ctxRiskBody'));
+      patchText(ctxRiskAcceptBtnText, t('settings.oth.ctxRiskAcceptBtn'));
+      patchAttr(ctxRiskAcceptBtn, 'disabled', acceptingContextRisk);
+
       const saved = latestSettings?.modelContextWindows || {};
       const models = new Map(contextWindowModels.map((model) => [model.id, model]));
       const knownIds = new Set(contextWindowModels.flatMap(({ id, members = [] }) => [id, ...members]));
@@ -250,8 +326,8 @@ export const SettingsOtherTab = defineComponent({
         ],
       });
       ctxWindowSelect.setProps({ modelValue: selected, options: choices });
-      patchAttr(ctxModelSelect.refs.triggerBtn, 'disabled', savingContextWindow);
-      patchAttr(ctxWindowSelect.refs.triggerBtn, 'disabled', savingContextWindow || (!options.length && !selected));
+      patchAttr(ctxModelSelect.refs.triggerBtn, 'disabled', !unlocked || savingContextWindow);
+      patchAttr(ctxWindowSelect.refs.triggerBtn, 'disabled', !unlocked || savingContextWindow || (!options.length && !selected));
       patchAttr(ctxModelSelect.refs.triggerBtn, 'aria-label', t('settings.oth.ctxModel'));
       patchAttr(ctxWindowSelect.refs.triggerBtn, 'aria-label', t('settings.oth.ctxBaselineLabel'));
       patchAttr(ctxModelRow, 'hidden', !models.size);
@@ -275,9 +351,7 @@ export const SettingsOtherTab = defineComponent({
         ]),
         ctxStatus,
       ]),
-      ctxModelRow,
-      ctxWindowRow,
-      h('div', { className: 'form-row' }, [ctxHint]),
+      ctxRiskStage,
     ]);
     renderContextWindows();
 
@@ -418,6 +492,9 @@ export const SettingsOtherTab = defineComponent({
         settings.showUpstreamModel
       );
       draftOrchestratorIdMode = normalizeClientOrchestratorIdMode(settings.orchestratorIdMode);
+      if (!acceptingContextRisk) {
+        draftContextRiskAccepted = Boolean(settings.contextWindowRiskAccepted);
+      }
       stepModelSelect.setProps({
         modelValue: draftModelDisplayMode,
         options: getStepModelDisplayOptions(),

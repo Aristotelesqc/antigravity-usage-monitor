@@ -2233,10 +2233,12 @@ test('v1.5 feedback settings schema: custom token combo DSL, 3-way model display
   assert.equal(h.normalizeModelDisplayMode(undefined, true), 'upstream');
   assert.equal(h.normalizeModelDisplayMode(undefined, false), 'short');
 
+  assert.equal(h.loadSettings().contextWindowRiskAccepted, false);
   const compactRes = h.executeSettingsAction({
     modelDisplayMode: 'upstream_compact',
     popoverWidthMode: 'custom',
     popoverWidth: 1500,
+    contextWindowRiskAccepted: true,
     stepTokenComboFormat: 'in:out:cache',
     stepTableColumns: ['step', 'model', 'tokens_io_cache', 'tokens_custom', 'cost'],
   });
@@ -2245,6 +2247,7 @@ test('v1.5 feedback settings schema: custom token combo DSL, 3-way model display
   assert.equal(compactRes.updated.showUpstreamModel, true);
   assert.equal(compactRes.updated.popoverWidthMode, 'custom');
   assert.equal(compactRes.updated.popoverWidth, 1080, 'Clamped to MAX_POPOVER_WIDTH 1080');
+  assert.equal(compactRes.updated.contextWindowRiskAccepted, true);
   assert.equal(compactRes.updated.stepTokenComboFormat, 'in:out:cache');
   assert.deepEqual([...compactRes.updated.stepTableColumns], [
     'step',

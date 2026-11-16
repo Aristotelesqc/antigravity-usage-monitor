@@ -441,6 +441,9 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
   if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
   if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if (Boolean(pSet?.contextWindowRiskAccepted) !== Boolean(nSet?.contextWindowRiskAccepted)) {
+    return false;
+  }
   if (
     JSON.stringify(pSet?.modelContextWindows) !== JSON.stringify(nSet?.modelContextWindows) ||
     JSON.stringify(prev.contextWindowModels) !== JSON.stringify(next.contextWindowModels)
@@ -1189,6 +1192,9 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidth')) {
     safePatch.popoverWidth = normalizeClientPopoverWidth(safePatch.popoverWidth);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'contextWindowRiskAccepted')) {
+    safePatch.contextWindowRiskAccepted = Boolean(safePatch.contextWindowRiskAccepted);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
     safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);

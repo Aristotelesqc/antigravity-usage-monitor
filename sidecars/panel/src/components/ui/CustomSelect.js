@@ -104,10 +104,6 @@ export const CustomSelect = defineComponent({
 
     function toggleOpen(nextOpen) {
       isOpen = Boolean(nextOpen);
-      patchClasses(rootEl, { 'is-open': isOpen });
-      patchAttr(triggerBtn, 'aria-expanded', isOpen ? 'true' : 'false');
-      patchAttr(menuEl, 'hidden', !isOpen);
-      patchSvgIcon(chevronIcon, isOpen ? 'chevron-up' : 'chevron-down');
       if (isOpen) {
         const opts = getProps().options || [];
         const selSet = getSelectedSet();
@@ -117,6 +113,10 @@ export const CustomSelect = defineComponent({
         );
         renderMenuOptions();
       }
+      patchClasses(rootEl, { 'is-open': isOpen });
+      patchAttr(triggerBtn, 'aria-expanded', isOpen ? 'true' : 'false');
+      patchAttr(menuEl, 'hidden', !isOpen);
+      patchSvgIcon(chevronIcon, isOpen ? 'chevron-up' : 'chevron-down');
     }
 
     function chooseOption(option) {
