@@ -35,6 +35,8 @@ import {
   formatAgentBadgeText,
   getAgentBadgeClass,
   normalizeClientHoverModules,
+  normalizeClientPopoverWidth,
+  normalizeClientPopoverWidthMode,
   normalizeClientTopbarSlots,
   normalizeClientUpdateMode,
   normalizeClientWindowMountMode,
@@ -49,6 +51,8 @@ import { uiStore } from '../../store/uiStore.js';
 const CAPSULE_HOST_ID = 'ag-usage-monitor-capsule';
 const PORTAL_HOST_ID = 'ag-usage-monitor-portal';
 const FLOATING_CARD_WIDTH = 522;
+const POPOVER_BASE_WIDTH = 540;
+const POPOVER_MAX_AUTO_WIDTH = 960;
 const MULTI_PANEL_WIDTH = 464;
 
 /**
@@ -1969,11 +1973,72 @@ export function mountWindowOverlay() {
           : bRect.right;
 
       if (popoverOpen) {
+        const maxPopCardW = Math.max(280, vw - minLeft - 12);
+        const curSettings = telemetryStore.getState().telemetry?.settings;
+        const popWidthMode = normalizeClientPopoverWidthMode(curSettings?.popoverWidthMode);
+        let desiredPopW = Math.min(POPOVER_BASE_WIDTH, maxPopCardW);
+        if (popWidthMode === 'custom') {
+          desiredPopW = Math.min(
+            normalizeClientPopoverWidth(curSettings?.popoverWidth),
+            maxPopCardW
+          );
+        } else if (typeof popoverEl.querySelectorAll === 'function') {
+          const panes = popoverEl.querySelectorAll('.table-viewport.is-step-table');
+          for (const pane of panes) {
+            let anc = pane;
+            let inHiddenTree = false;
+            while (anc && anc !== popoverEl) {
+              if (anc.hasAttribute?.('hidden')) {
+                inHiddenTree = true;
+                break;
+              }
+              anc = anc.parentElement || anc.parentNode;
+            }
+            if (inHiddenTree) continue;
+            const tableEl = pane.querySelector?.('.steps-data-table') || pane.firstElementChild;
+            if (!tableEl) continue;
+            const paneClientW = Number(pane.clientWidth || 0);
+            const curPopW = Number(
+              popoverEl.offsetWidth ||
+                popoverEl.getBoundingClientRect?.().width ||
+                POPOVER_BASE_WIDTH
+            );
+            let naturalTableW = 0;
+            if (tableEl.style) {
+              const prevW = tableEl.style.width || '';
+              tableEl.style.width = 'max-content';
+              naturalTableW = Math.ceil(
+                Number(
+                  tableEl.getBoundingClientRect?.().width ||
+                    tableEl.scrollWidth ||
+                    tableEl.offsetWidth ||
+                    0
+                )
+              );
+              tableEl.style.width = prevW;
+            } else {
+              naturalTableW = Math.ceil(Number(tableEl.scrollWidth || tableEl.offsetWidth || 0));
+            }
+            if (naturalTableW > 0) {
+              const chromeW =
+                paneClientW > 0 && curPopW >= paneClientW
+                  ? Math.max(24, curPopW - paneClientW)
+                  : 34;
+              desiredPopW = Math.max(
+                desiredPopW,
+                Math.min(POPOVER_MAX_AUTO_WIDTH, maxPopCardW, naturalTableW + chromeW + 4)
+              );
+            }
+          }
+        }
+        popoverEl.style.setProperty?.('--wm-popover-w', `${desiredPopW}px`);
+        popoverEl.style.width = `${desiredPopW}px`;
+
         const rawW =
           Number(popoverEl.offsetWidth) ||
           Number(popoverEl.getBoundingClientRect?.().width) ||
-          defaultCardW;
-        const panelW = Math.min(rawW, Math.max(280, vw - minLeft - 12));
+          desiredPopW;
+        const panelW = Math.min(rawW, maxPopCardW);
         const spaceBelowPop = vh - bRect.bottom - 12;
         const spaceAbovePop = bRect.top - 16;
         const openPopAbove =
@@ -2804,6 +2869,9 @@ export function mountWindowOverlay() {
       }
       lastAppliedMountMode = nextMountMode;
       renderCapsuleTelemetry();
+      if (popoverOpen) {
+        positionFloatingElements();
+      }
     }
   );
 
@@ -2811,8 +2879,25 @@ export function mountWindowOverlay() {
     (st) => ({
       selectedAgentScope: st.selectedAgentScope,
       ctxInspectorAgentId: st.ctxInspectorAgentId,
+      activeView: st.activeView,
+      stepsSubTab: st.stepsSubTab,
+      settingsSubTab: st.settingsSubTab,
+      settingsStructureTab: st.settingsStructureTab,
     }),
-    () => renderCapsuleTelemetry()
+    () => {
+      renderCapsuleTelemetry();
+      if (popoverOpen) {
+        positionFloatingElements();
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(() => {
+            if (!disposed && popoverOpen) {
+              positionFloatingElements();
+              refreshActiveViewScrollbars();
+            }
+          });
+        }
+      }
+    }
   );
 
   const unsubI18n = i18nStore.subscribe(
@@ -3000,10 +3085,10 @@ export function mountWindowOverlay() {
       const token = String(nextBridge.token || '');
       if (!Number.isInteger(port) || port <= 0 || !token) return false;
       const cur = window.__AGUsageMonitorBridge || {};
-      const portChanged = Number(cur.port || 0) !== port;
+      const portChanged = Number(cur.port || 0) !== port || String(cur.token || '') !== token;
       cur.port = port;
       cur.token = token;
-      if (portChanged && cur.transportMode !== 'cdp') {
+      if (portChanged) {
         cur.transportMode = 'http';
       }
       window.__AGUsageMonitorBridge = cur;

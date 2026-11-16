@@ -23,12 +23,19 @@ import {
   DEFAULT_CLIENT_HOVER_MODULES,
   DEFAULT_CLIENT_OVERVIEW_METRICS,
   DEFAULT_CLIENT_OVERVIEW_MODULES,
+  DEFAULT_CLIENT_POPOVER_WIDTH,
   DEFAULT_CLIENT_STEP_COLUMNS,
+  DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
   DEFAULT_CLIENT_TOPBAR_SLOTS,
+  MAX_CLIENT_POPOVER_WIDTH,
+  MIN_CLIENT_POPOVER_WIDTH,
   normalizeClientHoverModules,
   normalizeClientOverviewMetrics,
   normalizeClientOverviewModules,
+  normalizeClientPopoverWidth,
+  normalizeClientPopoverWidthMode,
   normalizeClientStepColumns,
+  normalizeClientStepTokenComboFormat,
   normalizeClientTopbarSlots,
   normalizeClientWindowMountMode,
   saveSettingsPatch,
@@ -76,6 +83,13 @@ function getEnableToggleOptions() {
   ];
 }
 
+function getPopoverWidthModeOptions() {
+  return [
+    { value: 'auto', label: t('settings.str.popoverWidthAuto') },
+    { value: 'custom', label: t('settings.str.popoverWidthCustom') },
+  ];
+}
+
 function isSameList(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -89,6 +103,8 @@ export const SettingsStructureTab = defineComponent({
   setup({ props, onCleanup }) {
     let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
+    let draftPopoverWidthMode = 'auto';
+    let draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
     let draftEnableCliStatusLine = true;
     let draftShowTopbarMulti = true;
     let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -98,6 +114,8 @@ export const SettingsStructureTab = defineComponent({
     let draftShowStepTurnRail = false;
     let draftShowStepAgentBadge = true;
     let draftShowStepSpeedColor = false;
+    let draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
+    let rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
 
@@ -110,6 +128,8 @@ export const SettingsStructureTab = defineComponent({
       return buildStructurePreviewTelemetry(latestSettings, {
         windowMountMode: draftWindowMountMode,
         enableWindowOverlay: draftWindowMountMode !== 'sidebar',
+        popoverWidthMode: draftPopoverWidthMode,
+        popoverWidth: draftPopoverWidth,
         enableCliStatusLine: draftEnableCliStatusLine,
         showTopbarMultiSession: draftShowTopbarMulti,
         topbarCapsuleSlots: draftTopbarSlots,
@@ -119,6 +139,7 @@ export const SettingsStructureTab = defineComponent({
         showStepTurnRail: draftShowStepTurnRail,
         showStepAgentBadge: draftShowStepAgentBadge,
         showStepSpeedColor: draftShowStepSpeedColor,
+        stepTokenComboFormat: draftStepTokenComboFormat,
         stepTableColumns: draftStepColumns,
       });
     }
@@ -185,6 +206,14 @@ export const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.mountMode'),
     });
+    const popoverWidthLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.popoverWidthLabel'),
+    });
+    const popoverWidthHintEl = h('span', {
+      className: 'settings-hint-text',
+      text: t('settings.str.popoverWidthHint'),
+    });
     const multiToggleLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.multiToggle'),
@@ -210,6 +239,54 @@ export const SettingsStructureTab = defineComponent({
         void persistStructurePatch(mountSection, {
           windowMountMode: nextMode,
           enableWindowOverlay: nextMode !== 'sidebar',
+        });
+      },
+    });
+
+    const popoverWidthInput = h('input', {
+      type: 'number',
+      className: 'settings-text-input',
+      min: String(MIN_CLIENT_POPOVER_WIDTH),
+      max: String(MAX_CLIENT_POPOVER_WIDTH),
+      step: '10',
+      value: String(draftPopoverWidth),
+      'aria-label': t('settings.str.popoverWidthLabel'),
+      onChange: () => {
+        const nextWidth = normalizeClientPopoverWidth(popoverWidthInput.value);
+        draftPopoverWidth = nextWidth;
+        popoverWidthInput.value = String(nextWidth);
+        syncMountSectionMeta();
+        props.onLayoutChange?.();
+        void persistStructurePatch(mountSection, {
+          popoverWidthMode: draftPopoverWidthMode,
+          popoverWidth: draftPopoverWidth,
+        });
+      },
+      onKeydown: (e) => {
+        if (e?.key === 'Enter') {
+          e.preventDefault();
+          popoverWidthInput.blur();
+        }
+      },
+    });
+
+    const popoverWidthNumWrap = h(
+      'span',
+      { className: 'settings-number-wrap', hidden: draftPopoverWidthMode !== 'custom' },
+      [popoverWidthInput, h('span', { className: 'settings-number-unit', text: 'px' })]
+    );
+
+    const popoverWidthModeToggle = SegmentedControl({
+      ariaLabel: t('settings.str.popoverWidthLabel'),
+      modelValue: draftPopoverWidthMode,
+      options: getPopoverWidthModeOptions(),
+      onUpdateModelValue: (val) => {
+        draftPopoverWidthMode = normalizeClientPopoverWidthMode(val);
+        syncMountSectionMeta();
+        props.onLayoutChange?.();
+        void persistStructurePatch(mountSection, {
+          popoverWidthMode: draftPopoverWidthMode,
+          popoverWidth: draftPopoverWidth,
         });
       },
     });
@@ -267,6 +344,9 @@ export const SettingsStructureTab = defineComponent({
       badgeText: t('settings.str.mountBadge', { count: draftTopbarSlots.length }),
       onReset: () => {
         draftWindowMountMode = 'dual';
+        draftPopoverWidthMode = 'auto';
+        draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
+        popoverWidthInput.value = String(DEFAULT_CLIENT_POPOVER_WIDTH);
         draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
         draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -277,6 +357,8 @@ export const SettingsStructureTab = defineComponent({
           {
             windowMountMode: 'dual',
             enableWindowOverlay: true,
+            popoverWidthMode: 'auto',
+            popoverWidth: DEFAULT_CLIENT_POPOVER_WIDTH,
             enableCliStatusLine: true,
             showTopbarMultiSession: true,
             topbarCapsuleSlots: [...DEFAULT_CLIENT_TOPBAR_SLOTS],
@@ -288,6 +370,16 @@ export const SettingsStructureTab = defineComponent({
         mountPreviewCanvas,
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [mountModeLabelEl, windowMountSelect.el]),
+        h('div', { className: 'form-row' }, [
+          h('div', { className: 'settings-inline-row' }, [
+            popoverWidthLabelEl,
+            h('div', { className: 'settings-inline-controls' }, [
+              popoverWidthModeToggle.el,
+              popoverWidthNumWrap,
+            ]),
+          ]),
+          popoverWidthHintEl,
+        ]),
         h('div', { className: 'settings-inline-row' }, [
           multiToggleLabelEl,
           multiSessionToggle.el,
@@ -310,6 +402,14 @@ export const SettingsStructureTab = defineComponent({
         modelValue: draftWindowMountMode,
         options: getMountModeOptions(),
       });
+      popoverWidthModeToggle.setProps({
+        modelValue: draftPopoverWidthMode,
+        options: getPopoverWidthModeOptions(),
+      });
+      patchAttr(popoverWidthNumWrap, 'hidden', draftPopoverWidthMode !== 'custom');
+      if (document?.activeElement !== popoverWidthInput) {
+        popoverWidthInput.value = String(draftPopoverWidth);
+      }
       multiSessionToggle.setProps({
         modelValue: draftShowTopbarMulti ? 'show' : 'hide',
         options: getMultiToggleOptions(),
@@ -328,6 +428,8 @@ export const SettingsStructureTab = defineComponent({
       );
       const isDefault =
         draftWindowMountMode === 'dual' &&
+        draftPopoverWidthMode === 'auto' &&
+        draftPopoverWidth === DEFAULT_CLIENT_POPOVER_WIDTH &&
         draftEnableCliStatusLine === true &&
         draftShowTopbarMulti === true &&
         isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
@@ -593,6 +695,14 @@ export const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.stepSpeedColorToggle'),
     });
+    const stepTokenComboLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepTokenComboLabel'),
+    });
+    const stepTokenComboHintEl = h('span', {
+      className: 'settings-hint-text',
+      text: t('settings.str.stepTokenComboHint'),
+    });
     const stepColsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepsColsLabel'),
@@ -637,11 +747,65 @@ export const SettingsStructureTab = defineComponent({
       },
     });
 
+    function commitStepTokenComboInput() {
+      const rawTrimmed = String(stepTokenComboInput.value || '').trim();
+      const normFmt = normalizeClientStepTokenComboFormat(rawTrimmed);
+      rawStepTokenComboText = normFmt;
+      draftStepTokenComboFormat = normFmt;
+      stepTokenComboInput.value = normFmt;
+      if (rawTrimmed && !draftStepColumns.includes('tokens_custom')) {
+        const comboIdx = draftStepColumns.findIndex(
+          (k) => k === 'tokens_combo' || k === 'tokens_io_cache'
+        );
+        if (comboIdx >= 0) {
+          const nextCols = [...draftStepColumns];
+          nextCols[comboIdx] = 'tokens_custom';
+          draftStepColumns = normalizeClientStepColumns(nextCols);
+        } else {
+          draftStepColumns = normalizeClientStepColumns([...draftStepColumns, 'tokens_custom']);
+        }
+      }
+      syncStepsSectionMeta();
+      props.onLayoutChange?.();
+      void persistStructurePatch(stepsSection, {
+        stepTokenComboFormat: draftStepTokenComboFormat,
+        stepTableColumns: draftStepColumns,
+      });
+    }
+
+    const stepTokenComboInput = h('input', {
+      type: 'text',
+      className: 'settings-text-input',
+      spellcheck: 'false',
+      value: rawStepTokenComboText,
+      placeholder: t('settings.str.stepTokenComboPlaceholder'),
+      'aria-label': t('settings.str.stepTokenComboLabel'),
+      onInput: () => {
+        rawStepTokenComboText = stepTokenComboInput.value;
+        draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(rawStepTokenComboText);
+        stepColumnsList.refs.setProps({
+          items: draftStepColumns,
+          options: getStepColumnOptions(draftStepTokenComboFormat),
+          addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
+        });
+        refreshStepsPreview();
+      },
+      onChange: () => {
+        commitStepTokenComboInput();
+      },
+      onKeydown: (e) => {
+        if (e?.key === 'Enter') {
+          e.preventDefault();
+          stepTokenComboInput.blur();
+        }
+      },
+    });
+
     const stepColumnsList = EditableSlotList({
       items: draftStepColumns,
-      options: getStepColumnOptions(),
+      options: getStepColumnOptions(draftStepTokenComboFormat),
       minItems: 2,
-      maxItems: 12,
+      maxItems: 15,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
         draftStepColumns = normalizeClientStepColumns(previewItems);
@@ -666,6 +830,9 @@ export const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail = false;
         draftShowStepAgentBadge = true;
         draftShowStepSpeedColor = false;
+        draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
+        rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
+        stepTokenComboInput.value = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
         draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
@@ -675,6 +842,7 @@ export const SettingsStructureTab = defineComponent({
             showStepTurnRail: false,
             showStepAgentBadge: true,
             showStepSpeedColor: false,
+            stepTokenComboFormat: DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
             stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
           },
           'settings.resetDone'
@@ -696,6 +864,11 @@ export const SettingsStructureTab = defineComponent({
           stepSpeedColorToggle.el,
         ]),
         h('div', { className: 'settings-divider' }),
+        h('div', { className: 'form-row' }, [
+          stepTokenComboLabelEl,
+          stepTokenComboInput,
+          stepTokenComboHintEl,
+        ]),
         h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
       ],
     });
@@ -704,10 +877,22 @@ export const SettingsStructureTab = defineComponent({
       if (!isStructureVisible() || activeThirdTab !== 'steps') return;
       const mockData = buildDraftTelemetry();
       const mockSteps = mockData.activeConversation?.recentSteps || [];
+      const previewCols =
+        document?.activeElement === stepTokenComboInput &&
+        String(rawStepTokenComboText || '').trim() &&
+        !draftStepColumns.includes('tokens_custom')
+          ? normalizeClientStepColumns(
+              draftStepColumns.some((k) => k === 'tokens_combo' || k === 'tokens_io_cache')
+                ? draftStepColumns.map((k) =>
+                    k === 'tokens_combo' || k === 'tokens_io_cache' ? 'tokens_custom' : k
+                  )
+                : [...draftStepColumns, 'tokens_custom']
+            )
+          : draftStepColumns;
       stepTablePreview.refs.renderStepTable(
         mockSteps,
         'mock-preview-conv',
-        draftStepColumns,
+        previewCols,
         getEffectiveLocale(),
         {
           effectiveScopes: ['all'],
@@ -716,6 +901,7 @@ export const SettingsStructureTab = defineComponent({
           showStepTurnRail: draftShowStepTurnRail,
           showStepAgentBadge: draftShowStepAgentBadge,
           showStepSpeedColor: draftShowStepSpeedColor,
+          stepTokenComboFormat: draftStepTokenComboFormat,
           displaySettings: mockData.settings,
         }
       );
@@ -734,9 +920,12 @@ export const SettingsStructureTab = defineComponent({
         modelValue: draftShowStepSpeedColor ? 'on' : 'off',
         options: getEnableToggleOptions(),
       });
+      if (document?.activeElement !== stepTokenComboInput) {
+        stepTokenComboInput.value = rawStepTokenComboText;
+      }
       stepColumnsList.refs.setProps({
         items: draftStepColumns,
-        options: getStepColumnOptions(),
+        options: getStepColumnOptions(draftStepTokenComboFormat),
         addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       });
       stepsSection.refs.setBadge(t('settings.str.stepsBadge', { count: draftStepColumns.length }));
@@ -744,6 +933,7 @@ export const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail === false &&
         draftShowStepAgentBadge === true &&
         draftShowStepSpeedColor === false &&
+        draftStepTokenComboFormat === DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT &&
         isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
       refreshStepsPreview();
@@ -805,6 +995,8 @@ export const SettingsStructureTab = defineComponent({
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
+      draftPopoverWidthMode = normalizeClientPopoverWidthMode(settings.popoverWidthMode);
+      draftPopoverWidth = normalizeClientPopoverWidth(settings.popoverWidth);
       draftEnableCliStatusLine = settings.enableCliStatusLine !== false;
       draftShowTopbarMulti = settings.showTopbarMultiSession !== false;
       draftTopbarSlots = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
@@ -814,6 +1006,10 @@ export const SettingsStructureTab = defineComponent({
       draftShowStepTurnRail = settings.showStepTurnRail === true;
       draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
       draftShowStepSpeedColor = settings.showStepSpeedColor === true;
+      draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(
+        settings.stepTokenComboFormat
+      );
+      rawStepTokenComboText = draftStepTokenComboFormat;
       draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
@@ -831,6 +1027,9 @@ export const SettingsStructureTab = defineComponent({
       mountSection.refs.setTitle(t('settings.str.mountSection'));
       mountSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
+      patchText(popoverWidthLabelEl, t('settings.str.popoverWidthLabel'));
+      patchText(popoverWidthHintEl, t('settings.str.popoverWidthHint'));
+      patchAttr(popoverWidthInput, 'aria-label', t('settings.str.popoverWidthLabel'));
       patchText(multiToggleLabelEl, t('settings.str.multiToggle'));
       patchText(cliCapsuleLabelEl, t('settings.str.cliCapsuleToggle'));
       patchText(capsuleSlotsLabelEl, t('settings.str.capsuleSlotsLabel'));
@@ -850,6 +1049,10 @@ export const SettingsStructureTab = defineComponent({
       patchText(stepTurnRailLabelEl, t('settings.str.stepTurnRailToggle'));
       patchText(stepAgentBadgeLabelEl, t('settings.str.stepAgentBadgeToggle'));
       patchText(stepSpeedColorLabelEl, t('settings.str.stepSpeedColorToggle'));
+      patchText(stepTokenComboLabelEl, t('settings.str.stepTokenComboLabel'));
+      patchText(stepTokenComboHintEl, t('settings.str.stepTokenComboHint'));
+      patchAttr(stepTokenComboInput, 'placeholder', t('settings.str.stepTokenComboPlaceholder'));
+      patchAttr(stepTokenComboInput, 'aria-label', t('settings.str.stepTokenComboLabel'));
       patchText(stepColsLabelEl, t('settings.str.stepsColsLabel'));
 
       syncMountSectionMeta();
@@ -894,6 +1097,7 @@ export const SettingsStructureTab = defineComponent({
       overviewPreviewHost.destroy();
       stepTablePreview.destroy();
       windowMountSelect.destroy();
+      popoverWidthModeToggle.destroy();
       multiSessionToggle.destroy();
       cliCapsuleToggle.destroy();
       topbarSlotsList.destroy();

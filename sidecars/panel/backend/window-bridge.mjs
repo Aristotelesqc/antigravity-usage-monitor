@@ -29,6 +29,7 @@ const ALLOWED_BRIDGE_PATHS = new Set([
   '/api/telemetry',
   '/api/settings',
   '/api/settings/reset',
+  '/api/cache/rebuild',
   '/api/accounts',
   '/api/accounts/update',
   '/api/context-window',
@@ -789,8 +790,13 @@ export function createWindowBridgeController(options) {
     }
     serverStartPromise = (async () => {
       const { http, crypto } = await loadNodeDeps();
+      const persistedLease = leaseFilePath ? loadJson(leaseFilePath, null) : null;
+      const persistedToken = String(persistedLease?.bridgeToken || '').trim();
+      const persistedPort = Number(persistedLease?.bridgePort || 0);
       if (!bridgeToken) {
-        bridgeToken = crypto.randomBytes(32).toString('hex');
+        bridgeToken = /^[0-9a-f]{64}$/i.test(persistedToken)
+          ? persistedToken
+          : crypto.randomBytes(32).toString('hex');
       }
 
       const srv = http.createServer((req, res) => {
@@ -915,17 +921,47 @@ export function createWindowBridgeController(options) {
         });
       });
 
-      await new Promise((resolve, reject) => {
-        srv.once('error', reject);
-        srv.listen(0, '127.0.0.1', () => {
-          srv.removeListener('error', reject);
-          resolve();
+      const listenOnLoopback = (targetPort) =>
+        new Promise((resolve, reject) => {
+          const onErr = (err) => {
+            srv.removeListener('listening', onListening);
+            reject(err);
+          };
+          const onListening = () => {
+            srv.removeListener('error', onErr);
+            resolve();
+          };
+          srv.once('error', onErr);
+          srv.once('listening', onListening);
+          srv.listen(targetPort, '127.0.0.1');
         });
-      });
+
+      const preferredPort =
+        Number.isInteger(persistedPort) && persistedPort >= 1024 && persistedPort <= 65535
+          ? persistedPort
+          : 0;
+      if (preferredPort > 0) {
+        try {
+          await listenOnLoopback(preferredPort);
+        } catch {
+          await listenOnLoopback(0);
+        }
+      } else {
+        await listenOnLoopback(0);
+      }
       srv.unref?.();
       const addr = srv.address();
       bridgePort = typeof addr === 'object' && addr ? Number(addr.port || 0) : 0;
       server = srv;
+      if (leaseFilePath && bridgePort > 0) {
+        saveJson(leaseFilePath, {
+          pid: process.pid,
+          bundleVersion: String(getBundleVersionFn() || ''),
+          bridgePort,
+          bridgeToken,
+          updatedAtMs: Date.now(),
+        });
+      }
       return { port: bridgePort, token: bridgeToken };
     })().finally(() => {
       serverStartPromise = null;
@@ -1133,6 +1169,8 @@ export function createWindowBridgeController(options) {
       saveJson(leaseFilePath, {
         pid: process.pid,
         bundleVersion,
+        bridgePort: bridgePort > 0 ? bridgePort : Number(lease?.bridgePort || 0) || undefined,
+        bridgeToken: bridgeToken || String(lease?.bridgeToken || '') || undefined,
         updatedAtMs: Date.now(),
       });
     }
@@ -1462,6 +1500,17 @@ export function createWindowBridgeController(options) {
     if (initialTimer) clearTimeout(initialTimer);
     if (pollTimer) clearTimeout(pollTimer);
 
+    if (leaseFilePath) {
+      const curSettings = getSettingsFn() || {};
+      const mountMode = normalizeWindowMountMode(
+        curSettings.windowMountMode,
+        curSettings.enableWindowOverlay
+      );
+      if (curSettings.enableWindowOverlay !== false && mountMode !== 'sidebar') {
+        ensureBridgeServer().catch(() => {});
+      }
+    }
+
     initialTimer = setTimeout(() => {
       initialTimer = null;
       syncAllWindows()
@@ -1469,7 +1518,7 @@ export function createWindowBridgeController(options) {
         .finally(() => {
           scheduleNextPoll();
         });
-    }, 350);
+    }, 120);
     initialTimer.unref?.();
   }
 

@@ -22,6 +22,7 @@ import {
   formatAgentBadgeText,
   formatAgentLabel,
   getAgentBadgeClass,
+  normalizeClientStepTokenComboFormat,
 } from '../../store/telemetryStore.js';
 
 export function formatTurnPromptText(rawPrompt) {
@@ -45,17 +46,19 @@ export const StepTableWidget = defineComponent({
     const stepsTheadRow = h('tr');
     const stepsTbody = h('tbody');
 
-    function syncTableHeaderColumns(colKeys) {
+    function syncTableHeaderColumns(colKeys, headerCtx = {}) {
       const locale = getEffectiveLocale();
+      const fmtKey = normalizeClientStepTokenComboFormat(headerCtx?.stepTokenComboFormat);
+      const ctx = { stepTokenComboFormat: fmtKey };
       patchKeyedList(stepsTheadRow, colKeys, {
         keyFn: (colKey) => colKey,
-        sigFn: (colKey) => `${locale}:${colKey}:${STEP_COLUMN_REGISTRY[colKey].thLabel()}`,
+        sigFn: (colKey) => `${locale}:${colKey}:${fmtKey}:${STEP_COLUMN_REGISTRY[colKey].thLabel(ctx)}`,
         createRow: (colKey) => {
-          const th = h('th', { text: STEP_COLUMN_REGISTRY[colKey].thLabel() });
+          const th = h('th', { text: STEP_COLUMN_REGISTRY[colKey].thLabel(ctx) });
           return { el: th, refs: { th } };
         },
         updateRow: (refs, colKey) => {
-          patchText(refs.th, STEP_COLUMN_REGISTRY[colKey].thLabel());
+          patchText(refs.th, STEP_COLUMN_REGISTRY[colKey].thLabel(ctx));
         },
       });
     }
@@ -169,13 +172,16 @@ export const StepTableWidget = defineComponent({
         showStepTurnRail = false,
         showStepAgentBadge = true,
         showStepSpeedColor = false,
+        stepTokenComboFormat = undefined,
         displaySettings = {},
       } = {}
     ) {
       const colOrderSig = colKeys.join(',');
+      const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
       const renderOptions = JSON.stringify([
         cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
-        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, displaySettings.showUpstreamModel,
+        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, normTokenFmt,
+        displaySettings.modelDisplayMode, displaySettings.showUpstreamModel,
         displaySettings.orchestratorIdMode,
       ]);
       if (lastRenderOptions === renderOptions && lastRenderedRows &&
@@ -184,13 +190,14 @@ export const StepTableWidget = defineComponent({
         return;
       }
       const wantedSet = new Set(colKeys);
-      syncTableHeaderColumns(colKeys);
+      syncTableHeaderColumns(colKeys, { stepTokenComboFormat: normTokenFmt });
 
       const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
       const cellCtx = {
         hasSubagents,
         showAgentBadge,
         showStepSpeedColor,
+        stepTokenComboFormat: normTokenFmt,
         effectiveScopes,
         scopeSigKey: effectiveScopes.join(','),
         displaySettings,

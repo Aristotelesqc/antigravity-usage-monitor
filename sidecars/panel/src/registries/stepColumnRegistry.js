@@ -19,6 +19,11 @@ import {
   speedReasonText,
 } from '../core/formatters.js';
 import { t } from '../i18n/index.js';
+import {
+  DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
+  normalizeClientStepTokenComboFormat,
+  parseClientStepTokenComboSegments,
+} from '../store/telemetryStore.js';
 
 export const STEP_COLUMN_KEYS = Object.freeze([
   'step',
@@ -28,6 +33,8 @@ export const STEP_COLUMN_KEYS = Object.freeze([
   'ttft',
   'duration',
   'tokens_combo',
+  'tokens_io_cache',
+  'tokens_custom',
   'input_tokens',
   'cache_tokens',
   'output_tokens',
@@ -44,6 +51,74 @@ export const DEFAULT_STEP_COLUMN_KEYS = Object.freeze([
   'cache',
   'cost',
 ]);
+
+function resolveStepTokenParts(st) {
+  const inTok = Math.max(0, Number(st?.inputTokens || 0));
+  const cacheTok = Math.max(0, Number(st?.cacheReadTokens || 0));
+  const outTok = Math.max(0, Number(st?.outputTokens || 0));
+  const thinkTok = Math.max(0, Number(st?.thinkingTokens || 0));
+  const respTok =
+    st?.responseTokens != null
+      ? Math.max(0, Number(st.responseTokens))
+      : Math.max(0, outTok - thinkTok);
+  const totalTok = inTok + cacheTok + outTok;
+  const ctxTok = Math.max(0, Number(st?.contextTokens ?? totalTok));
+  return { inTok, cacheTok, outTok, thinkTok, respTok, totalTok, ctxTok };
+}
+
+function formatPartWithOptionalCost(tokCount, costVal) {
+  const countStr = Math.round(Number(tokCount || 0)).toLocaleString();
+  if (costVal != null && Number.isFinite(Number(costVal))) {
+    return `${countStr} (${formatUsd(Number(costVal), { precise: true })})`;
+  }
+  return countStr;
+}
+
+export function formatCustomTokenComboHeader(rawFormat) {
+  const segs = parseClientStepTokenComboSegments(rawFormat);
+  return segs.map((seg) => t(`steps.tokSeg.${seg}.th`)).join(' / ');
+}
+
+function resolveSegmentDisplay(seg, parts, st) {
+  switch (seg) {
+    case 'context':
+      return {
+        short: formatTokens(parts.ctxTok),
+        tip: `${t('steps.tokSeg.context.tip')} ${Math.round(parts.ctxTok).toLocaleString()}`,
+      };
+    case 'in':
+      return {
+        short: formatTokens(parts.inTok),
+        tip: `${t('steps.tokSeg.in.tip')} ${formatPartWithOptionalCost(parts.inTok, st?.inCostUsd)}`,
+      };
+    case 'out':
+      return {
+        short: formatTokens(parts.outTok),
+        tip: `${t('steps.tokSeg.out.tip')} ${formatPartWithOptionalCost(parts.outTok, st?.outCostUsd)}`,
+      };
+    case 'cache':
+      return {
+        short: formatTokens(parts.cacheTok),
+        tip: `${t('steps.tokSeg.cache.tip')} ${formatPartWithOptionalCost(parts.cacheTok, st?.cacheCostUsd)}`,
+      };
+    case 'think':
+      return {
+        short: formatTokens(parts.thinkTok),
+        tip: `${t('steps.tokSeg.think.tip')} ${Math.round(parts.thinkTok).toLocaleString()}`,
+      };
+    case 'reply':
+      return {
+        short: formatTokens(parts.respTok),
+        tip: `${t('steps.tokSeg.reply.tip')} ${Math.round(parts.respTok).toLocaleString()}`,
+      };
+    case 'total':
+    default:
+      return {
+        short: formatTokens(parts.totalTok),
+        tip: `${t('steps.tokSeg.total.tip')} ${formatPartWithOptionalCost(parts.totalTok, st?.costUsd)}`,
+      };
+  }
+}
 
 function formatStepClockTime(createdAtMs) {
   const ms = Number(createdAtMs || 0);
@@ -96,19 +171,21 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.model.opt'),
     sigPart: (st, ctx) => {
       const disp = resolveModelDisplayInfo(st, ctx.displaySettings, { fallback: '—' });
-      return `${disp.text}:${disp.title}`;
+      return `${disp.baseText}:${disp.compactionSuffix}:${disp.title}`;
     },
     createCell: () => {
-      const valEl = h('span', {
-        style:
-          'display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;',
-      });
-      const td = h('td', {}, [valEl]);
-      return { td, refs: { td, valEl } };
+      const nameEl = h('span', { className: 'step-model-name' });
+      const compactEl = h('span', { className: 'step-model-compact', hidden: true });
+      const wrapEl = h('span', { className: 'step-model-cell' }, [nameEl, compactEl]);
+      const td = h('td', {}, [wrapEl]);
+      return { td, refs: { td, wrapEl, nameEl, compactEl } };
     },
     updateCell: (refs, st, ctx) => {
       const modelDisplay = resolveModelDisplayInfo(st, ctx.displaySettings, { fallback: '—' });
-      patchText(refs.valEl, modelDisplay.text);
+      patchText(refs.nameEl, modelDisplay.baseText);
+      const suffix = modelDisplay.compactionSuffix || '';
+      patchText(refs.compactEl, suffix);
+      patchAttr(refs.compactEl, 'hidden', !suffix);
       patchAttr(refs.td, 'title', modelDisplay.title);
     },
   },
@@ -203,24 +280,78 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      const outTok = Math.max(0, Number(st.outputTokens || 0));
-      const thinkTok = Math.max(0, Number(st.thinkingTokens || 0));
-      const respTok =
-        st.responseTokens != null
-          ? Math.max(0, Number(st.responseTokens))
-          : Math.max(0, outTok - thinkTok);
+      const parts = resolveStepTokenParts(st);
       patchText(
         refs.valEl,
-        `${formatTokens(st.contextTokens)} / ${formatTokens(thinkTok)} / ${formatTokens(respTok)}`
+        `${formatTokens(parts.ctxTok)} / ${formatTokens(parts.thinkTok)} / ${formatTokens(parts.respTok)}`
       );
       patchAttr(
         refs.td,
         'title',
         t('steps.ctxTitle', {
-          ctx: Math.round(Number(st.contextTokens || 0)),
-          think: Math.round(thinkTok),
-          resp: Math.round(respTok),
+          ctx: Math.round(parts.ctxTok),
+          think: Math.round(parts.thinkTok),
+          resp: Math.round(parts.respTok),
         })
+      );
+    },
+  },
+
+  tokens_io_cache: {
+    key: 'tokens_io_cache',
+    thLabel: () => t('stepCol.tokens_io_cache.th'),
+    optLabel: () => t('stepCol.tokens_io_cache.opt'),
+    sigPart: (st) =>
+      `${st.inputTokens || 0}:${st.outputTokens || 0}:${st.cacheReadTokens || 0}:${st.inCostUsd ?? ''}:${st.outCostUsd ?? ''}:${st.cacheCostUsd ?? ''}`,
+    createCell: () => {
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
+    },
+    updateCell: (refs, st) => {
+      const parts = resolveStepTokenParts(st);
+      patchText(
+        refs.valEl,
+        `${formatTokens(parts.inTok)} / ${formatTokens(parts.outTok)} / ${formatTokens(parts.cacheTok)}`
+      );
+      patchAttr(
+        refs.td,
+        'title',
+        t('steps.ioCacheTitle', {
+          inPart: formatPartWithOptionalCost(parts.inTok, st?.inCostUsd),
+          outPart: formatPartWithOptionalCost(parts.outTok, st?.outCostUsd),
+          cachePart: formatPartWithOptionalCost(parts.cacheTok, st?.cacheCostUsd),
+        })
+      );
+    },
+  },
+
+  tokens_custom: {
+    key: 'tokens_custom',
+    thLabel: (ctx) => formatCustomTokenComboHeader(ctx?.stepTokenComboFormat),
+    optLabel: (ctx) =>
+      t('stepCol.tokens_custom.opt', {
+        fmt: formatCustomTokenComboHeader(ctx?.stepTokenComboFormat),
+      }),
+    sigPart: (st, ctx) =>
+      `${normalizeClientStepTokenComboFormat(ctx?.stepTokenComboFormat)}:${st.contextTokens || 0}:${st.inputTokens || 0}:${st.cacheReadTokens || 0}:${st.outputTokens || 0}:${st.thinkingTokens || 0}:${st.responseTokens ?? ''}:${st.costUsd ?? ''}`,
+    createCell: () => {
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
+    },
+    updateCell: (refs, st, ctx) => {
+      const segs = parseClientStepTokenComboSegments(ctx?.stepTokenComboFormat);
+      const parts = resolveStepTokenParts(st);
+      const rendered = segs.map((seg) => resolveSegmentDisplay(seg, parts, st));
+      patchText(
+        refs.valEl,
+        rendered.map((r) => r.short).join(' / ')
+      );
+      patchAttr(
+        refs.td,
+        'title',
+        rendered.map((r) => r.tip).join(' · ')
       );
     },
   },
@@ -314,9 +445,12 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
   },
 });
 
-export function getStepColumnOptions() {
+export function getStepColumnOptions(
+  stepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT
+) {
+  const ctx = { stepTokenComboFormat };
   return STEP_COLUMN_KEYS.map((key) => ({
     value: key,
-    label: STEP_COLUMN_REGISTRY[key].optLabel(),
+    label: STEP_COLUMN_REGISTRY[key].optLabel(ctx),
   }));
 }

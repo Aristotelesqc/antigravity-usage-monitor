@@ -100,6 +100,7 @@ let feedbackTimer = null;
 let activeBundleVersion = 0;
 let latestRequestSeq = 0;
 let activeForceCount = 0;
+let consecutivePollFailures = 0;
 let inFlightTelemetryPoll = null;
 let lastReceivedSteps = null;
 let loopActive = false;
@@ -167,6 +168,8 @@ export const CLIENT_STEP_COLUMN_KEYS = Object.freeze([
   'ttft',
   'duration',
   'tokens_combo',
+  'tokens_io_cache',
+  'tokens_custom',
   'input_tokens',
   'cache_tokens',
   'output_tokens',
@@ -183,6 +186,94 @@ export const DEFAULT_CLIENT_STEP_COLUMNS = Object.freeze([
   'cache',
   'cost',
 ]);
+
+export const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
+
+const CLIENT_STEP_TOKEN_ALIASES = Object.freeze({
+  context: 'context',
+  ctx: 'context',
+  '上下文': 'context',
+  in: 'in',
+  new: 'in',
+  input: 'in',
+  '输入': 'in',
+  '新输入': 'in',
+  out: 'out',
+  output: 'out',
+  '输出': 'out',
+  '总输出': 'out',
+  cache: 'cache',
+  cached: 'cache',
+  cache_read: 'cache',
+  cacheread: 'cache',
+  '缓存': 'cache',
+  '缓存读': 'cache',
+  think: 'think',
+  thinking: 'think',
+  '思考': 'think',
+  reply: 'reply',
+  body: 'reply',
+  resp: 'reply',
+  response: 'reply',
+  text: 'reply',
+  '正文': 'reply',
+  '回复': 'reply',
+  total: 'total',
+  all: 'total',
+  sum: 'total',
+  '总计': 'total',
+  '总token': 'total',
+});
+
+export function parseClientStepTokenComboSegments(raw) {
+  const str = String(raw ?? '').trim();
+  const out = [];
+  const seen = new Set();
+  if (str) {
+    for (const part of str.split(/[:/,|]+/)) {
+      const key = part.trim().toLowerCase();
+      if (!key) continue;
+      const mapped = Object.prototype.hasOwnProperty.call(CLIENT_STEP_TOKEN_ALIASES, key)
+        ? CLIENT_STEP_TOKEN_ALIASES[key]
+        : null;
+      if (!mapped || seen.has(mapped)) continue;
+      seen.add(mapped);
+      out.push(mapped);
+      if (out.length >= 4) break;
+    }
+  }
+  return out.length > 0 ? out : ['context', 'in', 'cache'];
+}
+
+export function normalizeClientStepTokenComboFormat(raw) {
+  return parseClientStepTokenComboSegments(raw).join(':');
+}
+
+export const MIN_CLIENT_POPOVER_WIDTH = 440;
+export const MAX_CLIENT_POPOVER_WIDTH = 1080;
+export const DEFAULT_CLIENT_POPOVER_WIDTH = 580;
+
+export function normalizeClientPopoverWidthMode(mode) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
+}
+
+export function normalizeClientPopoverWidth(width) {
+  const num = Number(width);
+  if (!Number.isFinite(num) || num <= 0) return DEFAULT_CLIENT_POPOVER_WIDTH;
+  return Math.max(MIN_CLIENT_POPOVER_WIDTH, Math.min(MAX_CLIENT_POPOVER_WIDTH, Math.round(num)));
+}
+
+export function normalizeClientModelDisplayMode(mode, legacyShowUpstream) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+    return 'upstream_compact';
+  }
+  if (m === 'short') return 'short';
+  if (legacyShowUpstream === true) return 'upstream';
+  return 'short';
+}
 
 function normalizeClientOrderedList(raw, { allowedKeys, defaultItems, minLen, maxLen }) {
   if (!Array.isArray(raw)) {
@@ -281,7 +372,7 @@ export function normalizeClientStepColumns(raw) {
     allowedKeys: CLIENT_STEP_COLUMN_KEYS,
     defaultItems: DEFAULT_CLIENT_STEP_COLUMNS,
     minLen: 2,
-    maxLen: 12,
+    maxLen: CLIENT_STEP_COLUMN_KEYS.length,
   });
 }
 
@@ -356,7 +447,42 @@ function isEquivalentTelemetry(prev, next) {
   ) {
     return false;
   }
+  const normModelMode = (mode, legacyShowUpstream) => {
+    const m = String(mode ?? '').trim().toLowerCase();
+    if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+    if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+      return 'upstream_compact';
+    }
+    if (m === 'short') return 'short';
+    return legacyShowUpstream === true ? 'upstream' : 'short';
+  };
+  const normPopMode = (mode) => {
+    const m = String(mode ?? '').trim().toLowerCase();
+    return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
+  };
+  const normPopW = (w) => {
+    const n = Number(w);
+    return Number.isFinite(n) && n > 0 ? Math.max(440, Math.min(1080, Math.round(n))) : 580;
+  };
+  if (
+    normModelMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
+    normModelMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
+  ) {
+    return false;
+  }
   if (pSet?.showUpstreamModel !== nSet?.showUpstreamModel) return false;
+  if (normPopMode(pSet?.popoverWidthMode) !== normPopMode(nSet?.popoverWidthMode)) {
+    return false;
+  }
+  if (normPopW(pSet?.popoverWidth) !== normPopW(nSet?.popoverWidth)) {
+    return false;
+  }
+  if (
+    String(pSet?.stepTokenComboFormat ?? 'context:in:cache').trim() !==
+    String(nSet?.stepTokenComboFormat ?? 'context:in:cache').trim()
+  ) {
+    return false;
+  }
   const prevOrchIdMode =
     String(pSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
       ? 'full'
@@ -940,6 +1066,7 @@ async function requestTelemetry(params, force) {
       }
       activeBundleVersion = payload.uiBundleVersion;
     }
+    consecutivePollFailures = 0;
 
     const latestSt = telemetryStore.getState();
     const previousAccount = latestSt.telemetry?.account;
@@ -980,7 +1107,10 @@ async function requestTelemetry(params, force) {
     return payload;
   } catch (err) {
     if (err?.name === 'AbortError' || reqSeq !== latestRequestSeq) return null;
-    telemetryStore.setState({ syncState: 'error' });
+    consecutivePollFailures += 1;
+    if (force || consecutivePollFailures >= 2 || !telemetryStore.getState().telemetry) {
+      telemetryStore.setState({ syncState: 'error' });
+    }
     return null;
   } finally {
     if (force) {
@@ -1037,6 +1167,28 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTableColumns')) {
     safePatch.stepTableColumns = normalizeClientStepColumns(safePatch.stepTableColumns);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTokenComboFormat')) {
+    safePatch.stepTokenComboFormat = normalizeClientStepTokenComboFormat(
+      safePatch.stepTokenComboFormat
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'modelDisplayMode')) {
+    const normDisp = normalizeClientModelDisplayMode(
+      safePatch.modelDisplayMode,
+      safePatch.showUpstreamModel
+    );
+    safePatch.modelDisplayMode = normDisp;
+    safePatch.showUpstreamModel = normDisp !== 'short';
+  } else if (Object.prototype.hasOwnProperty.call(safePatch, 'showUpstreamModel')) {
+    safePatch.showUpstreamModel = Boolean(safePatch.showUpstreamModel);
+    safePatch.modelDisplayMode = safePatch.showUpstreamModel ? 'upstream' : 'short';
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidthMode')) {
+    safePatch.popoverWidthMode = normalizeClientPopoverWidthMode(safePatch.popoverWidthMode);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidth')) {
+    safePatch.popoverWidth = normalizeClientPopoverWidth(safePatch.popoverWidth);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
     safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);

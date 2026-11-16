@@ -12,10 +12,15 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  bootBundleVersion,
   bootWindowBridgeRuntime,
   setStandalonePortListener,
 } from './backend/api-actions.mjs';
-import { loadSettings, normalizeStandalonePort } from './backend/config.mjs';
+import {
+  computeRuntimeCodeVersion,
+  loadSettings,
+  normalizeStandalonePort,
+} from './backend/config.mjs';
 import {
   createStandaloneWebServer,
   parseStandaloneCliArgs,
@@ -41,6 +46,19 @@ export function startBridgeDaemon() {
     allowDynamicLs: true,
     onRestart: triggerRestart,
   });
+
+  const driftWatchTimer = setInterval(() => {
+    if (shuttingDown) return;
+    try {
+      const diskVersion = String(computeRuntimeCodeVersion() || '');
+      if (bootBundleVersion && diskVersion && diskVersion !== String(bootBundleVersion)) {
+        triggerRestart();
+      }
+    } catch {
+      // 忽略文件覆盖期间瞬态 stat 异常
+    }
+  }, 3000);
+  driftWatchTimer.unref?.();
 
   function resolveDesiredStandalonePort(settingsOverride = null) {
     if (envPinnedPort !== null) {
@@ -102,6 +120,7 @@ export function startBridgeDaemon() {
   async function shutdown({ disposeWindows = false, exitCode = 0 } = {}) {
     if (shuttingDown) return;
     shuttingDown = true;
+    clearInterval(driftWatchTimer);
     setStandalonePortListener(null);
     const forceTimer = setTimeout(() => {
       process.exit(exitCode);

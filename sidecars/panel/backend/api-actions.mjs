@@ -22,6 +22,7 @@ import {
   loadSettings,
   lsRuntimeEndpoint,
   normalizeFullSettings,
+  normalizeModelDisplayMode,
   normalizePluginUpdateMode,
   normalizeWindowMountMode,
   saveJson,
@@ -38,6 +39,7 @@ import { callLsRpc, getContextModelCatalog } from './ls-rpc.mjs';
 import {
   performPluginUpdate,
   scheduleSidecarRestart,
+  setSidecarRestartHandler,
   syncCloudCatalog,
 } from './plugin-updater.mjs';
 import { getCloudStatus } from './pricing-catalog.mjs';
@@ -124,19 +126,19 @@ function projectDisplayStep(st) {
     stepIndex, createdAtMs, isCompactionStep, modelKey, modelShort, modelLabel,
     modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
     streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
-    outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, agentId,
-    agentCascadeId, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
-    turnIndex, isTurnStart, isLatestTurn, turnPrompt, rootTurnIndex, isRootTurnStart,
-    isRootLatestTurn, rootTurnPrompt,
+    outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, inCostUsd,
+    cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentLabel, agentBadge,
+    agentRole, agentIndex, isSubagent, turnIndex, isTurnStart, isLatestTurn,
+    turnPrompt, rootTurnIndex, isRootTurnStart, isRootLatestTurn, rootTurnPrompt,
   } = st;
   return {
     stepIndex, createdAtMs, isCompactionStep, modelKey, modelShort, modelLabel,
     modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
     streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
-    outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, agentId,
-    agentCascadeId, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
-    turnIndex, isTurnStart, isLatestTurn, turnPrompt, rootTurnIndex, isRootTurnStart,
-    isRootLatestTurn, rootTurnPrompt,
+    outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, inCostUsd,
+    cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentLabel, agentBadge,
+    agentRole, agentIndex, isSubagent, turnIndex, isTurnStart, isLatestTurn,
+    turnPrompt, rootTurnIndex, isRootTurnStart, isRootLatestTurn, rootTurnPrompt,
   };
 }
 
@@ -288,6 +290,14 @@ export function executeSettingsAction(data) {
             : 'dual'
           : 'sidebar'
         : normalizeWindowMountMode(current.windowMountMode, current.enableWindowOverlay);
+  const nextModelDisplayMode =
+    payload.modelDisplayMode !== undefined
+      ? normalizeModelDisplayMode(payload.modelDisplayMode)
+      : typeof payload.showUpstreamModel === 'boolean'
+        ? payload.showUpstreamModel
+          ? 'upstream'
+          : 'short'
+        : normalizeModelDisplayMode(current.modelDisplayMode, current.showUpstreamModel);
   const updated = normalizeFullSettings({
     ...current,
     ...payload,
@@ -300,6 +310,7 @@ export function executeSettingsAction(data) {
       payload.weeklyCostBudget,
       current.weeklyCostBudget
     ),
+    modelDisplayMode: nextModelDisplayMode,
     pluginUpdateMode: nextPluginUpdateMode,
     windowMountMode: nextWindowMountMode,
   });
@@ -528,6 +539,9 @@ export function bootWindowBridgeRuntime({ allowDynamicLs = false, onRestart = nu
 
   const triggerRestart =
     typeof onRestart === 'function' ? onRestart : () => scheduleSidecarRestart(150);
+  if (typeof onRestart === 'function') {
+    setSidecarRestartHandler(onRestart);
+  }
 
   if (lsRuntimeEndpoint.baseUrl) {
     syncCloudCatalog({ force: false }).catch(() => {});

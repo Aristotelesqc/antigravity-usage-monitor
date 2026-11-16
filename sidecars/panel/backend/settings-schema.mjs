@@ -84,6 +84,8 @@ export const STEP_TABLE_COLUMN_KEYS = Object.freeze([
   'ttft',
   'duration',
   'tokens_combo',
+  'tokens_io_cache',
+  'tokens_custom',
   'input_tokens',
   'cache_tokens',
   'output_tokens',
@@ -101,11 +103,56 @@ export const DEFAULT_STEP_TABLE_COLUMNS = Object.freeze([
   'cost',
 ]);
 
+export const DEFAULT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
+
+export const STEP_TOKEN_SEGMENT_ALIASES = Object.freeze({
+  context: 'context',
+  ctx: 'context',
+  '上下文': 'context',
+  in: 'in',
+  new: 'in',
+  input: 'in',
+  '输入': 'in',
+  '新输入': 'in',
+  out: 'out',
+  output: 'out',
+  '输出': 'out',
+  '总输出': 'out',
+  cache: 'cache',
+  cached: 'cache',
+  cache_read: 'cache',
+  cacheread: 'cache',
+  '缓存': 'cache',
+  '缓存读': 'cache',
+  think: 'think',
+  thinking: 'think',
+  '思考': 'think',
+  reply: 'reply',
+  body: 'reply',
+  resp: 'reply',
+  response: 'reply',
+  text: 'reply',
+  '正文': 'reply',
+  '回复': 'reply',
+  total: 'total',
+  all: 'total',
+  sum: 'total',
+  '总计': 'total',
+  '总token': 'total',
+});
+
 export const PLUGIN_UPDATE_MODES = Object.freeze(['off', 'manual', 'auto']);
+
+export const MODEL_DISPLAY_MODES = Object.freeze(['short', 'upstream', 'upstream_compact']);
 
 export const ORCHESTRATOR_ID_MODES = Object.freeze(['compact', 'full']);
 
 export const WINDOW_MOUNT_MODES = Object.freeze(['dual', 'composer', 'sidebar']);
+
+export const POPOVER_WIDTH_MODES = Object.freeze(['auto', 'custom']);
+export const MIN_POPOVER_WIDTH = 440;
+export const MAX_POPOVER_WIDTH = 1080;
+export const DEFAULT_POPOVER_WIDTH = 580;
 
 function isSchemaPlainObject(v) {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
@@ -172,6 +219,25 @@ export function normalizeWindowMountMode(mode, legacyEnableOverlay) {
 }
 
 /**
+ * 归一化模型名称展示模式（`'short'` 精简代号 | `'upstream_compact'` 去前缀原始 ID | `'upstream'` 完整原始 ID），
+ * 兼容历史 `showUpstreamModel` 布尔开关，默认 `'short'`。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyShowUpstream]
+ * @returns {'short'|'upstream_compact'|'upstream'}
+ */
+export function normalizeModelDisplayMode(mode, legacyShowUpstream) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+    return 'upstream_compact';
+  }
+  if (m === 'short') return 'short';
+  if (legacyShowUpstream === true) return 'upstream';
+  return 'short';
+}
+
+/**
  * 归一化 Orchestrator 系列模型 ID 显示风格（`'compact'` 精简代号 vs `'full'` 完整模型 ID，默认 `'compact'`）。
  *
  * @param {unknown} mode
@@ -180,6 +246,65 @@ export function normalizeWindowMountMode(mode, legacyEnableOverlay) {
 export function normalizeOrchestratorIdMode(mode) {
   const m = String(mode ?? '').trim().toLowerCase();
   return m === 'full' ? 'full' : 'compact';
+}
+
+/**
+ * 归一化悬浮主面板宽度模式（`'auto'` 自适应内容宽度 | `'custom'` 指定像素宽度，默认 `'auto'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'auto'|'custom'}
+ */
+export function normalizePopoverWidthMode(mode) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
+}
+
+/**
+ * 归一化悬浮主面板自定义宽度像素值（范围 `440..1080`，默认 `580`）。
+ *
+ * @param {unknown} width
+ * @returns {number}
+ */
+export function normalizePopoverWidth(width) {
+  const num = Number(width);
+  if (!Number.isFinite(num) || num <= 0) return DEFAULT_POPOVER_WIDTH;
+  return Math.max(MIN_POPOVER_WIDTH, Math.min(MAX_POPOVER_WIDTH, Math.round(num)));
+}
+
+/**
+ * 解析步骤表自定义 Token 组合表达式，支持 `:`、`/`、`,`、`|` 分隔与中英文别名（1~4 项不重复）。
+ *
+ * @param {unknown} raw
+ * @returns {Array<'context'|'in'|'out'|'cache'|'think'|'reply'|'total'>}
+ */
+export function parseStepTokenComboSegments(raw) {
+  const str = String(raw ?? '').trim();
+  const out = [];
+  const seen = new Set();
+  if (str) {
+    for (const part of str.split(/[:/,|]+/)) {
+      const key = part.trim().toLowerCase();
+      if (!key) continue;
+      const mapped = Object.prototype.hasOwnProperty.call(STEP_TOKEN_SEGMENT_ALIASES, key)
+        ? STEP_TOKEN_SEGMENT_ALIASES[key]
+        : null;
+      if (!mapped || seen.has(mapped)) continue;
+      seen.add(mapped);
+      out.push(/** @type {any} */ (mapped));
+      if (out.length >= 4) break;
+    }
+  }
+  return out.length > 0 ? out : ['context', 'in', 'cache'];
+}
+
+/**
+ * 归一化步骤表自定义 Token 组合格式字符串（如 `'context:new:cache'` -> `'context:in:cache'`）。
+ *
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function normalizeStepTokenComboFormat(raw) {
+  return parseStepTokenComboSegments(raw).join(':');
 }
 
 /**
@@ -362,12 +487,15 @@ export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   weeklyTokenBudget: 150000000,
   weeklyCostBudget: 100,
   weeklyLimitMode: 'official',
+  modelDisplayMode: 'short',
   showUpstreamModel: false,
   orchestratorIdMode: 'compact',
   pluginUpdateMode: 'manual',
   autoUpdatePlugin: false,
   windowMountMode: 'dual',
   enableWindowOverlay: true,
+  popoverWidthMode: 'auto',
+  popoverWidth: DEFAULT_POPOVER_WIDTH,
   enableCliStatusLine: true,
   standalonePort: 0,
   showTopbarMultiSession: true,
@@ -378,6 +506,7 @@ export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   showStepTurnRail: false,
   showStepAgentBadge: true,
   showStepSpeedColor: false,
+  stepTokenComboFormat: DEFAULT_STEP_TOKEN_COMBO_FORMAT,
   stepTableColumns: DEFAULT_STEP_TABLE_COLUMNS,
   modelContextWindows: Object.freeze({}),
 });
@@ -393,12 +522,15 @@ export function createDefaultSettingsObject() {
     weeklyTokenBudget: DEFAULT_SETTINGS_SCHEMA.weeklyTokenBudget,
     weeklyCostBudget: DEFAULT_SETTINGS_SCHEMA.weeklyCostBudget,
     weeklyLimitMode: DEFAULT_SETTINGS_SCHEMA.weeklyLimitMode,
+    modelDisplayMode: DEFAULT_SETTINGS_SCHEMA.modelDisplayMode,
     showUpstreamModel: DEFAULT_SETTINGS_SCHEMA.showUpstreamModel,
     orchestratorIdMode: DEFAULT_SETTINGS_SCHEMA.orchestratorIdMode,
     pluginUpdateMode: DEFAULT_SETTINGS_SCHEMA.pluginUpdateMode,
     autoUpdatePlugin: DEFAULT_SETTINGS_SCHEMA.autoUpdatePlugin,
     windowMountMode: DEFAULT_SETTINGS_SCHEMA.windowMountMode,
     enableWindowOverlay: DEFAULT_SETTINGS_SCHEMA.enableWindowOverlay,
+    popoverWidthMode: DEFAULT_SETTINGS_SCHEMA.popoverWidthMode,
+    popoverWidth: DEFAULT_SETTINGS_SCHEMA.popoverWidth,
     enableCliStatusLine: DEFAULT_SETTINGS_SCHEMA.enableCliStatusLine,
     standalonePort: DEFAULT_SETTINGS_SCHEMA.standalonePort,
     showTopbarMultiSession: DEFAULT_SETTINGS_SCHEMA.showTopbarMultiSession,
@@ -409,6 +541,7 @@ export function createDefaultSettingsObject() {
     showStepTurnRail: DEFAULT_SETTINGS_SCHEMA.showStepTurnRail,
     showStepAgentBadge: DEFAULT_SETTINGS_SCHEMA.showStepAgentBadge,
     showStepSpeedColor: DEFAULT_SETTINGS_SCHEMA.showStepSpeedColor,
+    stepTokenComboFormat: DEFAULT_SETTINGS_SCHEMA.stepTokenComboFormat,
     stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
     modelContextWindows: {},
   };
@@ -429,6 +562,10 @@ export function normalizeFullSettings(rawInput) {
     safeRaw.windowMountMode,
     safeRaw.enableWindowOverlay
   );
+  const modelDisplayMode = normalizeModelDisplayMode(
+    safeRaw.modelDisplayMode,
+    safeRaw.showUpstreamModel
+  );
   return {
     language: normalizeLanguageSetting(safeRaw.language),
     themeAccent: normalizeThemeAccent(safeRaw.themeAccent),
@@ -442,12 +579,15 @@ export function normalizeFullSettings(rawInput) {
       DEFAULT_SETTINGS_SCHEMA.weeklyCostBudget
     ),
     weeklyLimitMode: normalizeWeeklyLimitMode(safeRaw.weeklyLimitMode),
-    showUpstreamModel: safeRaw.showUpstreamModel === true,
+    modelDisplayMode,
+    showUpstreamModel: modelDisplayMode !== 'short',
     orchestratorIdMode: normalizeOrchestratorIdMode(safeRaw.orchestratorIdMode),
     pluginUpdateMode,
     autoUpdatePlugin: pluginUpdateMode === 'auto',
     windowMountMode,
     enableWindowOverlay: windowMountMode !== 'sidebar',
+    popoverWidthMode: normalizePopoverWidthMode(safeRaw.popoverWidthMode),
+    popoverWidth: normalizePopoverWidth(safeRaw.popoverWidth),
     enableCliStatusLine: safeRaw.enableCliStatusLine !== false,
     standalonePort: normalizeStandalonePort(safeRaw.standalonePort),
     showTopbarMultiSession: safeRaw.showTopbarMultiSession !== false,
@@ -458,6 +598,7 @@ export function normalizeFullSettings(rawInput) {
     showStepTurnRail: safeRaw.showStepTurnRail === true,
     showStepAgentBadge: safeRaw.showStepAgentBadge !== false,
     showStepSpeedColor: safeRaw.showStepSpeedColor === true,
+    stepTokenComboFormat: normalizeStepTokenComboFormat(safeRaw.stepTokenComboFormat),
     stepTableColumns: normalizeStepTableColumns(safeRaw.stepTableColumns),
     modelContextWindows: normalizeModelContextWindows(safeRaw.modelContextWindows),
   };

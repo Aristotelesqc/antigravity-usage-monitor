@@ -321,6 +321,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'fmt.resetMins': '{m}分钟后重置',
   'fmt.selectTime': '选择时间',
   'fmt.unknownModel': '模型未知',
+  'fmt.compactionSuffix': '·压缩',
   'fmt.mainAgent': '主代理',
   'fmt.mainBadge': '主',
   'fmt.subAgent': '子代理',
@@ -523,6 +524,21 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'steps.badgeBackAll': '点击切回全部汇总',
   'steps.badgeFilterAgent': '点击仅过滤查看 {agent}（按住 Ctrl/Shift 可加减多选）',
   'steps.ctxTitle': '上下文 {ctx} · 思考 {think} · 正文 {resp}',
+  'steps.ioCacheTitle': '新输入 {inPart} · 输出 {outPart} · 缓存读 {cachePart}',
+  'steps.tokSeg.context.th': '上下文',
+  'steps.tokSeg.context.tip': '上下文',
+  'steps.tokSeg.in.th': '输入',
+  'steps.tokSeg.in.tip': '新输入',
+  'steps.tokSeg.out.th': '输出',
+  'steps.tokSeg.out.tip': '输出',
+  'steps.tokSeg.cache.th': '缓存',
+  'steps.tokSeg.cache.tip': '缓存读',
+  'steps.tokSeg.think.th': '思考',
+  'steps.tokSeg.think.tip': '思考',
+  'steps.tokSeg.reply.th': '正文',
+  'steps.tokSeg.reply.tip': '正文',
+  'steps.tokSeg.total.th': '总计',
+  'steps.tokSeg.total.tip': '总计',
   'steps.modelCallsShare': '{calls}次 · {pct}%',
   'steps.modelCallsOnly': '{calls}次',
   'steps.modelsSummaryPrefix': '{count} 模型 · ',
@@ -548,6 +564,9 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'stepCol.duration.opt': '端到端耗时 (s)',
   'stepCol.tokens_combo.th': '上下文 / 思考 / 正文',
   'stepCol.tokens_combo.opt': '上下文 / 思考 / 正文 (组合)',
+  'stepCol.tokens_io_cache.th': '输入 / 输出 / 缓存',
+  'stepCol.tokens_io_cache.opt': '输入 / 输出 / 缓存 (组合)',
+  'stepCol.tokens_custom.opt': '自定义组合 ({fmt})',
   'stepCol.input_tokens.th': '新输入',
   'stepCol.input_tokens.opt': '新输入 Token',
   'stepCol.cache_tokens.th': '缓存读',
@@ -684,6 +703,10 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.mountDual': '双栖挂载 (顶部栏 + 侧边栏)',
   'settings.str.mountComposer': '输入框挂载 (输入框 + 侧边栏)',
   'settings.str.mountSidebar': '仅侧边栏',
+  'settings.str.popoverWidthLabel': '悬浮面板宽度',
+  'settings.str.popoverWidthAuto': '自适应',
+  'settings.str.popoverWidthCustom': '指定宽度',
+  'settings.str.popoverWidthHint': '自适应模式下在调用明细等宽表格视图自动撑宽免水平滚动；指定宽度范围 440~1080 px',
   'settings.str.multiToggle': '实时运行会话入口',
   'settings.str.cliCapsuleToggle': 'CLI 底部状态胶囊',
   'settings.str.show': '显示',
@@ -710,6 +733,9 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.stepTurnRailToggle': '对话轮次导轨',
   'settings.str.stepAgentBadgeToggle': '主/子代理标识',
   'settings.str.stepSpeedColorToggle': '输出速度多色分级',
+  'settings.str.stepTokenComboLabel': '自定义 Token 组合格式',
+  'settings.str.stepTokenComboPlaceholder': '例如 context:new:cache 或 in:out:cache',
+  'settings.str.stepTokenComboHint': '可用字段：context(上下文)、in/new(新输入)、out(输出)、cache(缓存)、think(思考)、reply(正文)、total(总计)，以 : 或 / 分隔（1~4 项）',
   'settings.str.stepsColsLabel': '「按步查看」显示列 (左 → 右，至少 2 列，可拖拽)',
   'settings.str.addStepCol': '添加字段 ({count}/{max})',
   'settings.slot.dragHint': '按住上下拖动调整顺序',
@@ -728,6 +754,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.modelFormat': '模型名称格式',
   'settings.oth.modelShort': '精简代号 (如 argon-4-high)',
   'settings.oth.modelUpstream': '原始模型 ID (如 gemini-3.8-flash-n)',
+  'settings.oth.modelUpstreamCompact': '去前缀原始 ID (如 3.8-flash-n / sonnet-4-6 / 5.4-mini)',
   'settings.oth.orchFormat': 'Orchestrator 系列 ID',
   'settings.oth.orchCompact': '精简代号 (如 orchestrator-argon)',
   'settings.oth.orchFull': '原始完整 ID (如 gemini-pro-orchestrator)',
@@ -815,6 +842,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'fmt.resetMins': 'Resets in {m}m',
   'fmt.selectTime': 'Select time',
   'fmt.unknownModel': 'Unknown model',
+  'fmt.compactionSuffix': '·compact',
   'fmt.mainAgent': 'Main Agent',
   'fmt.mainBadge': 'Main',
   'fmt.subAgent': 'Subagent',
@@ -1017,6 +1045,21 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'steps.badgeBackAll': 'Click to return to All Agents',
   'steps.badgeFilterAgent': 'Click to filter {agent} (Ctrl/Shift-click to multi-select)',
   'steps.ctxTitle': 'Context {ctx} · Thinking {think} · Reply {resp}',
+  'steps.ioCacheTitle': 'New In {inPart} · Out {outPart} · Cache Read {cachePart}',
+  'steps.tokSeg.context.th': 'Ctx',
+  'steps.tokSeg.context.tip': 'Context',
+  'steps.tokSeg.in.th': 'In',
+  'steps.tokSeg.in.tip': 'New In',
+  'steps.tokSeg.out.th': 'Out',
+  'steps.tokSeg.out.tip': 'Output',
+  'steps.tokSeg.cache.th': 'Cache',
+  'steps.tokSeg.cache.tip': 'Cache Read',
+  'steps.tokSeg.think.th': 'Think',
+  'steps.tokSeg.think.tip': 'Thinking',
+  'steps.tokSeg.reply.th': 'Reply',
+  'steps.tokSeg.reply.tip': 'Reply',
+  'steps.tokSeg.total.th': 'Total',
+  'steps.tokSeg.total.tip': 'Total',
   'steps.modelCallsShare': '{calls} calls · {pct}%',
   'steps.modelCallsOnly': '{calls} calls',
   'steps.modelsSummaryPrefix': '{count} models · ',
@@ -1042,6 +1085,9 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'stepCol.duration.opt': 'Total Duration (s)',
   'stepCol.tokens_combo.th': 'Ctx / Think / Reply',
   'stepCol.tokens_combo.opt': 'Ctx / Think / Reply (Combo)',
+  'stepCol.tokens_io_cache.th': 'In / Out / Cache',
+  'stepCol.tokens_io_cache.opt': 'In / Out / Cache (Combo)',
+  'stepCol.tokens_custom.opt': 'Custom Combo ({fmt})',
   'stepCol.input_tokens.th': 'Input',
   'stepCol.input_tokens.opt': 'New Input Tokens',
   'stepCol.cache_tokens.th': 'CacheTok',
@@ -1178,6 +1224,10 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.mountDual': 'Dual Mount (Titlebar + Sidebar)',
   'settings.str.mountComposer': 'Composer Mount (Input Box + Sidebar)',
   'settings.str.mountSidebar': 'Sidebar Only',
+  'settings.str.popoverWidthLabel': 'Popover Width',
+  'settings.str.popoverWidthAuto': 'Auto Fit',
+  'settings.str.popoverWidthCustom': 'Custom',
+  'settings.str.popoverWidthHint': 'Auto Fit widens wide tables like Step Records to avoid horizontal scroll; Custom accepts 440–1080 px',
   'settings.str.multiToggle': 'Active Sessions Pill',
   'settings.str.cliCapsuleToggle': 'CLI Bottom Capsule',
   'settings.str.show': 'Show',
@@ -1204,6 +1254,9 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.stepTurnRailToggle': 'Turn Rail & Preview',
   'settings.str.stepAgentBadgeToggle': 'Main/Sub Agent Badge',
   'settings.str.stepSpeedColorToggle': 'Speed Multi-Color',
+  'settings.str.stepTokenComboLabel': 'Custom Token Combo Format',
+  'settings.str.stepTokenComboPlaceholder': 'e.g. context:new:cache or in:out:cache',
+  'settings.str.stepTokenComboHint': 'Tokens: context, in/new, out, cache, think, reply, total — separated by : or / (1–4 items)',
   'settings.str.stepsColsLabel': '"Steps" Visible Columns (Left → Right, min 2, draggable)',
   'settings.str.addStepCol': 'Add Column ({count}/{max})',
   'settings.slot.dragHint': 'Drag up or down to reorder',
@@ -1222,6 +1275,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.modelFormat': 'Model Name Format',
   'settings.oth.modelShort': 'Short Alias (e.g. argon-4-high)',
   'settings.oth.modelUpstream': 'Raw Upstream ID (e.g. gemini-3.8-flash-n)',
+  'settings.oth.modelUpstreamCompact': 'Trimmed Raw ID (hide gemini- / claude- / gpt-)',
   'settings.oth.orchFormat': 'Orchestrator Series ID',
   'settings.oth.orchCompact': 'Compact Alias (e.g. orchestrator-argon)',
   'settings.oth.orchFull': 'Full Upstream ID (e.g. gemini-pro-orchestrator)',
@@ -1863,6 +1917,42 @@ function formatElapsedSec(seconds) {
 }
 
 /**
+ * 归一化普通模型显示模式（`'short'` 精简代号 | `'upstream_compact'` 去厂商前缀原始 ID | `'upstream'` 完整原始 ID）。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyShowUpstream]
+ * @returns {'short'|'upstream_compact'|'upstream'}
+ */
+function normalizeModelDisplayMode(mode, legacyShowUpstream) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+    return 'upstream_compact';
+  }
+  if (m === 'short') return 'short';
+  if (legacyShowUpstream === true) return 'upstream';
+  return 'short';
+}
+
+/**
+ * 隐藏原始模型 ID 开头的 `gemini-`、`claude-`、`gpt-` 厂商前缀以节省单行表格空间（确保剥离后非空）。
+ *
+ * @param {string} rawText
+ * @returns {string}
+ */
+function stripVendorModelPrefix(rawText) {
+  return String(rawText || '')
+    .trim()
+    .replace(/^(?:gemini|claude|gpt)-(?=.+)/i, '');
+}
+
+function stripCompactionMarker(rawText) {
+  return String(rawText || '')
+    .replace(/(?:·(?:压缩|compact)|\[自动压缩\]|\[auto[- ]?compact\])\s*$/iu, '')
+    .trim();
+}
+
+/**
  * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
  *
  * @param {unknown} mode
@@ -1878,17 +1968,23 @@ function normalizeOrchestratorIdDisplayMode(mode) {
  * 规则：
  * - Orchestrator 系列（`Orchestrator (Carbon)`、`Orchestrator (Argon)`、`gemini-flash-worker-agy` / `M669`）
  *   独立遵循 `orchestratorIdMode`（`'compact'` 显示 `orchestrator-carbon` / `orchestrator-argon` / `worker-agy-hydrogen`；
- *   `'full'` 显示带括号标注的完整上游 ID），不受普通模型“精简代号 / 原始模型 ID”切换影响；
- * - 其余普通模型继续按 `showUpstreamModel` 与视图选项切换。
+ *   `'full'` 显示带括号标注的完整上游 ID），不受普通模型显示模式影响；
+ * - 其余普通模型遵循 `modelDisplayMode`（`'short'` | `'upstream_compact'` | `'upstream'`，兼容旧版布尔 `showUpstreamModel`）；
+ * - 独立拆分 `baseText` 与 `compactionSuffix`（`·压缩`），供步骤表单独保护压缩尾标永不截断。
  *
  * @param {object|null|undefined} target
- * @param {{ showUpstreamModel?: boolean, orchestratorIdMode?: string }|boolean} [settings]
+ * @param {{ modelDisplayMode?: string, showUpstreamModel?: boolean, orchestratorIdMode?: string }|boolean} [settings]
  * @param {{ preferLabelInShort?: boolean, fallback?: string }} [options]
- * @returns {{ text: string, title: string, isOrchestratorSeries: boolean }}
+ * @returns {{ text: string, baseText: string, compactionSuffix: string, isCompaction: boolean, title: string, isOrchestratorSeries: boolean }}
  */
 function resolveModelDisplayInfo(target, settings = {}, options = {}) {
-  const showUpstream =
-    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+  const modelDisplayMode =
+    typeof settings === 'boolean'
+      ? settings
+        ? 'upstream'
+        : 'short'
+      : normalizeModelDisplayMode(settings?.modelDisplayMode, settings?.showUpstreamModel);
+  const showUpstream = modelDisplayMode !== 'short';
   const orchestratorMode = normalizeOrchestratorIdDisplayMode(
     typeof settings === 'object' && settings ? settings.orchestratorIdMode : 'compact'
   );
@@ -1896,7 +1992,14 @@ function resolveModelDisplayInfo(target, settings = {}, options = {}) {
   const fallback = options?.fallback ?? t('fmt.unknownModel');
 
   if (!target || typeof target !== 'object') {
-    return { text: fallback, title: fallback, isOrchestratorSeries: false };
+    return {
+      text: fallback,
+      baseText: fallback,
+      compactionSuffix: '',
+      isCompaction: false,
+      title: fallback,
+      isOrchestratorSeries: false,
+    };
   }
 
   const shortText = String(
@@ -1913,9 +2016,12 @@ function resolveModelDisplayInfo(target, settings = {}, options = {}) {
 
   const isCompaction =
     Boolean(target.isCompactionStep) ||
-    /·压缩\s*$/.test(shortText) ||
-    /·压缩\s*$/.test(upstreamText) ||
-    /·压缩\s*$/.test(labelText);
+    /·(?:压缩|compact)\s*$/iu.test(shortText) ||
+    /·(?:压缩|compact)\s*$/iu.test(upstreamText) ||
+    /·(?:压缩|compact)\s*$/iu.test(labelText) ||
+    /\[自动压缩\]\s*$/u.test(labelText);
+
+  const compactionSuffix = isCompaction ? t('fmt.compactionSuffix') : '';
 
   const combined = `${modelKeyText} ${shortText} ${labelText} ${upstreamText} ${responseText}`;
   const isOrchWorker =
@@ -1938,27 +2044,50 @@ function resolveModelDisplayInfo(target, settings = {}, options = {}) {
       compactId = 'orchestrator-argon';
       fullId = 'gemini-pro-orchestrator-argon (argon-4)';
     }
-    const suffix = isCompaction ? '·压缩' : '';
-    const text = `${orchestratorMode === 'full' ? fullId : compactId}${suffix}`;
+    const baseText = orchestratorMode === 'full' ? fullId : compactId;
+    const text = `${baseText}${compactionSuffix}`;
     const multiUpstream =
       Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
         ? target.upstreamModels.join(' / ')
         : '';
-    const title = multiUpstream || `${fullId}${suffix}`;
-    return { text, title, isOrchestratorSeries: true };
+    const title = multiUpstream || `${fullId}${compactionSuffix}`;
+    return {
+      text,
+      baseText,
+      compactionSuffix,
+      isCompaction,
+      title,
+      isOrchestratorSeries: true,
+    };
   }
 
-  const standardText =
+  const rawSelected =
     (showUpstream
       ? upstreamText || responseText || shortText || labelText
       : preferLabelInShort
         ? labelText || shortText
         : shortText || labelText) || fallback;
+  const cleanRawBase = stripCompactionMarker(rawSelected) || fallback;
+  const baseText =
+    modelDisplayMode === 'upstream_compact'
+      ? stripVendorModelPrefix(cleanRawBase) || cleanRawBase
+      : cleanRawBase;
+  const text = `${baseText}${compactionSuffix}`;
+  const fullUpstreamWithSuffix = `${cleanRawBase}${compactionSuffix}`;
   const standardTitle =
     showUpstream && Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
       ? target.upstreamModels.join(' / ')
-      : standardText;
-  return { text: standardText, title: standardTitle, isOrchestratorSeries: false };
+      : showUpstream
+        ? fullUpstreamWithSuffix
+        : text;
+  return {
+    text,
+    baseText,
+    compactionSuffix,
+    isCompaction,
+    title: standardTitle,
+    isOrchestratorSeries: false,
+  };
 }
 
 /**
@@ -1974,7 +2103,9 @@ function resolveModelDisplayInfo(target, settings = {}, options = {}) {
 function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
   if (!Array.isArray(models) || models.length === 0) return [];
   const showUpstream =
-    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+    typeof settings === 'boolean'
+      ? settings
+      : normalizeModelDisplayMode(settings?.modelDisplayMode, settings?.showUpstreamModel) !== 'short';
   const byDisplay = new Map();
 
   for (const m of models) {
@@ -2247,7 +2378,7 @@ function callViaCdpBridge(bridge, path, { method, body, signal, cdpTimeoutMs }) 
   });
 }
 
-async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTimeoutMs = 8000 } = {}) {
+async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTimeoutMs = 3500 } = {}) {
   const upperMethod = method.toUpperCase();
   const dedupKey = upperMethod === 'GET' && !abortKey ? path : '';
 
@@ -2267,43 +2398,27 @@ async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTi
     signal = requestController.signal;
   }
 
-  const runRequest = async () => {
+  const execHttpOnce = async (activeBridge) => {
     const sidecar = typeof window !== 'undefined' ? window.sidecar : null;
-    const bridge = !sidecar?.fetch ? getWindowBridgeConfig() : null;
     const fetchFn = sidecar?.fetch
       ? sidecar.fetch.bind(sidecar)
       : typeof window !== 'undefined' && typeof window.fetch === 'function'
         ? window.fetch.bind(window)
         : globalThis.fetch.bind(globalThis);
-
-    const requestUrl = bridge ? `http://127.0.0.1:${bridge.port}${path}` : path;
+    const requestUrl = activeBridge ? `http://127.0.0.1:${activeBridge.port}${path}` : path;
     const headers = {};
-    if (body !== undefined || !bridge) {
+    if (body !== undefined || !activeBridge) {
       headers['Content-Type'] = 'application/json';
     }
-    if (bridge) {
-      headers['X-Usage-Monitor-Token'] = bridge.token;
-      if (bridge.transportMode === 'cdp') {
-        return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal, cdpTimeoutMs });
-      }
+    if (activeBridge) {
+      headers['X-Usage-Monitor-Token'] = activeBridge.token;
     }
-
-    let res;
-    try {
-      res = await fetchFn(requestUrl, {
-        method: upperMethod,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal,
-      });
-    } catch (fetchErr) {
-      if (!bridge || signal?.aborted || fetchErr?.name === 'AbortError') {
-        throw fetchErr;
-      }
-      // 当宿主环境的 CSP connect-src、混合内容策略或本地代理阻断 HTTP 直连时，无缝切至 CDP 通道
-      bridge.transportMode = 'cdp';
-      return callViaCdpBridge(bridge, path, { method: upperMethod, body, signal, cdpTimeoutMs });
-    }
+    const res = await fetchFn(requestUrl, {
+      method: upperMethod,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    });
     if (signal?.aborted) {
       const abortErr = new Error('Request aborted');
       abortErr.name = 'AbortError';
@@ -2318,7 +2433,58 @@ async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTi
     if (!res.ok) {
       throw new Error(data.error || `HTTP ${res.status}`);
     }
+    if (activeBridge) {
+      activeBridge.transportMode = 'http';
+    }
     return data;
+  };
+
+  const fallbackViaCdpWithRecovery = async (initialBridge) => {
+    initialBridge.transportMode = 'cdp';
+    try {
+      return await callViaCdpBridge(initialBridge, path, {
+        method: upperMethod,
+        body,
+        signal,
+        cdpTimeoutMs,
+      });
+    } catch (cdpErr) {
+      if (signal?.aborted || cdpErr?.name === 'AbortError') {
+        throw cdpErr;
+      }
+      // 热更新或守护重启期间若 CDP 尚未轮询投递，自动重置回 HTTP 并用最新桥接端口重试一次
+      const latestBridge = getWindowBridgeConfig() || initialBridge;
+      latestBridge.transportMode = 'http';
+      return execHttpOnce(latestBridge);
+    }
+  };
+
+  const runRequest = async () => {
+    const sidecar = typeof window !== 'undefined' ? window.sidecar : null;
+    const bridge = !sidecar?.fetch ? getWindowBridgeConfig() : null;
+    if (bridge && bridge.transportMode === 'cdp') {
+      return fallbackViaCdpWithRecovery(bridge);
+    }
+
+    try {
+      return await execHttpOnce(bridge);
+    } catch (fetchErr) {
+      if (signal?.aborted || fetchErr?.name === 'AbortError') {
+        throw fetchErr;
+      }
+      if (!bridge) {
+        // 辅助栏 Webview 在 Worker 热替换瞬间若有极短暂波动，延迟 180ms 自动无感重试一次
+        if (upperMethod === 'GET') {
+          await new Promise((r) => setTimeout(r, 180));
+          if (!signal?.aborted) {
+            return execHttpOnce(null);
+          }
+        }
+        throw fetchErr;
+      }
+      // 当宿主环境的 CSP connect-src、混合内容策略或瞬态端口切换阻断直连时，切至带 HTTP 自愈恢复的 CDP 通道
+      return fallbackViaCdpWithRecovery(bridge);
+    }
   };
 
   const promise = runRequest().finally(() => {
@@ -2471,6 +2637,7 @@ let feedbackTimer = null;
 let activeBundleVersion = 0;
 let latestRequestSeq = 0;
 let activeForceCount = 0;
+let consecutivePollFailures = 0;
 let inFlightTelemetryPoll = null;
 let lastReceivedSteps = null;
 let loopActive = false;
@@ -2538,6 +2705,8 @@ const CLIENT_STEP_COLUMN_KEYS = Object.freeze([
   'ttft',
   'duration',
   'tokens_combo',
+  'tokens_io_cache',
+  'tokens_custom',
   'input_tokens',
   'cache_tokens',
   'output_tokens',
@@ -2554,6 +2723,94 @@ const DEFAULT_CLIENT_STEP_COLUMNS = Object.freeze([
   'cache',
   'cost',
 ]);
+
+const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
+
+const CLIENT_STEP_TOKEN_ALIASES = Object.freeze({
+  context: 'context',
+  ctx: 'context',
+  '上下文': 'context',
+  in: 'in',
+  new: 'in',
+  input: 'in',
+  '输入': 'in',
+  '新输入': 'in',
+  out: 'out',
+  output: 'out',
+  '输出': 'out',
+  '总输出': 'out',
+  cache: 'cache',
+  cached: 'cache',
+  cache_read: 'cache',
+  cacheread: 'cache',
+  '缓存': 'cache',
+  '缓存读': 'cache',
+  think: 'think',
+  thinking: 'think',
+  '思考': 'think',
+  reply: 'reply',
+  body: 'reply',
+  resp: 'reply',
+  response: 'reply',
+  text: 'reply',
+  '正文': 'reply',
+  '回复': 'reply',
+  total: 'total',
+  all: 'total',
+  sum: 'total',
+  '总计': 'total',
+  '总token': 'total',
+});
+
+function parseClientStepTokenComboSegments(raw) {
+  const str = String(raw ?? '').trim();
+  const out = [];
+  const seen = new Set();
+  if (str) {
+    for (const part of str.split(/[:/,|]+/)) {
+      const key = part.trim().toLowerCase();
+      if (!key) continue;
+      const mapped = Object.prototype.hasOwnProperty.call(CLIENT_STEP_TOKEN_ALIASES, key)
+        ? CLIENT_STEP_TOKEN_ALIASES[key]
+        : null;
+      if (!mapped || seen.has(mapped)) continue;
+      seen.add(mapped);
+      out.push(mapped);
+      if (out.length >= 4) break;
+    }
+  }
+  return out.length > 0 ? out : ['context', 'in', 'cache'];
+}
+
+function normalizeClientStepTokenComboFormat(raw) {
+  return parseClientStepTokenComboSegments(raw).join(':');
+}
+
+const MIN_CLIENT_POPOVER_WIDTH = 440;
+const MAX_CLIENT_POPOVER_WIDTH = 1080;
+const DEFAULT_CLIENT_POPOVER_WIDTH = 580;
+
+function normalizeClientPopoverWidthMode(mode) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
+}
+
+function normalizeClientPopoverWidth(width) {
+  const num = Number(width);
+  if (!Number.isFinite(num) || num <= 0) return DEFAULT_CLIENT_POPOVER_WIDTH;
+  return Math.max(MIN_CLIENT_POPOVER_WIDTH, Math.min(MAX_CLIENT_POPOVER_WIDTH, Math.round(num)));
+}
+
+function normalizeClientModelDisplayMode(mode, legacyShowUpstream) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+    return 'upstream_compact';
+  }
+  if (m === 'short') return 'short';
+  if (legacyShowUpstream === true) return 'upstream';
+  return 'short';
+}
 
 function normalizeClientOrderedList(raw, { allowedKeys, defaultItems, minLen, maxLen }) {
   if (!Array.isArray(raw)) {
@@ -2652,7 +2909,7 @@ function normalizeClientStepColumns(raw) {
     allowedKeys: CLIENT_STEP_COLUMN_KEYS,
     defaultItems: DEFAULT_CLIENT_STEP_COLUMNS,
     minLen: 2,
-    maxLen: 12,
+    maxLen: CLIENT_STEP_COLUMN_KEYS.length,
   });
 }
 
@@ -2727,7 +2984,42 @@ function isEquivalentTelemetry(prev, next) {
   ) {
     return false;
   }
+  const normModelMode = (mode, legacyShowUpstream) => {
+    const m = String(mode ?? '').trim().toLowerCase();
+    if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+    if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+      return 'upstream_compact';
+    }
+    if (m === 'short') return 'short';
+    return legacyShowUpstream === true ? 'upstream' : 'short';
+  };
+  const normPopMode = (mode) => {
+    const m = String(mode ?? '').trim().toLowerCase();
+    return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
+  };
+  const normPopW = (w) => {
+    const n = Number(w);
+    return Number.isFinite(n) && n > 0 ? Math.max(440, Math.min(1080, Math.round(n))) : 580;
+  };
+  if (
+    normModelMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
+    normModelMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
+  ) {
+    return false;
+  }
   if (pSet?.showUpstreamModel !== nSet?.showUpstreamModel) return false;
+  if (normPopMode(pSet?.popoverWidthMode) !== normPopMode(nSet?.popoverWidthMode)) {
+    return false;
+  }
+  if (normPopW(pSet?.popoverWidth) !== normPopW(nSet?.popoverWidth)) {
+    return false;
+  }
+  if (
+    String(pSet?.stepTokenComboFormat ?? 'context:in:cache').trim() !==
+    String(nSet?.stepTokenComboFormat ?? 'context:in:cache').trim()
+  ) {
+    return false;
+  }
   const prevOrchIdMode =
     String(pSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
       ? 'full'
@@ -3311,6 +3603,7 @@ async function requestTelemetry(params, force) {
       }
       activeBundleVersion = payload.uiBundleVersion;
     }
+    consecutivePollFailures = 0;
 
     const latestSt = telemetryStore.getState();
     const previousAccount = latestSt.telemetry?.account;
@@ -3351,7 +3644,10 @@ async function requestTelemetry(params, force) {
     return payload;
   } catch (err) {
     if (err?.name === 'AbortError' || reqSeq !== latestRequestSeq) return null;
-    telemetryStore.setState({ syncState: 'error' });
+    consecutivePollFailures += 1;
+    if (force || consecutivePollFailures >= 2 || !telemetryStore.getState().telemetry) {
+      telemetryStore.setState({ syncState: 'error' });
+    }
     return null;
   } finally {
     if (force) {
@@ -3408,6 +3704,28 @@ async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTableColumns')) {
     safePatch.stepTableColumns = normalizeClientStepColumns(safePatch.stepTableColumns);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'stepTokenComboFormat')) {
+    safePatch.stepTokenComboFormat = normalizeClientStepTokenComboFormat(
+      safePatch.stepTokenComboFormat
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'modelDisplayMode')) {
+    const normDisp = normalizeClientModelDisplayMode(
+      safePatch.modelDisplayMode,
+      safePatch.showUpstreamModel
+    );
+    safePatch.modelDisplayMode = normDisp;
+    safePatch.showUpstreamModel = normDisp !== 'short';
+  } else if (Object.prototype.hasOwnProperty.call(safePatch, 'showUpstreamModel')) {
+    safePatch.showUpstreamModel = Boolean(safePatch.showUpstreamModel);
+    safePatch.modelDisplayMode = safePatch.showUpstreamModel ? 'upstream' : 'short';
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidthMode')) {
+    safePatch.popoverWidthMode = normalizeClientPopoverWidthMode(safePatch.popoverWidthMode);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'popoverWidth')) {
+    safePatch.popoverWidth = normalizeClientPopoverWidth(safePatch.popoverWidth);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'orchestratorIdMode')) {
     safePatch.orchestratorIdMode = normalizeClientOrchestratorIdMode(safePatch.orchestratorIdMode);
@@ -10262,6 +10580,8 @@ const STEP_COLUMN_KEYS = Object.freeze([
   'ttft',
   'duration',
   'tokens_combo',
+  'tokens_io_cache',
+  'tokens_custom',
   'input_tokens',
   'cache_tokens',
   'output_tokens',
@@ -10278,6 +10598,74 @@ const DEFAULT_STEP_COLUMN_KEYS = Object.freeze([
   'cache',
   'cost',
 ]);
+
+function resolveStepTokenParts(st) {
+  const inTok = Math.max(0, Number(st?.inputTokens || 0));
+  const cacheTok = Math.max(0, Number(st?.cacheReadTokens || 0));
+  const outTok = Math.max(0, Number(st?.outputTokens || 0));
+  const thinkTok = Math.max(0, Number(st?.thinkingTokens || 0));
+  const respTok =
+    st?.responseTokens != null
+      ? Math.max(0, Number(st.responseTokens))
+      : Math.max(0, outTok - thinkTok);
+  const totalTok = inTok + cacheTok + outTok;
+  const ctxTok = Math.max(0, Number(st?.contextTokens ?? totalTok));
+  return { inTok, cacheTok, outTok, thinkTok, respTok, totalTok, ctxTok };
+}
+
+function formatPartWithOptionalCost(tokCount, costVal) {
+  const countStr = Math.round(Number(tokCount || 0)).toLocaleString();
+  if (costVal != null && Number.isFinite(Number(costVal))) {
+    return `${countStr} (${formatUsd(Number(costVal), { precise: true })})`;
+  }
+  return countStr;
+}
+
+function formatCustomTokenComboHeader(rawFormat) {
+  const segs = parseClientStepTokenComboSegments(rawFormat);
+  return segs.map((seg) => t(`steps.tokSeg.${seg}.th`)).join(' / ');
+}
+
+function resolveSegmentDisplay(seg, parts, st) {
+  switch (seg) {
+    case 'context':
+      return {
+        short: formatTokens(parts.ctxTok),
+        tip: `${t('steps.tokSeg.context.tip')} ${Math.round(parts.ctxTok).toLocaleString()}`,
+      };
+    case 'in':
+      return {
+        short: formatTokens(parts.inTok),
+        tip: `${t('steps.tokSeg.in.tip')} ${formatPartWithOptionalCost(parts.inTok, st?.inCostUsd)}`,
+      };
+    case 'out':
+      return {
+        short: formatTokens(parts.outTok),
+        tip: `${t('steps.tokSeg.out.tip')} ${formatPartWithOptionalCost(parts.outTok, st?.outCostUsd)}`,
+      };
+    case 'cache':
+      return {
+        short: formatTokens(parts.cacheTok),
+        tip: `${t('steps.tokSeg.cache.tip')} ${formatPartWithOptionalCost(parts.cacheTok, st?.cacheCostUsd)}`,
+      };
+    case 'think':
+      return {
+        short: formatTokens(parts.thinkTok),
+        tip: `${t('steps.tokSeg.think.tip')} ${Math.round(parts.thinkTok).toLocaleString()}`,
+      };
+    case 'reply':
+      return {
+        short: formatTokens(parts.respTok),
+        tip: `${t('steps.tokSeg.reply.tip')} ${Math.round(parts.respTok).toLocaleString()}`,
+      };
+    case 'total':
+    default:
+      return {
+        short: formatTokens(parts.totalTok),
+        tip: `${t('steps.tokSeg.total.tip')} ${formatPartWithOptionalCost(parts.totalTok, st?.costUsd)}`,
+      };
+  }
+}
 
 function formatStepClockTime(createdAtMs) {
   const ms = Number(createdAtMs || 0);
@@ -10330,19 +10718,21 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     optLabel: () => t('stepCol.model.opt'),
     sigPart: (st, ctx) => {
       const disp = resolveModelDisplayInfo(st, ctx.displaySettings, { fallback: '—' });
-      return `${disp.text}:${disp.title}`;
+      return `${disp.baseText}:${disp.compactionSuffix}:${disp.title}`;
     },
     createCell: () => {
-      const valEl = h('span', {
-        style:
-          'display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;',
-      });
-      const td = h('td', {}, [valEl]);
-      return { td, refs: { td, valEl } };
+      const nameEl = h('span', { className: 'step-model-name' });
+      const compactEl = h('span', { className: 'step-model-compact', hidden: true });
+      const wrapEl = h('span', { className: 'step-model-cell' }, [nameEl, compactEl]);
+      const td = h('td', {}, [wrapEl]);
+      return { td, refs: { td, wrapEl, nameEl, compactEl } };
     },
     updateCell: (refs, st, ctx) => {
       const modelDisplay = resolveModelDisplayInfo(st, ctx.displaySettings, { fallback: '—' });
-      patchText(refs.valEl, modelDisplay.text);
+      patchText(refs.nameEl, modelDisplay.baseText);
+      const suffix = modelDisplay.compactionSuffix || '';
+      patchText(refs.compactEl, suffix);
+      patchAttr(refs.compactEl, 'hidden', !suffix);
       patchAttr(refs.td, 'title', modelDisplay.title);
     },
   },
@@ -10437,24 +10827,78 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
       return { td, refs: { td, valEl } };
     },
     updateCell: (refs, st) => {
-      const outTok = Math.max(0, Number(st.outputTokens || 0));
-      const thinkTok = Math.max(0, Number(st.thinkingTokens || 0));
-      const respTok =
-        st.responseTokens != null
-          ? Math.max(0, Number(st.responseTokens))
-          : Math.max(0, outTok - thinkTok);
+      const parts = resolveStepTokenParts(st);
       patchText(
         refs.valEl,
-        `${formatTokens(st.contextTokens)} / ${formatTokens(thinkTok)} / ${formatTokens(respTok)}`
+        `${formatTokens(parts.ctxTok)} / ${formatTokens(parts.thinkTok)} / ${formatTokens(parts.respTok)}`
       );
       patchAttr(
         refs.td,
         'title',
         t('steps.ctxTitle', {
-          ctx: Math.round(Number(st.contextTokens || 0)),
-          think: Math.round(thinkTok),
-          resp: Math.round(respTok),
+          ctx: Math.round(parts.ctxTok),
+          think: Math.round(parts.thinkTok),
+          resp: Math.round(parts.respTok),
         })
+      );
+    },
+  },
+
+  tokens_io_cache: {
+    key: 'tokens_io_cache',
+    thLabel: () => t('stepCol.tokens_io_cache.th'),
+    optLabel: () => t('stepCol.tokens_io_cache.opt'),
+    sigPart: (st) =>
+      `${st.inputTokens || 0}:${st.outputTokens || 0}:${st.cacheReadTokens || 0}:${st.inCostUsd ?? ''}:${st.outCostUsd ?? ''}:${st.cacheCostUsd ?? ''}`,
+    createCell: () => {
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
+    },
+    updateCell: (refs, st) => {
+      const parts = resolveStepTokenParts(st);
+      patchText(
+        refs.valEl,
+        `${formatTokens(parts.inTok)} / ${formatTokens(parts.outTok)} / ${formatTokens(parts.cacheTok)}`
+      );
+      patchAttr(
+        refs.td,
+        'title',
+        t('steps.ioCacheTitle', {
+          inPart: formatPartWithOptionalCost(parts.inTok, st?.inCostUsd),
+          outPart: formatPartWithOptionalCost(parts.outTok, st?.outCostUsd),
+          cachePart: formatPartWithOptionalCost(parts.cacheTok, st?.cacheCostUsd),
+        })
+      );
+    },
+  },
+
+  tokens_custom: {
+    key: 'tokens_custom',
+    thLabel: (ctx) => formatCustomTokenComboHeader(ctx?.stepTokenComboFormat),
+    optLabel: (ctx) =>
+      t('stepCol.tokens_custom.opt', {
+        fmt: formatCustomTokenComboHeader(ctx?.stepTokenComboFormat),
+      }),
+    sigPart: (st, ctx) =>
+      `${normalizeClientStepTokenComboFormat(ctx?.stepTokenComboFormat)}:${st.contextTokens || 0}:${st.inputTokens || 0}:${st.cacheReadTokens || 0}:${st.outputTokens || 0}:${st.thinkingTokens || 0}:${st.responseTokens ?? ''}:${st.costUsd ?? ''}`,
+    createCell: () => {
+      const valEl = h('span');
+      const td = h('td', {}, [valEl]);
+      return { td, refs: { td, valEl } };
+    },
+    updateCell: (refs, st, ctx) => {
+      const segs = parseClientStepTokenComboSegments(ctx?.stepTokenComboFormat);
+      const parts = resolveStepTokenParts(st);
+      const rendered = segs.map((seg) => resolveSegmentDisplay(seg, parts, st));
+      patchText(
+        refs.valEl,
+        rendered.map((r) => r.short).join(' / ')
+      );
+      patchAttr(
+        refs.td,
+        'title',
+        rendered.map((r) => r.tip).join(' · ')
       );
     },
   },
@@ -10548,10 +10992,13 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
   },
 });
 
-function getStepColumnOptions() {
+function getStepColumnOptions(
+  stepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT
+) {
+  const ctx = { stepTokenComboFormat };
   return STEP_COLUMN_KEYS.map((key) => ({
     value: key,
-    label: STEP_COLUMN_REGISTRY[key].optLabel(),
+    label: STEP_COLUMN_REGISTRY[key].optLabel(ctx),
   }));
 }
 
@@ -10943,17 +11390,19 @@ const StepTableWidget = defineComponent({
     const stepsTheadRow = h('tr');
     const stepsTbody = h('tbody');
 
-    function syncTableHeaderColumns(colKeys) {
+    function syncTableHeaderColumns(colKeys, headerCtx = {}) {
       const locale = getEffectiveLocale();
+      const fmtKey = normalizeClientStepTokenComboFormat(headerCtx?.stepTokenComboFormat);
+      const ctx = { stepTokenComboFormat: fmtKey };
       patchKeyedList(stepsTheadRow, colKeys, {
         keyFn: (colKey) => colKey,
-        sigFn: (colKey) => `${locale}:${colKey}:${STEP_COLUMN_REGISTRY[colKey].thLabel()}`,
+        sigFn: (colKey) => `${locale}:${colKey}:${fmtKey}:${STEP_COLUMN_REGISTRY[colKey].thLabel(ctx)}`,
         createRow: (colKey) => {
-          const th = h('th', { text: STEP_COLUMN_REGISTRY[colKey].thLabel() });
+          const th = h('th', { text: STEP_COLUMN_REGISTRY[colKey].thLabel(ctx) });
           return { el: th, refs: { th } };
         },
         updateRow: (refs, colKey) => {
-          patchText(refs.th, STEP_COLUMN_REGISTRY[colKey].thLabel());
+          patchText(refs.th, STEP_COLUMN_REGISTRY[colKey].thLabel(ctx));
         },
       });
     }
@@ -11067,13 +11516,16 @@ const StepTableWidget = defineComponent({
         showStepTurnRail = false,
         showStepAgentBadge = true,
         showStepSpeedColor = false,
+        stepTokenComboFormat = undefined,
         displaySettings = {},
       } = {}
     ) {
       const colOrderSig = colKeys.join(',');
+      const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
       const renderOptions = JSON.stringify([
         cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
-        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, displaySettings.showUpstreamModel,
+        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, normTokenFmt,
+        displaySettings.modelDisplayMode, displaySettings.showUpstreamModel,
         displaySettings.orchestratorIdMode,
       ]);
       if (lastRenderOptions === renderOptions && lastRenderedRows &&
@@ -11082,13 +11534,14 @@ const StepTableWidget = defineComponent({
         return;
       }
       const wantedSet = new Set(colKeys);
-      syncTableHeaderColumns(colKeys);
+      syncTableHeaderColumns(colKeys, { stepTokenComboFormat: normTokenFmt });
 
       const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
       const cellCtx = {
         hasSubagents,
         showAgentBadge,
         showStepSpeedColor,
+        stepTokenComboFormat: normTokenFmt,
         effectiveScopes,
         scopeSigKey: effectiveScopes.join(','),
         displaySettings,
@@ -11392,8 +11845,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       agentBadge: '主',
       agentLabel: t('fmt.mainAgent'),
       modelLabel: 'Gemini 4 Carbon (High)',
-      modelShort: 'gemini-4-carbon',
+      modelShort: 'carbon-4-high',
       rawModel: 'MODEL_PLACEHOLDER_M37',
+      modelUpstream: 'gemini-4-carbon-high',
       upstreamModel: 'gemini-4-carbon-high',
       tokPerSec: 68.4,
       ttftSec: 1.15,
@@ -11407,6 +11861,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       responseTokens: 560,
       cacheHitPct: 94.5,
       costUsd: 0.042,
+      inCostUsd: 0.0156,
+      cacheCostUsd: 0.0134,
+      outCostUsd: 0.0142,
       createdAtMs: anchorMinMs - 14_000,
       turnIndex: 2,
       rootTurnIndex: 2,
@@ -11427,8 +11884,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       agentRole: subRole,
       agentLabel: subRole,
       modelLabel: 'Gemini 3.8 Flash',
-      modelShort: 'gemini-3.8-flash',
+      modelShort: 'flash-3.8',
       rawModel: 'MODEL_PLACEHOLDER_M42',
+      modelUpstream: 'gemini-3.8-flash-n',
       upstreamModel: 'gemini-3.8-flash-n',
       tokPerSec: 96.2,
       ttftSec: 0.68,
@@ -11442,6 +11900,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       responseTokens: 464,
       cacheHitPct: 88.1,
       costUsd: 0.009,
+      inCostUsd: 0.0065,
+      cacheCostUsd: 0.0005,
+      outCostUsd: 0.0026,
       createdAtMs: anchorMinMs - 42_000,
       turnIndex: 1,
       rootTurnIndex: 2,
@@ -11460,9 +11921,11 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       isSubagent: false,
       agentBadge: '主',
       agentLabel: t('fmt.mainAgent'),
-      modelLabel: 'Gemini 4 Carbon (High)',
-      modelShort: 'gemini-4-carbon',
+      isCompactionStep: true,
+      modelLabel: 'Gemini 4 Carbon (High) [自动压缩]',
+      modelShort: 'carbon-4-high·压缩',
       rawModel: 'MODEL_PLACEHOLDER_M37',
+      modelUpstream: 'gemini-4-carbon-high·压缩',
       upstreamModel: 'gemini-4-carbon-high',
       tokPerSec: 46.5,
       ttftSec: 3.4,
@@ -11476,6 +11939,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       responseTokens: 380,
       cacheHitPct: 61.4,
       costUsd: 0.068,
+      inCostUsd: 0.0492,
+      cacheCostUsd: 0.0078,
+      outCostUsd: 0.011,
       createdAtMs: anchorMinMs - 88_000,
       turnIndex: 2,
       rootTurnIndex: 2,
@@ -12937,6 +13403,13 @@ function getEnableToggleOptions() {
   ];
 }
 
+function getPopoverWidthModeOptions() {
+  return [
+    { value: 'auto', label: t('settings.str.popoverWidthAuto') },
+    { value: 'custom', label: t('settings.str.popoverWidthCustom') },
+  ];
+}
+
 function isSameList(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -12950,6 +13423,8 @@ const SettingsStructureTab = defineComponent({
   setup({ props, onCleanup }) {
     let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
+    let draftPopoverWidthMode = 'auto';
+    let draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
     let draftEnableCliStatusLine = true;
     let draftShowTopbarMulti = true;
     let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -12959,6 +13434,8 @@ const SettingsStructureTab = defineComponent({
     let draftShowStepTurnRail = false;
     let draftShowStepAgentBadge = true;
     let draftShowStepSpeedColor = false;
+    let draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
+    let rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
 
@@ -12971,6 +13448,8 @@ const SettingsStructureTab = defineComponent({
       return buildStructurePreviewTelemetry(latestSettings, {
         windowMountMode: draftWindowMountMode,
         enableWindowOverlay: draftWindowMountMode !== 'sidebar',
+        popoverWidthMode: draftPopoverWidthMode,
+        popoverWidth: draftPopoverWidth,
         enableCliStatusLine: draftEnableCliStatusLine,
         showTopbarMultiSession: draftShowTopbarMulti,
         topbarCapsuleSlots: draftTopbarSlots,
@@ -12980,6 +13459,7 @@ const SettingsStructureTab = defineComponent({
         showStepTurnRail: draftShowStepTurnRail,
         showStepAgentBadge: draftShowStepAgentBadge,
         showStepSpeedColor: draftShowStepSpeedColor,
+        stepTokenComboFormat: draftStepTokenComboFormat,
         stepTableColumns: draftStepColumns,
       });
     }
@@ -13046,6 +13526,14 @@ const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.mountMode'),
     });
+    const popoverWidthLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.popoverWidthLabel'),
+    });
+    const popoverWidthHintEl = h('span', {
+      className: 'settings-hint-text',
+      text: t('settings.str.popoverWidthHint'),
+    });
     const multiToggleLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.multiToggle'),
@@ -13071,6 +13559,54 @@ const SettingsStructureTab = defineComponent({
         void persistStructurePatch(mountSection, {
           windowMountMode: nextMode,
           enableWindowOverlay: nextMode !== 'sidebar',
+        });
+      },
+    });
+
+    const popoverWidthInput = h('input', {
+      type: 'number',
+      className: 'settings-text-input',
+      min: String(MIN_CLIENT_POPOVER_WIDTH),
+      max: String(MAX_CLIENT_POPOVER_WIDTH),
+      step: '10',
+      value: String(draftPopoverWidth),
+      'aria-label': t('settings.str.popoverWidthLabel'),
+      onChange: () => {
+        const nextWidth = normalizeClientPopoverWidth(popoverWidthInput.value);
+        draftPopoverWidth = nextWidth;
+        popoverWidthInput.value = String(nextWidth);
+        syncMountSectionMeta();
+        props.onLayoutChange?.();
+        void persistStructurePatch(mountSection, {
+          popoverWidthMode: draftPopoverWidthMode,
+          popoverWidth: draftPopoverWidth,
+        });
+      },
+      onKeydown: (e) => {
+        if (e?.key === 'Enter') {
+          e.preventDefault();
+          popoverWidthInput.blur();
+        }
+      },
+    });
+
+    const popoverWidthNumWrap = h(
+      'span',
+      { className: 'settings-number-wrap', hidden: draftPopoverWidthMode !== 'custom' },
+      [popoverWidthInput, h('span', { className: 'settings-number-unit', text: 'px' })]
+    );
+
+    const popoverWidthModeToggle = SegmentedControl({
+      ariaLabel: t('settings.str.popoverWidthLabel'),
+      modelValue: draftPopoverWidthMode,
+      options: getPopoverWidthModeOptions(),
+      onUpdateModelValue: (val) => {
+        draftPopoverWidthMode = normalizeClientPopoverWidthMode(val);
+        syncMountSectionMeta();
+        props.onLayoutChange?.();
+        void persistStructurePatch(mountSection, {
+          popoverWidthMode: draftPopoverWidthMode,
+          popoverWidth: draftPopoverWidth,
         });
       },
     });
@@ -13128,6 +13664,9 @@ const SettingsStructureTab = defineComponent({
       badgeText: t('settings.str.mountBadge', { count: draftTopbarSlots.length }),
       onReset: () => {
         draftWindowMountMode = 'dual';
+        draftPopoverWidthMode = 'auto';
+        draftPopoverWidth = DEFAULT_CLIENT_POPOVER_WIDTH;
+        popoverWidthInput.value = String(DEFAULT_CLIENT_POPOVER_WIDTH);
         draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
         draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
@@ -13138,6 +13677,8 @@ const SettingsStructureTab = defineComponent({
           {
             windowMountMode: 'dual',
             enableWindowOverlay: true,
+            popoverWidthMode: 'auto',
+            popoverWidth: DEFAULT_CLIENT_POPOVER_WIDTH,
             enableCliStatusLine: true,
             showTopbarMultiSession: true,
             topbarCapsuleSlots: [...DEFAULT_CLIENT_TOPBAR_SLOTS],
@@ -13149,6 +13690,16 @@ const SettingsStructureTab = defineComponent({
         mountPreviewCanvas,
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [mountModeLabelEl, windowMountSelect.el]),
+        h('div', { className: 'form-row' }, [
+          h('div', { className: 'settings-inline-row' }, [
+            popoverWidthLabelEl,
+            h('div', { className: 'settings-inline-controls' }, [
+              popoverWidthModeToggle.el,
+              popoverWidthNumWrap,
+            ]),
+          ]),
+          popoverWidthHintEl,
+        ]),
         h('div', { className: 'settings-inline-row' }, [
           multiToggleLabelEl,
           multiSessionToggle.el,
@@ -13171,6 +13722,14 @@ const SettingsStructureTab = defineComponent({
         modelValue: draftWindowMountMode,
         options: getMountModeOptions(),
       });
+      popoverWidthModeToggle.setProps({
+        modelValue: draftPopoverWidthMode,
+        options: getPopoverWidthModeOptions(),
+      });
+      patchAttr(popoverWidthNumWrap, 'hidden', draftPopoverWidthMode !== 'custom');
+      if (document?.activeElement !== popoverWidthInput) {
+        popoverWidthInput.value = String(draftPopoverWidth);
+      }
       multiSessionToggle.setProps({
         modelValue: draftShowTopbarMulti ? 'show' : 'hide',
         options: getMultiToggleOptions(),
@@ -13189,6 +13748,8 @@ const SettingsStructureTab = defineComponent({
       );
       const isDefault =
         draftWindowMountMode === 'dual' &&
+        draftPopoverWidthMode === 'auto' &&
+        draftPopoverWidth === DEFAULT_CLIENT_POPOVER_WIDTH &&
         draftEnableCliStatusLine === true &&
         draftShowTopbarMulti === true &&
         isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
@@ -13454,6 +14015,14 @@ const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.stepSpeedColorToggle'),
     });
+    const stepTokenComboLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepTokenComboLabel'),
+    });
+    const stepTokenComboHintEl = h('span', {
+      className: 'settings-hint-text',
+      text: t('settings.str.stepTokenComboHint'),
+    });
     const stepColsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepsColsLabel'),
@@ -13498,11 +14067,65 @@ const SettingsStructureTab = defineComponent({
       },
     });
 
+    function commitStepTokenComboInput() {
+      const rawTrimmed = String(stepTokenComboInput.value || '').trim();
+      const normFmt = normalizeClientStepTokenComboFormat(rawTrimmed);
+      rawStepTokenComboText = normFmt;
+      draftStepTokenComboFormat = normFmt;
+      stepTokenComboInput.value = normFmt;
+      if (rawTrimmed && !draftStepColumns.includes('tokens_custom')) {
+        const comboIdx = draftStepColumns.findIndex(
+          (k) => k === 'tokens_combo' || k === 'tokens_io_cache'
+        );
+        if (comboIdx >= 0) {
+          const nextCols = [...draftStepColumns];
+          nextCols[comboIdx] = 'tokens_custom';
+          draftStepColumns = normalizeClientStepColumns(nextCols);
+        } else {
+          draftStepColumns = normalizeClientStepColumns([...draftStepColumns, 'tokens_custom']);
+        }
+      }
+      syncStepsSectionMeta();
+      props.onLayoutChange?.();
+      void persistStructurePatch(stepsSection, {
+        stepTokenComboFormat: draftStepTokenComboFormat,
+        stepTableColumns: draftStepColumns,
+      });
+    }
+
+    const stepTokenComboInput = h('input', {
+      type: 'text',
+      className: 'settings-text-input',
+      spellcheck: 'false',
+      value: rawStepTokenComboText,
+      placeholder: t('settings.str.stepTokenComboPlaceholder'),
+      'aria-label': t('settings.str.stepTokenComboLabel'),
+      onInput: () => {
+        rawStepTokenComboText = stepTokenComboInput.value;
+        draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(rawStepTokenComboText);
+        stepColumnsList.refs.setProps({
+          items: draftStepColumns,
+          options: getStepColumnOptions(draftStepTokenComboFormat),
+          addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
+        });
+        refreshStepsPreview();
+      },
+      onChange: () => {
+        commitStepTokenComboInput();
+      },
+      onKeydown: (e) => {
+        if (e?.key === 'Enter') {
+          e.preventDefault();
+          stepTokenComboInput.blur();
+        }
+      },
+    });
+
     const stepColumnsList = EditableSlotList({
       items: draftStepColumns,
-      options: getStepColumnOptions(),
+      options: getStepColumnOptions(draftStepTokenComboFormat),
       minItems: 2,
-      maxItems: 12,
+      maxItems: 15,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
         draftStepColumns = normalizeClientStepColumns(previewItems);
@@ -13527,6 +14150,9 @@ const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail = false;
         draftShowStepAgentBadge = true;
         draftShowStepSpeedColor = false;
+        draftStepTokenComboFormat = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
+        rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
+        stepTokenComboInput.value = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
         draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
@@ -13536,6 +14162,7 @@ const SettingsStructureTab = defineComponent({
             showStepTurnRail: false,
             showStepAgentBadge: true,
             showStepSpeedColor: false,
+            stepTokenComboFormat: DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
             stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
           },
           'settings.resetDone'
@@ -13557,6 +14184,11 @@ const SettingsStructureTab = defineComponent({
           stepSpeedColorToggle.el,
         ]),
         h('div', { className: 'settings-divider' }),
+        h('div', { className: 'form-row' }, [
+          stepTokenComboLabelEl,
+          stepTokenComboInput,
+          stepTokenComboHintEl,
+        ]),
         h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
       ],
     });
@@ -13565,10 +14197,22 @@ const SettingsStructureTab = defineComponent({
       if (!isStructureVisible() || activeThirdTab !== 'steps') return;
       const mockData = buildDraftTelemetry();
       const mockSteps = mockData.activeConversation?.recentSteps || [];
+      const previewCols =
+        document?.activeElement === stepTokenComboInput &&
+        String(rawStepTokenComboText || '').trim() &&
+        !draftStepColumns.includes('tokens_custom')
+          ? normalizeClientStepColumns(
+              draftStepColumns.some((k) => k === 'tokens_combo' || k === 'tokens_io_cache')
+                ? draftStepColumns.map((k) =>
+                    k === 'tokens_combo' || k === 'tokens_io_cache' ? 'tokens_custom' : k
+                  )
+                : [...draftStepColumns, 'tokens_custom']
+            )
+          : draftStepColumns;
       stepTablePreview.refs.renderStepTable(
         mockSteps,
         'mock-preview-conv',
-        draftStepColumns,
+        previewCols,
         getEffectiveLocale(),
         {
           effectiveScopes: ['all'],
@@ -13577,6 +14221,7 @@ const SettingsStructureTab = defineComponent({
           showStepTurnRail: draftShowStepTurnRail,
           showStepAgentBadge: draftShowStepAgentBadge,
           showStepSpeedColor: draftShowStepSpeedColor,
+          stepTokenComboFormat: draftStepTokenComboFormat,
           displaySettings: mockData.settings,
         }
       );
@@ -13595,9 +14240,12 @@ const SettingsStructureTab = defineComponent({
         modelValue: draftShowStepSpeedColor ? 'on' : 'off',
         options: getEnableToggleOptions(),
       });
+      if (document?.activeElement !== stepTokenComboInput) {
+        stepTokenComboInput.value = rawStepTokenComboText;
+      }
       stepColumnsList.refs.setProps({
         items: draftStepColumns,
-        options: getStepColumnOptions(),
+        options: getStepColumnOptions(draftStepTokenComboFormat),
         addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       });
       stepsSection.refs.setBadge(t('settings.str.stepsBadge', { count: draftStepColumns.length }));
@@ -13605,6 +14253,7 @@ const SettingsStructureTab = defineComponent({
         draftShowStepTurnRail === false &&
         draftShowStepAgentBadge === true &&
         draftShowStepSpeedColor === false &&
+        draftStepTokenComboFormat === DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT &&
         isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
       refreshStepsPreview();
@@ -13666,6 +14315,8 @@ const SettingsStructureTab = defineComponent({
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
+      draftPopoverWidthMode = normalizeClientPopoverWidthMode(settings.popoverWidthMode);
+      draftPopoverWidth = normalizeClientPopoverWidth(settings.popoverWidth);
       draftEnableCliStatusLine = settings.enableCliStatusLine !== false;
       draftShowTopbarMulti = settings.showTopbarMultiSession !== false;
       draftTopbarSlots = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
@@ -13675,6 +14326,10 @@ const SettingsStructureTab = defineComponent({
       draftShowStepTurnRail = settings.showStepTurnRail === true;
       draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
       draftShowStepSpeedColor = settings.showStepSpeedColor === true;
+      draftStepTokenComboFormat = normalizeClientStepTokenComboFormat(
+        settings.stepTokenComboFormat
+      );
+      rawStepTokenComboText = draftStepTokenComboFormat;
       draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
@@ -13692,6 +14347,9 @@ const SettingsStructureTab = defineComponent({
       mountSection.refs.setTitle(t('settings.str.mountSection'));
       mountSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
+      patchText(popoverWidthLabelEl, t('settings.str.popoverWidthLabel'));
+      patchText(popoverWidthHintEl, t('settings.str.popoverWidthHint'));
+      patchAttr(popoverWidthInput, 'aria-label', t('settings.str.popoverWidthLabel'));
       patchText(multiToggleLabelEl, t('settings.str.multiToggle'));
       patchText(cliCapsuleLabelEl, t('settings.str.cliCapsuleToggle'));
       patchText(capsuleSlotsLabelEl, t('settings.str.capsuleSlotsLabel'));
@@ -13711,6 +14369,10 @@ const SettingsStructureTab = defineComponent({
       patchText(stepTurnRailLabelEl, t('settings.str.stepTurnRailToggle'));
       patchText(stepAgentBadgeLabelEl, t('settings.str.stepAgentBadgeToggle'));
       patchText(stepSpeedColorLabelEl, t('settings.str.stepSpeedColorToggle'));
+      patchText(stepTokenComboLabelEl, t('settings.str.stepTokenComboLabel'));
+      patchText(stepTokenComboHintEl, t('settings.str.stepTokenComboHint'));
+      patchAttr(stepTokenComboInput, 'placeholder', t('settings.str.stepTokenComboPlaceholder'));
+      patchAttr(stepTokenComboInput, 'aria-label', t('settings.str.stepTokenComboLabel'));
       patchText(stepColsLabelEl, t('settings.str.stepsColsLabel'));
 
       syncMountSectionMeta();
@@ -13755,6 +14417,7 @@ const SettingsStructureTab = defineComponent({
       overviewPreviewHost.destroy();
       stepTablePreview.destroy();
       windowMountSelect.destroy();
+      popoverWidthModeToggle.destroy();
       multiSessionToggle.destroy();
       cliCapsuleToggle.destroy();
       topbarSlotsList.destroy();
@@ -14045,6 +14708,7 @@ function getStepModelDisplayOptions() {
   return [
     { value: 'short', label: t('settings.oth.modelShort') },
     { value: 'upstream', label: t('settings.oth.modelUpstream') },
+    { value: 'upstream_compact', label: t('settings.oth.modelUpstreamCompact') },
   ];
 }
 
@@ -14058,7 +14722,7 @@ function getOrchestratorIdDisplayOptions() {
 const SettingsOtherTab = defineComponent({
   name: 'SettingsOtherTab',
   setup({ onCleanup, getProps }) {
-    let draftShowUpstreamModel = false;
+    let draftModelDisplayMode = 'short';
     let draftOrchestratorIdMode = 'compact';
     let latestSettings = null;
     let contextWindowModels = [];
@@ -14127,12 +14791,15 @@ const SettingsOtherTab = defineComponent({
       icon: 'table',
       options: getStepModelDisplayOptions(),
       onUpdateModelValue: async (val) => {
-        const nextUpstream = val === 'upstream';
-        draftShowUpstreamModel = nextUpstream;
-        stepModelSelect.setValue(nextUpstream ? 'upstream' : 'short');
+        const nextMode = normalizeClientModelDisplayMode(val);
+        draftModelDisplayMode = nextMode;
+        stepModelSelect.setValue(nextMode);
         showModelFeedback(t('settings.saving'), 0);
         try {
-          await saveSettingsPatch({ showUpstreamModel: nextUpstream });
+          await saveSettingsPatch({
+            modelDisplayMode: nextMode,
+            showUpstreamModel: nextMode !== 'short',
+          });
           showModelFeedback(t('settings.saved'), 1500);
         } catch {
           if (latestSettings) renderSettings(latestSettings);
@@ -14432,10 +15099,13 @@ const SettingsOtherTab = defineComponent({
       if (!settings) return;
       latestSettings = settings;
       contextWindowModels = models;
-      draftShowUpstreamModel = Boolean(settings.showUpstreamModel);
+      draftModelDisplayMode = normalizeClientModelDisplayMode(
+        settings.modelDisplayMode,
+        settings.showUpstreamModel
+      );
       draftOrchestratorIdMode = normalizeClientOrchestratorIdMode(settings.orchestratorIdMode);
       stepModelSelect.setProps({
-        modelValue: draftShowUpstreamModel ? 'upstream' : 'short',
+        modelValue: draftModelDisplayMode,
         options: getStepModelDisplayOptions(),
       });
       orchestratorIdSelect.setProps({
@@ -14468,7 +15138,7 @@ const SettingsOtherTab = defineComponent({
       }
 
       stepModelSelect.setProps({
-        modelValue: draftShowUpstreamModel ? 'upstream' : 'short',
+        modelValue: draftModelDisplayMode,
         options: getStepModelDisplayOptions(),
       });
       orchestratorIdSelect.setProps({
@@ -15459,8 +16129,9 @@ const ConsumptionView = defineComponent({
       const locale = i18nStore.getState().locale;
       // 额度与会话状态也会发布遥测更新，只对用量页实际展示的数据重绘。
       const signature = JSON.stringify([
-        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.showUpstreamModel,
-        slice.orchestratorIdMode, dateSpan, preset?.label || rangeInfo.label, acct,
+        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.modelDisplayMode,
+        slice.showUpstreamModel, slice.orchestratorIdMode, dateSpan,
+        preset?.label || rangeInfo.label, acct,
         cons.trendSeries, slice.modelBreakdown, cons.sourcesBreakdown,
         monthlyYear, currentMonthIdx, cons.monthlySeries,
       ]);
@@ -15574,6 +16245,10 @@ const ConsumptionView = defineComponent({
       // 3. 同步热门模型列表（按最终展示名称去重归并后按总 Token 数降序排列并执行键值增量对账）
       const localeSig = i18nStore.getState().locale;
       const displaySettings = {
+        modelDisplayMode: normalizeModelDisplayMode(
+          slice.modelDisplayMode,
+          slice.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(slice.showUpstreamModel),
         orchestratorIdMode: slice.orchestratorIdMode,
       };
@@ -15660,6 +16335,10 @@ const ConsumptionView = defineComponent({
         customEndMs: st.customEndMs,
         consumption: st.telemetry?.consumption,
         modelBreakdown: st.telemetry?.modelBreakdown,
+        modelDisplayMode: normalizeModelDisplayMode(
+          st.telemetry?.settings?.modelDisplayMode,
+          st.telemetry?.settings?.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
@@ -16316,6 +16995,10 @@ const StepsDetailView = defineComponent({
       }
 
       const displaySettings = {
+        modelDisplayMode: normalizeModelDisplayMode(
+          slice.modelDisplayMode,
+          slice.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(slice.showUpstreamModel),
         orchestratorIdMode: slice.orchestratorIdMode,
       };
@@ -16441,6 +17124,7 @@ const StepsDetailView = defineComponent({
           showStepTurnRail: slice.showStepTurnRail === true,
           showStepAgentBadge: slice.showStepAgentBadge !== false,
           showStepSpeedColor: slice.showStepSpeedColor === true,
+          stepTokenComboFormat: slice.stepTokenComboFormat,
           displaySettings,
         });
         stepsScroll.refresh();
@@ -16757,6 +17441,10 @@ const StepsDetailView = defineComponent({
         cascadeId: st.telemetry?.activeConversation?.cascadeId,
         recentSteps: st.telemetry?.activeConversation?.recentSteps,
         sessionModelBreakdown: st.telemetry?.activeConversation?.modelBreakdown,
+        modelDisplayMode: normalizeModelDisplayMode(
+          st.telemetry?.settings?.modelDisplayMode,
+          st.telemetry?.settings?.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
@@ -16764,6 +17452,9 @@ const StepsDetailView = defineComponent({
         showStepTurnRail: st.telemetry?.settings?.showStepTurnRail === true,
         showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
         showStepSpeedColor: st.telemetry?.settings?.showStepSpeedColor === true,
+        stepTokenComboFormat: normalizeClientStepTokenComboFormat(
+          st.telemetry?.settings?.stepTokenComboFormat
+        ),
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
       }),
       (slice) => {
@@ -17183,6 +17874,8 @@ const App = defineComponent({
 const CAPSULE_HOST_ID = 'ag-usage-monitor-capsule';
 const PORTAL_HOST_ID = 'ag-usage-monitor-portal';
 const FLOATING_CARD_WIDTH = 522;
+const POPOVER_BASE_WIDTH = 540;
+const POPOVER_MAX_AUTO_WIDTH = 960;
 const MULTI_PANEL_WIDTH = 464;
 
 /**
@@ -19103,11 +19796,72 @@ function mountWindowOverlay() {
           : bRect.right;
 
       if (popoverOpen) {
+        const maxPopCardW = Math.max(280, vw - minLeft - 12);
+        const curSettings = telemetryStore.getState().telemetry?.settings;
+        const popWidthMode = normalizeClientPopoverWidthMode(curSettings?.popoverWidthMode);
+        let desiredPopW = Math.min(POPOVER_BASE_WIDTH, maxPopCardW);
+        if (popWidthMode === 'custom') {
+          desiredPopW = Math.min(
+            normalizeClientPopoverWidth(curSettings?.popoverWidth),
+            maxPopCardW
+          );
+        } else if (typeof popoverEl.querySelectorAll === 'function') {
+          const panes = popoverEl.querySelectorAll('.table-viewport.is-step-table');
+          for (const pane of panes) {
+            let anc = pane;
+            let inHiddenTree = false;
+            while (anc && anc !== popoverEl) {
+              if (anc.hasAttribute?.('hidden')) {
+                inHiddenTree = true;
+                break;
+              }
+              anc = anc.parentElement || anc.parentNode;
+            }
+            if (inHiddenTree) continue;
+            const tableEl = pane.querySelector?.('.steps-data-table') || pane.firstElementChild;
+            if (!tableEl) continue;
+            const paneClientW = Number(pane.clientWidth || 0);
+            const curPopW = Number(
+              popoverEl.offsetWidth ||
+                popoverEl.getBoundingClientRect?.().width ||
+                POPOVER_BASE_WIDTH
+            );
+            let naturalTableW = 0;
+            if (tableEl.style) {
+              const prevW = tableEl.style.width || '';
+              tableEl.style.width = 'max-content';
+              naturalTableW = Math.ceil(
+                Number(
+                  tableEl.getBoundingClientRect?.().width ||
+                    tableEl.scrollWidth ||
+                    tableEl.offsetWidth ||
+                    0
+                )
+              );
+              tableEl.style.width = prevW;
+            } else {
+              naturalTableW = Math.ceil(Number(tableEl.scrollWidth || tableEl.offsetWidth || 0));
+            }
+            if (naturalTableW > 0) {
+              const chromeW =
+                paneClientW > 0 && curPopW >= paneClientW
+                  ? Math.max(24, curPopW - paneClientW)
+                  : 34;
+              desiredPopW = Math.max(
+                desiredPopW,
+                Math.min(POPOVER_MAX_AUTO_WIDTH, maxPopCardW, naturalTableW + chromeW + 4)
+              );
+            }
+          }
+        }
+        popoverEl.style.setProperty?.('--wm-popover-w', `${desiredPopW}px`);
+        popoverEl.style.width = `${desiredPopW}px`;
+
         const rawW =
           Number(popoverEl.offsetWidth) ||
           Number(popoverEl.getBoundingClientRect?.().width) ||
-          defaultCardW;
-        const panelW = Math.min(rawW, Math.max(280, vw - minLeft - 12));
+          desiredPopW;
+        const panelW = Math.min(rawW, maxPopCardW);
         const spaceBelowPop = vh - bRect.bottom - 12;
         const spaceAbovePop = bRect.top - 16;
         const openPopAbove =
@@ -19938,6 +20692,9 @@ function mountWindowOverlay() {
       }
       lastAppliedMountMode = nextMountMode;
       renderCapsuleTelemetry();
+      if (popoverOpen) {
+        positionFloatingElements();
+      }
     }
   );
 
@@ -19945,8 +20702,25 @@ function mountWindowOverlay() {
     (st) => ({
       selectedAgentScope: st.selectedAgentScope,
       ctxInspectorAgentId: st.ctxInspectorAgentId,
+      activeView: st.activeView,
+      stepsSubTab: st.stepsSubTab,
+      settingsSubTab: st.settingsSubTab,
+      settingsStructureTab: st.settingsStructureTab,
     }),
-    () => renderCapsuleTelemetry()
+    () => {
+      renderCapsuleTelemetry();
+      if (popoverOpen) {
+        positionFloatingElements();
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(() => {
+            if (!disposed && popoverOpen) {
+              positionFloatingElements();
+              refreshActiveViewScrollbars();
+            }
+          });
+        }
+      }
+    }
   );
 
   const unsubI18n = i18nStore.subscribe(
@@ -20134,10 +20908,10 @@ function mountWindowOverlay() {
       const token = String(nextBridge.token || '');
       if (!Number.isInteger(port) || port <= 0 || !token) return false;
       const cur = window.__AGUsageMonitorBridge || {};
-      const portChanged = Number(cur.port || 0) !== port;
+      const portChanged = Number(cur.port || 0) !== port || String(cur.token || '') !== token;
       cur.port = port;
       cur.token = token;
-      if (portChanged && cur.transportMode !== 'cdp') {
+      if (portChanged) {
         cur.transportMode = 'http';
       }
       window.__AGUsageMonitorBridge = cur;

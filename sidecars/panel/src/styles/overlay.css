@@ -549,10 +549,11 @@
 }
 
 .wm-popover-panel {
+  --step-model-max-w: 240px;
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(522px, calc(100vw - 24px));
+  width: min(var(--wm-popover-w, 540px), calc(100vw - 24px));
   height: min(588px, calc(100vh - 54px));
   max-height: calc(100vh - 54px);
   display: flex;

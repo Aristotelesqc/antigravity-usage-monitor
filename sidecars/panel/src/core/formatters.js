@@ -173,6 +173,42 @@ export function formatElapsedSec(seconds) {
 }
 
 /**
+ * 归一化普通模型显示模式（`'short'` 精简代号 | `'upstream_compact'` 去厂商前缀原始 ID | `'upstream'` 完整原始 ID）。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyShowUpstream]
+ * @returns {'short'|'upstream_compact'|'upstream'}
+ */
+export function normalizeModelDisplayMode(mode, legacyShowUpstream) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+    return 'upstream_compact';
+  }
+  if (m === 'short') return 'short';
+  if (legacyShowUpstream === true) return 'upstream';
+  return 'short';
+}
+
+/**
+ * 隐藏原始模型 ID 开头的 `gemini-`、`claude-`、`gpt-` 厂商前缀以节省单行表格空间（确保剥离后非空）。
+ *
+ * @param {string} rawText
+ * @returns {string}
+ */
+export function stripVendorModelPrefix(rawText) {
+  return String(rawText || '')
+    .trim()
+    .replace(/^(?:gemini|claude|gpt)-(?=.+)/i, '');
+}
+
+function stripCompactionMarker(rawText) {
+  return String(rawText || '')
+    .replace(/(?:·(?:压缩|compact)|\[自动压缩\]|\[auto[- ]?compact\])\s*$/iu, '')
+    .trim();
+}
+
+/**
  * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
  *
  * @param {unknown} mode
@@ -188,17 +224,23 @@ export function normalizeOrchestratorIdDisplayMode(mode) {
  * 规则：
  * - Orchestrator 系列（`Orchestrator (Carbon)`、`Orchestrator (Argon)`、`gemini-flash-worker-agy` / `M669`）
  *   独立遵循 `orchestratorIdMode`（`'compact'` 显示 `orchestrator-carbon` / `orchestrator-argon` / `worker-agy-hydrogen`；
- *   `'full'` 显示带括号标注的完整上游 ID），不受普通模型“精简代号 / 原始模型 ID”切换影响；
- * - 其余普通模型继续按 `showUpstreamModel` 与视图选项切换。
+ *   `'full'` 显示带括号标注的完整上游 ID），不受普通模型显示模式影响；
+ * - 其余普通模型遵循 `modelDisplayMode`（`'short'` | `'upstream_compact'` | `'upstream'`，兼容旧版布尔 `showUpstreamModel`）；
+ * - 独立拆分 `baseText` 与 `compactionSuffix`（`·压缩`），供步骤表单独保护压缩尾标永不截断。
  *
  * @param {object|null|undefined} target
- * @param {{ showUpstreamModel?: boolean, orchestratorIdMode?: string }|boolean} [settings]
+ * @param {{ modelDisplayMode?: string, showUpstreamModel?: boolean, orchestratorIdMode?: string }|boolean} [settings]
  * @param {{ preferLabelInShort?: boolean, fallback?: string }} [options]
- * @returns {{ text: string, title: string, isOrchestratorSeries: boolean }}
+ * @returns {{ text: string, baseText: string, compactionSuffix: string, isCompaction: boolean, title: string, isOrchestratorSeries: boolean }}
  */
 export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
-  const showUpstream =
-    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+  const modelDisplayMode =
+    typeof settings === 'boolean'
+      ? settings
+        ? 'upstream'
+        : 'short'
+      : normalizeModelDisplayMode(settings?.modelDisplayMode, settings?.showUpstreamModel);
+  const showUpstream = modelDisplayMode !== 'short';
   const orchestratorMode = normalizeOrchestratorIdDisplayMode(
     typeof settings === 'object' && settings ? settings.orchestratorIdMode : 'compact'
   );
@@ -206,7 +248,14 @@ export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
   const fallback = options?.fallback ?? t('fmt.unknownModel');
 
   if (!target || typeof target !== 'object') {
-    return { text: fallback, title: fallback, isOrchestratorSeries: false };
+    return {
+      text: fallback,
+      baseText: fallback,
+      compactionSuffix: '',
+      isCompaction: false,
+      title: fallback,
+      isOrchestratorSeries: false,
+    };
   }
 
   const shortText = String(
@@ -223,9 +272,12 @@ export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
 
   const isCompaction =
     Boolean(target.isCompactionStep) ||
-    /·压缩\s*$/.test(shortText) ||
-    /·压缩\s*$/.test(upstreamText) ||
-    /·压缩\s*$/.test(labelText);
+    /·(?:压缩|compact)\s*$/iu.test(shortText) ||
+    /·(?:压缩|compact)\s*$/iu.test(upstreamText) ||
+    /·(?:压缩|compact)\s*$/iu.test(labelText) ||
+    /\[自动压缩\]\s*$/u.test(labelText);
+
+  const compactionSuffix = isCompaction ? t('fmt.compactionSuffix') : '';
 
   const combined = `${modelKeyText} ${shortText} ${labelText} ${upstreamText} ${responseText}`;
   const isOrchWorker =
@@ -248,27 +300,50 @@ export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
       compactId = 'orchestrator-argon';
       fullId = 'gemini-pro-orchestrator-argon (argon-4)';
     }
-    const suffix = isCompaction ? '·压缩' : '';
-    const text = `${orchestratorMode === 'full' ? fullId : compactId}${suffix}`;
+    const baseText = orchestratorMode === 'full' ? fullId : compactId;
+    const text = `${baseText}${compactionSuffix}`;
     const multiUpstream =
       Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
         ? target.upstreamModels.join(' / ')
         : '';
-    const title = multiUpstream || `${fullId}${suffix}`;
-    return { text, title, isOrchestratorSeries: true };
+    const title = multiUpstream || `${fullId}${compactionSuffix}`;
+    return {
+      text,
+      baseText,
+      compactionSuffix,
+      isCompaction,
+      title,
+      isOrchestratorSeries: true,
+    };
   }
 
-  const standardText =
+  const rawSelected =
     (showUpstream
       ? upstreamText || responseText || shortText || labelText
       : preferLabelInShort
         ? labelText || shortText
         : shortText || labelText) || fallback;
+  const cleanRawBase = stripCompactionMarker(rawSelected) || fallback;
+  const baseText =
+    modelDisplayMode === 'upstream_compact'
+      ? stripVendorModelPrefix(cleanRawBase) || cleanRawBase
+      : cleanRawBase;
+  const text = `${baseText}${compactionSuffix}`;
+  const fullUpstreamWithSuffix = `${cleanRawBase}${compactionSuffix}`;
   const standardTitle =
     showUpstream && Array.isArray(target.upstreamModels) && target.upstreamModels.length > 1
       ? target.upstreamModels.join(' / ')
-      : standardText;
-  return { text: standardText, title: standardTitle, isOrchestratorSeries: false };
+      : showUpstream
+        ? fullUpstreamWithSuffix
+        : text;
+  return {
+    text,
+    baseText,
+    compactionSuffix,
+    isCompaction,
+    title: standardTitle,
+    isOrchestratorSeries: false,
+  };
 }
 
 /**
@@ -284,7 +359,9 @@ export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
 export function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
   if (!Array.isArray(models) || models.length === 0) return [];
   const showUpstream =
-    typeof settings === 'boolean' ? settings : Boolean(settings?.showUpstreamModel);
+    typeof settings === 'boolean'
+      ? settings
+      : normalizeModelDisplayMode(settings?.modelDisplayMode, settings?.showUpstreamModel) !== 'short';
   const byDisplay = new Map();
 
   for (const m of models) {

@@ -2622,6 +2622,33 @@ html[data-standalone="true"] .app-shell {
   background: var(--surface-hover);
 }
 
+.step-model-cell {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: var(--step-model-max-w, 176px);
+  min-width: 0;
+  vertical-align: bottom;
+}
+
+.step-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.step-model-compact {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--metric-info, var(--accent-primary));
+  font-weight: 500;
+}
+
+.step-model-compact[hidden] {
+  display: none !important;
+}
+
 .steps-panel-header {
   flex-wrap: wrap;
   row-gap: 6px;
@@ -3952,6 +3979,55 @@ html[data-standalone="true"] .app-shell {
   font-weight: 600;
 }
 
+.settings-inline-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.settings-text-input {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--dur-instant) var(--ease-fast);
+}
+
+.settings-text-input:focus {
+  border-color: var(--accent-primary);
+}
+
+.settings-number-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-number-wrap[hidden] {
+  display: none !important;
+}
+
+.settings-number-wrap .settings-text-input {
+  width: 68px;
+  height: 24px;
+  padding: 0 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-number-unit {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
 /* --- src/styles/overlay.css --- */
 /*
  * 双栖模式顶栏胶囊与悬浮面板样式表 (overlay.css).
@@ -4504,10 +4580,11 @@ html[data-standalone="true"] .app-shell {
 }
 
 .wm-popover-panel {
+  --step-model-max-w: 240px;
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(522px, calc(100vw - 24px));
+  width: min(var(--wm-popover-w, 540px), calc(100vw - 24px));
   height: min(588px, calc(100vh - 54px));
   max-height: calc(100vh - 54px);
   display: flex;

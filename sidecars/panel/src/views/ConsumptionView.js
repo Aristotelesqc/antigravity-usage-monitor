@@ -24,6 +24,7 @@ import {
   formatTokensPrecise,
   formatUsd,
   mergeModelsByDisplayName,
+  normalizeModelDisplayMode,
   normalizeOrchestratorIdDisplayMode,
 } from '../core/formatters.js';
 import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
@@ -527,8 +528,9 @@ export const ConsumptionView = defineComponent({
       const locale = i18nStore.getState().locale;
       // 额度与会话状态也会发布遥测更新，只对用量页实际展示的数据重绘。
       const signature = JSON.stringify([
-        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.showUpstreamModel,
-        slice.orchestratorIdMode, dateSpan, preset?.label || rangeInfo.label, acct,
+        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.modelDisplayMode,
+        slice.showUpstreamModel, slice.orchestratorIdMode, dateSpan,
+        preset?.label || rangeInfo.label, acct,
         cons.trendSeries, slice.modelBreakdown, cons.sourcesBreakdown,
         monthlyYear, currentMonthIdx, cons.monthlySeries,
       ]);
@@ -642,6 +644,10 @@ export const ConsumptionView = defineComponent({
       // 3. 同步热门模型列表（按最终展示名称去重归并后按总 Token 数降序排列并执行键值增量对账）
       const localeSig = i18nStore.getState().locale;
       const displaySettings = {
+        modelDisplayMode: normalizeModelDisplayMode(
+          slice.modelDisplayMode,
+          slice.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(slice.showUpstreamModel),
         orchestratorIdMode: slice.orchestratorIdMode,
       };
@@ -728,6 +734,10 @@ export const ConsumptionView = defineComponent({
         customEndMs: st.customEndMs,
         consumption: st.telemetry?.consumption,
         modelBreakdown: st.telemetry?.modelBreakdown,
+        modelDisplayMode: normalizeModelDisplayMode(
+          st.telemetry?.settings?.modelDisplayMode,
+          st.telemetry?.settings?.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode

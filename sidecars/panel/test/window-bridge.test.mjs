@@ -1708,25 +1708,39 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.enableWindowOverlay, true, 'enableWindowOverlay persisted back to true');
     assert.equal(previewCapsuleBar.getAttribute('data-mount-mode'), 'dual');
 
-    // Toggle topbar multi-session switch (show -> hide -> show) and CLI bottom capsule switch (on -> off -> on)
+    // Toggle popover width mode (auto -> custom 640px -> auto), topbar multi-session switch (show -> hide -> show), and CLI bottom capsule switch (on -> off -> on)
     const topbarSegBtns = sec0.querySelectorAll('.seg-btn');
-    assert.equal(topbarSegBtns.length, 4, 'Topbar multi-session + CLI bottom capsule toggles render 4 buttons');
+    assert.equal(topbarSegBtns.length, 6, 'Popover width + Topbar multi-session + CLI bottom capsule toggles render 6 buttons');
+    const popWidthInput = sec0.querySelector('.settings-text-input');
+    assert.ok(popWidthInput, 'Numeric popover width input exists');
     topbarSegBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.popoverWidthMode, 'custom', 'Popover width mode switches to custom');
+    popWidthInput.value = '640';
+    popWidthInput.dispatchEvent({ type: 'change', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.popoverWidth, 640, 'Custom popover width persisted');
+    assert.equal(popoverEl.style.width, '640px', 'Popover width immediately reflects custom 640px');
+    topbarSegBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.popoverWidthMode, 'auto', 'Popover width mode restored to auto');
+
+    topbarSegBtns[3].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.showTopbarMultiSession, false);
     assert.equal(multiBtn.hasAttribute('hidden'), true, 'Topbar multi-session button hidden immediately');
     assert.equal(previewMultiBtn.hasAttribute('hidden'), true, 'Preview multi-session button hidden immediately');
     assert.equal(capsuleHost.getAttribute('data-multi'), 'off');
-    topbarSegBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    topbarSegBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.showTopbarMultiSession, true);
     assert.equal(multiBtn.hasAttribute('hidden'), false, 'Topbar multi-session button restored immediately');
     assert.equal(previewMultiBtn.hasAttribute('hidden'), false, 'Preview multi-session button restored immediately');
 
-    topbarSegBtns[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    topbarSegBtns[5].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.enableCliStatusLine, false, 'CLI bottom capsule toggle turns off enableCliStatusLine');
-    topbarSegBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    topbarSegBtns[4].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.enableCliStatusLine, true, 'CLI bottom capsule toggle restores enableCliStatusLine');
 
@@ -2029,16 +2043,24 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const modelFormatSelectEl = otherSelects[0];
     const orchestratorIdSelectEl = otherSelects[1];
 
-    // Toggle stepModelSelect: short -> upstream -> short
+    // Toggle stepModelSelect: short -> upstream -> upstream_compact -> short
     assert.ok(modelFormatSelectEl.querySelector('.select-label').textContent.includes('精简代号'));
     modelFormatSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     modelFormatSelectEl.querySelectorAll('.select-option')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.modelDisplayMode, 'upstream');
     assert.equal(mockSettings.showUpstreamModel, true);
     assert.ok(modelFormatSelectEl.querySelector('.select-label').textContent.includes('原始模型 ID'));
     modelFormatSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
+    modelFormatSelectEl.querySelectorAll('.select-option')[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.modelDisplayMode, 'upstream_compact');
+    assert.equal(mockSettings.showUpstreamModel, true);
+    assert.ok(modelFormatSelectEl.querySelector('.select-label').textContent.includes('去前缀原始 ID'));
+    modelFormatSelectEl.querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     modelFormatSelectEl.querySelectorAll('.select-option')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.modelDisplayMode, 'short');
     assert.equal(mockSettings.showUpstreamModel, false);
 
     // Toggle orchestratorIdSelect: compact -> full
@@ -5143,5 +5165,468 @@ test('Standalone Web server enforces loopback/non-loopback security boundaries, 
     assert.equal(validPost.status, 200);
   } finally {
     await tokenSrv.stop();
+  }
+});
+
+test('v1.5 feedback E2E: sticky bridge port/token across hot-reloads, CDP->HTTP self-healing, trimmed raw model IDs, non-truncating compaction suffix, custom token combo DSL, and adaptive popover width', async () => {
+  const stickyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-wm-sticky-'));
+  const leaseFile = path.join(stickyDir, 'window-bridge-lease.json');
+
+  // 1. Verify sticky port + token across window-bridge restarts & /api/cache/rebuild support
+  const makeCtrl = () =>
+    createWindowBridgeController({
+      leaseFilePath: leaseFile,
+      getSettingsFn: () => ({ enableWindowOverlay: true, windowMountMode: 'dual' }),
+      getBundleVersionFn: () => 'v-sticky-1',
+      readAssetFn: async () => '',
+      handleApiRequest: async (pathname, method) => ({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, pathname, method }),
+      }),
+    });
+
+  const ctrl1 = makeCtrl();
+  let ctrl2 = null;
+  try {
+    const info1 = await ctrl1.ensureBridgeServer();
+    assert.ok(info1.port >= 1024 && info1.token.length === 64);
+
+    // /api/cache/rebuild is allowed over loopback bridge
+    const rebuildRes = await fetch(`http://127.0.0.1:${info1.port}/api/cache/rebuild`, {
+      method: 'POST',
+      headers: {
+        Origin: 'https://127.0.0.1:55111',
+        'Content-Type': 'application/json',
+        'X-Usage-Monitor-Token': info1.token,
+      },
+      body: '{}',
+    });
+    assert.equal(rebuildRes.status, 200);
+    assert.equal((await rebuildRes.json()).pathname, '/api/cache/rebuild');
+
+    // Stop ctrl1 (simulating hot-reload) and start ctrl2 -> rebinds exact same port & token!
+    await ctrl1.stop();
+    ctrl2 = makeCtrl();
+    const info2 = await ctrl2.ensureBridgeServer();
+    assert.equal(info2.port, info1.port, 'Hot-reloaded bridge reuses exact previous port');
+    assert.equal(info2.token, info1.token, 'Hot-reloaded bridge reuses exact previous token');
+  } finally {
+    await ctrl1.stop().catch(() => {});
+    if (ctrl2) await ctrl2.stop().catch(() => {});
+    fs.rmSync(stickyDir, { recursive: true, force: true });
+  }
+
+  // 2. Verify frontend formatters, non-truncating compaction cell, custom token combo, trimmed model ID, adaptive width & CDP recovery
+  const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(stylesCss, /\.step-model-compact\s*\{[^}]*flex-shrink:\s*0;/, 'Compaction suffix never shrinks/truncates');
+  assert.match(stylesCss, /\.wm-popover-panel\s*\{[^}]*--wm-popover-w,\s*540px/, 'Popover supports dynamic CSS width variable');
+
+  const savedSettings = {
+    language: 'zh-CN',
+    windowMountMode: 'dual',
+    enableWindowOverlay: true,
+    popoverWidthMode: 'auto',
+    popoverWidth: 580,
+    modelDisplayMode: 'upstream_compact',
+    showUpstreamModel: true,
+    orchestratorIdMode: 'compact',
+    stepTokenComboFormat: 'context:in:cache',
+    stepTableColumns: ['step', 'model', 'tps', 'tokens_io_cache', 'tokens_custom', 'cost'],
+  };
+
+  const buildMockPayload = () => ({
+    uiBundleVersion: 'ver-v15',
+    settings: { ...savedSettings },
+    cloudStatus: { currentPluginVersion: '1.5.0', latestPluginVersion: '1.5.0', updateAvailable: false },
+    account: { planName: 'Google AI Ultra' },
+    quotas: { activePool: { remainingPct: 62 }, pools: [], weekly: {} },
+    runningConversations: [],
+    conversations: [{ cascadeId: '11111111-2222-3333-4444-555555555555', title: 'v1.5 Test', stepCount: 3 }],
+    activeConversation: {
+      cascadeId: '11111111-2222-3333-4444-555555555555',
+      title: 'v1.5 Test',
+      isRunning: false,
+      stepCount: 3,
+      latestTokPerSec: 140.6,
+      latestTtftSec: 1.2,
+      context: { totalTokens: 50000, compactionLimitTokens: 256000, limitTokens: 256000 },
+      recentSteps: [
+        {
+          stepIndex: 51,
+          isCompactionStep: true,
+          modelShort: 'hydrogen-4·压缩',
+          modelLabel: 'Gemini 4 Hydrogen [自动压缩]',
+          modelUpstream: 'gemini-4-hydrogen·压缩',
+          tokPerSec: 191.3,
+          ttftSec: null,
+          contextTokens: 133100,
+          inputTokens: 2500,
+          cacheReadTokens: 128000,
+          outputTokens: 2600,
+          thinkingTokens: 698,
+          responseTokens: 1902,
+          cacheHitPct: 98.1,
+          costUsd: 0.042,
+          inCostUsd: 0.0038,
+          cacheCostUsd: 0.0192,
+          outCostUsd: 0.0195,
+          createdAtMs: 1794800051000,
+        },
+        {
+          stepIndex: 50,
+          isCompactionStep: false,
+          modelShort: 'sonnet',
+          modelLabel: 'Claude Sonnet 4.6',
+          modelUpstream: 'claude-sonnet-4-6',
+          tokPerSec: 84.0,
+          ttftSec: 1.4,
+          contextTokens: 60000,
+          inputTokens: 10000,
+          cacheReadTokens: 49000,
+          outputTokens: 1000,
+          thinkingTokens: 200,
+          responseTokens: 800,
+          cacheHitPct: 83.1,
+          costUsd: 0.059,
+          inCostUsd: 0.03,
+          cacheCostUsd: 0.0147,
+          outCostUsd: 0.015,
+          createdAtMs: 1794800020000,
+        },
+        {
+          stepIndex: 49,
+          isCompactionStep: false,
+          modelShort: 'gpt-5.4-mini',
+          modelLabel: 'GPT 5.4 Mini',
+          modelUpstream: 'gpt-5.4-mini',
+          tokPerSec: 112.0,
+          ttftSec: 0.9,
+          contextTokens: 40000,
+          inputTokens: 5000,
+          cacheReadTokens: 34000,
+          outputTokens: 1000,
+          thinkingTokens: 100,
+          responseTokens: 900,
+          cacheHitPct: 87.2,
+          costUsd: 0.011,
+          inCostUsd: 0.0038,
+          cacheCostUsd: 0.0026,
+          outCostUsd: 0.0045,
+          createdAtMs: 1794800000000,
+        },
+      ],
+      agents: [],
+    },
+    consumption: {
+      selectedRange: { key: 'today', label: '今天', startMs: 1, endMs: 2 },
+      session: {},
+      account: {},
+      trendSeries: [],
+      monthlySeries: [],
+    },
+    modelBreakdown: [],
+  });
+
+  function makeLiteElem(tag) {
+    const attrs = new Map();
+    const classes = new Set();
+    const styleProps = new Map();
+    const listeners = new Map();
+    let ownText = '';
+    const el = {
+      tagName: String(tag || 'div').toUpperCase(),
+      nodeType: 1,
+      id: '',
+      value: '',
+      dataset: {},
+      children: [],
+      parentNode: null,
+      parentElement: null,
+      shadowRoot: null,
+      clientWidth: 0,
+      offsetWidth: 0,
+      scrollWidth: 0,
+      get firstChild() { return el.children[0] || null; },
+      get lastChild() { return el.children[el.children.length - 1] || null; },
+      get textContent() {
+        if (el.children.length === 0) return ownText;
+        return el.children.map((c) => c.textContent ?? '').join('');
+      },
+      set textContent(v) {
+        el.children = [];
+        ownText = String(v ?? '');
+      },
+      style: {
+        width: '',
+        height: '',
+        maxHeight: '',
+        top: '',
+        left: '',
+        right: '',
+        display: '',
+        setProperty(k, v) { styleProps.set(k, String(v)); },
+        getPropertyValue(k) { return styleProps.get(k) || ''; },
+        removeProperty(k) { styleProps.delete(k); },
+      },
+      classList: {
+        add(...names) { for (const n of names) if (n) classes.add(n); },
+        remove(...names) { for (const n of names) classes.delete(n); },
+        toggle(n, force) {
+          const add = force === undefined ? !classes.has(n) : Boolean(force);
+          if (add) classes.add(n); else classes.delete(n);
+          return add;
+        },
+        contains(n) { return classes.has(n); },
+      },
+      get className() { return [...classes].join(' '); },
+      set className(v) {
+        classes.clear();
+        for (const p of String(v || '').split(/\s+/)) if (p) classes.add(p);
+      },
+      setAttribute(k, v) {
+        attrs.set(k, String(v));
+        if (k === 'id') el.id = String(v);
+        if (k === 'class') el.className = String(v);
+      },
+      getAttribute(k) { return attrs.has(k) ? attrs.get(k) : null; },
+      removeAttribute(k) { attrs.delete(k); },
+      hasAttribute(k) { return attrs.has(k); },
+      appendChild(child) {
+        if (!child) return child;
+        if (child.parentNode?.removeChild) child.parentNode.removeChild(child);
+        child.parentNode = el;
+        child.parentElement = el;
+        el.children.push(child);
+        return child;
+      },
+      insertBefore(child, ref) {
+        if (!ref) return el.appendChild(child);
+        if (child.parentNode?.removeChild) child.parentNode.removeChild(child);
+        const idx = el.children.indexOf(ref);
+        child.parentNode = el;
+        child.parentElement = el;
+        if (idx >= 0) el.children.splice(idx, 0, child);
+        else el.children.push(child);
+        return child;
+      },
+      removeChild(child) {
+        const idx = el.children.indexOf(child);
+        if (idx >= 0) {
+          el.children.splice(idx, 1);
+          child.parentNode = null;
+          child.parentElement = null;
+        }
+        return child;
+      },
+      remove() {
+        if (el.parentNode?.removeChild) el.parentNode.removeChild(el);
+      },
+      contains(target) {
+        let cur = target;
+        while (cur) {
+          if (cur === el) return true;
+          cur = cur.parentNode;
+        }
+        return false;
+      },
+      attachShadow() {
+        const sr = makeLiteElem('shadow-root');
+        el.shadowRoot = sr;
+        return sr;
+      },
+      addEventListener(type, fn) {
+        if (!listeners.has(type)) listeners.set(type, []);
+        listeners.get(type).push(fn);
+      },
+      removeEventListener() {},
+      dispatchEvent(ev) {
+        for (const fn of listeners.get(ev.type) || []) fn(ev);
+      },
+      getBoundingClientRect() {
+        const w = Number.parseFloat(el.style.width) || el.offsetWidth || 120;
+        return { left: 900, right: 900 + w, top: 8, bottom: 36, width: w, height: 28 };
+      },
+      querySelectorAll(sel) {
+        const out = [];
+        const parts = String(sel).trim().split(/\s+/);
+        const matchesSimple = (node, s) => {
+          if (s.startsWith('#')) return node.id === s.slice(1);
+          if (s.startsWith('.')) {
+            return s.slice(1).split('.').filter(Boolean).every((c) => node.classList.contains(c));
+          }
+          return node.tagName.toLowerCase() === s.toLowerCase();
+        };
+        const matchesChain = (node, idx) => {
+          if (!matchesSimple(node, parts[idx])) return false;
+          if (idx === 0) return true;
+          let p = node.parentElement;
+          while (p) {
+            if (matchesChain(p, idx - 1)) return true;
+            p = p.parentElement;
+          }
+          return false;
+        };
+        const walk = (root) => {
+          for (const ch of root.children || []) {
+            if (matchesChain(ch, parts.length - 1)) out.push(ch);
+            walk(ch);
+          }
+        };
+        walk(el);
+        return out;
+      },
+      querySelector(sel) {
+        return el.querySelectorAll(sel)[0] || null;
+      },
+    };
+    return el;
+  }
+
+  const body = makeLiteElem('body');
+  const head = makeLiteElem('head');
+  let failHttpOnce = false;
+  const mockWin = {
+    innerWidth: 1280,
+    innerHeight: 820,
+    location: { pathname: '/c/11111111-2222-3333-4444-555555555555', search: '' },
+    __AGUsageMonitorBridge: {
+      port: 43111,
+      token: 'a'.repeat(64),
+      bundleVersion: 'ver-v15',
+      stylesCss,
+      initialTelemetry: buildMockPayload(),
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    getComputedStyle: () => ({ getPropertyValue: () => '', display: 'flex', flexDirection: 'row' }),
+    fetch: async (_url, opts) => {
+      if (failHttpOnce) {
+        throw new TypeError('Connection refused during transient restart');
+      }
+      if (opts?.method === 'POST' && opts?.body) {
+        Object.assign(savedSettings, JSON.parse(opts.body));
+        return { ok: true, status: 200, json: async () => ({ ...savedSettings }) };
+      }
+      return { ok: true, status: 200, json: async () => buildMockPayload() };
+    },
+  };
+  const mockDoc = {
+    hidden: false,
+    body,
+    head,
+    documentElement: makeLiteElem('html'),
+    activeElement: null,
+    createElement: (t) => makeLiteElem(t),
+    createElementNS: (_ns, t) => makeLiteElem(t),
+    createTextNode: (txt) => ({ nodeType: 3, textContent: String(txt ?? ''), parentNode: null }),
+    getElementById: (id) => body.children.find((c) => c.id === id) || null,
+    querySelector: (s) => body.querySelector(s),
+    querySelectorAll: (s) => body.querySelectorAll(s),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  const sandbox = {
+    window: mockWin,
+    document: mockDoc,
+    navigator: { language: 'zh-CN' },
+    URLSearchParams,
+    AbortController,
+    queueMicrotask,
+    requestAnimationFrame: (fn) => setTimeout(fn, 0),
+    cancelAnimationFrame: clearTimeout,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    Promise,
+    Math,
+    Date,
+    JSON,
+    Number,
+    String,
+    Boolean,
+    Array,
+    Object,
+    Map,
+    Set,
+    WeakMap,
+    RegExp,
+    Error,
+    TypeError,
+    parseFloat,
+    parseInt,
+    isNaN,
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(appJs, sandbox);
+
+  const ov = mockWin.__AGUsageMonitorOverlay;
+  assert.ok(ov, 'Overlay mounted');
+  try {
+    ov.open();
+    const portalHost = mockDoc.getElementById('ag-usage-monitor-portal');
+    const popEl = portalHost.shadowRoot.querySelector('.wm-popover-panel');
+    assert.equal(popEl.style.width, '540px', 'Base overview width starts at 540px');
+
+    // Switch to Steps tab (index 2 of top pill nav)
+    const navPills = popEl.querySelectorAll('.pill-tab');
+    const tableViewport = popEl.querySelector('.table-viewport.is-step-table');
+    const stepTable = tableViewport.querySelector('.steps-data-table');
+    tableViewport.clientWidth = 506;
+    popEl.offsetWidth = 540;
+    stepTable.scrollWidth = 660;
+    stepTable.offsetWidth = 660;
+
+    navPills[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+
+    // Adaptive width expands popover to fit wide 660px table (+ 34px chrome + 4px buffer = 698px)
+    assert.equal(popEl.style.width, '698px', 'Popover adaptively widens on wide step table to eliminate horizontal scroll');
+
+    // Verify trimmed raw IDs (hiding gemini-, claude-, gpt-) AND non-truncating compaction suffix
+    const bodyRows = stepTable.querySelector('tbody').querySelectorAll('tr');
+    assert.equal(bodyRows.length, 3);
+
+    const row0ModelName = bodyRows[0].querySelector('.step-model-name').textContent;
+    const row0Compact = bodyRows[0].querySelector('.step-model-compact');
+    assert.equal(row0ModelName, '4-hydrogen', 'Strips gemini- prefix from gemini-4-hydrogen');
+    assert.equal(row0Compact.hasAttribute('hidden'), false, 'Compaction badge visible as dedicated flex-shrink:0 span');
+    assert.equal(row0Compact.textContent, '·压缩', 'Compaction suffix never merged into ellipsized span');
+    assert.equal(bodyRows[0].children[1].getAttribute('title'), 'gemini-4-hydrogen·压缩', 'Hover title keeps full upstream ID');
+
+    assert.equal(bodyRows[1].querySelector('.step-model-name').textContent, 'sonnet-4-6', 'Strips claude- prefix');
+    assert.equal(bodyRows[1].querySelector('.step-model-compact').hasAttribute('hidden'), true);
+    assert.equal(bodyRows[2].querySelector('.step-model-name').textContent, '5.4-mini', 'Strips gpt- prefix');
+
+    // Verify In / Out / Cache column & Custom Combo column ('context:in:cache')
+    const ths = stepTable.querySelector('thead').querySelectorAll('th');
+    assert.equal(ths[3].textContent, '输入 / 输出 / 缓存');
+    assert.equal(ths[4].textContent, '上下文 / 输入 / 缓存');
+    assert.equal(bodyRows[0].children[3].children[0].textContent, '2.5k / 2.6k / 128.0k');
+    assert.equal(
+      bodyRows[0].children[3].getAttribute('title'),
+      '新输入 2,500 ($0.004) · 输出 2,600 ($0.019) · 缓存读 128,000 ($0.019)'
+    );
+    assert.equal(bodyRows[0].children[4].children[0].textContent, '133.1k / 2.5k / 128.0k');
+
+    // Switch back to Live Overview -> popover smoothly shrinks back to 540px
+    navPills[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(popEl.style.width, '540px', 'Popover returns to 540px base width when leaving wide step table');
+
+    // Verify p0-1 updateBridge resets poisoned 'cdp' transportMode back to 'http' immediately
+    failHttpOnce = true;
+    mockWin.location.pathname = '/c/99999999-2222-3333-4444-555555555555';
+    ov.syncHostRoute();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(mockWin.__AGUsageMonitorBridge.transportMode, 'cdp');
+    failHttpOnce = false;
+    ov.updateBridge({ port: 43222, token: 'b'.repeat(64) });
+    assert.equal(mockWin.__AGUsageMonitorBridge.transportMode, 'http', 'updateBridge immediately heals transportMode back to http');
+  } finally {
+    ov.dispose();
   }
 });

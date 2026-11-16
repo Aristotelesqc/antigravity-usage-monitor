@@ -2,26 +2,18 @@
  * @fileoverview Antigravity Usage Monitor 面板 Sidecar HTTP 服务入口。
  *
  * 职责边界：
- * - 提供前端静态资产路由（`/`、`/app.js`、`/styles.css`）；
- * - 提供严格同端口 Loopback 受保护的 JSON API 路由：
- *   - `GET /api/telemetry`：获取实时配额、当前会话指标与历史聚合遥测数据；
- *   - `POST /api/settings`：保存用户偏好设置（写入失败时返回 HTTP 500）；
- *   - `POST /api/cloud-sync`：立即从 GitHub 同步最新云端价格目录与版本信息；
- *   - `POST /api/plugin-update`：一键执行插件自更新（Git / Release ZIP 双通道）；
- * - 所有核心业务逻辑与双栖桥接引导均委托至 `./backend/api-actions.mjs`。
+ * - 提供前端静态资产路由（`/`、`/app.js`、`/styles.css`，每次请求从磁盘读取最新产物）；
+ * - 提供严格同端口 Loopback 受保护的 JSON API 路由；
+ * - 在真实宿主环境中通过 `node:worker_threads` 托管 `./backend/sidecar-worker.mjs`：
+ *   当插件在客户端未关闭时执行自更新或外部覆盖文件，主进程保持常驻不退出（守护 `SidecarApp` 宿主端口不断连），
+ *   仅在后台毫秒级平滑替换为全新 V8 Isolate 的 Worker 实例并复用桥接端口，彻底消除热更新后的「重试中」失联问题。
  */
 
+import { Worker } from 'node:worker_threads';
 import { Response, SidecarApp } from 'sidecar_sdk';
 import {
   bootWindowBridgeRuntime,
-  executeAccountCredentialAction,
-  executeCloudSyncAction,
-  executeModelContextWindowAction,
-  executePluginUpdateAction,
-  executeRebuildCacheAction,
-  executeResetSettingsAction,
-  executeSettingsAction,
-  executeTelemetryAction,
+  dispatchBridgeApiRequest,
   isLocalHostRequest,
   readLocalAsync,
 } from './backend/api-actions.mjs';
@@ -29,6 +21,160 @@ import {
 const app = new SidecarApp();
 
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, no-cache, must-revalidate' };
+
+const isTestHarnessEnv =
+  String(process?.env?.ANTIGRAVITY_LS_ADDRESS || '').trim() === 'test.invalid' ||
+  typeof Worker !== 'function';
+
+// ---------------------------------------------------------------------------
+// 热可替换后端 Worker 监督器（仅在真实宿主运行时启用，测试沙箱直接走内存分发）
+// ---------------------------------------------------------------------------
+
+let activeWorker = null;
+let workerSwapPromise = null;
+let rpcSeq = 0;
+const pendingWorkerRpcs = new Map();
+
+function createBackendWorkerInstance() {
+  const workerUrl = new URL('./backend/sidecar-worker.mjs', import.meta.url);
+  const worker = new Worker(workerUrl);
+
+  worker.on('message', (msg) => {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'reload_request') {
+      if (worker === activeWorker) {
+        void reloadBackendWorker();
+      }
+      return;
+    }
+    if (msg.type === 'api_result' || msg.type === 'shutdown_ack') {
+      const pending = pendingWorkerRpcs.get(msg.id);
+      if (!pending) return;
+      pendingWorkerRpcs.delete(msg.id);
+      clearTimeout(pending.timer);
+      if (msg.type === 'shutdown_ack' || msg.ok) {
+        pending.resolve(msg.response ?? true);
+      } else {
+        pending.reject(new Error(msg.error || 'Backend worker error'));
+      }
+    }
+  });
+
+  worker.on('exit', () => {
+    for (const [id, entry] of pendingWorkerRpcs.entries()) {
+      if (entry.worker === worker) {
+        pendingWorkerRpcs.delete(id);
+        clearTimeout(entry.timer);
+        entry.reject(new Error('Backend worker exited during request'));
+      }
+    }
+    if (activeWorker === worker) {
+      activeWorker = null;
+      if (!workerSwapPromise) {
+        setTimeout(() => {
+          if (!activeWorker && !workerSwapPromise) {
+            activeWorker = createBackendWorkerInstance();
+          }
+        }, 120).unref?.();
+      }
+    }
+  });
+
+  worker.on('error', () => {
+    // 交由 exit 回调统一回收并拉起新实例
+  });
+
+  return worker;
+}
+
+function sendWorkerMessage(worker, payload, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    const id = ++rpcSeq;
+    const timer = setTimeout(() => {
+      pendingWorkerRpcs.delete(id);
+      reject(new Error('Backend worker request timeout'));
+    }, timeoutMs);
+    timer.unref?.();
+    pendingWorkerRpcs.set(id, { worker, timer, resolve, reject });
+    try {
+      worker.postMessage({ ...payload, id });
+    } catch (err) {
+      pendingWorkerRpcs.delete(id);
+      clearTimeout(timer);
+      reject(err);
+    }
+  });
+}
+
+async function stopWorkerGracefully(worker) {
+  if (!worker) return;
+  try {
+    await sendWorkerMessage(worker, { type: 'shutdown' }, 1200);
+  } catch {
+    // 超时或通道已关闭时直接强制终止旧 Isolate
+  }
+  try {
+    await worker.terminate();
+  } catch {
+    // 忽略重复终止异常
+  }
+}
+
+function reloadBackendWorker() {
+  if (workerSwapPromise) return workerSwapPromise;
+  workerSwapPromise = (async () => {
+    const prev = activeWorker;
+    activeWorker = null;
+    await stopWorkerGracefully(prev);
+    activeWorker = createBackendWorkerInstance();
+    return activeWorker;
+  })().finally(() => {
+    workerSwapPromise = null;
+  });
+  return workerSwapPromise;
+}
+
+async function ensureActiveWorker() {
+  if (workerSwapPromise) {
+    return workerSwapPromise;
+  }
+  if (!activeWorker) {
+    activeWorker = createBackendWorkerInstance();
+  }
+  return activeWorker;
+}
+
+async function forwardApiCall(pathname, method, data) {
+  if (isTestHarnessEnv) {
+    return dispatchBridgeApiRequest(pathname, method, data);
+  }
+  const upperMethod = String(method || 'GET').toUpperCase();
+  try {
+    const worker = await ensureActiveWorker();
+    return await sendWorkerMessage(worker, { type: 'api', pathname, method: upperMethod, data });
+  } catch (err) {
+    if (upperMethod === 'GET') {
+      const retryWorker = await ensureActiveWorker();
+      return sendWorkerMessage(retryWorker, { type: 'api', pathname, method: upperMethod, data });
+    }
+    throw err;
+  }
+}
+
+async function handleProtectedApi(pathname, method, data, req) {
+  if (!isLocalHostRequest(req)) {
+    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
+      status: 403,
+      contentType: 'application/json',
+    });
+  }
+  const out = await forwardApiCall(pathname, method, data);
+  return new Response(out.body, {
+    status: out.status,
+    contentType: out.contentType,
+    headers: out.headers,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // 静态页面与前端资产路由
@@ -65,138 +211,19 @@ app.page(
 // 业务数据与控制 API 路由
 // ---------------------------------------------------------------------------
 
-app.api(
-  '/api/telemetry',
-  async (data, req) => {
-    if (!isLocalHostRequest(req)) {
-      return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-        status: 403,
-        contentType: 'application/json',
-      });
-    }
-    const out = await executeTelemetryAction(data);
-    return new Response(out.body, {
-      status: out.status,
-      contentType: out.contentType,
-      headers: out.headers,
-    });
-  },
-  'GET'
-);
-
-app.api('/api/settings', (data, req) => {
-  if (!isLocalHostRequest(req)) {
-    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-      status: 403,
-      contentType: 'application/json',
-    });
-  }
-  const out = executeSettingsAction(data);
-  if (!out.ok) {
-    return new Response(out.body, {
-      status: out.status,
-      contentType: out.contentType,
-      headers: out.headers,
-    });
-  }
-  return out.updated;
-});
-
-async function serveAccountCredentials(data, req) {
-  if (!isLocalHostRequest(req)) {
-    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-      status: 403,
-      contentType: 'application/json',
-    });
-  }
-  const out = await executeAccountCredentialAction(data);
-  return new Response(out.body, {
-    status: out.status,
-    contentType: out.contentType,
-    headers: out.headers,
-  });
-}
-
-app.api('/api/accounts', (_data, req) => serveAccountCredentials(undefined, req), 'GET');
-app.api('/api/accounts/update', serveAccountCredentials, 'POST');
-
-app.api('/api/context-window', async (data, req) => {
-  if (!isLocalHostRequest(req)) {
-    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-      status: 403,
-      contentType: 'application/json',
-    });
-  }
-  const out = await executeModelContextWindowAction(data);
-  return new Response(out.body, {
-    status: out.status,
-    contentType: out.contentType,
-    headers: out.headers,
-  });
-});
-
-app.api('/api/settings/reset', (_data, req) => {
-  if (!isLocalHostRequest(req)) {
-    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-      status: 403,
-      contentType: 'application/json',
-    });
-  }
-  const out = executeResetSettingsAction();
-  if (!out.ok) {
-    return new Response(out.body, {
-      status: out.status,
-      contentType: out.contentType,
-      headers: out.headers,
-    });
-  }
-  return out.updated;
-});
-
-app.api('/api/cache/rebuild', (_data, req) => {
-  if (!isLocalHostRequest(req)) {
-    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-      status: 403,
-      contentType: 'application/json',
-    });
-  }
-  const out = executeRebuildCacheAction();
-  return new Response(out.body, {
-    status: out.status,
-    contentType: out.contentType,
-    headers: out.headers,
-  });
-});
-
-app.api('/api/cloud-sync', async (_data, req) => {
-  if (!isLocalHostRequest(req)) {
-    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-      status: 403,
-      contentType: 'application/json',
-    });
-  }
-  const out = await executeCloudSyncAction();
-  return new Response(out.body, {
-    status: out.status,
-    contentType: out.contentType,
-    headers: out.headers,
-  });
-});
-
-app.api('/api/plugin-update', async (_data, req) => {
-  if (!isLocalHostRequest(req)) {
-    return new Response(JSON.stringify({ error: 'Forbidden host or origin' }), {
-      status: 403,
-      contentType: 'application/json',
-    });
-  }
-  const out = await executePluginUpdateAction();
-  return new Response(out.body, {
-    status: out.status,
-    contentType: out.contentType,
-    headers: out.headers,
-  });
-});
+app.api('/api/telemetry', (data, req) => handleProtectedApi('/api/telemetry', 'GET', data, req), 'GET');
+app.api('/api/settings', (data, req) => handleProtectedApi('/api/settings', 'POST', data, req));
+app.api('/api/accounts', (_data, req) => handleProtectedApi('/api/accounts', 'GET', undefined, req), 'GET');
+app.api('/api/accounts/update', (data, req) => handleProtectedApi('/api/accounts/update', 'POST', data, req), 'POST');
+app.api('/api/context-window', (data, req) => handleProtectedApi('/api/context-window', 'POST', data, req));
+app.api('/api/settings/reset', (_data, req) => handleProtectedApi('/api/settings/reset', 'POST', undefined, req));
+app.api('/api/cache/rebuild', (_data, req) => handleProtectedApi('/api/cache/rebuild', 'POST', undefined, req));
+app.api('/api/cloud-sync', (_data, req) => handleProtectedApi('/api/cloud-sync', 'POST', undefined, req));
+app.api('/api/plugin-update', (_data, req) => handleProtectedApi('/api/plugin-update', 'POST', undefined, req));
 
 app.run();
-bootWindowBridgeRuntime({ allowDynamicLs: false });
+if (isTestHarnessEnv) {
+  bootWindowBridgeRuntime({ allowDynamicLs: false });
+} else {
+  void ensureActiveWorker();
+}

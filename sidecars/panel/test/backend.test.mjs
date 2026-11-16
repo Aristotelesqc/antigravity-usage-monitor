@@ -2185,3 +2185,141 @@ test('provisions Antigravity CLI statusLine safely and renders live capsule from
     rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('v1.5 feedback settings schema: custom token combo DSL, 3-way model display mode, popover width bounds, and Worker hot-reload IPC', async () => {
+  const { Worker } = await import('node:worker_threads');
+  const h = backendHarness({
+    trajectories: {
+      'conv-cost': {
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              metadata: {
+                createdAt: '2026-11-16T05:00:00Z',
+                completedAt: '2026-11-16T05:00:04Z',
+                firstChunkAt: '2026-11-16T05:00:01Z',
+                generatorModel: 'MODEL_PLACEHOLDER_M526',
+                modelUsage: {
+                  model: 'gemini-4-hydrogen-medium',
+                  inputTokens: '10000',
+                  cacheReadTokens: '40000',
+                  outputTokens: '2000',
+                  thinkingTokens: '500',
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+    summaries: {
+      'conv-cost': { summary: 'Cost Breakdown Session', status: 'CASCADE_RUN_STATUS_IDLE' },
+    },
+  });
+
+  // 1. Custom token combo DSL normalization & aliases
+  assert.deepEqual([...h.parseStepTokenComboSegments('context:new:cache')], [
+    'context',
+    'in',
+    'cache',
+  ]);
+  assert.equal(h.normalizeStepTokenComboFormat('in / out / cache'), 'in:out:cache');
+  assert.equal(h.normalizeStepTokenComboFormat('上下文:输入:正文:思考:总计'), 'context:in:reply:think');
+  assert.equal(h.normalizeStepTokenComboFormat('invalid:foo'), 'context:in:cache');
+
+  // 2. 3-way model display mode & legacy showUpstreamModel round-trip
+  assert.equal(h.normalizeModelDisplayMode('upstream_compact', false), 'upstream_compact');
+  assert.equal(h.normalizeModelDisplayMode(undefined, true), 'upstream');
+  assert.equal(h.normalizeModelDisplayMode(undefined, false), 'short');
+
+  const compactRes = h.executeSettingsAction({
+    modelDisplayMode: 'upstream_compact',
+    popoverWidthMode: 'custom',
+    popoverWidth: 1500,
+    stepTokenComboFormat: 'in:out:cache',
+    stepTableColumns: ['step', 'model', 'tokens_io_cache', 'tokens_custom', 'cost'],
+  });
+  assert.equal(compactRes.ok, true);
+  assert.equal(compactRes.updated.modelDisplayMode, 'upstream_compact');
+  assert.equal(compactRes.updated.showUpstreamModel, true);
+  assert.equal(compactRes.updated.popoverWidthMode, 'custom');
+  assert.equal(compactRes.updated.popoverWidth, 1080, 'Clamped to MAX_POPOVER_WIDTH 1080');
+  assert.equal(compactRes.updated.stepTokenComboFormat, 'in:out:cache');
+  assert.deepEqual([...compactRes.updated.stepTableColumns], [
+    'step',
+    'model',
+    'tokens_io_cache',
+    'tokens_custom',
+    'cost',
+  ]);
+
+  // Legacy caller passing { showUpstreamModel: false } cleanly resets modelDisplayMode -> 'short'
+  const legacyReset = h.executeSettingsAction({ showUpstreamModel: false, popoverWidth: 320 });
+  assert.equal(legacyReset.updated.modelDisplayMode, 'short');
+  assert.equal(legacyReset.updated.showUpstreamModel, false);
+  assert.equal(legacyReset.updated.popoverWidth, 440, 'Clamped to MIN_POPOVER_WIDTH 440');
+
+  // 3. Display projection retains inCostUsd / outCostUsd / cacheCostUsd for Sub2-style tooltips
+  const dispOut = await h.executeTelemetryAction({
+    conversationId: 'conv-cost',
+    stepDetails: 'display',
+  });
+  const dispPayload = JSON.parse(dispOut.body);
+  const step0 = dispPayload.activeConversation.recentSteps[0];
+  assert.ok(Number.isFinite(step0.inCostUsd) && step0.inCostUsd > 0, 'inCostUsd projected');
+  assert.ok(Number.isFinite(step0.cacheCostUsd) && step0.cacheCostUsd > 0, 'cacheCostUsd projected');
+  assert.ok(Number.isFinite(step0.outCostUsd) && step0.outCostUsd > 0, 'outCostUsd projected');
+
+  // 4. Real Worker isolate (`sidecar-worker.mjs`) handles API IPC & graceful shutdown without parent exit
+  const workerTemp = mkdtempSync(fileURLToPath(new URL('./.worker-test-', import.meta.url)));
+  const workerUrl = new URL('../backend/sidecar-worker.mjs', import.meta.url);
+  const worker = new Worker(workerUrl, {
+    env: {
+      ...process.env,
+      USAGE_MONITOR_DATA_DIR: workerTemp,
+      ANTIGRAVITY_GEMINI_DIR: workerTemp,
+      ANTIGRAVITY_LS_ADDRESS: 'test.invalid',
+    },
+  });
+  try {
+    const callWorker = (payload) =>
+      new Promise((resolve, reject) => {
+        const id = Math.random().toString(36).slice(2);
+        const onMsg = (msg) => {
+          if (msg?.id !== id) return;
+          worker.off('message', onMsg);
+          resolve(msg);
+        };
+        worker.on('message', onMsg);
+        worker.once('error', reject);
+        worker.postMessage({ ...payload, id });
+      });
+
+    const saveMsg = await callWorker({
+      type: 'api',
+      pathname: '/api/settings',
+      method: 'POST',
+      data: { modelDisplayMode: 'upstream_compact', stepTokenComboFormat: 'context:new:cache' },
+    });
+    assert.equal(saveMsg.ok, true);
+    assert.equal(saveMsg.response.status, 200);
+    const savedBody = JSON.parse(saveMsg.response.body);
+    assert.equal(savedBody.modelDisplayMode, 'upstream_compact');
+    assert.equal(savedBody.stepTokenComboFormat, 'context:in:cache');
+
+    const rebuildMsg = await callWorker({
+      type: 'api',
+      pathname: '/api/cache/rebuild',
+      method: 'POST',
+    });
+    assert.equal(rebuildMsg.ok, true);
+    assert.equal(rebuildMsg.response.status, 200);
+
+    const ackMsg = await callWorker({ type: 'shutdown' });
+    assert.equal(ackMsg.type, 'shutdown_ack');
+  } finally {
+    await worker.terminate().catch(() => {});
+    rmSync(workerTemp, { recursive: true, force: true });
+  }
+});

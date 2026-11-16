@@ -145,7 +145,7 @@ function startMcpHostSupervisor() {
       if (shuttingDown) return;
 
       const ranDurationMs = Date.now() - lastSpawnMs;
-      let delayMs = 350;
+      let delayMs = code === 0 ? 120 : 350;
       if (code !== 0 && ranDurationMs < 10_000) {
         rapidCrashCount += 1;
         delayMs = Math.min(30_000, 1000 * 2 ** Math.min(rapidCrashCount - 1, 5));

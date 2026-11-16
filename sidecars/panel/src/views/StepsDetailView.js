@@ -18,6 +18,7 @@ import {
   formatTokens,
   formatUsd,
   mergeModelsByDisplayName,
+  normalizeModelDisplayMode,
   normalizeOrchestratorIdDisplayMode,
   resolveModelDisplayInfo,
 } from '../core/formatters.js';
@@ -26,6 +27,7 @@ import { getEffectiveLocale, i18nStore, t } from '../i18n/index.js';
 import {
   formatAgentLabel,
   normalizeClientStepColumns,
+  normalizeClientStepTokenComboFormat,
   resolveScopedConversation,
   telemetryStore,
 } from '../store/telemetryStore.js';
@@ -604,6 +606,10 @@ export const StepsDetailView = defineComponent({
       }
 
       const displaySettings = {
+        modelDisplayMode: normalizeModelDisplayMode(
+          slice.modelDisplayMode,
+          slice.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(slice.showUpstreamModel),
         orchestratorIdMode: slice.orchestratorIdMode,
       };
@@ -729,6 +735,7 @@ export const StepsDetailView = defineComponent({
           showStepTurnRail: slice.showStepTurnRail === true,
           showStepAgentBadge: slice.showStepAgentBadge !== false,
           showStepSpeedColor: slice.showStepSpeedColor === true,
+          stepTokenComboFormat: slice.stepTokenComboFormat,
           displaySettings,
         });
         stepsScroll.refresh();
@@ -1045,6 +1052,10 @@ export const StepsDetailView = defineComponent({
         cascadeId: st.telemetry?.activeConversation?.cascadeId,
         recentSteps: st.telemetry?.activeConversation?.recentSteps,
         sessionModelBreakdown: st.telemetry?.activeConversation?.modelBreakdown,
+        modelDisplayMode: normalizeModelDisplayMode(
+          st.telemetry?.settings?.modelDisplayMode,
+          st.telemetry?.settings?.showUpstreamModel
+        ),
         showUpstreamModel: Boolean(st.telemetry?.settings?.showUpstreamModel),
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
@@ -1052,6 +1063,9 @@ export const StepsDetailView = defineComponent({
         showStepTurnRail: st.telemetry?.settings?.showStepTurnRail === true,
         showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
         showStepSpeedColor: st.telemetry?.settings?.showStepSpeedColor === true,
+        stepTokenComboFormat: normalizeClientStepTokenComboFormat(
+          st.telemetry?.settings?.stepTokenComboFormat
+        ),
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
       }),
       (slice) => {

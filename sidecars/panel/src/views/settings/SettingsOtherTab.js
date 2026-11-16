@@ -9,6 +9,7 @@ import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
 import { setI18nLanguage, t } from '../../i18n/index.js';
 import {
+  normalizeClientModelDisplayMode,
   normalizeClientOrchestratorIdMode,
   rebuildTrajectoryCache,
   resetAllSettings,
@@ -21,6 +22,7 @@ function getStepModelDisplayOptions() {
   return [
     { value: 'short', label: t('settings.oth.modelShort') },
     { value: 'upstream', label: t('settings.oth.modelUpstream') },
+    { value: 'upstream_compact', label: t('settings.oth.modelUpstreamCompact') },
   ];
 }
 
@@ -34,7 +36,7 @@ function getOrchestratorIdDisplayOptions() {
 export const SettingsOtherTab = defineComponent({
   name: 'SettingsOtherTab',
   setup({ onCleanup, getProps }) {
-    let draftShowUpstreamModel = false;
+    let draftModelDisplayMode = 'short';
     let draftOrchestratorIdMode = 'compact';
     let latestSettings = null;
     let contextWindowModels = [];
@@ -103,12 +105,15 @@ export const SettingsOtherTab = defineComponent({
       icon: 'table',
       options: getStepModelDisplayOptions(),
       onUpdateModelValue: async (val) => {
-        const nextUpstream = val === 'upstream';
-        draftShowUpstreamModel = nextUpstream;
-        stepModelSelect.setValue(nextUpstream ? 'upstream' : 'short');
+        const nextMode = normalizeClientModelDisplayMode(val);
+        draftModelDisplayMode = nextMode;
+        stepModelSelect.setValue(nextMode);
         showModelFeedback(t('settings.saving'), 0);
         try {
-          await saveSettingsPatch({ showUpstreamModel: nextUpstream });
+          await saveSettingsPatch({
+            modelDisplayMode: nextMode,
+            showUpstreamModel: nextMode !== 'short',
+          });
           showModelFeedback(t('settings.saved'), 1500);
         } catch {
           if (latestSettings) renderSettings(latestSettings);
@@ -408,10 +413,13 @@ export const SettingsOtherTab = defineComponent({
       if (!settings) return;
       latestSettings = settings;
       contextWindowModels = models;
-      draftShowUpstreamModel = Boolean(settings.showUpstreamModel);
+      draftModelDisplayMode = normalizeClientModelDisplayMode(
+        settings.modelDisplayMode,
+        settings.showUpstreamModel
+      );
       draftOrchestratorIdMode = normalizeClientOrchestratorIdMode(settings.orchestratorIdMode);
       stepModelSelect.setProps({
-        modelValue: draftShowUpstreamModel ? 'upstream' : 'short',
+        modelValue: draftModelDisplayMode,
         options: getStepModelDisplayOptions(),
       });
       orchestratorIdSelect.setProps({
@@ -444,7 +452,7 @@ export const SettingsOtherTab = defineComponent({
       }
 
       stepModelSelect.setProps({
-        modelValue: draftShowUpstreamModel ? 'upstream' : 'short',
+        modelValue: draftModelDisplayMode,
         options: getStepModelDisplayOptions(),
       });
       orchestratorIdSelect.setProps({
