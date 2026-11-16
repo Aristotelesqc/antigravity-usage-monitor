@@ -117,7 +117,8 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
     key: 'tps',
     thLabel: () => t('stepCol.tps.th'),
     optLabel: () => t('stepCol.tps.opt'),
-    sigPart: (st) => `${st.tokPerSec}:${st.selectedSpeedReason || ''}`,
+    sigPart: (st, ctx) =>
+      `${st.tokPerSec}:${st.selectedSpeedReason || ''}:${ctx?.showStepSpeedColor === true ? 1 : 0}`,
     createCell: () => {
       const speedMain = h('strong', {
         className: 'cell-value tone-muted',
@@ -131,9 +132,17 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
       const td = h('td', {}, [wrapEl]);
       return { td, refs: { wrapEl, speedMain, speedReason: null } };
     },
-    updateCell: (refs, st) => {
+    updateCell: (refs, st, ctx) => {
       patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
-      patchAttr(refs.speedMain, 'class', `cell-value ${getSpeedToneClass(st.tokPerSec)}`);
+      const hasValidSpeed =
+        st.tokPerSec != null && Number.isFinite(Number(st.tokPerSec)) && Number(st.tokPerSec) > 0;
+      const toneCls =
+        ctx?.showStepSpeedColor === true
+          ? getSpeedToneClass(st.tokPerSec)
+          : hasValidSpeed
+            ? ''
+            : 'tone-muted';
+      patchAttr(refs.speedMain, 'class', toneCls ? `cell-value ${toneCls}` : 'cell-value');
       const reason = speedReasonText(st.selectedSpeedReason);
       if (reason && !refs.speedReason) {
         refs.speedReason = h('div', {

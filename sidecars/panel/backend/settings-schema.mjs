@@ -37,7 +37,7 @@ export const TOPBAR_SLOT_KEYS = Object.freeze([
   'claude_weekly',
 ]);
 
-export const DEFAULT_TOPBAR_SLOTS = Object.freeze(['context', 'tps', 'quota_auto']);
+export const DEFAULT_TOPBAR_SLOTS = Object.freeze(['tps', 'ttft', 'context']);
 export const MIN_TOPBAR_SLOTS = 1;
 export const MAX_TOPBAR_SLOTS = 5;
 
@@ -368,14 +368,16 @@ export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   autoUpdatePlugin: false,
   windowMountMode: 'dual',
   enableWindowOverlay: true,
+  enableCliStatusLine: true,
   standalonePort: 0,
   showTopbarMultiSession: true,
   topbarCapsuleSlots: DEFAULT_TOPBAR_SLOTS,
   hoverModules: DEFAULT_HOVER_MODULES,
   overviewModules: DEFAULT_OVERVIEW_MODULES,
   overviewMetrics: DEFAULT_OVERVIEW_METRICS,
-  showStepTurnRail: true,
+  showStepTurnRail: false,
   showStepAgentBadge: true,
+  showStepSpeedColor: false,
   stepTableColumns: DEFAULT_STEP_TABLE_COLUMNS,
   modelContextWindows: Object.freeze({}),
 });
@@ -397,6 +399,7 @@ export function createDefaultSettingsObject() {
     autoUpdatePlugin: DEFAULT_SETTINGS_SCHEMA.autoUpdatePlugin,
     windowMountMode: DEFAULT_SETTINGS_SCHEMA.windowMountMode,
     enableWindowOverlay: DEFAULT_SETTINGS_SCHEMA.enableWindowOverlay,
+    enableCliStatusLine: DEFAULT_SETTINGS_SCHEMA.enableCliStatusLine,
     standalonePort: DEFAULT_SETTINGS_SCHEMA.standalonePort,
     showTopbarMultiSession: DEFAULT_SETTINGS_SCHEMA.showTopbarMultiSession,
     topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS],
@@ -405,6 +408,7 @@ export function createDefaultSettingsObject() {
     overviewMetrics: [...DEFAULT_OVERVIEW_METRICS],
     showStepTurnRail: DEFAULT_SETTINGS_SCHEMA.showStepTurnRail,
     showStepAgentBadge: DEFAULT_SETTINGS_SCHEMA.showStepAgentBadge,
+    showStepSpeedColor: DEFAULT_SETTINGS_SCHEMA.showStepSpeedColor,
     stepTableColumns: [...DEFAULT_STEP_TABLE_COLUMNS],
     modelContextWindows: {},
   };
@@ -444,14 +448,16 @@ export function normalizeFullSettings(rawInput) {
     autoUpdatePlugin: pluginUpdateMode === 'auto',
     windowMountMode,
     enableWindowOverlay: windowMountMode !== 'sidebar',
+    enableCliStatusLine: safeRaw.enableCliStatusLine !== false,
     standalonePort: normalizeStandalonePort(safeRaw.standalonePort),
     showTopbarMultiSession: safeRaw.showTopbarMultiSession !== false,
     topbarCapsuleSlots: normalizeTopbarCapsuleSlots(safeRaw.topbarCapsuleSlots),
     hoverModules: normalizeHoverModules(safeRaw.hoverModules),
     overviewModules: normalizeOverviewModules(safeRaw.overviewModules),
     overviewMetrics: normalizeOverviewMetrics(safeRaw.overviewMetrics),
-    showStepTurnRail: safeRaw.showStepTurnRail !== false,
+    showStepTurnRail: safeRaw.showStepTurnRail === true,
     showStepAgentBadge: safeRaw.showStepAgentBadge !== false,
+    showStepSpeedColor: safeRaw.showStepSpeedColor === true,
     stepTableColumns: normalizeStepTableColumns(safeRaw.stepTableColumns),
     modelContextWindows: normalizeModelContextWindows(safeRaw.modelContextWindows),
   };

@@ -1191,9 +1191,9 @@ export function mountWindowOverlay() {
 
   // 构建可复用的预占胶囊槽位节点（由 CapsuleBarWidget 共享创建，支持 1..5 项动态槽位）
   const capsuleSlots = [
-    createCapsuleSlotNode(0, 'context'),
-    createCapsuleSlotNode(1, 'tps'),
-    createCapsuleSlotNode(2, 'quota_auto'),
+    createCapsuleSlotNode(0, 'tps'),
+    createCapsuleSlotNode(1, 'ttft'),
+    createCapsuleSlotNode(2, 'context'),
     createCapsuleSlotNode(3, 'none'),
     createCapsuleSlotNode(4, 'none'),
   ];

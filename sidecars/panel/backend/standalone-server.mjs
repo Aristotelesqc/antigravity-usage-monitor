@@ -15,8 +15,9 @@ import {
   isLocalHostRequest,
   readLocalAsync,
 } from './api-actions.mjs';
-import { lsRuntimeEndpoint, setLsRuntimeEndpoint } from './config.mjs';
+import { loadSettings, lsRuntimeEndpoint, setLsRuntimeEndpoint } from './config.mjs';
 import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
+import { ensureCliStatusLineConfigured } from './cli-statusline-config.mjs';
 import { syncCloudCatalog } from './plugin-updater.mjs';
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
@@ -574,6 +575,7 @@ export function createStandaloneWebServer(options = {}) {
       return getStatus();
     }
     if (!options.skipStartupDiscovery && lsRuntimeEndpoint.addr !== 'test.invalid') {
+      ensureCliStatusLineConfigured({ enabled: loadSettings().enableCliStatusLine !== false });
       if (lsRuntimeEndpoint.baseUrl) {
         syncCloudCatalog({ force: false }).catch(() => {});
       } else {

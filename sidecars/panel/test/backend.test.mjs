@@ -967,12 +967,14 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   assert.equal(def.windowMountMode, 'dual');
   assert.equal(def.enableWindowOverlay, true);
   assert.equal(def.showTopbarMultiSession, true);
-  assert.deepEqual([...def.topbarCapsuleSlots], ['context', 'tps', 'quota_auto']);
+  assert.equal(def.enableCliStatusLine, true);
+  assert.deepEqual([...def.topbarCapsuleSlots], ['tps', 'ttft', 'context']);
   assert.deepEqual([...def.hoverModules], ['metrics', 'context', 'quotas']);
   assert.deepEqual([...def.overviewModules], ['metrics', 'context', 'quotas', 'live_tasks']);
   assert.deepEqual([...def.overviewMetrics], ['tps', 'ttft', 'avg_tps', 'step_cost']);
-  assert.equal(def.showStepTurnRail, true);
+  assert.equal(def.showStepTurnRail, false);
   assert.equal(def.showStepAgentBadge, true);
+  assert.equal(def.showStepSpeedColor, false);
   assert.deepEqual([...def.stepTableColumns], ['step', 'model', 'tps', 'ttft', 'tokens_combo', 'cache', 'cost']);
   assert.deepEqual({ ...def.modelContextWindows }, {});
 
@@ -1003,8 +1005,10 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
     hoverModules: ['metrics', 'context'],
     overviewModules: ['quotas', 'metrics'],
     overviewMetrics: ['avg_tps', 'cache_hit'],
-    showStepTurnRail: false,
+    enableCliStatusLine: false,
+    showStepTurnRail: true,
     showStepAgentBadge: false,
+    showStepSpeedColor: true,
     stepTableColumns: ['step', 'time', 'model', 'duration', 'input_tokens', 'output_tokens', 'cost'],
     contextLimitOverrideTokens: 128000,
     modelContextWindows: { MODEL_PLACEHOLDER_M418: '900K' },
@@ -1017,8 +1021,10 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   assert.deepEqual([...saveRes.updated.hoverModules], ['metrics', 'context']);
   assert.deepEqual([...saveRes.updated.overviewModules], ['quotas', 'metrics']);
   assert.deepEqual([...saveRes.updated.overviewMetrics], ['avg_tps', 'cache_hit']);
-  assert.equal(saveRes.updated.showStepTurnRail, false);
+  assert.equal(saveRes.updated.enableCliStatusLine, false);
+  assert.equal(saveRes.updated.showStepTurnRail, true);
   assert.equal(saveRes.updated.showStepAgentBadge, false);
+  assert.equal(saveRes.updated.showStepSpeedColor, true);
   assert.equal(saveRes.updated.contextLimitOverrideTokens, undefined);
   assert.deepEqual({ ...saveRes.updated.modelContextWindows }, {});
 
@@ -1046,9 +1052,11 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   assert.equal(resetRes.ok, true);
   assert.equal(resetRes.updated.language, 'zh-CN');
   assert.equal(resetRes.updated.themeAccent, 'host');
-  assert.equal(resetRes.updated.showStepTurnRail, true);
+  assert.equal(resetRes.updated.enableCliStatusLine, true);
+  assert.equal(resetRes.updated.showStepTurnRail, false);
   assert.equal(resetRes.updated.showStepAgentBadge, true);
-  assert.deepEqual([...resetRes.updated.topbarCapsuleSlots], ['context', 'tps', 'quota_auto']);
+  assert.equal(resetRes.updated.showStepSpeedColor, false);
+  assert.deepEqual([...resetRes.updated.topbarCapsuleSlots], ['tps', 'ttft', 'context']);
 });
 
 test('assigns unified rootTurnIndex across interleaved main and subagent steps so multi-agent turn rail never fragments', async () => {
@@ -1756,6 +1764,423 @@ test('Antigravity CLI annotations.pbtxt + SQLite trajectory reader recovers titl
     assert.ok(cliSource);
     assert.equal(cliSource.calls, 1);
     assert.equal(cliSource.totalTokens, 14658);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('provisions Antigravity CLI statusLine safely and renders live capsule from stdin + SQLite + quota snapshot', async (t) => {
+  const DatabaseSync = getNodeSqliteDatabaseSync();
+  if (!DatabaseSync) {
+    t.skip('node:sqlite is unavailable in this Node runtime');
+    return;
+  }
+
+  const h = backendHarness();
+  assert.equal(
+    h.buildCliStatusLineCommand('C:\\Users\\Administrator\\.gemini\\config\\plugins\\usage-monitor\\sidecars\\panel\\cli-statusline.mjs', {
+      platform: 'win32',
+      nodeOnPath: true,
+    }),
+    'node C:/Users/Administrator/.gemini/config/plugins/usage-monitor/sidecars/panel/cli-statusline.mjs'
+  );
+  const winSpaceCmd = h.buildCliStatusLineCommand(
+    'C:\\Users\\Alice Smith\\.gemini\\config\\plugins\\usage-monitor\\sidecars\\panel\\cli-statusline.mjs',
+    {
+      platform: 'win32',
+      execPath: 'C:\\Program Files\\nodejs\\node.exe',
+      nodeOnPath: false,
+    }
+  );
+  assert.equal(
+    winSpaceCmd,
+    "node --input-type=module -e import('file:///C:/Users/Alice%20Smith/.gemini/config/plugins/usage-monitor/sidecars/panel/cli-statusline.mjs#autorun')"
+  );
+  assert.equal(winSpaceCmd.includes('"'), false, 'Windows command must contain zero double quotes so Go syscall.EscapeArg never injects \\"');
+  assert.equal(h.isManagedCliStatusLineCommand('node C:/path/to/cli-statusline.mjs'), true);
+  assert.equal(h.isManagedCliStatusLineCommand(winSpaceCmd), true);
+  assert.equal(h.isManagedCliStatusLineCommand('node "C:/legacy/path/cli-statusline.mjs"'), true);
+  assert.equal(h.isManagedCliStatusLineCommand('python C:/custom/my-status.py'), false);
+
+  // Never overwrites user's third-party statusLine command
+  const customPreserved = h.applyCliStatusLineToSettingsObject(
+    { theme: 'dark', statusLine: { type: 'command', command: 'python ~/my-status.py', enabled: true } },
+    { enabled: true, command: 'node "/plugin/cli-statusline.mjs"' }
+  );
+  assert.equal(customPreserved.changed, false);
+  assert.equal(customPreserved.preservedCustom, true);
+
+  // Migrates legacy managed stack_with_default: true to single-line inline stack_with_default: false
+  const migratedStack = h.applyCliStatusLineToSettingsObject(
+    {
+      statusLine: {
+        type: 'command',
+        command: 'node C:/plugin/cli-statusline.mjs',
+        enabled: true,
+        padding: 0,
+        stack_with_default: true,
+      },
+    },
+    { enabled: true, command: 'node C:/plugin/cli-statusline.mjs' }
+  );
+  assert.equal(migratedStack.changed, true);
+  assert.equal(migratedStack.object.statusLine.stack_with_default, false);
+
+  assert.deepEqual({ ...h.parseCliModelAndEffort('Gemini 4 Hydrogen (Medium)', 'medium') }, {
+    modelName: 'Gemini 4 Hydrogen',
+    effort: 'medium',
+  });
+  assert.deepEqual({ ...h.parseCliModelAndEffort('Gemini 4 Hydrogen (High)', '') }, {
+    modelName: 'Gemini 4 Hydrogen',
+    effort: 'high',
+  });
+
+  // Capsule formatting in NO_COLOR and 24-bit ANSI modes uses transparent background (zero 48;...m SGR)
+  const plainCapsule = h.formatCliStatusLineCapsule(
+    {
+      hasTelemetry: true,
+      runningCount: 0,
+      runningSubCount: 0,
+      ttft: 11.8,
+      tps: 38.1,
+      usedPct: 17,
+      quotas: { activePool: { remainingPct: 57 } },
+    },
+    {
+      slots: ['ttft', 'tps', 'quota_auto', 'context'],
+      showMultiSession: true,
+      language: 'zh-CN',
+      color: false,
+    }
+  );
+  assert.equal(plainCapsule, '● 0 运行中   11.8s | 38.1 t/s | 余 57% | ◎ 17%');
+
+  const ansiCapsule = h.formatCliStatusLineCapsule(
+    {
+      hasTelemetry: true,
+      runningCount: 2,
+      runningSubCount: 1,
+      ttft: 1.25,
+      tps: 68.4,
+      usedPct: 75,
+      quotas: { activePool: { remainingPct: 22 } },
+    },
+    {
+      slots: ['ttft', 'tps', 'quota_auto', 'context'],
+      showMultiSession: true,
+      language: 'zh-CN',
+      color: true,
+    }
+  );
+  assert.equal(/\x1b\[48;/.test(ansiCapsule), false, 'Emits zero background SGR codes');
+  assert.equal(/\x1b\]/.test(ansiCapsule), false, 'Contains zero OSC sequences so Bubble Tea width never breaks');
+  assert.equal(
+    ansiCapsule.replace(/\x1b\[[0-9;]*m/g, ''),
+    '● 2 运行中 · 1 子   1.3s | 68.4 t/s | 余 22% | ◎ 75%'
+  );
+
+  // Full 3-column single-line bar with left shortcuts, centered metrics, and right mode/model/effort
+  const inlineBar120 = h.formatCliStatusLineCapsule(
+    {
+      hasTelemetry: true,
+      runningCount: 2,
+      runningSubCount: 0,
+      ttft: 5.6,
+      tps: 22.0,
+      usedPct: 2,
+      quotas: { activePool: { remainingPct: 54 } },
+    },
+    {
+      slots: ['ttft', 'tps', 'quota_auto', 'context'],
+      showMultiSession: true,
+      language: 'zh-CN',
+      color: true,
+      terminalWidth: 120,
+      cycleMode: 'auto',
+      modelDisplayName: 'Gemini 4 Hydrogen (Medium)',
+      modelEffort: 'medium',
+    }
+  );
+  assert.equal(/\x1b\[48;/.test(inlineBar120), false, 'Inline 3-column bar has zero background SGR');
+  const plainBar120 = inlineBar120.replace(/\x1b\[[0-9;]*m/g, '');
+  assert.ok(plainBar120.startsWith('? for shortcuts  '), 'Keeps ? for shortcuts on the left');
+  assert.ok(plainBar120.includes('● 2 运行中   5.6s | 22.0 t/s | 余 54% | ◎ 2%'), 'Centers capsule metrics inline');
+  assert.ok(plainBar120.endsWith('  auto · Gemini 4 Hydrogen · medium'), 'Renders deduplicated mode · model · effort on the right');
+  assert.equal(h.cliDisplayWidth(inlineBar120), 119, 'Fits cleanly within terminalWidth - 1 without wrapping');
+
+  // Narrow 80-column terminal gracefully compacts without wrapping
+  const inlineBar80 = h.formatCliStatusLineCapsule(
+    {
+      hasTelemetry: true,
+      runningCount: 2,
+      runningSubCount: 0,
+      ttft: 5.6,
+      tps: 22.0,
+      usedPct: 2,
+      quotas: { activePool: { remainingPct: 54 } },
+    },
+    {
+      slots: ['ttft', 'tps', 'quota_auto', 'context'],
+      showMultiSession: true,
+      language: 'zh-CN',
+      color: false,
+      terminalWidth: 80,
+      cycleMode: 'auto',
+      modelDisplayName: 'Gemini 4 Hydrogen (Medium)',
+      modelEffort: 'medium',
+    }
+  );
+  assert.ok(h.cliDisplayWidth(inlineBar80) <= 79, 'Narrow 80-col bar never overflows terminalWidth - 1');
+  assert.ok(inlineBar80.includes('5.6s | 22.0 t/s | 余 54% | ◎ 2%'));
+
+  // End-to-end filesystem + subprocess verification
+  const tempRoot = mkdtempSync(fileURLToPath(new URL('./.cli-statusline-', import.meta.url)));
+  try {
+    const cliDir = join(tempRoot, 'antigravity-cli');
+    const convDir = join(cliDir, 'conversations');
+    const dataDir = join(tempRoot, 'data');
+    mkdirSync(convDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
+
+    const cliSettingsFile = join(cliDir, 'settings.json');
+    writeFileSync(
+      cliSettingsFile,
+      JSON.stringify({ selectedAuthType: 'oauth', model: 'gemini-3.1-pro-high' }, null, 2),
+      'utf8'
+    );
+
+    const statusLineScript = fileURLToPath(new URL('../cli-statusline.mjs', import.meta.url));
+    const installEnv = {
+      ...process.env,
+      ANTIGRAVITY_GEMINI_DIR: tempRoot,
+      USAGE_MONITOR_DATA_DIR: dataDir,
+      USAGE_MONITOR_ALLOW_TEST_CLI_SETTINGS: '1',
+    };
+
+    const installOut = JSON.parse(
+      execFileSync(process.execPath, [statusLineScript, '--install'], {
+        env: installEnv,
+        encoding: 'utf8',
+      }).trim()
+    );
+    assert.equal(installOut.updated, true);
+    const writtenSettings = JSON.parse(readFileSync(cliSettingsFile, 'utf8'));
+    assert.equal(writtenSettings.selectedAuthType, 'oauth', 'Existing CLI settings preserved');
+    assert.equal(writtenSettings.statusLine.type, 'command');
+    assert.equal(writtenSettings.statusLine.enabled, true);
+    assert.equal(writtenSettings.statusLine.stack_with_default, false);
+    assert.ok(writtenSettings.statusLine.command.includes('cli-statusline.mjs'));
+
+    // Prepare real SQLite conversation + summaries + quota snapshot + custom user slot order
+    const cid = '22222222-3333-4444-5555-666666666666';
+    const sumDb = new DatabaseSync(join(cliDir, 'conversation_summaries.db'));
+    sumDb.exec(`
+      CREATE TABLE conversation_summaries (
+        conversation_id TEXT NOT NULL,
+        title TEXT,
+        status TEXT,
+        parent_conversation_id TEXT,
+        agent_name TEXT,
+        not_fully_idle INTEGER,
+        killed INTEGER,
+        step_count INTEGER,
+        last_modified_time TEXT,
+        app_data_dir TEXT
+      );
+      CREATE TABLE conversations_fts (conversation_id TEXT, title TEXT, workspace TEXT, last_modified_time INTEGER, chunk_index INTEGER);
+    `);
+    sumDb
+      .prepare(
+        `INSERT INTO conversation_summaries
+         (conversation_id, title, status, parent_conversation_id, agent_name, not_fully_idle, killed, step_count, last_modified_time, app_data_dir)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(cid, 'CLI Capsule E2E', 'CASCADE_RUN_STATUS_IDLE', '', '', 0, 0, 2, '2026-11-15 17:00:15+00:00', 'antigravity-cli');
+    sumDb
+      .prepare('INSERT INTO conversations_fts (conversation_id, title, workspace, last_modified_time, chunk_index) VALUES (?, ?, ?, ?, ?)')
+      .run(cid, 'CLI Capsule E2E', 'C:/Work/MyProject', 1794762015, -1);
+    sumDb.close();
+
+    // 10.0s request (1794762001.0s -> 1794762011.0s), 381 outputTokens => 38.1 tok/s, TTFT = 1.8s
+    const modelUsageBuf = Buffer.concat([
+      encodeProtoFieldVarint(1, 1425), // MODEL_PLACEHOLDER_M425
+      encodeProtoFieldVarint(2, 1200), // inputTokens
+      encodeProtoFieldVarint(3, 381), // outputTokens
+      encodeProtoFieldVarint(5, 13800), // cacheReadTokens
+      encodeProtoFieldVarint(6, 24), // API_PROVIDER_GOOGLE_GEMINI
+    ]);
+    const stepMetaBuf = Buffer.concat([
+      encodeProtoFieldBytes(1, encodeProtoFieldVarint(1, 1794762001)), // createdAt
+      encodeProtoFieldBytes(6, encodeProtoFieldVarint(1, 1794762011)), // finishedGeneratingAt (+10.0s)
+      encodeProtoFieldBytes(7, encodeProtoFieldVarint(1, 1794762011)), // completedAt
+      encodeProtoFieldBytes(9, modelUsageBuf),
+      encodeProtoFieldBytes(20, encodeProtoFieldVarint(2, 1)), // stepIndex = 1
+    ]);
+    const chatModelBuf = Buffer.concat([
+      encodeProtoFieldVarint(3, 1425),
+      encodeProtoFieldBytes(4, modelUsageBuf),
+      encodeProtoFieldBytes(
+        11,
+        Buffer.concat([encodeProtoFieldVarint(1, 1), encodeProtoFieldVarint(2, 800000000)]) // TTFT = 1.8s
+      ),
+      encodeProtoFieldBytes(12, encodeProtoFieldVarint(1, 10)), // streamingDuration = 10s
+    ]);
+    const genMetaBuf = Buffer.concat([
+      encodeProtoFieldBytes(2, Buffer.from([1])),
+      encodeProtoFieldBytes(1, chatModelBuf),
+    ]);
+
+    const convDb = new DatabaseSync(join(convDir, `${cid}.db`));
+    convDb.exec(`
+      CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, metadata BLOB, step_payload BLOB);
+      CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB);
+    `);
+    convDb.prepare('INSERT INTO steps (idx, step_type, status, metadata) VALUES (?, ?, ?, ?)').run(0, 14, 3, null);
+    convDb.prepare('INSERT INTO steps (idx, step_type, status, metadata) VALUES (?, ?, ?, ?)').run(1, 15, 3, stepMetaBuf);
+    convDb.prepare('INSERT INTO gen_metadata (idx, data) VALUES (?, ?)').run(0, genMetaBuf);
+    convDb.close();
+
+    writeFileSync(
+      join(dataDir, 'settings.json'),
+      JSON.stringify({
+        language: 'zh-CN',
+        showTopbarMultiSession: true,
+        enableCliStatusLine: true,
+        topbarCapsuleSlots: ['ttft', 'tps', 'quota_auto', 'context'],
+      }),
+      'utf8'
+    );
+    writeFileSync(
+      join(dataDir, 'cli-status-snapshot.json'),
+      JSON.stringify({
+        updatedAtMs: Date.now(),
+        runningCount: 0,
+        runningSubCount: 0,
+        hasWaiting: false,
+        quotas: {
+          activePool: { poolLabel: 'Gemini', remainingPct: 57 },
+          pools: [{ poolKey: 'Gemini', poolLabel: 'Gemini', remainingPct: 57 }],
+        },
+      }),
+      'utf8'
+    );
+
+    const stdinPayload = JSON.stringify({
+      agent_state: 'idle',
+      cwd: 'C:\\Work\\MyProject',
+      context_window: { used_percentage: 17, total_input_tokens: 15000, total_output_tokens: 381 },
+      cost: { total_usd: 0.012 },
+    });
+
+    const capsuleOut = execFileSync(process.execPath, [statusLineScript], {
+      env: { ...installEnv, NO_COLOR: '1' },
+      input: stdinPayload,
+      encoding: 'utf8',
+    }).trim();
+    assert.equal(capsuleOut, '● 0 运行中   1.8s | 38.1 t/s | 余 57% | ◎ 17%');
+
+    // Full 3-column single-line E2E with terminal_width + cycle_mode + model + native stdin quota fallback
+    const emptySnapDir = join(tempRoot, 'empty-data');
+    mkdirSync(emptySnapDir, { recursive: true });
+    writeFileSync(
+      join(emptySnapDir, 'settings.json'),
+      JSON.stringify({
+        language: 'zh-CN',
+        showTopbarMultiSession: true,
+        enableCliStatusLine: true,
+        topbarCapsuleSlots: ['ttft', 'tps', 'quota_auto', 'context'],
+      }),
+      'utf8'
+    );
+    const fullLineStdin = JSON.stringify({
+      agent_state: 'running',
+      cwd: 'C:\\Work\\MyProject',
+      terminal_width: 130,
+      cycle_mode: 'auto',
+      model: {
+        id: 'gemini-4-hydrogen-medium',
+        display_name: 'Gemini 4 Hydrogen (Medium)',
+        effort: 'medium',
+      },
+      quota: {
+        Gemini: { remaining_fraction: 0.54 },
+      },
+      context_window: { used_percentage: 2, total_input_tokens: 15000, total_output_tokens: 381 },
+    });
+    const fullLineOut = execFileSync(process.execPath, [statusLineScript], {
+      env: { ...installEnv, USAGE_MONITOR_DATA_DIR: emptySnapDir },
+      input: fullLineStdin,
+      encoding: 'utf8',
+    }).replace(/\r?\n$/, '');
+    assert.equal(/\x1b\[48;/.test(fullLineOut), false, 'E2E ANSI output has zero background fill');
+    const plainFullLine = fullLineOut.replace(/\x1b\[[0-9;]*m/g, '');
+    assert.ok(plainFullLine.startsWith('? for shortcuts  '));
+    assert.ok(plainFullLine.includes('● 1 运行中   1.8s | 38.1 t/s | 余 54% | ◎ 2%'));
+    assert.ok(plainFullLine.endsWith('  auto · Gemini 4 Hydrogen · medium'));
+    assert.equal(h.cliDisplayWidth(fullLineOut), 129);
+
+    if (process.platform === 'win32') {
+      assert.equal(writtenSettings.statusLine.command.includes('"'), false);
+      const cmdCapsuleOut = execFileSync('cmd.exe', ['/c', writtenSettings.statusLine.command], {
+        env: { ...installEnv, NO_COLOR: '1' },
+        input: stdinPayload,
+        encoding: 'utf8',
+      }).trim();
+      assert.equal(cmdCapsuleOut, '● 0 运行中   1.8s | 38.1 t/s | 余 57% | ◎ 17%');
+
+      const spaceDir = join(tempRoot, 'Dir With Spaces');
+      mkdirSync(spaceDir, { recursive: true });
+      const spaceCmd = h.buildCliStatusLineCommand(statusLineScript, {
+        platform: 'win32',
+        nodeOnPath: true,
+      });
+      assert.ok(spaceCmd);
+      const encodedAutorunCmd = `node --input-type=module -e import('${new URL('../cli-statusline.mjs', import.meta.url).href}#autorun')`;
+      const autorunOut = execFileSync('cmd.exe', ['/c', encodedAutorunCmd], {
+        cwd: spaceDir,
+        env: { ...installEnv, NO_COLOR: '1' },
+        input: stdinPayload,
+        encoding: 'utf8',
+      }).trim();
+      assert.equal(autorunOut, '● 0 运行中   1.8s | 38.1 t/s | 余 57% | ◎ 17%');
+    }
+
+    // Verify real non-test.invalid buildTelemetryPayload writes cli-status-snapshot.json cleanly without throwing
+    const builderUrl = new URL('../backend/telemetry-builder.mjs', import.meta.url).href;
+    execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const { buildTelemetryPayload } = await import(${JSON.stringify(builderUrl)});
+         const p = await buildTelemetryPayload(${JSON.stringify(cid)}, false, { range: 'all' });
+         if (!p || !p.activeConversation) process.exit(2);`,
+      ],
+      {
+        env: {
+          ...installEnv,
+          ANTIGRAVITY_LS_ADDRESS: '127.0.0.1:1',
+          ANTIGRAVITY_CSRF_TOKEN: 'live-check',
+        },
+        encoding: 'utf8',
+      }
+    );
+    const liveWrittenSnap = JSON.parse(readFileSync(join(dataDir, 'cli-status-snapshot.json'), 'utf8'));
+    assert.equal(liveWrittenSnap.activeConversation.cascadeId, cid);
+    assert.equal(liveWrittenSnap.activeConversation.latestTokPerSec, 38.1);
+    assert.ok(Number.isFinite(liveWrittenSnap.updatedAtMs) && liveWrittenSnap.updatedAtMs > 0);
+
+    // Verify uninstall removes managed statusLine while keeping other settings intact
+    const uninstallOut = JSON.parse(
+      execFileSync(process.execPath, [statusLineScript, '--uninstall'], {
+        env: installEnv,
+        encoding: 'utf8',
+      }).trim()
+    );
+    assert.equal(uninstallOut.updated, true);
+    const afterUninstall = JSON.parse(readFileSync(cliSettingsFile, 'utf8'));
+    assert.equal(afterUninstall.selectedAuthType, 'oauth');
+    assert.equal(afterUninstall.statusLine, undefined);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

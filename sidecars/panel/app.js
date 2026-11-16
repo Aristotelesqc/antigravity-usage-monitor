@@ -673,20 +673,23 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
 
   // Preferences -> Structure Tab
   'settings.str.thirdTabAria': '结构子菜单切换',
-  'settings.str.tabMount': '挂载与胶囊',
+  'settings.str.tabMount': '挂载胶囊',
   'settings.str.tabHover': '鼠标悬浮窗',
   'settings.str.tabOverview': '实时监控布局',
   'settings.str.tabSteps': '调用明细字段',
   'settings.str.previewMountSidebarHint': '当前为仅侧边栏模式，主窗口不挂载胶囊；切回顶部栏或输入框挂载后将按上方样式呈现',
-  'settings.str.mountSection': '挂载与胶囊栏',
+  'settings.str.mountSection': '挂载胶囊',
   'settings.str.mountBadge': '{count}/5 项',
   'settings.str.mountMode': '面板挂载方式',
   'settings.str.mountDual': '双栖挂载 (顶部栏 + 侧边栏)',
   'settings.str.mountComposer': '输入框挂载 (输入框 + 侧边栏)',
   'settings.str.mountSidebar': '仅侧边栏',
   'settings.str.multiToggle': '实时运行会话入口',
+  'settings.str.cliCapsuleToggle': 'CLI 底部状态胶囊',
   'settings.str.show': '显示',
   'settings.str.hide': '隐藏',
+  'settings.str.on': '开启',
+  'settings.str.off': '关闭',
   'settings.str.capsuleSlotsLabel': '胶囊数值与顺序 (左 → 右，1~5 项，可拖拽)',
   'settings.str.addCapsuleSlot': '添加槽位 ({count}/{max})',
   'settings.str.hoverSection': '鼠标悬浮窗',
@@ -706,6 +709,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.stepsBadge': '{count} 列',
   'settings.str.stepTurnRailToggle': '对话轮次导轨',
   'settings.str.stepAgentBadgeToggle': '主/子代理标识',
+  'settings.str.stepSpeedColorToggle': '输出速度多色分级',
   'settings.str.stepsColsLabel': '「按步查看」显示列 (左 → 右，至少 2 列，可拖拽)',
   'settings.str.addStepCol': '添加字段 ({count}/{max})',
   'settings.slot.dragHint': '按住上下拖动调整顺序',
@@ -1175,8 +1179,11 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.mountComposer': 'Composer Mount (Input Box + Sidebar)',
   'settings.str.mountSidebar': 'Sidebar Only',
   'settings.str.multiToggle': 'Active Sessions Pill',
+  'settings.str.cliCapsuleToggle': 'CLI Bottom Capsule',
   'settings.str.show': 'Show',
   'settings.str.hide': 'Hide',
+  'settings.str.on': 'On',
+  'settings.str.off': 'Off',
   'settings.str.capsuleSlotsLabel': 'Capsule Metrics & Order (Left → Right, 1–5, draggable)',
   'settings.str.addCapsuleSlot': 'Add Slot ({count}/{max})',
   'settings.str.hoverSection': 'Hover Quick-View',
@@ -1196,6 +1203,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.stepsBadge': '{count} cols',
   'settings.str.stepTurnRailToggle': 'Turn Rail & Preview',
   'settings.str.stepAgentBadgeToggle': 'Main/Sub Agent Badge',
+  'settings.str.stepSpeedColorToggle': 'Speed Multi-Color',
   'settings.str.stepsColsLabel': '"Steps" Visible Columns (Left → Right, min 2, draggable)',
   'settings.str.addStepCol': 'Add Column ({count}/{max})',
   'settings.slot.dragHint': 'Drag up or down to reorder',
@@ -2485,7 +2493,7 @@ const CLIENT_TOPBAR_SLOT_KEYS = Object.freeze([
   'claude_weekly',
 ]);
 
-const DEFAULT_CLIENT_TOPBAR_SLOTS = Object.freeze(['context', 'tps', 'quota_auto']);
+const DEFAULT_CLIENT_TOPBAR_SLOTS = Object.freeze(['tps', 'ttft', 'context']);
 
 const CLIENT_OVERVIEW_MODULE_KEYS = Object.freeze([
   'metrics',
@@ -2743,13 +2751,19 @@ function isEquivalentTelemetry(prev, next) {
     return false;
   }
   if (pSet?.enableWindowOverlay !== nSet?.enableWindowOverlay) return false;
+  if ((pSet?.enableCliStatusLine !== false) !== (nSet?.enableCliStatusLine !== false)) {
+    return false;
+  }
   if ((pSet?.showTopbarMultiSession !== false) !== (nSet?.showTopbarMultiSession !== false)) {
     return false;
   }
-  if ((pSet?.showStepTurnRail !== false) !== (nSet?.showStepTurnRail !== false)) {
+  if (Boolean(pSet?.showStepTurnRail) !== Boolean(nSet?.showStepTurnRail)) {
     return false;
   }
   if ((pSet?.showStepAgentBadge !== false) !== (nSet?.showStepAgentBadge !== false)) {
+    return false;
+  }
+  if (Boolean(pSet?.showStepSpeedColor) !== Boolean(nSet?.showStepSpeedColor)) {
     return false;
   }
   if (!sameArr(pSet?.topbarCapsuleSlots, nSet?.topbarCapsuleSlots)) return false;
@@ -3365,6 +3379,9 @@ async function saveSettingsPatch(patch) {
     safePatch.weeklyLimitMode =
       mode === 'custom_tokens' || mode === 'custom_cost' ? mode : 'official';
   }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'enableCliStatusLine')) {
+    safePatch.enableCliStatusLine = Boolean(safePatch.enableCliStatusLine);
+  }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'showTopbarMultiSession')) {
     safePatch.showTopbarMultiSession = Boolean(safePatch.showTopbarMultiSession);
   }
@@ -3373,6 +3390,9 @@ async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepAgentBadge')) {
     safePatch.showStepAgentBadge = Boolean(safePatch.showStepAgentBadge);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepSpeedColor')) {
+    safePatch.showStepSpeedColor = Boolean(safePatch.showStepSpeedColor);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
     safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);
@@ -10331,7 +10351,8 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
     key: 'tps',
     thLabel: () => t('stepCol.tps.th'),
     optLabel: () => t('stepCol.tps.opt'),
-    sigPart: (st) => `${st.tokPerSec}:${st.selectedSpeedReason || ''}`,
+    sigPart: (st, ctx) =>
+      `${st.tokPerSec}:${st.selectedSpeedReason || ''}:${ctx?.showStepSpeedColor === true ? 1 : 0}`,
     createCell: () => {
       const speedMain = h('strong', {
         className: 'cell-value tone-muted',
@@ -10345,9 +10366,17 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
       const td = h('td', {}, [wrapEl]);
       return { td, refs: { wrapEl, speedMain, speedReason: null } };
     },
-    updateCell: (refs, st) => {
+    updateCell: (refs, st, ctx) => {
       patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
-      patchAttr(refs.speedMain, 'class', `cell-value ${getSpeedToneClass(st.tokPerSec)}`);
+      const hasValidSpeed =
+        st.tokPerSec != null && Number.isFinite(Number(st.tokPerSec)) && Number(st.tokPerSec) > 0;
+      const toneCls =
+        ctx?.showStepSpeedColor === true
+          ? getSpeedToneClass(st.tokPerSec)
+          : hasValidSpeed
+            ? ''
+            : 'tone-muted';
+      patchAttr(refs.speedMain, 'class', toneCls ? `cell-value ${toneCls}` : 'cell-value');
       const reason = speedReasonText(st.selectedSpeedReason);
       if (reason && !refs.speedReason) {
         refs.speedReason = h('div', {
@@ -10573,7 +10602,9 @@ function createCapsuleSlotNode(slotIndex, initialMetric) {
         ? '--%'
         : initialMetric === 'tps'
           ? '-- t/s'
-          : t('capsule.quotaUnknown'),
+          : initialMetric === 'ttft'
+            ? '--s'
+            : t('capsule.quotaUnknown'),
   });
   const el = h(
     'span',
@@ -10584,7 +10615,9 @@ function createCapsuleSlotNode(slotIndex, initialMetric) {
           ? 'wm-cap-slot wm-ctx-seg'
           : initialMetric === 'tps'
             ? 'wm-cap-slot wm-seg-speed'
-            : 'wm-cap-slot wm-seg-quota',
+            : initialMetric === 'ttft'
+              ? 'wm-cap-slot wm-seg-metric'
+              : 'wm-cap-slot wm-seg-quota',
       hidden: isNone,
       'data-slot-idx': String(slotIndex),
       'data-metric': initialMetric,
@@ -10679,9 +10712,9 @@ const CapsuleBarWidget = defineComponent({
     );
 
     const capsuleSlots = [
-      createCapsuleSlotNode(0, 'context'),
-      createCapsuleSlotNode(1, 'tps'),
-      createCapsuleSlotNode(2, 'quota_auto'),
+      createCapsuleSlotNode(0, 'tps'),
+      createCapsuleSlotNode(1, 'ttft'),
+      createCapsuleSlotNode(2, 'context'),
       createCapsuleSlotNode(3, 'none'),
       createCapsuleSlotNode(4, 'none'),
     ];
@@ -11031,15 +11064,16 @@ const StepTableWidget = defineComponent({
         effectiveScopes = ['all'],
         hasSubagents = false,
         isMergedMultiAgents = false,
-        showStepTurnRail = true,
+        showStepTurnRail = false,
         showStepAgentBadge = true,
+        showStepSpeedColor = false,
         displaySettings = {},
       } = {}
     ) {
       const colOrderSig = colKeys.join(',');
       const renderOptions = JSON.stringify([
         cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
-        showStepTurnRail, showStepAgentBadge, displaySettings.showUpstreamModel,
+        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, displaySettings.showUpstreamModel,
         displaySettings.orchestratorIdMode,
       ]);
       if (lastRenderOptions === renderOptions && lastRenderedRows &&
@@ -11054,6 +11088,7 @@ const StepTableWidget = defineComponent({
       const cellCtx = {
         hasSubagents,
         showAgentBadge,
+        showStepSpeedColor,
         effectiveScopes,
         scopeSigKey: effectiveScopes.join(','),
         displaySettings,
@@ -12895,6 +12930,13 @@ function getMultiToggleOptions() {
   ];
 }
 
+function getEnableToggleOptions() {
+  return [
+    { value: 'on', label: t('settings.str.on') },
+    { value: 'off', label: t('settings.str.off') },
+  ];
+}
+
 function isSameList(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -12908,13 +12950,15 @@ const SettingsStructureTab = defineComponent({
   setup({ props, onCleanup }) {
     let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
+    let draftEnableCliStatusLine = true;
     let draftShowTopbarMulti = true;
     let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
     let draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
     let draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
     let draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
-    let draftShowStepTurnRail = true;
+    let draftShowStepTurnRail = false;
     let draftShowStepAgentBadge = true;
+    let draftShowStepSpeedColor = false;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
 
@@ -12927,6 +12971,7 @@ const SettingsStructureTab = defineComponent({
       return buildStructurePreviewTelemetry(latestSettings, {
         windowMountMode: draftWindowMountMode,
         enableWindowOverlay: draftWindowMountMode !== 'sidebar',
+        enableCliStatusLine: draftEnableCliStatusLine,
         showTopbarMultiSession: draftShowTopbarMulti,
         topbarCapsuleSlots: draftTopbarSlots,
         hoverModules: draftHoverModules,
@@ -12934,6 +12979,7 @@ const SettingsStructureTab = defineComponent({
         overviewMetrics: draftOverviewMetrics,
         showStepTurnRail: draftShowStepTurnRail,
         showStepAgentBadge: draftShowStepAgentBadge,
+        showStepSpeedColor: draftShowStepSpeedColor,
         stepTableColumns: draftStepColumns,
       });
     }
@@ -13004,6 +13050,10 @@ const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.multiToggle'),
     });
+    const cliCapsuleLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.cliCapsuleToggle'),
+    });
     const capsuleSlotsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.capsuleSlotsLabel'),
@@ -13038,6 +13088,19 @@ const SettingsStructureTab = defineComponent({
       },
     });
 
+    const cliCapsuleToggle = SegmentedControl({
+      ariaLabel: t('settings.str.cliCapsuleToggle'),
+      modelValue: 'on',
+      options: getEnableToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftEnableCliStatusLine = val !== 'off';
+        syncMountSectionMeta();
+        void persistStructurePatch(mountSection, {
+          enableCliStatusLine: draftEnableCliStatusLine,
+        });
+      },
+    });
+
     const topbarSlotsList = EditableSlotList({
       items: draftTopbarSlots,
       options: getCapsuleMetricOptions(),
@@ -13065,6 +13128,7 @@ const SettingsStructureTab = defineComponent({
       badgeText: t('settings.str.mountBadge', { count: draftTopbarSlots.length }),
       onReset: () => {
         draftWindowMountMode = 'dual';
+        draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
         draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
         syncMountSectionMeta();
@@ -13074,6 +13138,7 @@ const SettingsStructureTab = defineComponent({
           {
             windowMountMode: 'dual',
             enableWindowOverlay: true,
+            enableCliStatusLine: true,
             showTopbarMultiSession: true,
             topbarCapsuleSlots: [...DEFAULT_CLIENT_TOPBAR_SLOTS],
           },
@@ -13087,6 +13152,10 @@ const SettingsStructureTab = defineComponent({
         h('div', { className: 'settings-inline-row' }, [
           multiToggleLabelEl,
           multiSessionToggle.el,
+        ]),
+        h('div', { className: 'settings-inline-row' }, [
+          cliCapsuleLabelEl,
+          cliCapsuleToggle.el,
         ]),
         h('div', { className: 'form-row' }, [capsuleSlotsLabelEl, topbarSlotsList.el]),
       ],
@@ -13106,6 +13175,10 @@ const SettingsStructureTab = defineComponent({
         modelValue: draftShowTopbarMulti ? 'show' : 'hide',
         options: getMultiToggleOptions(),
       });
+      cliCapsuleToggle.setProps({
+        modelValue: draftEnableCliStatusLine ? 'on' : 'off',
+        options: getEnableToggleOptions(),
+      });
       topbarSlotsList.refs.setProps({
         items: draftTopbarSlots,
         options: getCapsuleMetricOptions(),
@@ -13116,6 +13189,7 @@ const SettingsStructureTab = defineComponent({
       );
       const isDefault =
         draftWindowMountMode === 'dual' &&
+        draftEnableCliStatusLine === true &&
         draftShowTopbarMulti === true &&
         isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
       mountSection.refs.setResetDisabled(isDefault);
@@ -13376,6 +13450,10 @@ const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.stepAgentBadgeToggle'),
     });
+    const stepSpeedColorLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepSpeedColorToggle'),
+    });
     const stepColsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepsColsLabel'),
@@ -13383,7 +13461,7 @@ const SettingsStructureTab = defineComponent({
 
     const stepTurnRailToggle = SegmentedControl({
       ariaLabel: t('settings.str.stepTurnRailToggle'),
-      modelValue: 'show',
+      modelValue: 'hide',
       options: getMultiToggleOptions(),
       onUpdateModelValue: (val) => {
         draftShowStepTurnRail = val !== 'hide';
@@ -13403,6 +13481,19 @@ const SettingsStructureTab = defineComponent({
         syncStepsSectionMeta();
         void persistStructurePatch(stepsSection, {
           showStepAgentBadge: draftShowStepAgentBadge,
+        });
+      },
+    });
+
+    const stepSpeedColorToggle = SegmentedControl({
+      ariaLabel: t('settings.str.stepSpeedColorToggle'),
+      modelValue: 'off',
+      options: getEnableToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftShowStepSpeedColor = val !== 'off';
+        syncStepsSectionMeta();
+        void persistStructurePatch(stepsSection, {
+          showStepSpeedColor: draftShowStepSpeedColor,
         });
       },
     });
@@ -13433,16 +13524,18 @@ const SettingsStructureTab = defineComponent({
       title: t('settings.str.stepsSection'),
       badgeText: t('settings.str.stepsBadge', { count: draftStepColumns.length }),
       onReset: () => {
-        draftShowStepTurnRail = true;
+        draftShowStepTurnRail = false;
         draftShowStepAgentBadge = true;
+        draftShowStepSpeedColor = false;
         draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           stepsSection,
           {
-            showStepTurnRail: true,
+            showStepTurnRail: false,
             showStepAgentBadge: true,
+            showStepSpeedColor: false,
             stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
           },
           'settings.resetDone'
@@ -13458,6 +13551,10 @@ const SettingsStructureTab = defineComponent({
         h('div', { className: 'settings-inline-row' }, [
           stepAgentBadgeLabelEl,
           stepAgentBadgeToggle.el,
+        ]),
+        h('div', { className: 'settings-inline-row' }, [
+          stepSpeedColorLabelEl,
+          stepSpeedColorToggle.el,
         ]),
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
@@ -13479,6 +13576,7 @@ const SettingsStructureTab = defineComponent({
           isMergedMultiAgents: true,
           showStepTurnRail: draftShowStepTurnRail,
           showStepAgentBadge: draftShowStepAgentBadge,
+          showStepSpeedColor: draftShowStepSpeedColor,
           displaySettings: mockData.settings,
         }
       );
@@ -13493,6 +13591,10 @@ const SettingsStructureTab = defineComponent({
         modelValue: draftShowStepAgentBadge ? 'show' : 'hide',
         options: getMultiToggleOptions(),
       });
+      stepSpeedColorToggle.setProps({
+        modelValue: draftShowStepSpeedColor ? 'on' : 'off',
+        options: getEnableToggleOptions(),
+      });
       stepColumnsList.refs.setProps({
         items: draftStepColumns,
         options: getStepColumnOptions(),
@@ -13500,8 +13602,9 @@ const SettingsStructureTab = defineComponent({
       });
       stepsSection.refs.setBadge(t('settings.str.stepsBadge', { count: draftStepColumns.length }));
       const isDefault =
-        draftShowStepTurnRail === true &&
+        draftShowStepTurnRail === false &&
         draftShowStepAgentBadge === true &&
+        draftShowStepSpeedColor === false &&
         isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
       refreshStepsPreview();
@@ -13563,13 +13666,15 @@ const SettingsStructureTab = defineComponent({
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
+      draftEnableCliStatusLine = settings.enableCliStatusLine !== false;
       draftShowTopbarMulti = settings.showTopbarMultiSession !== false;
       draftTopbarSlots = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
       draftHoverModules = normalizeClientHoverModules(settings.hoverModules);
       draftOverviewModules = normalizeClientOverviewModules(settings.overviewModules);
       draftOverviewMetrics = normalizeClientOverviewMetrics(settings.overviewMetrics);
-      draftShowStepTurnRail = settings.showStepTurnRail !== false;
+      draftShowStepTurnRail = settings.showStepTurnRail === true;
       draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
+      draftShowStepSpeedColor = settings.showStepSpeedColor === true;
       draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
@@ -13588,6 +13693,7 @@ const SettingsStructureTab = defineComponent({
       mountSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
       patchText(multiToggleLabelEl, t('settings.str.multiToggle'));
+      patchText(cliCapsuleLabelEl, t('settings.str.cliCapsuleToggle'));
       patchText(capsuleSlotsLabelEl, t('settings.str.capsuleSlotsLabel'));
 
       hoverSection.refs.setTitle(t('settings.str.hoverSection'));
@@ -13604,6 +13710,7 @@ const SettingsStructureTab = defineComponent({
       stepsSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(stepTurnRailLabelEl, t('settings.str.stepTurnRailToggle'));
       patchText(stepAgentBadgeLabelEl, t('settings.str.stepAgentBadgeToggle'));
+      patchText(stepSpeedColorLabelEl, t('settings.str.stepSpeedColorToggle'));
       patchText(stepColsLabelEl, t('settings.str.stepsColsLabel'));
 
       syncMountSectionMeta();
@@ -13649,12 +13756,14 @@ const SettingsStructureTab = defineComponent({
       stepTablePreview.destroy();
       windowMountSelect.destroy();
       multiSessionToggle.destroy();
+      cliCapsuleToggle.destroy();
       topbarSlotsList.destroy();
       hoverModulesList.destroy();
       overviewModulesList.destroy();
       overviewMetricsList.destroy();
       stepTurnRailToggle.destroy();
       stepAgentBadgeToggle.destroy();
+      stepSpeedColorToggle.destroy();
       stepColumnsList.destroy();
       mountSection.destroy();
       hoverSection.destroy();
@@ -13672,12 +13781,14 @@ const SettingsStructureTab = defineComponent({
         stepTablePreview,
         windowMountSelect,
         multiSessionToggle,
+        cliCapsuleToggle,
         topbarSlotsList,
         hoverModulesList,
         overviewModulesList,
         overviewMetricsList,
         stepTurnRailToggle,
         stepAgentBadgeToggle,
+        stepSpeedColorToggle,
         stepColumnsList,
         mountSection,
         hoverSection,
@@ -16327,8 +16438,9 @@ const StepsDetailView = defineComponent({
           effectiveScopes,
           hasSubagents,
           isMergedMultiAgents,
-          showStepTurnRail: slice.showStepTurnRail !== false,
+          showStepTurnRail: slice.showStepTurnRail === true,
           showStepAgentBadge: slice.showStepAgentBadge !== false,
+          showStepSpeedColor: slice.showStepSpeedColor === true,
           displaySettings,
         });
         stepsScroll.refresh();
@@ -16649,8 +16761,9 @@ const StepsDetailView = defineComponent({
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
         ),
-        showStepTurnRail: st.telemetry?.settings?.showStepTurnRail !== false,
+        showStepTurnRail: st.telemetry?.settings?.showStepTurnRail === true,
         showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
+        showStepSpeedColor: st.telemetry?.settings?.showStepSpeedColor === true,
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
       }),
       (slice) => {
@@ -18212,9 +18325,9 @@ function mountWindowOverlay() {
 
   // 构建可复用的预占胶囊槽位节点（由 CapsuleBarWidget 共享创建，支持 1..5 项动态槽位）
   const capsuleSlots = [
-    createCapsuleSlotNode(0, 'context'),
-    createCapsuleSlotNode(1, 'tps'),
-    createCapsuleSlotNode(2, 'quota_auto'),
+    createCapsuleSlotNode(0, 'tps'),
+    createCapsuleSlotNode(1, 'ttft'),
+    createCapsuleSlotNode(2, 'context'),
     createCapsuleSlotNode(3, 'none'),
     createCapsuleSlotNode(4, 'none'),
   ];

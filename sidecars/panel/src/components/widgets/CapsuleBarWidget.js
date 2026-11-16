@@ -54,7 +54,9 @@ export function createCapsuleSlotNode(slotIndex, initialMetric) {
         ? '--%'
         : initialMetric === 'tps'
           ? '-- t/s'
-          : t('capsule.quotaUnknown'),
+          : initialMetric === 'ttft'
+            ? '--s'
+            : t('capsule.quotaUnknown'),
   });
   const el = h(
     'span',
@@ -65,7 +67,9 @@ export function createCapsuleSlotNode(slotIndex, initialMetric) {
           ? 'wm-cap-slot wm-ctx-seg'
           : initialMetric === 'tps'
             ? 'wm-cap-slot wm-seg-speed'
-            : 'wm-cap-slot wm-seg-quota',
+            : initialMetric === 'ttft'
+              ? 'wm-cap-slot wm-seg-metric'
+              : 'wm-cap-slot wm-seg-quota',
       hidden: isNone,
       'data-slot-idx': String(slotIndex),
       'data-metric': initialMetric,
@@ -160,9 +164,9 @@ export const CapsuleBarWidget = defineComponent({
     );
 
     const capsuleSlots = [
-      createCapsuleSlotNode(0, 'context'),
-      createCapsuleSlotNode(1, 'tps'),
-      createCapsuleSlotNode(2, 'quota_auto'),
+      createCapsuleSlotNode(0, 'tps'),
+      createCapsuleSlotNode(1, 'ttft'),
+      createCapsuleSlotNode(2, 'context'),
       createCapsuleSlotNode(3, 'none'),
       createCapsuleSlotNode(4, 'none'),
     ];

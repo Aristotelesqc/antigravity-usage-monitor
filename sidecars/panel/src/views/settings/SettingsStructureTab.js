@@ -69,6 +69,13 @@ function getMultiToggleOptions() {
   ];
 }
 
+function getEnableToggleOptions() {
+  return [
+    { value: 'on', label: t('settings.str.on') },
+    { value: 'off', label: t('settings.str.off') },
+  ];
+}
+
 function isSameList(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -82,13 +89,15 @@ export const SettingsStructureTab = defineComponent({
   setup({ props, onCleanup }) {
     let activeThirdTab = normalizeStructureTabKey(uiStore.getState().settingsStructureTab);
     let draftWindowMountMode = 'dual';
+    let draftEnableCliStatusLine = true;
     let draftShowTopbarMulti = true;
     let draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
     let draftHoverModules = [...DEFAULT_CLIENT_HOVER_MODULES];
     let draftOverviewModules = [...DEFAULT_CLIENT_OVERVIEW_MODULES];
     let draftOverviewMetrics = [...DEFAULT_CLIENT_OVERVIEW_METRICS];
-    let draftShowStepTurnRail = true;
+    let draftShowStepTurnRail = false;
     let draftShowStepAgentBadge = true;
+    let draftShowStepSpeedColor = false;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
 
@@ -101,6 +110,7 @@ export const SettingsStructureTab = defineComponent({
       return buildStructurePreviewTelemetry(latestSettings, {
         windowMountMode: draftWindowMountMode,
         enableWindowOverlay: draftWindowMountMode !== 'sidebar',
+        enableCliStatusLine: draftEnableCliStatusLine,
         showTopbarMultiSession: draftShowTopbarMulti,
         topbarCapsuleSlots: draftTopbarSlots,
         hoverModules: draftHoverModules,
@@ -108,6 +118,7 @@ export const SettingsStructureTab = defineComponent({
         overviewMetrics: draftOverviewMetrics,
         showStepTurnRail: draftShowStepTurnRail,
         showStepAgentBadge: draftShowStepAgentBadge,
+        showStepSpeedColor: draftShowStepSpeedColor,
         stepTableColumns: draftStepColumns,
       });
     }
@@ -178,6 +189,10 @@ export const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.multiToggle'),
     });
+    const cliCapsuleLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.cliCapsuleToggle'),
+    });
     const capsuleSlotsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.capsuleSlotsLabel'),
@@ -212,6 +227,19 @@ export const SettingsStructureTab = defineComponent({
       },
     });
 
+    const cliCapsuleToggle = SegmentedControl({
+      ariaLabel: t('settings.str.cliCapsuleToggle'),
+      modelValue: 'on',
+      options: getEnableToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftEnableCliStatusLine = val !== 'off';
+        syncMountSectionMeta();
+        void persistStructurePatch(mountSection, {
+          enableCliStatusLine: draftEnableCliStatusLine,
+        });
+      },
+    });
+
     const topbarSlotsList = EditableSlotList({
       items: draftTopbarSlots,
       options: getCapsuleMetricOptions(),
@@ -239,6 +267,7 @@ export const SettingsStructureTab = defineComponent({
       badgeText: t('settings.str.mountBadge', { count: draftTopbarSlots.length }),
       onReset: () => {
         draftWindowMountMode = 'dual';
+        draftEnableCliStatusLine = true;
         draftShowTopbarMulti = true;
         draftTopbarSlots = [...DEFAULT_CLIENT_TOPBAR_SLOTS];
         syncMountSectionMeta();
@@ -248,6 +277,7 @@ export const SettingsStructureTab = defineComponent({
           {
             windowMountMode: 'dual',
             enableWindowOverlay: true,
+            enableCliStatusLine: true,
             showTopbarMultiSession: true,
             topbarCapsuleSlots: [...DEFAULT_CLIENT_TOPBAR_SLOTS],
           },
@@ -261,6 +291,10 @@ export const SettingsStructureTab = defineComponent({
         h('div', { className: 'settings-inline-row' }, [
           multiToggleLabelEl,
           multiSessionToggle.el,
+        ]),
+        h('div', { className: 'settings-inline-row' }, [
+          cliCapsuleLabelEl,
+          cliCapsuleToggle.el,
         ]),
         h('div', { className: 'form-row' }, [capsuleSlotsLabelEl, topbarSlotsList.el]),
       ],
@@ -280,6 +314,10 @@ export const SettingsStructureTab = defineComponent({
         modelValue: draftShowTopbarMulti ? 'show' : 'hide',
         options: getMultiToggleOptions(),
       });
+      cliCapsuleToggle.setProps({
+        modelValue: draftEnableCliStatusLine ? 'on' : 'off',
+        options: getEnableToggleOptions(),
+      });
       topbarSlotsList.refs.setProps({
         items: draftTopbarSlots,
         options: getCapsuleMetricOptions(),
@@ -290,6 +328,7 @@ export const SettingsStructureTab = defineComponent({
       );
       const isDefault =
         draftWindowMountMode === 'dual' &&
+        draftEnableCliStatusLine === true &&
         draftShowTopbarMulti === true &&
         isSameList(draftTopbarSlots, DEFAULT_CLIENT_TOPBAR_SLOTS);
       mountSection.refs.setResetDisabled(isDefault);
@@ -550,6 +589,10 @@ export const SettingsStructureTab = defineComponent({
       className: 'form-label',
       text: t('settings.str.stepAgentBadgeToggle'),
     });
+    const stepSpeedColorLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.str.stepSpeedColorToggle'),
+    });
     const stepColsLabelEl = h('span', {
       className: 'form-label',
       text: t('settings.str.stepsColsLabel'),
@@ -557,7 +600,7 @@ export const SettingsStructureTab = defineComponent({
 
     const stepTurnRailToggle = SegmentedControl({
       ariaLabel: t('settings.str.stepTurnRailToggle'),
-      modelValue: 'show',
+      modelValue: 'hide',
       options: getMultiToggleOptions(),
       onUpdateModelValue: (val) => {
         draftShowStepTurnRail = val !== 'hide';
@@ -577,6 +620,19 @@ export const SettingsStructureTab = defineComponent({
         syncStepsSectionMeta();
         void persistStructurePatch(stepsSection, {
           showStepAgentBadge: draftShowStepAgentBadge,
+        });
+      },
+    });
+
+    const stepSpeedColorToggle = SegmentedControl({
+      ariaLabel: t('settings.str.stepSpeedColorToggle'),
+      modelValue: 'off',
+      options: getEnableToggleOptions(),
+      onUpdateModelValue: (val) => {
+        draftShowStepSpeedColor = val !== 'off';
+        syncStepsSectionMeta();
+        void persistStructurePatch(stepsSection, {
+          showStepSpeedColor: draftShowStepSpeedColor,
         });
       },
     });
@@ -607,16 +663,18 @@ export const SettingsStructureTab = defineComponent({
       title: t('settings.str.stepsSection'),
       badgeText: t('settings.str.stepsBadge', { count: draftStepColumns.length }),
       onReset: () => {
-        draftShowStepTurnRail = true;
+        draftShowStepTurnRail = false;
         draftShowStepAgentBadge = true;
+        draftShowStepSpeedColor = false;
         draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
         syncStepsSectionMeta();
         props.onLayoutChange?.();
         void persistStructurePatch(
           stepsSection,
           {
-            showStepTurnRail: true,
+            showStepTurnRail: false,
             showStepAgentBadge: true,
+            showStepSpeedColor: false,
             stepTableColumns: [...DEFAULT_CLIENT_STEP_COLUMNS],
           },
           'settings.resetDone'
@@ -632,6 +690,10 @@ export const SettingsStructureTab = defineComponent({
         h('div', { className: 'settings-inline-row' }, [
           stepAgentBadgeLabelEl,
           stepAgentBadgeToggle.el,
+        ]),
+        h('div', { className: 'settings-inline-row' }, [
+          stepSpeedColorLabelEl,
+          stepSpeedColorToggle.el,
         ]),
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [stepColsLabelEl, stepColumnsList.el]),
@@ -653,6 +715,7 @@ export const SettingsStructureTab = defineComponent({
           isMergedMultiAgents: true,
           showStepTurnRail: draftShowStepTurnRail,
           showStepAgentBadge: draftShowStepAgentBadge,
+          showStepSpeedColor: draftShowStepSpeedColor,
           displaySettings: mockData.settings,
         }
       );
@@ -667,6 +730,10 @@ export const SettingsStructureTab = defineComponent({
         modelValue: draftShowStepAgentBadge ? 'show' : 'hide',
         options: getMultiToggleOptions(),
       });
+      stepSpeedColorToggle.setProps({
+        modelValue: draftShowStepSpeedColor ? 'on' : 'off',
+        options: getEnableToggleOptions(),
+      });
       stepColumnsList.refs.setProps({
         items: draftStepColumns,
         options: getStepColumnOptions(),
@@ -674,8 +741,9 @@ export const SettingsStructureTab = defineComponent({
       });
       stepsSection.refs.setBadge(t('settings.str.stepsBadge', { count: draftStepColumns.length }));
       const isDefault =
-        draftShowStepTurnRail === true &&
+        draftShowStepTurnRail === false &&
         draftShowStepAgentBadge === true &&
+        draftShowStepSpeedColor === false &&
         isSameList(draftStepColumns, DEFAULT_CLIENT_STEP_COLUMNS);
       stepsSection.refs.setResetDisabled(isDefault);
       refreshStepsPreview();
@@ -737,13 +805,15 @@ export const SettingsStructureTab = defineComponent({
         settings.windowMountMode,
         settings.enableWindowOverlay
       );
+      draftEnableCliStatusLine = settings.enableCliStatusLine !== false;
       draftShowTopbarMulti = settings.showTopbarMultiSession !== false;
       draftTopbarSlots = normalizeClientTopbarSlots(settings.topbarCapsuleSlots);
       draftHoverModules = normalizeClientHoverModules(settings.hoverModules);
       draftOverviewModules = normalizeClientOverviewModules(settings.overviewModules);
       draftOverviewMetrics = normalizeClientOverviewMetrics(settings.overviewMetrics);
-      draftShowStepTurnRail = settings.showStepTurnRail !== false;
+      draftShowStepTurnRail = settings.showStepTurnRail === true;
       draftShowStepAgentBadge = settings.showStepAgentBadge !== false;
+      draftShowStepSpeedColor = settings.showStepSpeedColor === true;
       draftStepColumns = normalizeClientStepColumns(settings.stepTableColumns);
 
       syncMountSectionMeta();
@@ -762,6 +832,7 @@ export const SettingsStructureTab = defineComponent({
       mountSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(mountModeLabelEl, t('settings.str.mountMode'));
       patchText(multiToggleLabelEl, t('settings.str.multiToggle'));
+      patchText(cliCapsuleLabelEl, t('settings.str.cliCapsuleToggle'));
       patchText(capsuleSlotsLabelEl, t('settings.str.capsuleSlotsLabel'));
 
       hoverSection.refs.setTitle(t('settings.str.hoverSection'));
@@ -778,6 +849,7 @@ export const SettingsStructureTab = defineComponent({
       stepsSection.refs.setResetLabel(t('settings.resetBtn'));
       patchText(stepTurnRailLabelEl, t('settings.str.stepTurnRailToggle'));
       patchText(stepAgentBadgeLabelEl, t('settings.str.stepAgentBadgeToggle'));
+      patchText(stepSpeedColorLabelEl, t('settings.str.stepSpeedColorToggle'));
       patchText(stepColsLabelEl, t('settings.str.stepsColsLabel'));
 
       syncMountSectionMeta();
@@ -823,12 +895,14 @@ export const SettingsStructureTab = defineComponent({
       stepTablePreview.destroy();
       windowMountSelect.destroy();
       multiSessionToggle.destroy();
+      cliCapsuleToggle.destroy();
       topbarSlotsList.destroy();
       hoverModulesList.destroy();
       overviewModulesList.destroy();
       overviewMetricsList.destroy();
       stepTurnRailToggle.destroy();
       stepAgentBadgeToggle.destroy();
+      stepSpeedColorToggle.destroy();
       stepColumnsList.destroy();
       mountSection.destroy();
       hoverSection.destroy();
@@ -846,12 +920,14 @@ export const SettingsStructureTab = defineComponent({
         stepTablePreview,
         windowMountSelect,
         multiSessionToggle,
+        cliCapsuleToggle,
         topbarSlotsList,
         hoverModulesList,
         overviewModulesList,
         overviewMetricsList,
         stepTurnRailToggle,
         stepAgentBadgeToggle,
+        stepSpeedColorToggle,
         stepColumnsList,
         mountSection,
         hoverSection,

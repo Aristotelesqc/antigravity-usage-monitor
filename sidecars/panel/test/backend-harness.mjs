@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -22,6 +23,7 @@ const BACKEND_MODULE_FILES = [
   '../backend/settings-schema.mjs',
   '../backend/config.mjs',
   '../backend/cli-sqlite-reader.mjs',
+  '../backend/cli-statusline-config.mjs',
   '../backend/ls-discovery.mjs',
   '../backend/pricing-catalog.mjs',
   '../backend/plugin-updater.mjs',
@@ -82,6 +84,8 @@ export function backendHarness({
     console:{error:m=>state.errors.push(m)},
     cpSync:()=>{},
     rmSync:()=>{},
+    renameSync:()=>{},
+    unlinkSync:()=>{},
     execFile:execFileImpl || ((cmd,args,opts,cb)=>{
       const fn = typeof opts === 'function' ? opts : cb;
       fn(new Error('execFile not mocked'));
@@ -150,7 +154,7 @@ export function backendHarness({
     writeTrajectoryCacheFile:(p,data)=>{
       state.saves.push({path:p,data:JSON.parse(JSON.stringify(data))});
     },
-    homedir:()=>'/test-home',dirname:path.dirname,join:path.join,basename:path.basename,fileURLToPath:()=>mainPath,
+    homedir:()=>'/test-home',dirname:path.dirname,join:path.join,basename:path.basename,delimiter:path.delimiter,pathToFileURL,fileURLToPath:()=>mainPath,
     Response:class {constructor(body,options){this.body=body;this.options=options;}},
     SidecarApp:class {page(){} api(){} run(){}},
     fetch:async(url,options={})=>{
@@ -172,6 +176,6 @@ export function backendHarness({
       return {ok:true,json:async()=>data};
     },
   };
-  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns,normalizeStandalonePort,setStandalonePortListener,parseAnnotationPbtxtTitle};',ctx);
+  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns,normalizeStandalonePort,setStandalonePortListener,parseAnnotationPbtxtTitle,buildCliStatusSnapshot,buildCliStatusLineCommand,isManagedCliStatusLineCommand,applyCliStatusLineToSettingsObject,cliDisplayWidth,parseCliModelAndEffort,formatCliStatusLineCapsule};',ctx);
   return {...ctx.api,state};
 }

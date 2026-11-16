@@ -50,7 +50,8 @@
   - 按模型汇总：按当前所选会话（及所选主/子代理范围）统计各模型的调用次数、均速、总 Token 与费用。
 - **偏好设置**
   - 选择面板挂载方式：双栖挂载（顶部栏 + 侧边栏）或仅侧边栏。
-  - 顶部栏定制：独立开关实时运行会话入口，并自由定义右侧三个指标槽位的显示内容与排列顺序。
+  - 顶部栏与 CLI 胶囊定制：独立开关实时运行会话入口与 Antigravity CLI 底部状态胶囊（自动写入 `~/.gemini/antigravity-cli/settings.json` 的 `statusLine`），并自由定义 1 至 5 个指标槽位的显示内容与排列顺序（默认为输出速度、首字延迟、上下文占用）。
+  - 调用明细显示：在「界面编排 -> 调用明细字段」可独立开关主/子代理标识、对话轮次导轨（默认关闭）与输出速度多色分级（默认关闭，以清爽单色显示输出速度，避免速度波动时色彩繁杂）。
   - 选择模型名称格式：精简代号或原始模型 ID，并可独立设置 Orchestrator 系列显示精简代号（如 `orchestrator-argon`、`worker-agy-hydrogen`）或原始完整 ID。
   - 按模型设置上下文：在「其他 → 模型上下文设置」为同一模型的各推理档统一设置上限，或切回「跟随宿主设置」。列表右侧显示已设置的上限和宿主最近报告的数值。App / IDE 窗口桥接在插件启动时重新读取宿主模型目录并应用已保存的设置，适用于之后发送的消息。CLI 使用 `AGY_CLI_AUTO_COMPACT_OVERRIDE`。
   - 版本更新与价格表同步：支持从云端 [`pricing-catalog.json`](pricing-catalog.json) 动态同步最新模型价格表，并提供「仅提示新版本，手动更新」（默认）、「自动更新」与「关闭更新」三档更新方式。
@@ -103,8 +104,9 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
    - **Antigravity 2.0 桌面端**：开启插件后即自动在主对话窗口右上角顶部栏挂载实时状态与指标胶囊（悬停查看速览，左键展开完整四标签面板，右键强制刷新），全程不修改宿主 `app.asar`。
    - **Antigravity IDE**：首次启用插件时，后台 Sidecar 会自动在 `~/.antigravity-ide/argv.json` 中补齐 `"remote-debugging-port": "0"`（保留原有注释与配置）。**完整重启一次 Antigravity IDE** 后，胶囊会自动停靠在 IDE 窗口最上方标题栏右侧。由于 Antigravity IDE 宿主暂未开放右侧 UI Sidecar 辅助栏，在 IDE 中请保持「双栖挂载」并直接点击顶部栏胶囊打开四标签面板。
 3. **右侧辅助栏面板（Antigravity 2.0）**：在 Antigravity 2.0 对话窗口点击右上角菜单打开右侧辅助栏中的 **用量监控**，或在 **偏好设置 -> 面板挂载方式** 中按需切换「顶部栏 + 侧边栏」与「仅侧边栏」。
-4. **无头 CLI / `agy remote-control serve` 独立 Web 模式**：
-   - 在纯终端或远程 Linux 服务器上，插件会自动扫描 `~/.gemini/antigravity-cli`（含 `daemon/hub_*.json`、对话轨迹与 `transcript.jsonl`）；即使 `agy` 暂未运行，也会基于本地日志离线展示历史会话与 Token 消耗，并在 `agy` 启动后自动重连升级为完整遥测。
+4. **Antigravity CLI 底部状态胶囊与独立 Web 模式**：
+   - **CLI 底部状态胶囊（`statusLine`，默认开启）**：本机存在 `~/.gemini/antigravity-cli` 时，插件会自动配置原生 `statusLine`（若你已配置自定义脚本则原样保留，绝不覆盖），在 `agy` 终端底栏单行内联展示无背景色的多会话状态与监控指标（左侧保留 `? for shortcuts`，中间显示如 `● 1 运行中   38.1 t/s | 0.85s | ◎ 17%`，右侧保留模式与模型档位），也可在 CLI 内输入 `/statusline` 或在面板 **偏好设置 -> 挂载胶囊** 中随时开关。
+   - **本地离线日志与自动重连**：在纯终端或远程 Linux 服务器上，插件会自动扫描 `~/.gemini/antigravity-cli`（含 `daemon/hub_*.json`、SQLite `.db` 对话轨迹与 `transcript.jsonl`）；即使 `agy` 暂未运行，也会基于本地日志离线展示历史会话与 Token 消耗，并在 `agy` 启动后自动重连升级为完整遥测。
    - **手动启动（推荐配合 SSH 端口转发）**：
      ```bash
      # 在远程服务器上启动（默认仅监听 127.0.0.1:8787）

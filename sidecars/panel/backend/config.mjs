@@ -176,6 +176,7 @@ export const DATA_DIR = resolveDefaultDataDir();
 export const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 export const CACHE_FILE = join(DATA_DIR, 'trajectory_usage_cache.json');
 export const REMOTE_CATALOG_CACHE_FILE = join(DATA_DIR, 'remote_pricing_cache.json');
+export const CLI_STATUS_SNAPSHOT_FILE = join(DATA_DIR, 'cli-status-snapshot.json');
 
 /**
  * 本地对话记录目录、脑图日志目录、守护发现目录与跨端深层统计缓存路径候选列表（联合覆盖 Desktop / CLI / IDE）。
@@ -335,6 +336,7 @@ export function computeRuntimeCodeVersion() {
     join(HERE, 'standalone.mjs'),
     join(HERE, 'bridge-daemon.mjs'),
     join(HERE, 'mcp-entry.mjs'),
+    join(HERE, 'cli-statusline.mjs'),
     join(HERE, 'speed-metrics.mjs'),
     LOCAL_CATALOG_FILE,
   ];

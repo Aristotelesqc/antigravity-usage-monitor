@@ -47,6 +47,7 @@ import {
   notifyWindowOverlaySetting,
   startDefaultWindowBridge,
 } from './window-bridge.mjs';
+import { ensureCliStatusLineConfigured } from './cli-statusline-config.mjs';
 
 export const bootBundleVersion = computeRuntimeCodeVersion();
 
@@ -222,7 +223,23 @@ export async function executeTelemetryAction(data, { onRestart = null } = {}) {
     startMs: sanitizePositiveFiniteMs(data?.startMs),
     endMs: sanitizePositiveFiniteMs(data?.endMs),
   };
-  const payload = await buildTelemetryPayload(convId, force, filterOpts);
+  let payload;
+  try {
+    payload = await buildTelemetryPayload(convId, force, filterOpts);
+  } catch (err) {
+    if (
+      lsRuntimeEndpoint.addr !== 'test.invalid' &&
+      bootBundleVersion &&
+      String(computeRuntimeCodeVersion()) !== String(bootBundleVersion)
+    ) {
+      if (typeof onRestart === 'function') {
+        onRestart();
+      } else {
+        scheduleSidecarRestart(150);
+      }
+    }
+    throw err;
+  }
   if (
     bootBundleVersion &&
     payload.uiBundleVersion &&
@@ -305,6 +322,9 @@ export function executeSettingsAction(data) {
   ) {
     void notifyWindowOverlaySetting(updated.enableWindowOverlay);
   }
+  if ((updated.enableCliStatusLine !== false) !== (current.enableCliStatusLine !== false)) {
+    ensureCliStatusLineConfigured({ enabled: updated.enableCliStatusLine !== false });
+  }
   if (
     typeof standalonePortListener === 'function' &&
     Number(updated.standalonePort || 0) !== Number(current.standalonePort || 0)
@@ -386,6 +406,9 @@ export function executeResetSettingsAction() {
     void notifyWindowOverlaySetting(updated.enableWindowOverlay);
   } else if (Object.keys(current.modelContextWindows).length) {
     void notifyModelContextWindowsChanged();
+  }
+  if ((updated.enableCliStatusLine !== false) !== (current.enableCliStatusLine !== false)) {
+    ensureCliStatusLineConfigured({ enabled: updated.enableCliStatusLine !== false });
   }
   if (
     typeof standalonePortListener === 'function' &&
@@ -500,6 +523,8 @@ export async function dispatchBridgeApiRequest(pathname, method, data, opts = un
 export function bootWindowBridgeRuntime({ allowDynamicLs = false, onRestart = null } = {}) {
   if (lsRuntimeEndpoint.addr === 'test.invalid') return null;
   if (!allowDynamicLs && !lsRuntimeEndpoint.addr) return null;
+
+  ensureCliStatusLineConfigured({ enabled: loadSettings().enableCliStatusLine !== false });
 
   const triggerRestart =
     typeof onRestart === 'function' ? onRestart : () => scheduleSidecarRestart(150);

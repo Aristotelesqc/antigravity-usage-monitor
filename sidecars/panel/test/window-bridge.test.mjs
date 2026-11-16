@@ -475,9 +475,9 @@ test('Capsule 4-stage responsive hysteresis and backend settings default/overrid
   assert.equal(defaultPayload.settings.enableWindowOverlay, true);
   assert.equal(defaultPayload.settings.showTopbarMultiSession, true);
   assert.deepEqual(Array.from(defaultPayload.settings.topbarCapsuleSlots), [
-    'context',
     'tps',
-    'quota_auto',
+    'ttft',
+    'context',
   ]);
 
   const disabledEnv = backendHarness({
@@ -784,13 +784,15 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     windowMountMode: 'dual',
     enableWindowOverlay: true,
     showTopbarMultiSession: true,
-    topbarCapsuleSlots: ['context', 'tps', 'quota_auto'],
+    enableCliStatusLine: true,
+    topbarCapsuleSlots: ['tps', 'ttft', 'context'],
     hoverModules: ['metrics', 'context', 'quotas'],
     overviewModules: ['metrics', 'context', 'quotas', 'live_tasks'],
     overviewMetrics: ['tps', 'ttft', 'avg_tps', 'step_cost'],
     stepTableColumns: ['step', 'model', 'tps', 'ttft', 'tokens_combo', 'cache', 'cost'],
-    showStepTurnRail: true,
+    showStepTurnRail: false,
     showStepAgentBadge: true,
+    showStepSpeedColor: false,
     showUpstreamModel: false,
     orchestratorIdMode: 'compact',
     weeklyLimitMode: 'official',
@@ -1369,15 +1371,18 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const multiLabelEl = multiBtn.querySelector('.wm-multi-label');
     assert.equal(multiLabelEl.textContent, '2 运行 · 1 子');
 
-    // Verify capsule reactive text (50% context, 92.4 t/s without bolt SVG, 余 68%)
+    // Verify capsule reactive text (default order: 92.4 t/s without bolt SVG, 0.85s TTFT, 50% context)
+    const defaultCapSlots = capsuleHost.shadowRoot.querySelectorAll('.wm-cap-slot');
     const ctxPctEl = capsuleHost.shadowRoot.querySelector('.wm-ctx-pct');
     const speedSegEl = capsuleHost.shadowRoot.querySelector('.wm-seg-speed');
-    const quotaSegEl = capsuleHost.shadowRoot.querySelector('.wm-seg-quota');
-    assert.equal(ctxPctEl.textContent, '50%');
+    assert.equal(defaultCapSlots[0].getAttribute('data-metric'), 'tps');
+    assert.equal(defaultCapSlots[1].getAttribute('data-metric'), 'ttft');
+    assert.equal(defaultCapSlots[2].getAttribute('data-metric'), 'context');
     assert.equal(speedSegEl.children.length, 1, 'Speed segment has no lightning bolt SVG');
     assert.equal(speedSegEl.querySelector('.svg-icon'), null);
     assert.ok(speedSegEl.children[0].textContent.includes('92.4 t/s'));
-    assert.equal(quotaSegEl.children[0].textContent, '余 68%');
+    assert.equal(defaultCapSlots[1].children[0].textContent, '0.85s');
+    assert.equal(ctxPctEl.textContent, '50%');
 
     // Verify hovering left multi-session button opens .wm-multi-panel with live tasks, subagents, and recent sessions
     const multiPanelEl = portalHost.shadowRoot.querySelector('.wm-multi-panel');
@@ -1648,7 +1653,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const thirdNavBtns = thirdNavBar.querySelectorAll('.structure-thirdnav-btn');
     assert.deepEqual(
       thirdNavBtns.map((btn) => btn.querySelector('.structure-thirdnav-label').textContent),
-      ['挂载与胶囊', '鼠标悬浮窗', '实时监控布局', '调用明细字段'],
+      ['挂载胶囊', '鼠标悬浮窗', '实时监控布局', '调用明细字段'],
       '3rd-level menu renders 4 structure sub-tabs'
     );
     assert.equal(thirdNavBtns[0].classList.contains('is-active'), true, 'First 3rd-level tab active by default');
@@ -1668,10 +1673,10 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const previewMultiBtn = sec0.querySelector('.wm-multi-btn');
     assert.ok(previewCapsuleBar, 'Pane 0 mounts real CapsuleBarWidget preview');
     assert.equal(previewCapsuleSlots.length, 5, 'Preview CapsuleBarWidget mounts real 5 capsule slots');
-    assert.equal(previewCapsuleSlots[0].querySelector('.wm-ctx-pct').textContent, '56%', 'Preview renders simulated context %');
-    assert.equal(previewCapsuleSlots[1].children[0].textContent, '68.4 t/s', 'Preview renders simulated speed');
-    assert.equal(previewCapsuleSlots[1].classList.contains('tone-good'), true, 'Preview capsule 68.4 t/s shares tone-good green with cards');
-    assert.equal(previewCapsuleSlots[2].children[0].textContent, '余 52%', 'Preview renders simulated quota_auto (min of 5h 64% and weekly 52%)');
+    assert.equal(previewCapsuleSlots[0].children[0].textContent, '68.4 t/s', 'Preview slot 0 renders simulated speed');
+    assert.equal(previewCapsuleSlots[0].classList.contains('tone-good'), true, 'Preview capsule 68.4 t/s shares tone-good green with cards');
+    assert.equal(previewCapsuleSlots[1].children[0].textContent, '1.1s', 'Preview slot 1 renders simulated TTFT');
+    assert.equal(previewCapsuleSlots[2].querySelector('.wm-ctx-pct').textContent, '56%', 'Preview slot 2 renders simulated context %');
     const mountSelectEl = sec0.querySelectorAll('.custom-select')[0];
 
     // Toggle windowMountSelect: dual -> composer -> sidebar -> dual (updating both live host & preview bar)
@@ -1703,9 +1708,9 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.enableWindowOverlay, true, 'enableWindowOverlay persisted back to true');
     assert.equal(previewCapsuleBar.getAttribute('data-mount-mode'), 'dual');
 
-    // Toggle topbar multi-session switch: show -> hide -> show
+    // Toggle topbar multi-session switch (show -> hide -> show) and CLI bottom capsule switch (on -> off -> on)
     const topbarSegBtns = sec0.querySelectorAll('.seg-btn');
-    assert.equal(topbarSegBtns.length, 2, 'Topbar multi-session toggle has 显示 / 隐藏 buttons');
+    assert.equal(topbarSegBtns.length, 4, 'Topbar multi-session + CLI bottom capsule toggles render 4 buttons');
     topbarSegBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.showTopbarMultiSession, false);
@@ -1717,6 +1722,13 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.showTopbarMultiSession, true);
     assert.equal(multiBtn.hasAttribute('hidden'), false, 'Topbar multi-session button restored immediately');
     assert.equal(previewMultiBtn.hasAttribute('hidden'), false, 'Preview multi-session button restored immediately');
+
+    topbarSegBtns[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.enableCliStatusLine, false, 'CLI bottom capsule toggle turns off enableCliStatusLine');
+    topbarSegBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.enableCliStatusLine, true, 'CLI bottom capsule toggle restores enableCliStatusLine');
 
     // Dynamic 1..5 capsule slots via EditableSlotList (+ / - / ↑ / ↓ & mouse drag-and-drop)
     const capSlots = capsuleHost.shadowRoot.querySelectorAll('.wm-cap-slot');
@@ -1730,19 +1742,14 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     let capRowSelects = capSlotWrap.querySelectorAll('.custom-select');
     assert.equal(capRowSelects.length, 3, 'Default 3 capsule slot rows in EditableSlotList');
 
-    // Slot 0 -> Gemini 5h (index 9), Slot 1 -> TTFT (index 2), Slot 2 -> Cost (index 4)
+    // Slot 0 ('tps') -> Gemini 5h (index 9), Slot 1 stays TTFT, Slot 2 ('context') -> Cost (index 4)
     capRowSelects[0].querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
     capRowSelects[0].querySelectorAll('.select-option')[9].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(capSlots[0].getAttribute('data-metric'), 'gemini_5h');
-    assert.equal(capSlots[0].children.length, 1, 'Ring SVG detached cleanly when slot leaves context');
     assert.equal(capSlots[0].children[0].textContent, '余 44%');
     assert.equal(previewCapsuleSlots[0].getAttribute('data-metric'), 'gemini_5h', 'Preview slot 0 mirrors gemini_5h');
     assert.equal(previewCapsuleSlots[0].children[0].textContent, '余 64%', 'Preview slot 0 renders simulated gemini_5h');
-
-    capRowSelects[1].querySelector('.select-trigger').dispatchEvent({ type: 'click', stopPropagation() {} });
-    capRowSelects[1].querySelectorAll('.select-option')[2].dispatchEvent({ type: 'click', stopPropagation() {} });
-    await new Promise((r) => setTimeout(r, 30));
     assert.equal(capSlots[1].getAttribute('data-metric'), 'ttft');
     assert.equal(capSlots[1].children[0].textContent, '0.85s');
 
@@ -1750,6 +1757,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     capRowSelects[2].querySelectorAll('.select-option')[4].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(capSlots[2].getAttribute('data-metric'), 'cost');
+    assert.equal(capSlots[2].children.length, 1, 'Ring SVG detached cleanly when slot leaves context');
     assert.equal(capSlots[2].children[0].textContent, '$0.040');
     assert.deepEqual(mockSettings.topbarCapsuleSlots, ['gemini_5h', 'ttft', 'cost']);
 
@@ -1822,13 +1830,15 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(capSlotWrap.querySelector('.slot-remove-btn').hasAttribute('disabled'), true, '- button disabled at min 1 slot');
     assert.equal(capSeps[0].hasAttribute('hidden'), true, 'All separators hidden when 1 slot');
 
-    // Reset Section 0 restores default 3 slots ['context', 'tps', 'quota_auto']
+    // Reset Section 0 restores default 3 slots ['tps', 'ttft', 'context']
     sec0.querySelector('.btn-ghost-sm').dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 40));
-    assert.deepEqual(mockSettings.topbarCapsuleSlots, ['context', 'tps', 'quota_auto']);
-    assert.equal(capSlots[0].getAttribute('data-metric'), 'context');
-    assert.equal(capSlots[0].children.length, 2, 'Ring SVG re-attached on Slot 0');
-    assert.equal(capSlots[0].querySelector('.wm-ctx-pct').textContent, '50%');
+    assert.deepEqual(mockSettings.topbarCapsuleSlots, ['tps', 'ttft', 'context']);
+    assert.equal(capSlots[0].getAttribute('data-metric'), 'tps');
+    assert.equal(capSlots[1].getAttribute('data-metric'), 'ttft');
+    assert.equal(capSlots[2].getAttribute('data-metric'), 'context');
+    assert.equal(capSlots[2].children.length, 2, 'Ring SVG re-attached on Slot 2');
+    assert.equal(capSlots[2].querySelector('.wm-ctx-pct').textContent, '50%');
 
     // Pane 1 (3rd-level tab 'hover'): Hover Popup Modules (0..4) + real hover UI preview
     const sec1 = accordionSections[1];
@@ -1920,9 +1930,30 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(sec3.hasAttribute('hidden'), false);
     const previewStepTable = sec3.querySelector('.steps-data-table');
     assert.ok(previewStepTable, 'Real StepTableWidget mounted in Steps structure preview');
-    assert.equal(previewStepTable.classList.contains('has-turn-rail'), true, 'Preview step table shows turn rail by default');
+    assert.equal(previewStepTable.classList.contains('has-turn-rail'), false, 'Preview step table hides turn rail by default');
     assert.equal(previewStepTable.children[0].children[0].children.length, 7, 'Preview step table renders 7 default columns');
     assert.equal(previewStepTable.children[1].children.length, 4, 'Preview step table renders 4 simulated steps');
+
+    const sec3SettingLabels = sec3.querySelectorAll('.form-label').map((el) => el.textContent);
+    assert.ok(sec3SettingLabels.includes('对话轮次导轨'), 'Turn rail switch rendered in 调用明细字段');
+    assert.ok(sec3SettingLabels.includes('主/子代理标识'), 'Main/Sub agent badge switch rendered in 调用明细字段');
+    assert.ok(sec3SettingLabels.includes('输出速度多色分级'), 'Speed multi-color switch rendered in 调用明细字段');
+    const sec3SegControls = sec3.querySelectorAll('.segmented');
+    assert.equal(sec3SegControls.length, 3, 'Three independent switches rendered in 调用明细字段');
+    const getRowSpeedClasses = (tableEl) =>
+      Array.from(tableEl.children[1].children).map(
+        (tr) => tr.children[2].querySelector('.cell-value')?.getAttribute('class') || ''
+      );
+    assert.equal(
+      getRowSpeedClasses(previewStepTable).every((cls) => cls === 'cell-value'),
+      true,
+      'Preview step table renders monochrome speed cells by default'
+    );
+    // Toggle ON 对话轮次导轨 & 输出速度多色分级, and toggle OFF 主/子代理标识
+    sec3SegControls[0].querySelectorAll('.seg-btn')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(mockSettings.showStepTurnRail, true, 'Turn rail switch updates showStepTurnRail to true');
+    assert.equal(previewStepTable.classList.contains('has-turn-rail'), true, 'Preview step table activates turn rail immediately');
     const previewFirstTd = previewStepTable.children[1].children[0].children[0];
     previewFirstTd.onmouseenter?.({ target: previewFirstTd });
     const previewTurnTip = sec3.querySelector('.turn-prompt-tip');
@@ -1930,16 +1961,6 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.ok(previewTurnTip.textContent.includes('并发刷新令牌'), 'Preview turn tooltip displays realistic engineering prompt');
     previewFirstTd.onmouseleave?.();
 
-    const sec3SettingLabels = sec3.querySelectorAll('.form-label').map((el) => el.textContent);
-    assert.ok(sec3SettingLabels.includes('对话轮次导轨'), 'Turn rail switch rendered in 调用明细字段');
-    assert.ok(sec3SettingLabels.includes('主/子代理标识'), 'Main/Sub agent badge switch rendered in 调用明细字段');
-    const sec3SegControls = sec3.querySelectorAll('.segmented');
-    assert.equal(sec3SegControls.length, 2, 'Two independent switches rendered in 调用明细字段');
-    // Toggle off 对话轮次导轨 and 主/子代理标识
-    sec3SegControls[0].querySelectorAll('.seg-btn')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
-    await new Promise((r) => setTimeout(r, 25));
-    assert.equal(mockSettings.showStepTurnRail, false, 'Turn rail switch updates showStepTurnRail to false');
-    assert.equal(previewStepTable.classList.contains('has-turn-rail'), false, 'Preview step table removes turn rail immediately');
     sec3SegControls[1].querySelectorAll('.seg-btn')[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 25));
     assert.equal(mockSettings.showStepAgentBadge, false, 'Agent badge switch updates showStepAgentBadge to false');
@@ -1947,6 +1968,14 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       previewStepTable.querySelector('.agent-badge').hasAttribute('hidden'),
       true,
       'Preview step table hides Main/Sub agent badge immediately'
+    );
+    sec3SegControls[2].querySelectorAll('.seg-btn')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(mockSettings.showStepSpeedColor, true, 'Speed multi-color switch updates showStepSpeedColor to true');
+    assert.equal(
+      getRowSpeedClasses(previewStepTable).some((cls) => /tone-(good|info|warn|danger)/.test(cls)),
+      true,
+      'Preview step table enables multi-color speed tones immediately when showStepSpeedColor is true'
     );
 
     const stepColWrap = sec3.querySelector('.editable-slot-wrap');
@@ -1958,27 +1987,37 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(previewStepTable.children[0].children[0].children.length, 9, 'Preview step table expands to 9 columns live');
     pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
-    const stepTableWhileRailOff = allPanes[2].querySelector('.data-table');
+    const stepTableWhileCustomOn = allPanes[2].querySelector('.data-table');
     assert.equal(
-      stepTableWhileRailOff.classList.contains('has-turn-rail'),
-      false,
-      'has-turn-rail class removed when showStepTurnRail is false'
-    );
-    assert.equal(
-      Array.from(stepTableWhileRailOff.querySelectorAll('.turn-rail'))
-        .every((rail) => rail.hasAttribute('hidden')),
+      stepTableWhileCustomOn.classList.contains('has-turn-rail'),
       true,
-      'No visible turn rail when showStepTurnRail is false'
+      'has-turn-rail class applied when showStepTurnRail is true'
     );
-    const stepHeaderThs = stepTableWhileRailOff.children[0].children[0].children;
+    assert.equal(
+      Array.from(stepTableWhileCustomOn.children[1].children).some((tr) =>
+        /tone-(good|info|warn|danger)/.test(
+          tr.children[2].querySelector('.cell-value')?.getAttribute('class') || ''
+        )
+      ),
+      true,
+      'StepsDetailView applies multi-color speed classes when showStepSpeedColor is true'
+    );
+    const stepHeaderThs = stepTableWhileCustomOn.children[0].children[0].children;
     assert.equal(stepHeaderThs.length, 9, 'StepsDetailView thead dynamically renders 9 columns');
     pillTabs[3].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 15));
     sec3.querySelector('.btn-ghost-sm').dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 40));
     assert.equal(mockSettings.stepTableColumns.length, 7);
-    assert.equal(mockSettings.showStepTurnRail, true, 'Section reset restores showStepTurnRail to true');
+    assert.equal(mockSettings.showStepTurnRail, false, 'Section reset restores showStepTurnRail to false');
     assert.equal(mockSettings.showStepAgentBadge, true, 'Section reset restores showStepAgentBadge to true');
+    assert.equal(mockSettings.showStepSpeedColor, false, 'Section reset restores showStepSpeedColor to false');
+    assert.equal(previewStepTable.classList.contains('has-turn-rail'), false, 'Section reset hides turn rail in preview step table');
+    assert.equal(
+      getRowSpeedClasses(previewStepTable).every((cls) => cls === 'cell-value'),
+      true,
+      'Section reset restores monochrome speed classes in preview step table'
+    );
 
     // --- 其他 (model format, context limits, cache rebuild, reset) ---
     subNavBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
@@ -2145,8 +2184,24 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(stepRows[0].children[4].getAttribute('title'), '上下文 37800 · 思考 420 · 正文 265');
     assert.equal(stepRows[1].children[4].children[0].textContent, '117.7k / 14.5k / 57');
 
-    // Verify minimalist Turn Rail (.has-turn-rail, cap & origin dots) and hover prompt preview tooltip
+    // Verify minimalist Turn Rail (.has-turn-rail, cap & origin dots) is off by default and activates cleanly when enabled
     const stepsDataTable = stepsPane.querySelectorAll('.data-table')[0];
+    assert.equal(stepsDataTable.classList.contains('has-turn-rail'), false, 'Turn rail off by default after full reset');
+    assert.equal(
+      Array.from(stepRows).every(
+        (tr) => tr.children[2].querySelector('.cell-value')?.getAttribute('class') === 'cell-value'
+      ),
+      true,
+      'Speed column monochrome by default after full reset'
+    );
+    pillTabs[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    subNavBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    thirdNavBtns[3].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 15));
+    sec3SegControls[0].querySelectorAll('.seg-btn')[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 25));
+    pillTabs[2].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 20));
     assert.equal(stepsDataTable.classList.contains('has-turn-rail'), true, 'Turn rail active when showStepTurnRail=true');
     const row0Rail = stepRows[0].children[0].querySelector('.turn-rail');
     const row1Rail = stepRows[1].children[0].querySelector('.turn-rail');
@@ -2583,10 +2638,14 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     ]);
     assert.equal(delivered, 1);
     await new Promise((r) => setTimeout(r, 20));
-    assert.equal(ctxPctEl.textContent, '25%', 'CDP relay delivered live telemetry without HTTP');
-    assert.equal(speedSegEl.children[0].textContent, '121 t/s');
-    assert.equal(quotaSegEl.hasAttribute('hidden'), false, 'Quota slot stays pre-reserved even when quotas=null');
-    assert.equal(quotaSegEl.children[0].textContent, '余 --%');
+    assert.equal(
+      defaultCapSlots[2].querySelector('.wm-ctx-pct').textContent,
+      '25%',
+      'CDP relay delivered live telemetry without HTTP'
+    );
+    assert.equal(defaultCapSlots[0].children[0].textContent, '121 t/s');
+    assert.equal(defaultCapSlots[1].hasAttribute('hidden'), false, 'TTFT slot stays pre-reserved even when latestTtftSec is absent');
+    assert.equal(defaultCapSlots[1].children[0].textContent, '--s');
     assert.equal(
       hoverLegendGrid.children[0],
       firstLegendSlotBefore,

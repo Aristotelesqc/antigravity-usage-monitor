@@ -166,15 +166,16 @@ export const StepTableWidget = defineComponent({
         effectiveScopes = ['all'],
         hasSubagents = false,
         isMergedMultiAgents = false,
-        showStepTurnRail = true,
+        showStepTurnRail = false,
         showStepAgentBadge = true,
+        showStepSpeedColor = false,
         displaySettings = {},
       } = {}
     ) {
       const colOrderSig = colKeys.join(',');
       const renderOptions = JSON.stringify([
         cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
-        showStepTurnRail, showStepAgentBadge, displaySettings.showUpstreamModel,
+        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, displaySettings.showUpstreamModel,
         displaySettings.orchestratorIdMode,
       ]);
       if (lastRenderOptions === renderOptions && lastRenderedRows &&
@@ -189,6 +190,7 @@ export const StepTableWidget = defineComponent({
       const cellCtx = {
         hasSubagents,
         showAgentBadge,
+        showStepSpeedColor,
         effectiveScopes,
         scopeSigKey: effectiveScopes.join(','),
         displaySettings,

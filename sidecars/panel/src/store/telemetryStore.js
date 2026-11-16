@@ -122,7 +122,7 @@ export const CLIENT_TOPBAR_SLOT_KEYS = Object.freeze([
   'claude_weekly',
 ]);
 
-export const DEFAULT_CLIENT_TOPBAR_SLOTS = Object.freeze(['context', 'tps', 'quota_auto']);
+export const DEFAULT_CLIENT_TOPBAR_SLOTS = Object.freeze(['tps', 'ttft', 'context']);
 
 export const CLIENT_OVERVIEW_MODULE_KEYS = Object.freeze([
   'metrics',
@@ -380,13 +380,19 @@ function isEquivalentTelemetry(prev, next) {
     return false;
   }
   if (pSet?.enableWindowOverlay !== nSet?.enableWindowOverlay) return false;
+  if ((pSet?.enableCliStatusLine !== false) !== (nSet?.enableCliStatusLine !== false)) {
+    return false;
+  }
   if ((pSet?.showTopbarMultiSession !== false) !== (nSet?.showTopbarMultiSession !== false)) {
     return false;
   }
-  if ((pSet?.showStepTurnRail !== false) !== (nSet?.showStepTurnRail !== false)) {
+  if (Boolean(pSet?.showStepTurnRail) !== Boolean(nSet?.showStepTurnRail)) {
     return false;
   }
   if ((pSet?.showStepAgentBadge !== false) !== (nSet?.showStepAgentBadge !== false)) {
+    return false;
+  }
+  if (Boolean(pSet?.showStepSpeedColor) !== Boolean(nSet?.showStepSpeedColor)) {
     return false;
   }
   if (!sameArr(pSet?.topbarCapsuleSlots, nSet?.topbarCapsuleSlots)) return false;
@@ -1002,6 +1008,9 @@ export async function saveSettingsPatch(patch) {
     safePatch.weeklyLimitMode =
       mode === 'custom_tokens' || mode === 'custom_cost' ? mode : 'official';
   }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'enableCliStatusLine')) {
+    safePatch.enableCliStatusLine = Boolean(safePatch.enableCliStatusLine);
+  }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'showTopbarMultiSession')) {
     safePatch.showTopbarMultiSession = Boolean(safePatch.showTopbarMultiSession);
   }
@@ -1010,6 +1019,9 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepAgentBadge')) {
     safePatch.showStepAgentBadge = Boolean(safePatch.showStepAgentBadge);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'showStepSpeedColor')) {
+    safePatch.showStepSpeedColor = Boolean(safePatch.showStepSpeedColor);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'topbarCapsuleSlots')) {
     safePatch.topbarCapsuleSlots = normalizeClientTopbarSlots(safePatch.topbarCapsuleSlots);

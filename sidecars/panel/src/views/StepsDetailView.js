@@ -726,8 +726,9 @@ export const StepsDetailView = defineComponent({
           effectiveScopes,
           hasSubagents,
           isMergedMultiAgents,
-          showStepTurnRail: slice.showStepTurnRail !== false,
+          showStepTurnRail: slice.showStepTurnRail === true,
           showStepAgentBadge: slice.showStepAgentBadge !== false,
+          showStepSpeedColor: slice.showStepSpeedColor === true,
           displaySettings,
         });
         stepsScroll.refresh();
@@ -1048,8 +1049,9 @@ export const StepsDetailView = defineComponent({
         orchestratorIdMode: normalizeOrchestratorIdDisplayMode(
           st.telemetry?.settings?.orchestratorIdMode
         ),
-        showStepTurnRail: st.telemetry?.settings?.showStepTurnRail !== false,
+        showStepTurnRail: st.telemetry?.settings?.showStepTurnRail === true,
         showStepAgentBadge: st.telemetry?.settings?.showStepAgentBadge !== false,
+        showStepSpeedColor: st.telemetry?.settings?.showStepSpeedColor === true,
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
       }),
       (slice) => {
