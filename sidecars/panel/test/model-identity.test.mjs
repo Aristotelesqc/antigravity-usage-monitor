@@ -339,12 +339,12 @@ test('real-world M669 worker steps (responseModel gemini-flash-worker-agy, displ
   assert.equal(s2.modelShort, 'hydrogen-4');
   assert.equal(s2.modelLabel, 'Orchestrator Worker (Hydrogen)');
   assert.equal(s2.modelUpstream, 'gemini-flash-worker-agy (hydrogen-4)');
-  assert.equal(s2.costUsd, 0.0103);
+  assert.equal(s2.costUsd, 0.0097);
 
   assert.equal(s3.modelShort, 'hydrogen-4');
   assert.equal(s3.modelLabel, 'Orchestrator Worker (Hydrogen)');
   assert.equal(s3.modelUpstream, 'gemini-flash-worker-agy (hydrogen-4)');
-  assert.equal(s3.costUsd, 0.0103);
+  assert.equal(s3.costUsd, 0.0097);
 
   assert.equal(p.consumption.account.unpricedCalls, 0);
   const orchRow = p.modelBreakdown.find((m) => m.label === 'Orchestrator (Carbon)');
@@ -392,7 +392,7 @@ test('new Carbon (M427/M437/M438) and Hydrogen XHigh/High/Medium/Low (M525-M528)
   assert.equal(xhigh.shortName, 'hydrogen-4-xhigh');
   assert.equal(xhigh.baseLabel, 'Gemini 4 Hydrogen');
   assert.equal(xhigh.pricing.input, 1.5);
-  assert.equal(xhigh.pricing.cache, 0.15);
+  assert.equal(xhigh.pricing.cache, 0.075);
   assert.equal(xhigh.pricing.output, 7.5);
   assert.equal(resolveModelInfo('MODEL_PLACEHOLDER_M525').shortName, 'hydrogen-4-high');
   assert.equal(resolveModelInfo('MODEL_PLACEHOLDER_M526').shortName, 'hydrogen-4');
