@@ -2,8 +2,8 @@
 
 English | [简体中文](README.zh-CN.md)
 
-**Real-time dual-mount monitor for Google Antigravity IDE.**  
-Track token generation speed (TPS), time-to-first-token (TTFT), context window usage, official model quotas, subagent activity, and historical token consumption — across Windows, macOS, and Linux.
+**Real-time usage & speed monitor for Google Antigravity 2.0, IDE, and CLI.**<br>
+Track token generation speed (TPS), time-to-first-token (TTFT), context window usage, official model quotas, subagent activity, and historical token consumption — across Windows, macOS, Linux, and headless CLI servers.
 
 ![Antigravity Usage Monitor Preview](assets/preview.png)
 
@@ -49,9 +49,11 @@ The dashboard is organized into four tabs, with a top header to switch conversat
   - **By Step**: Lists every step in the selected conversation with its model, TPS, TTFT, context/output tokens, cache hit rate, and step cost.
   - **By Model**: Aggregates call counts, mean speed, total tokens, and cost per model within the current session and selected agent scope.
 - **Preferences**
-  - **Mount Mode**: Dual-mount (Top Bar + Sidebar) or Sidebar only.
-  - **Top-Bar Customization**: Independently toggle the live running-sessions indicator, and customize the content and left-to-right order of the three metric slots in the capsule.
-  - **Model Name Format**: Compact short alias (e.g. `argon-4-high`) or raw upstream model ID (e.g. `gemini-3.8-flash-n`), plus an independent Orchestrator series ID selector (`orchestrator-argon` / `worker-agy-hydrogen` compact mode by default, or full annotated IDs).
+  - **Mount Mode & Popover Width**: Choose Dual-mount (Top Bar + Sidebar), Composer mount, or Sidebar only; the floating popover defaults to **Auto Fit** (expanding automatically on wide step tables within viewport bounds to avoid horizontal scrolling) or accepts a custom fixed width (`440–1080 px`).
+  - **Top-Bar & CLI Capsule Customization**: Independently toggle the live running-sessions indicator and the Antigravity CLI bottom status capsule (auto-provisioned via `~/.gemini/antigravity-cli/settings.json` `statusLine`), and customize 1 to 5 metric slots and their left-to-right order (defaulting to Output Speed, TTFT, and Context Usage).
+  - **Call Details & Custom Token Combos**: Under **Structure -> Step Table**, independently toggle main/subagent badges, the turn rail (off by default), and **Speed Multi-Color** grading (off by default); keep the default `Ctx / Think / Reply` combo column, switch to the billing-aligned `In / Out / Cache` preset (with per-segment cost breakdown on hover), or enter a custom format string such as `context:new:cache` or `in:out:cache`.
+  - **Model Name Format**: Choose among Compact short alias (e.g. `argon-4-high`), full raw upstream ID, or Trimmed raw ID (hiding `gemini-`, `claude-`, and `gpt-` prefixes to save single-line space, e.g. `3.8-flash-n`, `sonnet-4-6`, `5.4-mini`), with compaction suffixes (`·compact`) protected from ellipsis truncation; Orchestrator series IDs remain independently configurable.
+  - **Per-model context windows**: In **Other → Model Context Settings**, choose a shared limit for all thinking levels of a model or select **Follow host settings**. The model list shows the saved limit and the most recent value reported by the host. At startup, the App / IDE window bridge reads the latest model catalog and reapplies saved limits to future messages. The CLI uses `AGY_CLI_AUTO_COMPACT_OVERRIDE`.
   - **Version Updates & Pricing Sync**: Dynamically sync [`pricing-catalog.json`](pricing-catalog.json) from GitHub, with three update modes: *Notify only, manual update* (default), *Auto update*, and *Off*.
 
 ## Model Identification & Cost Accounting
@@ -98,8 +100,23 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
 ## Enabling & Opening the Panel
 
 1. Open **Customizations** in the left sidebar, switch to the **Installed** tab, locate `usage-monitor`, and toggle it on.
-2. **Top-Bar Floating Capsule (enabled by default)**: Once enabled, the background sidecar mounts a live status & metric capsule in the top-right bar of the main chat window (hover for quick overview, left-click to expand the full 4-tab panel, right-click to force refresh) without modifying `app.asar`. To disable the top-bar capsule, switch **Mount Mode** to *Sidebar only* in Preferences.
-3. **Right-Hand Sidebar Panel**: Click `⋮` in the top-right corner of the chat pane -> **Extensions** -> **Usage & Speed Monitor** (or **用量监控**) to dock the panel in the auxiliary sidebar.
+2. **Top-Bar Floating Capsule (enabled by default on both Antigravity 2.0 & Antigravity IDE)**:
+   - **Antigravity 2.0 App**: Immediately mounts a live status & metric capsule in the top-right bar of the main chat window (hover for quick overview, left-click to expand the full 4-tab panel, right-click to force refresh) without modifying `app.asar`.
+   - **Antigravity IDE**: On first enable, the background sidecar automatically adds `"remote-debugging-port": "0"` to `~/.antigravity-ide/argv.json` (preserving comments and existing settings). **Restart Antigravity IDE once**, and the capsule will dock into the top-right IDE window titlebar on every launch. Because Antigravity IDE does not currently expose the right-hand UI Sidecar auxiliary pane, keep **Mount Mode** set to *Dual-mount* in IDE and click the top-bar capsule to open the 4-tab dashboard.
+3. **Right-Hand Sidebar Panel (Antigravity 2.0)**: Open the auxiliary sidebar menu in the chat window to dock **Usage & Speed Monitor** on the right, or switch **Mount Mode** between *Top Bar + Sidebar* and *Sidebar only* in Preferences.
+4. **Antigravity CLI Bottom Status Capsule & Headless Standalone Web Mode**:
+   - **CLI Bottom Status Capsule (`statusLine`, enabled by default)**: When `~/.gemini/antigravity-cli` is present, the plugin automatically configures native `statusLine` in `settings.json` (any existing custom third-party `statusLine.command` is strictly preserved) to render a single-line transparent 24-bit ANSI status bar at the bottom of `agy` (keeping `? for shortcuts` on the left, live metrics such as `● 1 active   38.1 t/s | 0.85s | ◎ 17%` centered, and mode/model/effort on the right). Toggle it anytime via `/statusline` in the CLI or **Preferences -> Mount & Capsule Bar**.
+   - **Offline Transcript Fallback & Auto-Upgrade**: On terminal-only machines or remote Linux servers, the backend automatically discovers `~/.gemini/antigravity-cli` (`daemon/hub_*.json`, SQLite `.db` trajectories, and `transcript.jsonl`). When `agy` is offline, historical sessions and token accounting still load from local records and automatically upgrade to full live RPC telemetry once `agy` starts.
+   - **Manual launch (recommended with SSH port forwarding)**:
+     ```bash
+     # On the remote server (binds strictly to 127.0.0.1:8787 by default)
+     node ~/.gemini/config/plugins/usage-monitor/sidecars/panel/standalone.mjs --port 8787
+
+     # Forward from your local machine, then open http://localhost:8787
+     ssh -L 8787:127.0.0.1:8787 user@your-server
+     ```
+   - **Auto-host alongside `agy`**: Set `USAGE_MONITOR_STANDALONE_PORT=8787` or `"standalonePort": 8787` in `~/.gemini/antigravity-cli/sidecar_data/usage-monitor/panel/data/settings.json` to host the standalone Web UI automatically whenever the plugin's MCP supervisor starts.
+   - **Token-protected non-loopback access**: Binding to `0.0.0.0` or a LAN IP requires `--token <secret>` (or `USAGE_MONITOR_STANDALONE_TOKEN`); unauthenticated non-loopback startup is refused.
 
 ## Updating
 

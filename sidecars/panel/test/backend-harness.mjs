@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import vm from 'node:vm';
+import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import * as metrics from '../speed-metrics.mjs';
 import { stripModuleSyntax } from '../scripts/build-bundle.mjs';
 
@@ -14,7 +17,14 @@ const DEFAULT_BUNDLED_CATALOG = {
 };
 
 const BACKEND_MODULE_FILES = [
+  '../backend/context-windows.mjs',
+  '../backend/account-oauth.mjs',
+  '../backend/account-switch.mjs',
+  '../backend/settings-schema.mjs',
   '../backend/config.mjs',
+  '../backend/cli-sqlite-reader.mjs',
+  '../backend/cli-statusline-config.mjs',
+  '../backend/ls-discovery.mjs',
   '../backend/pricing-catalog.mjs',
   '../backend/plugin-updater.mjs',
   '../backend/ls-rpc.mjs',
@@ -24,6 +34,7 @@ const BACKEND_MODULE_FILES = [
   '../backend/usage-aggregator.mjs',
   '../backend/telemetry-builder.mjs',
   '../backend/window-bridge.mjs',
+  '../backend/api-actions.mjs',
   '../main.mjs',
 ];
 
@@ -41,10 +52,12 @@ export function backendHarness({
   cache={},
   deepStats=null,
   transcripts={},
+  diskDirs={},
   settings={},
   trajectories={},
   summaries={},
   userStatus={},
+  availableModels={},
   quotaSummary={groups:[]},
   localCatalog=DEFAULT_BUNDLED_CATALOG,
   remoteCatalog=null,
@@ -54,18 +67,25 @@ export function backendHarness({
   remoteFetch=null,
   execFileImpl=null,
   sourceText=null,
+  clock=null,
   metricsImplementation=metrics,
 }={}) {
   const mainUrl = pluginRootPath ? `file://${pluginRootPath}/sidecars/panel/main.mjs` : 'file:///test/sidecars/panel/main.mjs';
   const mainPath = pluginRootPath ? `${pluginRootPath}/sidecars/panel/main.mjs` : '/test/sidecars/panel/main.mjs';
   const source = stripEsmSyntax(sourceText ?? loadCombinedBackendSource(), mainUrl);
-  const state={calls:[],errors:[],saves:[],trajectories,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,deepStats,deepStatsMtimeMs:1};
+  const state={calls:[],errors:[],saves:[],settings,trajectories,summaries,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,deepStats,deepStatsMtimeMs:1};
   const ctx={
-    ...metricsImplementation, URL, AbortSignal, Buffer,
+    ...metricsImplementation, URL, AbortSignal, Buffer, isDeepStrictEqual, randomUUID,
+    ...(clock ? { Date: class extends Date {
+      constructor(...args) { super(...(args.length ? args : [clock()])); }
+      static now() { return clock(); }
+    } } : {}),
     process:{platform:'win32',env:{ANTIGRAVITY_EXECUTABLE_DATA_DIR:'/test-data',ANTIGRAVITY_LS_ADDRESS:'test.invalid',ANTIGRAVITY_CSRF_TOKEN:'test'}},
     console:{error:m=>state.errors.push(m)},
     cpSync:()=>{},
     rmSync:()=>{},
+    renameSync:()=>{},
+    unlinkSync:()=>{},
     execFile:execFileImpl || ((cmd,args,opts,cb)=>{
       const fn = typeof opts === 'function' ? opts : cb;
       fn(new Error('execFile not mocked'));
@@ -82,9 +102,15 @@ export function backendHarness({
         return Boolean(m && state.transcripts?.[m[1]]);
       }
       if (norm.endsWith('/.git')) return Boolean(state.hasGitDir);
+      if (diskDirs && Object.prototype.hasOwnProperty.call(diskDirs, norm)) return true;
       return false;
     },
-    mkdirSync:()=>{},readdirSync:()=>[],
+    mkdirSync:()=>{},
+    readdirSync:p=>{
+      const norm = String(p).replace(/\\/g, '/');
+      if (diskDirs && Array.isArray(diskDirs[norm])) return diskDirs[norm];
+      return [];
+    },
     statSync:p=>{
       const norm = String(p).replace(/\\/g, '/');
       if (norm.endsWith('/.system_generated/logs/transcript.jsonl')) {
@@ -107,7 +133,7 @@ export function backendHarness({
         const lines = m && state.transcripts?.[m[1]];
         return Array.isArray(lines) ? lines.map(x => JSON.stringify(x)).join('\n') : String(lines || '');
       }
-      if (norm.endsWith('settings.json')) return JSON.stringify(settings);
+      if (norm.endsWith('settings.json')) return JSON.stringify(state.settings);
       if (norm.endsWith('/antigravity/brain/.deep_stats_cache.json')) return JSON.stringify(state.deepStats);
       if (norm.endsWith('pricing-catalog.json')) return JSON.stringify(state.localCatalog);
       if (norm.endsWith('remote_pricing_cache.json')) return JSON.stringify(state.remoteCatalog);
@@ -118,11 +144,17 @@ export function backendHarness({
       const norm = String(p).replace(/\\/g, '/');
       const parsed = typeof s === 'string' ? JSON.parse(s) : s;
       state.saves.push({path:p,data:parsed});
+      if (norm.endsWith('settings.json')) {
+        state.settings = parsed;
+      }
       if (norm.endsWith('remote_pricing_cache.json')) {
         state.remoteCatalog = parsed;
       }
     },
-    homedir:()=>'/test-home',dirname:path.dirname,join:path.join,basename:path.basename,fileURLToPath:()=>mainPath,
+    writeTrajectoryCacheFile:(p,data)=>{
+      state.saves.push({path:p,data:JSON.parse(JSON.stringify(data))});
+    },
+    homedir:()=>'/test-home',dirname:path.dirname,join:path.join,basename:path.basename,delimiter:path.delimiter,pathToFileURL,fileURLToPath:()=>mainPath,
     Response:class {constructor(body,options){this.body=body;this.options=options;}},
     SidecarApp:class {page(){} api(){} run(){}},
     fetch:async(url,options={})=>{
@@ -136,14 +168,14 @@ export function backendHarness({
         return {ok:true,json:async()=>data||{}};
       }
       if(method==='RetrieveUserQuotaSummary') {
-        const qs=state.quotaSummary;
+        const qs=await state.quotaSummary;
         if(qs instanceof Error) throw qs;
         return {ok:true,json:async()=>({response:qs})};
       }
-      const data={GetUserStatus:{userStatus:state.userStatus},GetAllCascadeTrajectories:{trajectorySummaries:summaries}}[method];
+      const data={GetUserStatus:{userStatus:state.userStatus},GetAvailableModels:{response:{models:availableModels}},GetAllCascadeTrajectories:{trajectorySummaries:state.summaries}}[method];
       return {ok:true,json:async()=>data};
     },
   };
-  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction};',ctx);
+  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns,normalizeStepTokenComboFormat,parseStepTokenComboSegments,normalizeModelDisplayMode,normalizePopoverWidthMode,normalizePopoverWidth,normalizeStandalonePort,setStandalonePortListener,parseAnnotationPbtxtTitle,buildCliStatusSnapshot,buildCliStatusLineCommand,isManagedCliStatusLineCommand,applyCliStatusLineToSettingsObject,cliDisplayWidth,parseCliModelAndEffort,formatCliStatusLineCapsule};',ctx);
   return {...ctx.api,state};
 }

@@ -13,6 +13,100 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inferCompactionStepModels, normalizeCachedStep } from '../speed-metrics.mjs';
+import { writeTrajectoryCacheFile } from './trajectory-cache-file.mjs';
+import {
+  DEFAULT_HOVER_MODULES,
+  DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_OVERVIEW_MODULES,
+  DEFAULT_POPOVER_WIDTH,
+  DEFAULT_SETTINGS_SCHEMA,
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+  DEFAULT_TOPBAR_SLOTS,
+  FONT_SCALE_KEYS,
+  MAX_POPOVER_WIDTH,
+  MAX_TOPBAR_SLOTS,
+  MIN_POPOVER_WIDTH,
+  MIN_TOPBAR_SLOTS,
+  MODEL_DISPLAY_MODES,
+  ORCHESTRATOR_ID_MODES,
+  OVERVIEW_METRIC_KEYS,
+  OVERVIEW_MODULE_KEYS,
+  PLUGIN_UPDATE_MODES,
+  POPOVER_WIDTH_MODES,
+  STEP_TABLE_COLUMN_KEYS,
+  SUPPORTED_LANGUAGES,
+  THEME_ACCENT_KEYS,
+  TOPBAR_SLOT_KEYS,
+  WINDOW_MOUNT_MODES,
+  createDefaultSettingsObject,
+  normalizeFontScale,
+  normalizeFullSettings,
+  normalizeHoverModules,
+  normalizeLanguageSetting,
+  normalizeModelDisplayMode,
+  normalizeOrchestratorIdMode,
+  normalizeOverviewMetrics,
+  normalizeOverviewModules,
+  normalizePluginUpdateMode,
+  normalizePopoverWidth,
+  normalizePopoverWidthMode,
+  normalizeStandalonePort,
+  normalizeStepTableColumns,
+  normalizeStepTokenComboFormat,
+  normalizeThemeAccent,
+  normalizeTopbarCapsuleSlots,
+  normalizeWeeklyLimitMode,
+  normalizeWindowMountMode,
+  parseStepTokenComboSegments,
+} from './settings-schema.mjs';
+
+export {
+  DEFAULT_HOVER_MODULES,
+  DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_OVERVIEW_MODULES,
+  DEFAULT_POPOVER_WIDTH,
+  DEFAULT_SETTINGS_SCHEMA,
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+  DEFAULT_TOPBAR_SLOTS,
+  FONT_SCALE_KEYS,
+  MAX_POPOVER_WIDTH,
+  MAX_TOPBAR_SLOTS,
+  MIN_POPOVER_WIDTH,
+  MIN_TOPBAR_SLOTS,
+  MODEL_DISPLAY_MODES,
+  ORCHESTRATOR_ID_MODES,
+  OVERVIEW_METRIC_KEYS,
+  OVERVIEW_MODULE_KEYS,
+  PLUGIN_UPDATE_MODES,
+  POPOVER_WIDTH_MODES,
+  STEP_TABLE_COLUMN_KEYS,
+  SUPPORTED_LANGUAGES,
+  THEME_ACCENT_KEYS,
+  TOPBAR_SLOT_KEYS,
+  WINDOW_MOUNT_MODES,
+  createDefaultSettingsObject,
+  normalizeFontScale,
+  normalizeFullSettings,
+  normalizeHoverModules,
+  normalizeLanguageSetting,
+  normalizeModelDisplayMode,
+  normalizeOrchestratorIdMode,
+  normalizeOverviewMetrics,
+  normalizeOverviewModules,
+  normalizePluginUpdateMode,
+  normalizePopoverWidth,
+  normalizePopoverWidthMode,
+  normalizeStandalonePort,
+  normalizeStepTableColumns,
+  normalizeStepTokenComboFormat,
+  normalizeThemeAccent,
+  normalizeTopbarCapsuleSlots,
+  normalizeWeeklyLimitMode,
+  normalizeWindowMountMode,
+  parseStepTokenComboSegments,
+} from './settings-schema.mjs';
 
 /**
  * 自适应解析 `sidecars/panel` 目录路径：
@@ -25,34 +119,141 @@ export const PLUGIN_ROOT = dirname(dirname(HERE));
 export const PLUGIN_MANIFEST_FILE = join(PLUGIN_ROOT, 'plugin.json');
 export const LOCAL_CATALOG_FILE = join(PLUGIN_ROOT, 'pricing-catalog.json');
 
+function resolveGeminiBaseDir() {
+  const envGemini = String(process.env.ANTIGRAVITY_GEMINI_DIR || '').trim();
+  return envGemini || join(homedir(), '.gemini');
+}
+
+function dedupeDirCandidates(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list) {
+    const clean = String(item || '').trim();
+    if (!clean) continue;
+    const key = process.platform === 'win32' ? clean.toLowerCase() : clean;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+  }
+  return out;
+}
+
+function resolveProductDataRoots() {
+  const geminiBase = resolveGeminiBaseDir();
+  const explicitAppDir = String(
+    process.env.USAGE_MONITOR_APP_DATA_DIR || process.env.ANTIGRAVITY_APP_DATA_DIR || ''
+  ).trim();
+  const customRoot = explicitAppDir
+    ? /[\\/]|^[a-zA-Z]:/.test(explicitAppDir)
+      ? explicitAppDir
+      : join(geminiBase, explicitAppDir)
+    : '';
+  return dedupeDirCandidates([
+    customRoot,
+    join(geminiBase, 'antigravity'),
+    join(geminiBase, 'antigravity-cli'),
+    join(geminiBase, 'antigravity-ide'),
+    join(geminiBase, 'antigravity-idea'),
+  ]);
+}
+
 /**
- * 插件持久化数据目录（默认由 Antigravity 宿主注入 `~/.gemini/antigravity/sidecar_data/usage-monitor`）。
- * 存放用户偏好设置、历史轨迹缓存及云端价格表缓存，插件升级不会清除此目录。
+ * 插件持久化数据目录（默认由 Antigravity 宿主注入 `~/.gemini/antigravity/sidecar_data/usage-monitor/panel/data`）。
+ * 兼容桌面端、Antigravity IDE 与无头 `agy` CLI（`~/.gemini/antigravity-cli`）：
+ * 优先使用已存在的持久化目录，纯 CLI 服务器自动落入 `~/.gemini/antigravity-cli/sidecar_data/usage-monitor/panel/data`，
+ * 避免落入插件源码目录而在自更新时丢失缓存与设置。
  */
-export const DATA_DIR = process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR || join(HERE, '.data');
+function resolveDefaultDataDir() {
+  const explicitDataDir = String(process.env.USAGE_MONITOR_DATA_DIR || '').trim();
+  if (explicitDataDir) {
+    return explicitDataDir;
+  }
+  if (process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR) {
+    return process.env.ANTIGRAVITY_EXECUTABLE_DATA_DIR;
+  }
+  if (String(process.env.ANTIGRAVITY_LS_ADDRESS || '').trim() === 'test.invalid') {
+    return join(HERE, '.data');
+  }
+  const geminiBase = resolveGeminiBaseDir();
+  const antigravityRoot = join(geminiBase, 'antigravity');
+  const cliRoot = join(geminiBase, 'antigravity-cli');
+  const panelDataDir = join(antigravityRoot, 'sidecar_data', 'usage-monitor', 'panel', 'data');
+  const legacyDataDir = join(antigravityRoot, 'sidecar_data', 'usage-monitor', 'data');
+  const cliPanelDataDir = join(cliRoot, 'sidecar_data', 'usage-monitor', 'panel', 'data');
+  if (existsSync(panelDataDir)) return panelDataDir;
+  if (existsSync(legacyDataDir)) return legacyDataDir;
+  if (existsSync(cliPanelDataDir)) return cliPanelDataDir;
+  if (existsSync(antigravityRoot)) return panelDataDir;
+  if (
+    process.env.USAGE_MONITOR_PLUGIN_DATA &&
+    !process.env.USAGE_MONITOR_PLUGIN_DATA.includes('${')
+  ) {
+    return process.env.USAGE_MONITOR_PLUGIN_DATA;
+  }
+  if (existsSync(cliRoot)) return cliPanelDataDir;
+  return join(HERE, '.data');
+}
+
+export const DATA_DIR = resolveDefaultDataDir();
 export const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 export const CACHE_FILE = join(DATA_DIR, 'trajectory_usage_cache.json');
 export const REMOTE_CATALOG_CACHE_FILE = join(DATA_DIR, 'remote_pricing_cache.json');
+export const CLI_STATUS_SNAPSHOT_FILE = join(DATA_DIR, 'cli-status-snapshot.json');
 
 /**
- * 本地对话记录目录与跨端深层统计缓存路径候选列表。
+ * 本地对话记录目录、脑图日志目录、守护发现目录与跨端深层统计缓存路径候选列表（联合覆盖 Desktop / CLI / IDE）。
  */
-export const CONVERSATIONS_DIR = join(homedir(), '.gemini', 'antigravity', 'conversations');
-export const BRAIN_DIR = join(homedir(), '.gemini', 'antigravity', 'brain');
-export const DEEP_STATS_CACHE_CANDIDATES = [
-  join(homedir(), '.gemini', 'antigravity-ide', 'brain', '.deep_stats_cache.json'),
-  join(homedir(), '.gemini', 'antigravity', 'brain', '.deep_stats_cache.json'),
-  join(homedir(), '.gemini', 'antigravity-idea', 'brain', '.deep_stats_cache.json'),
-];
+export const PRODUCT_DATA_ROOTS = resolveProductDataRoots();
+export const CONVERSATION_DIRS = PRODUCT_DATA_ROOTS.map((root) => join(root, 'conversations'));
+export const BRAIN_DIRS = PRODUCT_DATA_ROOTS.map((root) => join(root, 'brain'));
+export const ANNOTATION_DIRS = PRODUCT_DATA_ROOTS.map((root) => join(root, 'annotations'));
+export const DAEMON_DIRS = dedupeDirCandidates([
+  join(resolveGeminiBaseDir(), 'antigravity-cli', 'daemon'),
+  ...PRODUCT_DATA_ROOTS.map((root) => join(root, 'daemon')),
+]);
+export const CONVERSATIONS_DIR = CONVERSATION_DIRS[0];
+export const BRAIN_DIR = BRAIN_DIRS[0];
+export const DEEP_STATS_CACHE_CANDIDATES = dedupeDirCandidates([
+  join(resolveGeminiBaseDir(), 'antigravity-ide', 'brain', '.deep_stats_cache.json'),
+  join(resolveGeminiBaseDir(), 'antigravity-cli', 'brain', '.deep_stats_cache.json'),
+  join(resolveGeminiBaseDir(), 'antigravity', 'brain', '.deep_stats_cache.json'),
+  join(resolveGeminiBaseDir(), 'antigravity-idea', 'brain', '.deep_stats_cache.json'),
+  ...BRAIN_DIRS.map((dir) => join(dir, '.deep_stats_cache.json')),
+]);
 
 /**
- * Antigravity 本地 Language Server Connect RPC 端点与鉴权 Token（自动剥离重复协议前缀与尾部斜杠）。
+ * Antigravity 本地 Language Server Connect RPC 端点与鉴权 Token（支持环境变量静态注入与进程/守护文件动态发现）。
  */
 const rawLsAddr = String(process.env.ANTIGRAVITY_LS_ADDRESS || '').trim();
 const LS_PROTOCOL = /^https:\/\//i.test(rawLsAddr) ? 'https' : 'http';
 export const LS_ADDR = rawLsAddr.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
 export const LS_BASE_URL = LS_ADDR ? `${LS_PROTOCOL}://${LS_ADDR}` : '';
-export const CSRF_TOKEN = process.env.ANTIGRAVITY_CSRF_TOKEN;
+export const CSRF_TOKEN =
+  process.env.ANTIGRAVITY_CSRF_TOKEN || process.env.ANTIGRAVITY_SERVER_CSRF_TOKEN;
+
+export const lsRuntimeEndpoint = {
+  addr: LS_ADDR,
+  baseUrl: LS_BASE_URL,
+  csrfToken: CSRF_TOKEN || '',
+  isDynamic: false,
+};
+
+/**
+ * 动态更新运行时 Language Server / Hub RPC 连接端点与 CSRF 令牌。
+ *
+ * @param {string} nextAddr
+ * @param {string} nextCsrfToken
+ * @param {{ isDynamic?: boolean }} [opts]
+ */
+export function setLsRuntimeEndpoint(nextAddr, nextCsrfToken, { isDynamic = true } = {}) {
+  const raw = String(nextAddr || '').trim();
+  const proto = /^https:\/\//i.test(raw) ? 'https' : 'http';
+  const cleanAddr = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  lsRuntimeEndpoint.addr = cleanAddr;
+  lsRuntimeEndpoint.baseUrl = cleanAddr ? `${proto}://${cleanAddr}` : '';
+  lsRuntimeEndpoint.csrfToken = String(nextCsrfToken || '').trim();
+  lsRuntimeEndpoint.isDynamic = Boolean(cleanAddr && isDynamic);
+}
 
 /**
  * GitHub 官方云端价格目录与插件发布包地址配置。
@@ -74,87 +275,6 @@ export const DEFAULT_ARCHIVE_FALLBACK_URL =
 /** 云端目录常规自动检查间隔（6 小时）与失败冷却时间（5 分钟）。 */
 export const CLOUD_SYNC_TTL_MS = 6 * 3600 * 1000;
 export const CLOUD_SYNC_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
-
-/**
- * 顶栏右侧精简胶囊三槽位允许配置的指标枚举与默认顺序。
- */
-export const TOPBAR_SLOT_KEYS = Object.freeze([
-  'context',
-  'tps',
-  'ttft',
-  'cost',
-  'quota_auto',
-  'gemini_5h',
-  'gemini_weekly',
-  'claude_5h',
-  'claude_weekly',
-  'none',
-]);
-
-export const DEFAULT_TOPBAR_SLOTS = Object.freeze(['context', 'tps', 'quota_auto']);
-
-export const PLUGIN_UPDATE_MODES = Object.freeze(['off', 'manual', 'auto']);
-
-export const ORCHESTRATOR_ID_MODES = Object.freeze(['compact', 'full']);
-
-/**
- * 归一化 Orchestrator 系列模型 ID 显示风格（`'compact'` 精简代号 vs `'full'` 完整模型 ID，默认 `'compact'`）。
- *
- * @param {unknown} mode
- * @returns {'compact'|'full'}
- */
-export function normalizeOrchestratorIdMode(mode) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  return m === 'full' ? 'full' : 'compact';
-}
-
-/**
- * 归一化插件更新策略枚举（兼容历史 `autoUpdatePlugin` 布尔开关，默认 `'manual'`）。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyAutoUpdate]
- * @returns {'off'|'manual'|'auto'}
- */
-export function normalizePluginUpdateMode(mode, legacyAutoUpdate) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'off' || m === 'manual' || m === 'auto') return m;
-  if (legacyAutoUpdate === true) return 'auto';
-  return 'manual';
-}
-
-/**
- * 归一化顶栏三槽位配置数组，兜底非法枚举值并保证至少保留一个可见槽位。
- *
- * @param {unknown} raw
- * @returns {[string, string, string]}
- */
-export function normalizeTopbarCapsuleSlots(raw) {
-  const arr = Array.isArray(raw) ? raw : [];
-  const slots = [0, 1, 2].map((idx) => {
-    const val = String(arr[idx] ?? '').trim();
-    return TOPBAR_SLOT_KEYS.includes(val) ? val : DEFAULT_TOPBAR_SLOTS[idx];
-  });
-  if (slots.every((s) => s === 'none')) {
-    slots[0] = 'context';
-  }
-  return /** @type {[string, string, string]} */ (slots);
-}
-
-/**
- * 用户可配置项的默认值。
- */
-const DEFAULT_SETTINGS = {
-  weeklyTokenBudget: 150000000, // 自定义每周 Token 预算默认值 (150M，保留底层兼容)
-  weeklyCostBudget: 100,        // 自定义每周美元费用预算默认值 ($100，保留底层兼容)
-  weeklyLimitMode: 'official',  // 'official' | 'custom_tokens' | 'custom_cost'
-  showUpstreamModel: false,     // 是否显示上游真实 responseModel 名称
-  orchestratorIdMode: 'compact', // 'compact' | 'full'（Orchestrator 系列显示精简 ID 或完整 ID）
-  pluginUpdateMode: 'manual',   // 'off' | 'manual' | 'auto'（默认仅提示新版本，手动更新）
-  autoUpdatePlugin: false,      // 派生自 pluginUpdateMode === 'auto'，保留底层兼容
-  enableWindowOverlay: true,    // 是否启用双栖模式（自动通过 CDP 在主窗口顶栏挂载胶囊与悬浮面板）
-  showTopbarMultiSession: true, // 是否在顶栏左侧显示实时运行会话入口
-  topbarCapsuleSlots: [...DEFAULT_TOPBAR_SLOTS], // 顶栏右侧胶囊三槽位指标与顺序
-};
 
 /** 历史轨迹缓存 Schema 版本号，升级时触发旧缓存字段迁移校验。 */
 export const CACHE_SCHEMA_VERSION = 'v10-model-identity';
@@ -194,10 +314,12 @@ export function loadJson(filePath, fallback) {
  */
 export function saveJson(filePath, data) {
   try {
-    mkdirSync(DATA_DIR, { recursive: true });
-    const serialized =
-      filePath === CACHE_FILE ? JSON.stringify(data) : JSON.stringify(data, null, 2);
-    writeFileSync(filePath, serialized, 'utf8');
+    mkdirSync(dirname(filePath), { recursive: true });
+    if (filePath === CACHE_FILE) {
+      writeTrajectoryCacheFile(filePath, data);
+    } else {
+      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+    }
     return true;
   } catch (err) {
     console.error(`Failed writing ${filePath}: ${err.message}`);
@@ -206,54 +328,10 @@ export function saveJson(filePath, data) {
 }
 
 /**
- * 归一化每周额度统计模式枚举（兼容历史简写 `'tokens'` / `'cost'` 与标准枚举 `'custom_tokens'` / `'custom_cost'`）。
- *
- * @param {unknown} mode
- * @returns {'official'|'custom_tokens'|'custom_cost'}
- */
-export function normalizeWeeklyLimitMode(mode) {
-  const m = String(mode || '').trim().toLowerCase();
-  if (m === 'custom_tokens' || m === 'tokens') return 'custom_tokens';
-  if (m === 'custom_cost' || m === 'cost') return 'custom_cost';
-  return 'official';
-}
-
-function sanitizeSettingNumber(val, fallback) {
-  const num = Number(val);
-  return Number.isFinite(num) && num > 0 ? num : fallback;
-}
-
-/**
- * 读取用户设置并与默认设置合并，同时剔除已废弃的历史字段并兜底非法数值。
- *
- * @returns {typeof DEFAULT_SETTINGS}
+ * 读取用户设置并通过统一 Schema 归一化合并默认值，自动迁移旧版字段。
  */
 export function loadSettings() {
-  const raw = loadJson(SETTINGS_FILE, {});
-  const safeRaw = isPlainObject(raw) ? raw : {};
-  const merged = { ...DEFAULT_SETTINGS, ...safeRaw };
-  const pluginUpdateMode = normalizePluginUpdateMode(
-    safeRaw.pluginUpdateMode,
-    safeRaw.autoUpdatePlugin
-  );
-  return {
-    weeklyTokenBudget: sanitizeSettingNumber(
-      safeRaw.weeklyTokenBudget ?? safeRaw.weeklyTokenLimit ?? merged.weeklyTokenBudget,
-      DEFAULT_SETTINGS.weeklyTokenBudget
-    ),
-    weeklyCostBudget: sanitizeSettingNumber(
-      merged.weeklyCostBudget,
-      DEFAULT_SETTINGS.weeklyCostBudget
-    ),
-    weeklyLimitMode: normalizeWeeklyLimitMode(merged.weeklyLimitMode),
-    showUpstreamModel: merged.showUpstreamModel === true,
-    orchestratorIdMode: normalizeOrchestratorIdMode(merged.orchestratorIdMode),
-    pluginUpdateMode,
-    autoUpdatePlugin: pluginUpdateMode === 'auto',
-    enableWindowOverlay: merged.enableWindowOverlay !== false,
-    showTopbarMultiSession: merged.showTopbarMultiSession !== false,
-    topbarCapsuleSlots: normalizeTopbarCapsuleSlots(safeRaw.topbarCapsuleSlots),
-  };
+  return normalizeFullSettings(loadJson(SETTINGS_FILE, {}));
 }
 
 /**
@@ -277,6 +355,10 @@ export function computeRuntimeCodeVersion() {
     join(HERE, 'app.js'),
     join(HERE, 'styles.css'),
     join(HERE, 'main.mjs'),
+    join(HERE, 'standalone.mjs'),
+    join(HERE, 'bridge-daemon.mjs'),
+    join(HERE, 'mcp-entry.mjs'),
+    join(HERE, 'cli-statusline.mjs'),
     join(HERE, 'speed-metrics.mjs'),
     LOCAL_CATALOG_FILE,
   ];
@@ -369,6 +451,11 @@ export const externalDeepStatsMemo = {
   convos: new Map(),
 };
 
+export const localSummaryMemo = {
+  sig: '',
+  byId: new Map(),
+};
+
 /** 并发请求去重表（防止同一参数并发重复拉取）。 */
 export const inFlightRequests = new Map();
 
@@ -377,6 +464,7 @@ export const quotaSummaryCache = {
   ts: 0,
   lastAttemptTs: 0,
   accountName: '',
+  accountGeneration: 0,
   data: null,
   error: null,
 };
@@ -407,3 +495,26 @@ export const pluginUpdateState = {
   lastError: null,
   inFlight: null,
 };
+
+/**
+ * 清空内存态轨迹缓存、外部深层统计 Memo 与配额摘要短期缓存，并将磁盘缓存重置为空对象。
+ *
+ * @returns {boolean} 是否成功写回空白缓存文件
+ */
+export function clearRuntimeCaches() {
+  for (const key of Object.keys(trajectoryCache)) {
+    delete trajectoryCache[key];
+  }
+  cacheState.needsSave = false;
+  externalDeepStatsMemo.sig = '';
+  externalDeepStatsMemo.convos.clear();
+  localSummaryMemo.sig = '';
+  localSummaryMemo.byId.clear();
+  quotaSummaryCache.ts = 0;
+  quotaSummaryCache.lastAttemptTs = 0;
+  quotaSummaryCache.accountName = '';
+  quotaSummaryCache.accountGeneration += 1;
+  quotaSummaryCache.data = null;
+  quotaSummaryCache.error = null;
+  return saveJson(CACHE_FILE, {});
+}

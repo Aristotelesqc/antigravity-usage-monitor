@@ -103,13 +103,23 @@ export function isCarbonModelIdentifier(...parts) {
 export function getBaseModelLabel(label = '') {
   return (
     String(label || '')
-      .replace(/\s*\((?:Max|XHigh|High|Medium|Low|Thinking|Extra Low|Tiered)\)\s*$/i, '')
+      .replace(/\bFlash-Lite\b/gi, 'Flash Lite')
+      .replace(/\s*\((?:Max|XHigh|High|Medium|Low|Thinking|Extra Low|Tiered|Preview)\)\s*$/i, '')
       .trim() || String(label || 'Unknown Model')
   );
 }
 
+const SLUG_TIER_LABELS = {
+  xhigh: 'XHigh',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
+  'extra-low': 'Extra Low',
+  tiered: 'Tiered',
+};
+
 /**
- * 将严格匹配的 `gemini-3.1-pro`、`gemini-3.5-flash-lite` 或 `gemini-4-carbon` 通用模型 Slug 转为人类可读标签。
+ * 将严格匹配的 `gemini-3.1-pro`、`gemini-3.5-flash-lite`、`gemini-4-carbon` 或已知内部路由别名转为人类可读标签。
  * 使用行尾锚点 `$` 防止未收录新后缀（如 `gemini-3.1-pro-ultra-v2`）被静默截断伪装成旧模型获取错误定价。
  *
  * @param {string} [slug='']
@@ -120,14 +130,22 @@ export function formatGenericModelSlug(slug = '') {
     .trim()
     .replace(/^session-display:/i, '');
   if (!s || /^MODEL_PLACEHOLDER_/i.test(s)) return '';
+  if (/^gemini-4-argon-(?:f|disabled)$/i.test(s)) return 'Gemini 4 Argon';
+  if (/^gemini-3\.8-flash-n$/i.test(s)) return 'Gemini 3.8 Flash';
+  if (/^gemini-3\.7-flash-safety-le$/i.test(s)) return 'Gemini 3.7 Flash';
+  if (/^gemini-3-flash-(?:[abd]|agent)$/i.test(s)) return 'Gemini 3.5 Flash';
+  if (/^gemini-3-flash-c$/i.test(s)) return 'Gemini 3 Flash';
+  if (/^gemini-pro-(?:default|agent|b)$/i.test(s)) return 'Gemini 3.1 Pro';
   const m = s.match(
-    /^gemini-(\d+(?:\.\d+)?)-(pro|flash|argon|carbon|hydrogen|helix)(?:-(lite))?$/i
+    /^gemini-(\d+(?:\.\d+)?)-(pro|flash|argon|carbon|hydrogen|helix)(?:-(lite))?(?:-(xhigh|high|medium|low|extra-low|tiered|preview))?$/i
   );
   if (m) {
     const ver = m[1];
     const tier = m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase();
     const lite = m[3] ? ' Lite' : '';
-    return `Gemini ${ver} ${tier}${lite}`;
+    const suffixKey = m[4] ? m[4].toLowerCase() : '';
+    const tierSuffix = SLUG_TIER_LABELS[suffixKey] ? ` (${SLUG_TIER_LABELS[suffixKey]})` : '';
+    return `Gemini ${ver} ${tier}${lite}${tierSuffix}`;
   }
   const codenameMatch = s.match(/^gemini-(hydrogen|helix)$/i);
   if (codenameMatch) {
@@ -254,6 +272,34 @@ export function resolveModelInfo(
     family: inferredFamily,
     pricing: null,
     isEstimatedPrice: true,
+  };
+}
+
+/** 在单次遥测请求内复用同一模型身份与价格的解析结果。 */
+export function createStepModelResolver(dynamicModelMap) {
+  const models = new Map();
+  return (step) => {
+    const { modelKey, apiProvider = '', modelDisplayName = '', responseModel = '' } = step;
+    if (
+      typeof modelKey !== 'string' ||
+      typeof apiProvider !== 'string' ||
+      typeof modelDisplayName !== 'string' ||
+      typeof responseModel !== 'string'
+    ) {
+      return resolveModelInfo(modelKey, dynamicModelMap, apiProvider, modelDisplayName, responseModel);
+    }
+    let providers = models.get(modelKey);
+    if (!providers) models.set(modelKey, (providers = new Map()));
+    let names = providers.get(apiProvider);
+    if (!names) providers.set(apiProvider, (names = new Map()));
+    let responses = names.get(modelDisplayName);
+    if (!responses) names.set(modelDisplayName, (responses = new Map()));
+    let info = responses.get(responseModel);
+    if (!info) {
+      info = resolveModelInfo(modelKey, dynamicModelMap, apiProvider, modelDisplayName, responseModel);
+      responses.set(responseModel, info);
+    }
+    return info;
   };
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {extractLiveActivity, extractModelSteps, normalizeCachedStep, speedMetric, summarizeSpeed, summarizeTtft} from '../speed-metrics.mjs';
+import {extractContextBreakdown, extractLiveActivity, extractModelSteps, normalizeCachedStep, speedMetric, summarizeSpeed, summarizeTtft} from '../speed-metrics.mjs';
 
 function sample({total=12,ttft='2s',stream='10s',output=1100,thinking=100,response=1000,
   thinkingDuration='4s',tools=false,text=true,status='CORTEX_STEP_STATUS_DONE'}={}) {
@@ -71,6 +71,26 @@ test('unfinished, missing-completion and reversed-time requests cannot fabricate
   assert.equal(parse({total:-1}).totalTokPerSec,null);
   assert.equal(parse({total:0}).totalTokPerSec,null);
   assert.equal(parse({status:'CORTEX_STEP_STATUS_GENERATING'}).totalTokPerSec,null);
+});
+test('cleared steps with a recorded generation end retain their original request speed',()=>{
+  const {s,gm}=sample({status:'CORTEX_STEP_STATUS_CLEARED'});
+  s.metadata.completedAt='2026-01-01T00:04:00Z';
+  const [cleared]=extractModelSteps([s],[gm]);
+  assert.equal(cleared.totalDurationSec,12);
+  assert.equal(cleared.totalTokPerSec,1100/12);
+  assert.equal(cleared.isComplete,true);
+
+  for(const status of ['CORTEX_STEP_STATUS_CANCELED','CORTEX_STEP_STATUS_ERROR','CORTEX_STEP_STATUS_GENERATING']){
+    assert.equal(extractModelSteps([{...s,status}],[gm])[0].totalTokPerSec,null);
+  }
+  const [canceled]=extractModelSteps([{...s,status:'CORTEX_STEP_STATUS_CANCELED'}],[gm]);
+  assert.equal(speedMetric(canceled).reason,'canceled');
+  delete s.metadata.finishedGeneratingAt;
+  assert.equal(extractModelSteps([s],[gm])[0].totalTokPerSec,null);
+  const [checkpoint]=extractModelSteps([{...s,type:'CORTEX_STEP_TYPE_CHECKPOINT'}],[gm]);
+  assert.equal(speedMetric(checkpoint).value,null);
+  assert.equal(speedMetric(checkpoint).reason,'compaction_timing_unavailable');
+  assert.equal(summarizeSpeed([checkpoint,canceled]).sampleCount,0);
 });
 test('zero output is a real zero; malformed or missing output counts cannot produce rates',()=>{
   const zero=parse({output:0,response:0,thinking:0});
@@ -280,4 +300,109 @@ test('extractLiveActivity covers thinking, partial streaming tool args, multi-to
   assert.equal(actTranscript2.label, '执行命令');
   assert.equal(actTranscript2.stepProgress, '2/2');
   assert.equal(actTranscript2.detail, '列出插件项目全部源文件 (Get-ChildItem -Path "f:\\ppt")');
+});
+
+test('extractModelSteps tracks sequential user turns, merges consecutive prompts, marks media, and strips compaction context summaries', () => {
+  const mkModelStep = (stepIndex) => ({
+    status: 'CORTEX_STEP_STATUS_DONE',
+    type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+    metadata: {
+      sourceTrajectoryStepInfo: { stepIndex },
+      createdAt: '2026-01-01T00:00:00Z',
+      finishedGeneratingAt: '2026-01-01T00:00:02Z',
+      modelUsage: { inputTokens: '100', cacheReadTokens: '200', outputTokens: '80' },
+    },
+    plannerResponse: { response: 'ok' },
+  });
+
+  const steps = extractModelSteps([
+    {
+      type: 'CORTEX_STEP_TYPE_USER_INPUT',
+      userInput: { userResponse: '第一轮提问' },
+    },
+    mkModelStep(1),
+    { type: 'CORTEX_STEP_TYPE_VIEW_FILE' },
+    mkModelStep(3),
+    {
+      type: 'CORTEX_STEP_TYPE_USER_INPUT',
+      userInput: { userResponse: '取消前一句' },
+    },
+    {
+      type: 'CORTEX_STEP_TYPE_USER_INPUT',
+      userInput: { userResponse: '第二轮补充提问', media: [{}] },
+    },
+    mkModelStep(7),
+    {
+      type: 'USER_INPUT',
+      content:
+        '<CONTEXT_SUMMARY><USER_REQUEST>旧摘要文本</USER_REQUEST></CONTEXT_SUMMARY>\n<USER_REQUEST>\n  第三轮真实提问  \n</USER_REQUEST>\n<ADDITIONAL_METADATA>ignored</ADDITIONAL_METADATA>',
+    },
+    mkModelStep(9),
+  ]);
+
+  assert.equal(steps.length, 4);
+  assert.equal(steps[0].turnIndex, 1);
+  assert.equal(steps[0].isTurnStart, true);
+  assert.equal(steps[0].turnPrompt, '第一轮提问');
+
+  assert.equal(steps[1].turnIndex, 1);
+  assert.equal(steps[1].isTurnStart, false);
+  assert.equal(steps[1].turnPrompt, undefined);
+
+  assert.equal(steps[2].turnIndex, 2);
+  assert.equal(steps[2].isTurnStart, true);
+  assert.equal(steps[2].turnPrompt, '取消前一句\n第二轮补充提问 [附图]');
+
+  assert.equal(steps[3].turnIndex, 3);
+  assert.equal(steps[3].isTurnStart, true);
+  assert.equal(steps[3].turnPrompt, '第三轮真实提问');
+});
+
+test('extractContextBreakdown parses split top-level SKILLS, RULES, SUBAGENTS, and PLUGINS groups without dropping tokens', () => {
+  const breakdown = extractContextBreakdown({
+    chatStartMetadata: {
+      contextWindowMetadata: {
+        estimatedTokensUsed: 148852,
+        maxContextTokens: 256000,
+        tokenBreakdown: {
+          totalTokens: 148852,
+          groups: [
+            { type: 'TOKEN_TYPE_SYSTEM_PROMPT', name: 'System Prompt', numTokens: 5505 },
+            { type: 'TOKEN_TYPE_MCP_TOOLS', name: 'Mcp Tools', numTokens: 234 },
+            { type: 'TOKEN_TYPE_SUBAGENTS', name: 'Subagents', numTokens: 1741 },
+            { type: 'TOKEN_TYPE_SKILLS', name: 'Skills', numTokens: 2201 },
+            { type: 'TOKEN_TYPE_PLUGINS', name: 'Plugins', numTokens: 1601 },
+            { type: 'TOKEN_TYPE_RULES', name: 'Rules', numTokens: 2282 },
+            { type: 'TOKEN_TYPE_TOOLS', name: 'Tools', numTokens: 8857 },
+            {
+              type: 'TOKEN_TYPE_CHAT_MESSAGES',
+              name: 'Chat Messages',
+              numTokens: 126431,
+              children: [
+                { name: '2449: CHECKPOINT', numTokens: 5087 },
+                { name: '2450: USER_INPUT', numTokens: 281 },
+                { name: '2455: SYSTEM_MESSAGE', numTokens: 179 },
+                { name: '2502: PLANNER_RESPONSE', numTokens: 15017 },
+                { name: '2503: GENERIC', numTokens: 105867 },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.ok(breakdown);
+  assert.equal(breakdown.skillsTokens, 2201);
+  assert.equal(breakdown.userRulesTokens, 2282);
+  assert.equal(breakdown.systemPromptTokens, 5505 + 1741 + 1601);
+  assert.equal(breakdown.mcpToolsTokens, 234);
+  assert.equal(breakdown.systemToolsTokens, 8857);
+  assert.equal(breakdown.checkpointTokens, 5087);
+  assert.equal(breakdown.userInputTokens, 281);
+  assert.equal(breakdown.subagentTokens, 179);
+  assert.equal(breakdown.assistantTokens, 15017);
+  assert.equal(breakdown.toolResultsTokens, 105867);
+  assert.equal(breakdown.messagesTokens, 126431);
+  assert.equal(breakdown.totalTokens, 148852);
 });

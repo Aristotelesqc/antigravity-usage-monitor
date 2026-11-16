@@ -6,6 +6,7 @@
 
 import { defineComponent } from '../../core/component.js';
 import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
+import { i18nStore, t } from '../../i18n/index.js';
 import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 import {
   fetchTelemetry,
@@ -20,9 +21,13 @@ function formatConvOptionMeta(c) {
   if (!c) return '';
   const subs = Number(c.subagentCount || 0);
   if (subs > 0) {
-    return `主${c.stepCount || 0} · ${subs}子 (共${c.totalStepCount || c.stepCount || 0}步)`;
+    return t('header.convMetaWithSubs', {
+      main: c.stepCount || 0,
+      subs,
+      total: c.totalStepCount || c.stepCount || 0,
+    });
   }
-  return `${c.stepCount || 0}步`;
+  return t('header.convMetaSteps', { count: c.stepCount || 0 });
 }
 
 export const TopSessionHeader = defineComponent({
@@ -30,8 +35,8 @@ export const TopSessionHeader = defineComponent({
   setup({ onCleanup }) {
     const convSelect = CustomSelect({
       modelValue: telemetryStore.getState().selectedConversationId,
-      placeholder: '跟随最新会话',
-      options: [{ value: '', label: '跟随最新会话' }],
+      placeholder: t('header.followLatest'),
+      options: [{ value: '', label: t('header.followLatest') }],
       onUpdateModelValue: (nextConvId) => {
         uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
         telemetryStore.setState({ selectedConversationId: nextConvId });
@@ -40,7 +45,7 @@ export const TopSessionHeader = defineComponent({
     });
 
     const updateBtnIcon = createSvgIcon('arrow-down', { size: 11 });
-    const updateBtnText = h('span', { text: '有新版本' });
+    const updateBtnText = h('span', { text: t('header.hasUpdate') });
     let isHeaderUpdating = false;
     const updateBtn = h(
       'button',
@@ -48,11 +53,11 @@ export const TopSessionHeader = defineComponent({
         type: 'button',
         className: 'update-badge-btn',
         hidden: true,
-        'aria-label': '发现新版本，点击升级',
+        'aria-label': t('header.ariaUpdate'),
         onClick: async () => {
           if (isHeaderUpdating) return;
           isHeaderUpdating = true;
-          patchText(updateBtnText, '升级中…');
+          patchText(updateBtnText, t('header.upgrading'));
           patchAttr(updateBtn, 'disabled', true);
           try {
             const res = await triggerPluginUpdate();
@@ -67,7 +72,9 @@ export const TopSessionHeader = defineComponent({
             const cs = telemetryStore.getState().telemetry?.cloudStatus;
             patchText(
               updateBtnText,
-              cs?.latestPluginVersion ? `升级 v${cs.latestPluginVersion}` : '有新版本'
+              cs?.latestPluginVersion
+                ? t('header.upgradeToVer', { ver: cs.latestPluginVersion })
+                : t('header.hasUpdate')
             );
           }
         },
@@ -76,7 +83,7 @@ export const TopSessionHeader = defineComponent({
     );
 
     const statusIcon = createSvgIcon('pulse', { size: 12 });
-    const statusText = h('span', { text: '实时 2s' });
+    const statusText = h('span', { text: t('header.statusLive') });
     const statusTag = h('span', { className: 'status-tag' }, [statusIcon, statusText]);
 
     const refreshBtn = h(
@@ -84,7 +91,7 @@ export const TopSessionHeader = defineComponent({
       {
         type: 'button',
         className: 'icon-btn',
-        'aria-label': '刷新数据',
+        'aria-label': t('header.ariaRefresh'),
         onClick: () => fetchTelemetry({ force: true }),
       },
       [createSvgIcon('refresh', { size: 13 })]
@@ -113,6 +120,10 @@ export const TopSessionHeader = defineComponent({
       } else if (currentCascadeId) {
         lastActiveCascadeId = currentCascadeId;
       }
+      if (!uiSt.monitorVisible) return;
+
+      patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
+      patchAttr(refreshBtn, 'aria-label', t('header.ariaRefresh'));
 
       const actConv = telemetry?.activeConversation;
       const convs = telemetry?.conversations || [];
@@ -122,12 +133,12 @@ export const TopSessionHeader = defineComponent({
           (actConv?.cascadeId === hostRouteId ? actConv : null)
         : null;
       const defaultOptLabel = hostRouteId
-        ? hostMatchedConv?.title
-          ? `当前窗口 (${hostMatchedConv.title})`
-          : `当前窗口 (${hostRouteId.slice(0, 8)})`
+        ? t('header.currentWindowNamed', {
+            title: hostMatchedConv?.title || hostRouteId.slice(0, 8),
+          })
         : convs[0]?.title
-          ? `最新 (${convs[0].title})`
-          : '跟随最新会话';
+          ? t('header.latestNamed', { title: convs[0].title })
+          : t('header.followLatest');
       const defaultOptMeta = hostRouteId
         ? hostMatchedConv
           ? formatConvOptionMeta({
@@ -153,14 +164,14 @@ export const TopSessionHeader = defineComponent({
         const lockedTitle =
           isLoadedLocked && actConv?.title
             ? actConv.title
-            : `已锁定会话 (${String(lockedId).slice(0, 8)})`;
+            : t('header.lockedSession', { id: String(lockedId).slice(0, 8) });
         const lockedMeta = isLoadedLocked
           ? formatConvOptionMeta({
               stepCount: actConv.stepCount,
               subagentCount: actConv.subagentCount,
               totalStepCount: actConv.totalStepsAllAgents,
             })
-          : '已锁定';
+          : t('header.lockedMeta');
         options.splice(1, 0, {
           value: lockedId,
           label: lockedTitle,
@@ -169,6 +180,7 @@ export const TopSessionHeader = defineComponent({
       }
       convSelect.setProps({
         modelValue: telSt.selectedConversationId,
+        placeholder: t('header.followLatest'),
         options,
       });
 
@@ -186,8 +198,8 @@ export const TopSessionHeader = defineComponent({
         patchText(
           updateBtnText,
           cloudStatus?.latestPluginVersion
-            ? `升级 v${cloudStatus.latestPluginVersion}`
-            : '有新版本'
+            ? t('header.upgradeToVer', { ver: cloudStatus.latestPluginVersion })
+            : t('header.hasUpdate')
         );
       }
 
@@ -203,7 +215,7 @@ export const TopSessionHeader = defineComponent({
 
       if (isSyncing) {
         patchSvgIcon(statusIcon, 'refresh');
-        patchText(statusText, '同步中');
+        patchText(statusText, t('header.statusSyncing'));
         patchClasses(statusTag, {
           'state-running': false,
           'state-synced': true,
@@ -211,7 +223,7 @@ export const TopSessionHeader = defineComponent({
         });
       } else if (isSynced) {
         patchSvgIcon(statusIcon, 'check');
-        patchText(statusText, '已刷新');
+        patchText(statusText, t('header.statusSynced'));
         patchClasses(statusTag, {
           'state-running': false,
           'state-synced': true,
@@ -219,7 +231,7 @@ export const TopSessionHeader = defineComponent({
         });
       } else if (isError) {
         patchSvgIcon(statusIcon, 'warning');
-        patchText(statusText, '重试中');
+        patchText(statusText, t('header.statusRetrying'));
         patchClasses(statusTag, {
           'state-running': false,
           'state-synced': false,
@@ -230,7 +242,7 @@ export const TopSessionHeader = defineComponent({
         const runSuffix =
           hasSubagents && runningAgent ? ` · ${runningAgent.badgeText || runningAgent.shortLabel}` : '';
         patchSvgIcon(statusIcon, 'bolt');
-        patchText(statusText, `生成中${runSuffix}`);
+        patchText(statusText, t('header.statusGenerating', { suffix: runSuffix }));
         patchClasses(statusTag, {
           'state-running': true,
           'state-synced': false,
@@ -238,7 +250,10 @@ export const TopSessionHeader = defineComponent({
         });
       } else if (quotaStale) {
         patchSvgIcon(statusIcon, 'warning');
-        patchText(statusText, quotaMeta?.hasOfficialData ? '额度缓存' : '额度离线');
+        patchText(
+          statusText,
+          quotaMeta?.hasOfficialData ? t('header.statusQuotaCached') : t('header.statusQuotaOffline')
+        );
         patchClasses(statusTag, {
           'state-running': false,
           'state-synced': false,
@@ -246,7 +261,7 @@ export const TopSessionHeader = defineComponent({
         });
       } else {
         patchSvgIcon(statusIcon, 'pulse');
-        patchText(statusText, '实时 2s');
+        patchText(statusText, t('header.statusLive'));
         patchClasses(statusTag, {
           'state-running': false,
           'state-synced': false,
@@ -265,8 +280,22 @@ export const TopSessionHeader = defineComponent({
       () => renderHeaderState()
     );
 
+    const unsubI18n = i18nStore.subscribe(
+      (st) => st.locale,
+      () => renderHeaderState()
+    );
+    const unsubVisibility = uiStore.subscribe(
+      (st) => st.monitorVisible,
+      (visible) => {
+        if (visible) renderHeaderState();
+      },
+      { immediate: false }
+    );
+
     onCleanup(() => {
       unsubTelemetry();
+      unsubI18n();
+      unsubVisibility();
       convSelect.destroy();
     });
 

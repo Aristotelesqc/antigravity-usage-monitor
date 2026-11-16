@@ -169,15 +169,29 @@ function estimateUtf8Tokens(text) {
  * @param {unknown} name 分块名称或标题
  * @returns {'skills' | 'userRules' | 'mcpTools' | 'systemPrompt'} 归属的上下文分类键名
  */
-function classifyPromptSection(name) {
-  const key = String(name || '').trim().toLowerCase();
+function classifyPromptSection(name, type = '') {
+  const key = String(name || type || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^token_type_/, '')
+    .replace(/[\s-]+/g, '_');
   if (key === 'skills' || key === 'skill') {
     return 'skills';
   }
-  if (key === 'user_rules' || key === 'user_rule' || key === 'rules') {
+  if (
+    key === 'user_rules' ||
+    key === 'user_rule' ||
+    key === 'rules' ||
+    key === 'rule'
+  ) {
     return 'userRules';
   }
-  if (key === 'mcp_servers' || key === 'mcp' || key.startsWith('mcp_')) {
+  if (
+    key === 'mcp_servers' ||
+    key === 'mcp_tools' ||
+    key === 'mcp' ||
+    key.startsWith('mcp_')
+  ) {
     return 'mcpTools';
   }
   return 'systemPrompt';
@@ -328,7 +342,7 @@ export function extractContextBreakdown(chat) {
         for (const c of children) {
           const tok = Math.max(0, Number(c?.numTokens || 0));
           childSum += tok;
-          const bucket = classifyPromptSection(c?.name ?? c?.title);
+          const bucket = classifyPromptSection(c?.name ?? c?.title, c?.type);
           if (bucket === 'skills') {
             skillsTokens += tok;
           } else if (bucket === 'userRules') {
@@ -345,6 +359,32 @@ export function extractContextBreakdown(chat) {
       } else {
         systemPromptTokens += gTokens;
       }
+    } else if (
+      gType === 'TOKEN_TYPE_SKILLS' ||
+      gName === 'skills' ||
+      gName === 'skill'
+    ) {
+      hasPromptGroup = true;
+      skillsTokens += gTokens;
+    } else if (
+      gType === 'TOKEN_TYPE_RULES' ||
+      gType === 'TOKEN_TYPE_USER_RULES' ||
+      gName === 'rules' ||
+      gName === 'user rules' ||
+      gName === 'user_rules'
+    ) {
+      hasPromptGroup = true;
+      userRulesTokens += gTokens;
+    } else if (
+      gType === 'TOKEN_TYPE_SUBAGENTS' ||
+      gType === 'TOKEN_TYPE_PLUGINS' ||
+      gName === 'subagents' ||
+      gName === 'plugins' ||
+      gName === 'featured plugins' ||
+      gName === 'featured_plugins'
+    ) {
+      hasPromptGroup = true;
+      systemPromptTokens += gTokens;
     } else if (
       gType === 'TOKEN_TYPE_TOOLS' ||
       gName === 'tools' ||
@@ -451,6 +491,19 @@ export function extractContextBreakdown(chat) {
       } else if (gTokens > 0) {
         userInputTokens += gTokens;
       }
+    } else if (gTokens > 0) {
+      // 兜底接收未来新增的顶层提示词分组，确保 tokenBreakdown.groups 不丢任何分组
+      hasPromptGroup = true;
+      const fallbackBucket = classifyPromptSection(g?.name, g?.type);
+      if (fallbackBucket === 'skills') {
+        skillsTokens += gTokens;
+      } else if (fallbackBucket === 'userRules') {
+        userRulesTokens += gTokens;
+      } else if (fallbackBucket === 'mcpTools') {
+        mcpToolsTokens += gTokens;
+      } else {
+        systemPromptTokens += gTokens;
+      }
     }
   }
 
@@ -555,8 +608,9 @@ export function extractContextBreakdown(chat) {
  *    - 优先级 3：`chat.model`（`chatModel` 请求级模型标识）
  *    - 优先级 4：`metadata.generatorModel`（步骤 `metadata` 顶层记录的生成模型）
  *    - 优先级 5：`chat.responseModel`（上游返回的具体响应模型名）
- * 2. **5 种测速过滤与排除原因（`timingReason` / `speedReason`）**：
- *    - `'incomplete_or_invalid_timing'`：步骤状态未完成（非 `CORTEX_STEP_STATUS_DONE`）或总耗时 `totalDurationSec` 缺失/非正数；
+ * 2. **测速过滤与排除原因（`timingReason` / `speedReason`）**：
+ *    - `'canceled'`：生成已取消，保留用量但不参与测速；
+ *    - `'incomplete_or_invalid_timing'`：没有完成生成的证据，或总耗时 `totalDurationSec` 缺失/非正数；
  *    - `'invalid_output_tokens'`：`outputTokens` 不是合法的非负安全整数；
  *    - `'short_timing'`：请求总耗时低于 `MIN_SPEED_DURATION_SECONDS`（0.5s），易受计时器粒度噪声干扰；
  *    - `'inconsistent_timing'`：原生首字延迟 `nativeTtftSec` 大于请求总耗时 `totalDurationSec + 0.01s`（时钟或元数据自相矛盾）；
@@ -610,12 +664,89 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
 
   const result = [];
   let lastCompactionStepIdx = -1;
+  let turnCounter = 0;
+  let activeTurnIndex = null;
+  let pendingTurnPrompts = [];
+  let hasUnconsumedTurn = false;
+
+  const isUserTurnBoundary = (step) => {
+    if (!step || typeof step !== 'object') return false;
+    const t = String(step.type || '').trim().toUpperCase();
+    if (t === 'CORTEX_STEP_TYPE_USER_INPUT' || t === 'USER_INPUT') {
+      return true;
+    }
+    return Boolean(step.userInput && typeof step.userInput === 'object');
+  };
+
+  const extractUserTurnPrompt = (step) => {
+    const ui = step?.userInput;
+    let raw = '';
+    if (typeof ui?.userResponse === 'string' && ui.userResponse.trim()) {
+      raw = ui.userResponse;
+    } else if (Array.isArray(ui?.items)) {
+      raw = ui.items
+        .map((it) => (typeof it?.text === 'string' ? it.text : ''))
+        .filter(Boolean)
+        .join('\n');
+    } else if (typeof step?.content === 'string' && step.content.trim()) {
+      const withoutSummary = step.content
+        .replace(/<CONTEXT_SUMMARY>[\s\S]*?<\/CONTEXT_SUMMARY>/gi, '')
+        .replace(/<SYSTEM_MESSAGE>[\s\S]*$/i, '');
+      const reqMatches = [...withoutSummary.matchAll(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/gi)];
+      raw =
+        reqMatches.length > 0
+          ? reqMatches[reqMatches.length - 1][1]
+          : withoutSummary.replace(/<ADDITIONAL_METADATA>[\s\S]*$/i, '');
+    }
+    const cleaned = String(raw || '')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+    const mediaArr = Array.isArray(ui?.media)
+      ? ui.media
+      : Array.isArray(step?.media)
+        ? step.media
+        : [];
+    const hasMedia = mediaArr.length > 0;
+    if (!cleaned) {
+      return hasMedia ? '[图片/附件提问]' : '';
+    }
+    const withMedia = hasMedia ? `${cleaned} [附图]` : cleaned;
+    return withMedia.length > 180 ? `${withMedia.slice(0, 179)}…` : withMedia;
+  };
 
   rawSteps.forEach((s, index) => {
+    if (isUserTurnBoundary(s)) {
+      const promptText = extractUserTurnPrompt(s);
+      if (!hasUnconsumedTurn) {
+        hasUnconsumedTurn = true;
+        pendingTurnPrompts = promptText ? [promptText] : [];
+      } else if (
+        promptText &&
+        pendingTurnPrompts[pendingTurnPrompts.length - 1] !== promptText
+      ) {
+        pendingTurnPrompts.push(promptText);
+      }
+    }
+
     const m = s?.metadata;
     const u = m?.modelUsage || m?.retryInfos?.[0]?.usage;
     if (!u) {
       return;
+    }
+
+    let stepIsTurnStart = false;
+    let stepTurnPrompt = '';
+    if (hasUnconsumedTurn) {
+      turnCounter += 1;
+      activeTurnIndex = turnCounter;
+      stepIsTurnStart = true;
+      const joinedPrompt = pendingTurnPrompts.join('\n').trim();
+      stepTurnPrompt =
+        joinedPrompt.length > 180 ? `${joinedPrompt.slice(0, 179)}…` : joinedPrompt;
+      hasUnconsumedTurn = false;
+      pendingTurnPrompts = [];
     }
 
     const stepIndex = m.sourceTrajectoryStepInfo?.stepIndex ?? index;
@@ -658,12 +789,14 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
         : Math.max(0, outputTokens - thinkingTokens);
 
     const start = parseIsoMs(m.createdAt);
+    // 轨迹清理可把已生成的步骤改为 CLEARED；仍需原始生成结束时间，避免将清理时间计入测速。
+    const isCleared = s.status === 'CORTEX_STEP_STATUS_CLEARED';
     const measuredDuration = requestDuration(
       m.createdAt,
-      m.finishedGeneratingAt || m.completedAt
+      m.finishedGeneratingAt || (isCleared ? null : m.completedAt)
     );
     const explicitlyIncomplete = Boolean(
-      s.status && s.status !== 'CORTEX_STEP_STATUS_DONE'
+      s.status && s.status !== 'CORTEX_STEP_STATUS_DONE' && !isCleared
     );
     const complete = !explicitlyIncomplete && measuredDuration !== null;
     const totalDurationSec = complete ? measuredDuration : null;
@@ -674,9 +807,11 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
     const nativeStreamSec = duration(chat?.streamingDuration);
     const thinkingDurationSec = duration(p.thinkingDuration);
 
-    // 5 种测速过滤原因判定：先校验耗时与 Token 合法性（timingReason），再判定压缩步与短样本（speedReason）
+    // 先校验状态、耗时与 Token 合法性，再判定压缩步与短样本。
     let timingReason = null;
-    if (!complete || !(totalDurationSec > 0)) {
+    if (s.status === 'CORTEX_STEP_STATUS_CANCELED') {
+      timingReason = 'canceled';
+    } else if (!complete || !(totalDurationSec > 0)) {
       timingReason = 'incomplete_or_invalid_timing';
     } else if (!validCount(u.outputTokens)) {
       timingReason = 'invalid_output_tokens';
@@ -763,6 +898,7 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
         context?.estimatedTokensUsed || contextBreakdown?.totalTokens || 0
       ),
       maxContextBudgetTokens: Number(context?.maxContextTokens || 256000),
+      ...(context?.maxContextTokens > 0 ? { reportedContextLimitTokens: Number(context.maxContextTokens) } : {}),
       contextBreakdown,
       measurementVersion: MEASUREMENT_VERSION,
       isComplete: complete,
@@ -778,6 +914,9 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
       speedSampleEligible:
         totalTokPerSec !== null && !shortOutputSample && !isCompactionStep,
       speedReason,
+      turnIndex: activeTurnIndex,
+      isTurnStart: stepIsTurnStart,
+      ...(stepIsTurnStart && stepTurnPrompt ? { turnPrompt: stepTurnPrompt } : {}),
     });
   });
 
@@ -1051,7 +1190,10 @@ export function speedMetric(step) {
     !Number.isFinite(step.totalTokPerSec) ||
     !(step.totalDurationSec >= MIN_SPEED_DURATION_SECONDS)
   ) {
-    return missing(step.speedReason || 'incomplete_or_invalid_timing');
+    const reason = step.speedReason || 'incomplete_or_invalid_timing';
+    return missing(step.isCompactionStep && reason === 'incomplete_or_invalid_timing'
+      ? 'compaction_timing_unavailable'
+      : reason);
   }
 
   return {
@@ -1161,10 +1303,12 @@ export function summarizeTtft(steps) {
 /** 标志着原始轨迹步骤已进入终态的状态枚举集合（兼容 Connect RPC 与 transcript.jsonl） */
 const LIVE_TERMINAL_STATUSES = new Set([
   'CORTEX_STEP_STATUS_DONE',
+  'CORTEX_STEP_STATUS_CLEARED',
   'CORTEX_STEP_STATUS_ERROR',
   'CORTEX_STEP_STATUS_CANCELED',
   'CORTEX_STEP_STATUS_CANCELLED',
   'DONE',
+  'CLEARED',
   'ERROR',
   'CANCELED',
   'CANCELLED',

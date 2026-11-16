@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { extractModelSteps, normalizeCachedStep, MODEL_IDENTITY_VERSION } from '../speed-metrics.mjs';
-import { formatUsd, resolveModelDisplayInfo } from '../src/core/formatters.js';
+import {
+  formatUsd,
+  mergeModelsByDisplayName,
+  resolveModelDisplayInfo,
+} from '../src/core/formatters.js';
 import { backendHarness } from './backend-harness.mjs';
 
 const FLASH = 'MODEL_PLACEHOLDER_M318', ARGON = 'MODEL_PLACEHOLDER_M418';
@@ -481,4 +485,214 @@ test('orchestratorIdMode defaults to compact, persists via settings action, and 
     resolveModelDisplayInfo(directHydrogen, { showUpstreamModel: false, orchestratorIdMode: 'full' }, { preferLabelInShort: true }).text,
     'Gemini 4 Hydrogen (XHigh)'
   );
+});
+
+test('historical placeholders (M15/M16/M47/M84/M132/M133/M264/M330) and verified internal routing slugs resolve and price accurately without wildcarding unknown slugs', () => {
+  const { resolveModelInfo } = backendHarness();
+
+  const expectedPlaceholders = [
+    ['MODEL_PLACEHOLDER_M84', 'flash-3.5-high', 1.5, 9.0],
+    ['MODEL_PLACEHOLDER_M15', 'flash-3.5-high', 1.5, 9.0],
+    ['MODEL_PLACEHOLDER_M132', 'flash-3.5-high', 1.5, 9.0],
+    ['MODEL_PLACEHOLDER_M133', 'flash-3.5', 1.5, 9.0],
+    ['MODEL_PLACEHOLDER_M47', 'flash-3', 0.5, 3.0],
+    ['MODEL_PLACEHOLDER_M16', 'pro-3.1-high', 2.0, 12.0],
+    ['MODEL_PLACEHOLDER_M264', 'flash-3.6-high', 0.75, 3.75],
+    ['MODEL_PLACEHOLDER_M330', 'flash-2.5-lite', 0.1, 0.4],
+  ];
+  for (const [ph, shortName, inputPrice, outputPrice] of expectedPlaceholders) {
+    const info = resolveModelInfo(ph);
+    assert.equal(info.shortName, shortName, `${ph} shortName`);
+    assert.ok(info.pricing, `${ph} should have pricing`);
+    assert.equal(info.pricing.input, inputPrice, `${ph} input price`);
+    assert.equal(info.pricing.output, outputPrice, `${ph} output price`);
+  }
+
+  const expectedSlugs = [
+    ['gemini-3-flash-a', 'flash-3.5', 1.5, 9.0],
+    ['gemini-3-flash-b', 'flash-3.5', 1.5, 9.0],
+    ['gemini-3-flash-c', 'flash-3', 0.5, 3.0],
+    ['gemini-3-flash-d', 'flash-3.5', 1.5, 9.0],
+    ['gemini-3-flash-agent', 'flash-3.5', 1.5, 9.0],
+    ['gemini-pro-default', 'pro-3.1', 2.0, 12.0],
+    ['gemini-pro-agent', 'pro-3.1', 2.0, 12.0],
+    ['gemini-pro-b', 'pro-3.1', 2.0, 12.0],
+    ['gemini-3.7-flash-safety-le', 'flash-3.7', 0.75, 3.75],
+    ['gemini-3.8-flash-n', 'flash-3.8', 0.75, 3.75],
+    ['gemini-4-argon-f', 'argon-4', 2.0, 10.0],
+    ['gemini-4-argon-disabled', 'argon-4', 2.0, 10.0],
+  ];
+  for (const [slug, shortName, inputPrice, outputPrice] of expectedSlugs) {
+    const info = resolveModelInfo(slug);
+    assert.equal(info.shortName, shortName, `${slug} shortName`);
+    assert.ok(info.pricing, `${slug} should have pricing`);
+    assert.equal(info.pricing.input, inputPrice, `${slug} input price`);
+    assert.equal(info.pricing.output, outputPrice, `${slug} output price`);
+  }
+
+  // Unverified future variant must still remain unpriced (no reckless prefix fallback)
+  const unknownVariant = resolveModelInfo('gemini-3.1-pro-ultra-v2');
+  assert.equal(unknownVariant.pricing, null);
+});
+
+test('deep_stats session-display mislabeling is ignored when step-intrinsic model differs, and micro-costs preserve 6-decimal precision', async () => {
+  const nowIso = new Date(Date.now() - 5_000).toISOString();
+  const h = backendHarness({
+    summaries: {
+      ide_convo: { stepCount: 1 },
+    },
+    trajectories: {
+      ide_convo: {
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'CORTEX_STEP_STATUS_DONE',
+              metadata: {
+                sourceTrajectoryStepInfo: { stepIndex: 1 },
+                createdAt: nowIso,
+                completedAt: new Date(Date.now() - 4_000).toISOString(),
+                modelUsage: {
+                  model: 'MODEL_GOOGLE_GEMINI_2_5_FLASH_LITE',
+                  apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
+                  inputTokens: '1900',
+                  cacheReadTokens: '0',
+                  outputTokens: '107',
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+    deepStats: {
+      perConvo: {
+        'standalone:11111111-2222-3333-4444-555555555555': {
+          appSource: 'standalone',
+          entries: [
+            {
+              ts: nowIso,
+              model: 'gemini-2.5-flash-lite',
+              modelCanonicalId: 'gemini-2.5-flash-lite',
+              modelAggregationId: 'session-display:gemini-3-5-flash-lite',
+              modelDisplayName: 'Gemini 3.5 Flash Lite',
+              provider: 'API_PROVIDER_GOOGLE_GEMINI',
+              inp: 12300,
+              cache: 0,
+              out: 154,
+              reasoning: 0,
+            },
+            {
+              ts: nowIso,
+              model: 'gemini-3-flash-a',
+              modelCanonicalId: 'gemini-3-flash-a',
+              modelAggregationId: 'session:gemini-3-flash-a',
+              provider: 'API_PROVIDER_GOOGLE_GEMINI',
+              inp: 3320000,
+              cache: 32730000,
+              out: 120000,
+              reasoning: 195500,
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  const p = await h.buildTelemetryPayloadInternal('ide_convo');
+  const consumptionModels = p.modelBreakdown;
+
+  // Both gemini-2.5-flash-lite calls (IDE + standalone with session-display:gemini-3-5-flash-lite) merge into one Gemini 2.5 Flash Lite bucket!
+  const flash25Rows = consumptionModels.filter((m) => /2\.5 Flash Lite/i.test(m.label));
+  assert.equal(flash25Rows.length, 1);
+  assert.equal(
+    consumptionModels.some((m) => /3\.5 Flash Lite/i.test(m.label)),
+    false,
+    'mismatched session-display:gemini-3-5-flash-lite should not create a bogus Gemini 3.5 Flash Lite bucket'
+  );
+  assert.equal(flash25Rows[0].calls, 2);
+  assert.equal(flash25Rows[0].unpricedCalls, 0);
+  // 14,200 input * $0.10/M + 261 output * $0.40/M = $0.0015244 -> 0.001524 (> 0, not truncated to 0!)
+  assert.equal(flash25Rows[0].costUsd, 0.001524);
+
+  // Also check single-step micro-cost (< $0.001) on activeConversation.modelBreakdown
+  const sessionFlash25 = p.activeConversation.modelBreakdown.find((m) => /2\.5 Flash Lite/i.test(m.label));
+  assert.ok(sessionFlash25);
+  // 1,900 * $0.10/M + 107 * $0.40/M = $0.0002328 -> 0.000233
+  assert.equal(sessionFlash25.costUsd, 0.000233);
+  assert.equal(formatUsd(sessionFlash25.costUsd, { precise: true }), '<$0.001');
+  assert.equal(formatUsd(flash25Rows[0].costUsd, { precise: true }), '$0.002');
+
+  // Standalone session:gemini-3-flash-a entry preserves responseModel & prices cleanly
+  const flash35Row = consumptionModels.find((m) => m.label === 'Gemini 3.5 Flash');
+  assert.ok(flash35Row);
+  assert.equal(flash35Row.upstreamName, 'gemini-3-flash-a');
+  assert.equal(flash35Row.unpricedCalls, 0);
+  assert.ok(flash35Row.costUsd > 12);
+});
+
+test('mergeModelsByDisplayName collapses distinct backend buckets that share the same rendered display text', () => {
+  const rawModels = [
+    {
+      label: 'Gemini 3.8 Flash',
+      shortName: 'flash-3.8',
+      upstreamName: 'gemini-3-flash-a',
+      upstreamModels: ['gemini-3-flash-a', 'gemini-3.8-flash'],
+      calls: 7063,
+      inputTokens: 91_800_000,
+      cacheReadTokens: 674_810_000,
+      outputTokens: 5_510_000,
+      thinkingTokens: 3_130_000,
+      responseTokens: 2_380_000,
+      totalTokens: 772_120_000,
+      costUsd: 286.2,
+      unpricedCalls: 0,
+      avgTokPerSec: 120,
+      speedSummary: { sampleCount: 100, excludedCount: 5, avgTokPerSec: 120 },
+      avgTtftSec: 2.0,
+      ttftSampleCount: 100,
+    },
+    {
+      label: 'Gemini 3.5 Flash',
+      shortName: 'flash-3.5',
+      upstreamName: 'gemini-3-flash-a',
+      upstreamModels: ['gemini-3-flash-a'],
+      calls: 449,
+      inputTokens: 3_320_000,
+      cacheReadTokens: 32_730_000,
+      outputTokens: 315_500,
+      thinkingTokens: 195_500,
+      responseTokens: 120_000,
+      totalTokens: 36_365_500,
+      costUsd: 12.73,
+      unpricedCalls: 0,
+      avgTokPerSec: 80,
+      speedSummary: { sampleCount: 100, excludedCount: 2, avgTokPerSec: 80 },
+      avgTtftSec: 4.0,
+      ttftSampleCount: 100,
+    },
+  ];
+
+  // In upstream mode, both resolve to 'gemini-3-flash-a' -> merged into 1 row!
+  const mergedUpstream = mergeModelsByDisplayName(
+    rawModels,
+    { showUpstreamModel: true },
+    { preferLabelInShort: true }
+  );
+  assert.equal(mergedUpstream.length, 1);
+  assert.equal(mergedUpstream[0].displayText, 'gemini-3-flash-a');
+  assert.equal(mergedUpstream[0].calls, 7512);
+  assert.equal(mergedUpstream[0].totalTokens, 808_485_500);
+  assert.equal(mergedUpstream[0].costUsd, 298.93);
+  assert.equal(mergedUpstream[0].avgTokPerSec, 100);
+  assert.equal(mergedUpstream[0].avgTtftSec, 3);
+  assert.deepEqual(mergedUpstream[0].sourceLabels, ['Gemini 3.8 Flash', 'Gemini 3.5 Flash']);
+
+  // In friendly label mode, 'Gemini 3.8 Flash' and 'Gemini 3.5 Flash' stay distinct!
+  const mergedShort = mergeModelsByDisplayName(
+    rawModels,
+    { showUpstreamModel: false },
+    { preferLabelInShort: true }
+  );
+  assert.equal(mergedShort.length, 2);
 });

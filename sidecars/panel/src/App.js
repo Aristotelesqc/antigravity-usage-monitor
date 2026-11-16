@@ -6,8 +6,9 @@
 
 import { defineComponent } from './core/component.js';
 import { h, patchAttr } from './core/domPatch.js';
+import { i18nStore } from './i18n/index.js';
 import { resolveScopedConversation, telemetryStore } from './store/telemetryStore.js';
-import { uiStore, VIEW_TABS } from './store/uiStore.js';
+import { getViewTabs, uiStore } from './store/uiStore.js';
 import { TopSessionHeader } from './components/layout/TopSessionHeader.js';
 import { TopLongPillNav } from './components/ui/TopLongPillNav.js';
 import { LiveOverviewView } from './views/LiveOverviewView.js';
@@ -21,7 +22,7 @@ export const App = defineComponent({
     const sessionHeader = TopSessionHeader();
     const topPillNav = TopLongPillNav({
       modelValue: uiStore.getState().activeView,
-      items: VIEW_TABS,
+      items: getViewTabs(),
       onUpdateModelValue: (nextView) => {
         uiStore.setState({ activeView: nextView });
       },
@@ -61,8 +62,10 @@ export const App = defineComponent({
       );
       const stepCount = scopedConv?.stepCount ?? 0;
       topPillNav.setProps({
-        items: VIEW_TABS.map((t) =>
-          t.value === 'steps' ? { ...t, badge: stepCount > 0 ? stepCount : '' } : t
+        items: getViewTabs().map((tabItem) =>
+          tabItem.value === 'steps'
+            ? { ...tabItem, badge: stepCount > 0 ? stepCount : '' }
+            : tabItem
         ),
       });
     }
@@ -102,10 +105,16 @@ export const App = defineComponent({
       () => syncStepsBadge()
     );
 
+    const unsubI18n = i18nStore.subscribe(
+      (st) => st.locale,
+      () => syncStepsBadge()
+    );
+
     onCleanup(() => {
       unsubUi();
       unsubStepCount();
       unsubScopeBadge();
+      unsubI18n();
       sessionHeader.destroy();
       topPillNav.destroy();
       overviewView.destroy();

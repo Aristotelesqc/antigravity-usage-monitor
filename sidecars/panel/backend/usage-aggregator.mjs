@@ -6,18 +6,24 @@
  * 进行去重遍历聚合，输出前端消费分析与模型明细所需的完整统计结构。
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import {
+  MEASUREMENT_VERSION,
   accumulateSpeed,
   createSpeedAccumulator,
   finishSpeed,
+  parseIsoMs,
 } from '../speed-metrics.mjs';
 import { roundMetric, trajectoryCache } from './config.mjs';
 import { loadExternalDeepStatsCache } from './local-scanner.mjs';
 import {
   computeStepCost,
   formatUpstreamModelId,
-  resolveModelInfo,
+  isArgonModelIdentifier,
+  isCarbonModelIdentifier,
 } from './model-pricing.mjs';
+
+/** @typedef {ReturnType<import('./model-pricing.mjs').createStepModelResolver>} StepModelResolver */
 
 function safeTok(val) {
   const n = Number(val);
@@ -181,27 +187,13 @@ function createUsageBucket() {
  * 将单个模型步骤的 Token 与成本累加至目标统计桶。
  *
  * @param {ReturnType<typeof createUsageBucket>} bucket
- * @param {object} st 步骤对象
- * @param {ReturnType<typeof resolveModelInfo>} mInfo 模型信息
- * @param {number|null} stepCost 单步美元成本（未知时为 `null`）
+ * @param {object} usage 已归一化的单步用量
  * @param {string} cascadeId 会话标识
  */
-function accumulateStepIntoBucket(bucket, st, mInfo, stepCost, cascadeId) {
-  const inTok = safeTok(st?.inputTokens);
-  const cacheTok = safeTok(st?.cacheReadTokens);
-  const outTok = safeTok(st?.outputTokens);
-  const thinkTok = safeTok(st?.thinkingTokens);
-  const respTok =
-    st?.responseTokens !== undefined && st?.responseTokens !== null
-      ? safeTok(st.responseTokens)
-      : Math.max(0, outTok - thinkTok);
-
-  const stepTotalTokens = inTok + cacheTok + outTok;
-  const savedCost = mInfo?.pricing
-    ? (cacheTok / 1_000_000) * Math.max(0, mInfo.pricing.input - mInfo.pricing.cache)
-    : 0;
-  if (stepCost === null) bucket.unpricedCalls = (bucket.unpricedCalls || 0) + 1;
-  const resolvedCost = Number.isFinite(stepCost) ? stepCost : 0;
+function accumulateStepIntoBucket(bucket, usage, cascadeId) {
+  const { inTok, cacheTok, outTok, thinkTok, respTok, stepTotalTokens,
+    resolvedCost, savedCost, unpriced } = usage;
+  if (unpriced) bucket.unpricedCalls = (bucket.unpricedCalls || 0) + 1;
   bucket.calls += 1;
   if (cascadeId) bucket.conversationsSet.add(cascadeId);
   bucket.inputTokens += inTok;
@@ -278,6 +270,8 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
       responseTokens: 0,
       totalTokens: 0,
       costUsd: 0,
+      ttftSumSec: 0,
+      ttftSampleCount: 0,
       speedAccumulator: createSpeedAccumulator(),
     });
   }
@@ -290,6 +284,18 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
     );
   }
   accumulateSpeed(agg.speedAccumulator, st);
+  if (
+    !st.isCompactionStep &&
+    st.measurementVersion === MEASUREMENT_VERSION &&
+    st.isComplete &&
+    Number.isFinite(st.totalDurationSec) &&
+    Number.isFinite(st.nativeTtftSec) &&
+    st.nativeTtftSec >= 0 &&
+    st.nativeTtftSec <= st.totalDurationSec + 0.01
+  ) {
+    agg.ttftSumSec += st.nativeTtftSec;
+    agg.ttftSampleCount += 1;
+  }
 
   agg.calls += 1;
   agg.inputTokens += inTok;
@@ -311,46 +317,126 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
 function finalizeModelBreakdownMap(perModelStats) {
   return Array.from(perModelStats.values())
     .sort((a, b) => b.calls - a.calls || String(a.label).localeCompare(String(b.label)))
-    .map(({ speedAccumulator, upstreamModelCounts, fallbackModelId, ...m }) => {
-      const sortedUpstream = Array.from((upstreamModelCounts || new Map()).entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([name]) => name);
-      const primaryUpstream =
-        sortedUpstream.length > 0 ? sortedUpstream[0] : fallbackModelId || m.shortName || m.label;
-      const finishedSpeed = finishSpeed(speedAccumulator);
-      return {
-        ...m,
-        upstreamName: primaryUpstream,
-        upstreamModels: sortedUpstream,
-        costUsd: +m.costUsd.toFixed(3),
-        avgTokPerSec: roundMetric(finishedSpeed.avgTokPerSec),
-        speedSummary: finishedSpeed,
-      };
-    });
+    .map(
+      ({
+        speedAccumulator,
+        upstreamModelCounts,
+        fallbackModelId,
+        ttftSumSec,
+        ttftSampleCount,
+        ...m
+      }) => {
+        const sortedUpstream = Array.from((upstreamModelCounts || new Map()).entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name]) => name);
+        const primaryUpstream =
+          sortedUpstream.length > 0 ? sortedUpstream[0] : fallbackModelId || m.shortName || m.label;
+        const finishedSpeed = finishSpeed(speedAccumulator);
+        const promptTokens = m.inputTokens + m.cacheReadTokens;
+        const cacheHitPct =
+          promptTokens > 0 ? +((m.cacheReadTokens / promptTokens) * 100).toFixed(1) : 0;
+        const avgTtftSec =
+          ttftSampleCount > 0 ? roundMetric(ttftSumSec / ttftSampleCount) : null;
+        return {
+          ...m,
+          upstreamName: primaryUpstream,
+          upstreamModels: sortedUpstream,
+          costUsd: +m.costUsd.toFixed(6),
+          cacheHitPct,
+          avgTtftSec,
+          ttftSampleCount,
+          avgTokPerSec: roundMetric(finishedSpeed.avgTokPerSec),
+          speedSummary: finishedSpeed,
+        };
+      }
+    );
 }
 
 /**
  * 针对给定步骤数组构建按模型聚合的统计列表（供单代理、主+子汇总及全局时间范围复用）。
  *
  * @param {object[]} [steps=[]]
- * @param {Map<string, object>} [dynamicModelMap=new Map()]
+ * @param {StepModelResolver} resolveStepModel
  * @returns {object[]}
  */
-export function buildScopedModelBreakdown(steps = [], dynamicModelMap = new Map()) {
+export function buildScopedModelBreakdown(steps, resolveStepModel) {
   const perModelStats = new Map();
   for (const st of steps) {
     if (!st || typeof st !== 'object') continue;
-    const mInfo = resolveModelInfo(
-      st.modelKey,
-      dynamicModelMap,
-      st.apiProvider,
-      st.modelDisplayName,
-      st.responseModel
-    );
+    const mInfo = resolveStepModel(st);
     const stepCost = computeStepCost(st, mInfo.pricing);
     accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost);
   }
   return finalizeModelBreakdownMap(perModelStats);
+}
+
+let lastUsageSnapshot = null;
+const MAX_TREND_TIMESTAMP_MS = 8_640_000_000_000_000;
+
+function planUsageTrend(window, nowMs, earliest, latest) {
+  const safeMs = (value, fallback) =>
+    Number.isFinite(value) && value > 0 && value <= MAX_TREND_TIMESTAMP_MS ? value : fallback;
+  const end = Math.max(safeMs(window.endMs, Math.max(nowMs, latest || nowMs)), latest);
+  const defaultStart = end - 24 * 3600 * 1000;
+  const start = window.key === 'all'
+    ? Math.min(safeMs(earliest, defaultStart), end - 3600 * 1000)
+    : Math.min(safeMs(window.startMs, defaultStart), end);
+  const hourly = window.key === 'today' || window.key === '24h' || window.key === '5h' ||
+    end - start <= 72 * 3600 * 1000;
+  const first = new Date(start);
+  const last = new Date(end);
+  if (hourly) {
+    first.setMinutes(0, 0, 0);
+    last.setMinutes(0, 0, 0);
+  } else {
+    first.setHours(0, 0, 0, 0);
+    last.setHours(0, 0, 0, 0);
+  }
+  return { start, end, hourly, first: first.getTime(), last: last.getTime() };
+}
+
+function sameUsageEntries(previous, current) {
+  return previous.length === current.length && current.every((entry, index) => {
+    const before = previous[index];
+    return entry.steps === before.steps && entry.cascadeId === before.cascadeId &&
+      entry.appSource === before.appSource && entry.isCurrentConv === before.isCurrentConv;
+  });
+}
+
+function sortedUsageTimestamps(entries) {
+  const dates = new Float64Array(entries.reduce((sum, entry) => sum + entry.steps.length, 0));
+  let count = 0;
+  for (const { steps } of entries) {
+    for (const step of steps) {
+      const date = Number(step?.createdAtMs);
+      if (date > 0) dates[count++] = date;
+    }
+  }
+  return dates.subarray(0, count).sort();
+}
+
+function usageTimestampBoundary(dates, value, inclusive) {
+  let start = 0;
+  let end = dates.length;
+  while (start < end) {
+    const i = (start + end) >>> 1;
+    if (dates[i] < value || (inclusive && dates[i] === value)) start = i + 1;
+    else end = i;
+  }
+  return start;
+}
+
+function sameUsageWindows(previous, current, dates) {
+  return previous.length === current.length && current.every((window, index) => {
+    const before = previous[index];
+    return before.key === window.key && before.label === window.label &&
+      (before.startMs === window.startMs ||
+        usageTimestampBoundary(dates, before.startMs, false) ===
+          usageTimestampBoundary(dates, window.startMs, false)) &&
+      (before.endMs === window.endMs ||
+        usageTimestampBoundary(dates, before.endMs, true) ===
+          usageTimestampBoundary(dates, window.endMs, true));
+  });
 }
 
 /**
@@ -359,10 +445,11 @@ export function buildScopedModelBreakdown(steps = [], dynamicModelMap = new Map(
  * @param {{
  *   filterOpts?: { range?: string, startMs?: number, endMs?: number },
  *   cycleAnchors?: { fiveHourResetMs?: number, weeklyResetMs?: number },
- *   currentAccountName?: string,
+ *   currentAccountName?: string|null,
  *   activeCascadeId?: string|null,
  *   activeFamilyCascadeIds?: Set<string>|null,
- *   dynamicModelMap?: Map<string, object>
+ *   resolveStepModel: StepModelResolver
+ *   modelInputs?: { catalogRevision: number, dynamicModelMap: Map }
  * }} params
  */
 export function aggregateMultiWindowUsage({
@@ -371,8 +458,10 @@ export function aggregateMultiWindowUsage({
   currentAccountName = '',
   activeCascadeId = null,
   activeFamilyCascadeIds = null,
-  dynamicModelMap = new Map(),
-} = {}) {
+  resolveStepModel,
+  quotaPoolsMap = null,
+  modelInputs = null,
+}) {
   const rawFamilyIds =
     activeFamilyCascadeIds instanceof Set
       ? Array.from(activeFamilyCascadeIds)
@@ -399,11 +488,39 @@ export function aggregateMultiWindowUsage({
     accountBuckets[k] = createUsageBucket();
     sessionBuckets[k] = createUsageBucket();
   }
-  const selectedAccountBucket = createUsageBucket();
-  const selectedSessionBucket = createUsageBucket();
+
+  // 为每个配额池建立独立的 5h 与周限周期统计桶（按各池自身的 resetTime / weeklyResetTime 截取窗口）
+  const poolCycleBuckets = new Map();
+  if (quotaPoolsMap instanceof Map && quotaPoolsMap.size > 0) {
+    const weekFallbackStartMs = getStartOfCurrentWeekMs(new Date(nowMs));
+    for (const [poolKey, poolObj] of quotaPoolsMap.entries()) {
+      const reset5hMs = parseIsoMs(poolObj?.resetTime) || 0;
+      const start5hMs =
+        reset5hMs > nowMs
+          ? Math.min(nowMs, reset5hMs - 5 * 3600 * 1000)
+          : nowMs - 5 * 3600 * 1000;
+      const resetWkMs = parseIsoMs(poolObj?.weeklyResetTime) || 0;
+      const startWkMs =
+        resetWkMs > nowMs
+          ? Math.min(nowMs, resetWkMs - 7 * 24 * 3600 * 1000)
+          : weekFallbackStartMs;
+      poolCycleBuckets.set(poolKey, {
+        start5hMs,
+        startWkMs,
+        b5h: createUsageBucket(),
+        bWk: createUsageBucket(),
+      });
+    }
+  }
+  const hasDedicatedCarbonPool = poolCycleBuckets.has('Carbon');
+  const hasDedicatedArgonPool = poolCycleBuckets.has('Argon');
+  const poolByModel = new Map();
+  const selectedAccountBucket = accountBuckets[selectedWindow.key] || createUsageBucket();
+  const selectedSessionBucket = sessionBuckets[selectedWindow.key] || createUsageBucket();
   const perModelStats = new Map();
   const selectedWindowSteps = [];
   let earliestSelectedStepMs = Infinity;
+  let latestSelectedStepMs = 0;
 
   const currentYear = new Date(nowMs).getFullYear();
   const monthlySeries = Array.from({ length: 12 }, (_, idx) => ({
@@ -445,9 +562,8 @@ export function aggregateMultiWindowUsage({
     const ownerAccount = ext.accountName || knownLive?.accountName || '';
     if (
       ownerAccount &&
-      currentAccountName &&
-      ownerAccount !== currentAccountName &&
-      !familySet.has(extCidLower)
+      currentAccountName !== '' &&
+      ownerAccount !== currentAccountName
     ) {
       continue;
     }
@@ -462,9 +578,8 @@ export function aggregateMultiWindowUsage({
   for (const [cidLower, entry] of allLiveByLower.entries()) {
     if (
       entry?.accountName &&
-      currentAccountName &&
-      entry.accountName !== currentAccountName &&
-      !familySet.has(cidLower)
+      currentAccountName !== '' &&
+      entry.accountName !== currentAccountName
     ) {
       continue;
     }
@@ -496,6 +611,33 @@ export function aggregateMultiWindowUsage({
     });
   }
 
+  const timeZone = modelInputs ? new Intl.DateTimeFormat().resolvedOptions().timeZone : '';
+  const quotaWindows = Array.from(poolCycleBuckets, ([key, { start5hMs, startWkMs }]) => [
+    { key: `${key}:5h`, startMs: start5hMs, endMs: nowMs },
+    { key: `${key}:week`, startMs: startWkMs, endMs: nowMs },
+  ]).flat();
+  const windows = [selectedWindow, ...Object.values(presetWindows), ...quotaWindows];
+  const snapshot = lastUsageSnapshot;
+  const sameSnapshot = modelInputs && snapshot && timeZone === snapshot.timeZone &&
+    currentYear === snapshot.currentYear && modelInputs.catalogRevision === snapshot.modelInputs.catalogRevision &&
+    isDeepStrictEqual(modelInputs.dynamicModelMap, snapshot.modelInputs.dynamicModelMap) &&
+    sameUsageEntries(snapshot.entries, allEntriesToAggregate);
+  const previous = sameSnapshot ? snapshot.ranges.get(selectedWindow.key) : null;
+  if (previous) {
+    // 时钟继续前进，只有实际有步骤跨过窗口边界时才重新聚合。
+    const trend = planUsageTrend(selectedWindow, nowMs, previous.earliest, previous.latest);
+    if (
+      trend.hourly === previous.trend.hourly && trend.first === previous.trend.first &&
+      trend.last === previous.trend.last &&
+      sameUsageWindows(previous.windows, windows,
+        snapshot.dates ??= sortedUsageTimestamps(allEntriesToAggregate))
+    ) {
+      snapshot.ranges.delete(selectedWindow.key);
+      snapshot.ranges.set(selectedWindow.key, previous);
+      return { ...previous.result, selectedWindow, trendStartMs: trend.start, trendEndMs: trend.end };
+    }
+  }
+
   for (const entry of allEntriesToAggregate) {
     const { cascadeId, isCurrentConv } = entry;
     const srcKey = entry.appSource || 'standalone';
@@ -503,13 +645,7 @@ export function aggregateMultiWindowUsage({
 
     for (const st of entry.steps || []) {
       if (!st || typeof st !== 'object') continue;
-      const mInfo = resolveModelInfo(
-        st.modelKey,
-        dynamicModelMap,
-        st.apiProvider,
-        st.modelDisplayName,
-        st.responseModel
-      );
+      const mInfo = resolveStepModel(st);
       const inTok = safeTok(st.inputTokens);
       const cacheTok = safeTok(st.cacheReadTokens);
       const outTok = safeTok(st.outputTokens);
@@ -523,6 +659,11 @@ export function aggregateMultiWindowUsage({
       const resolvedCost = Number.isFinite(stepCost) ? stepCost : 0;
       const unpriced = stepCost === null ? 1 : 0;
       const tMs = Number(st.createdAtMs) > 0 ? Number(st.createdAtMs) : 0;
+      const savedCost = mInfo.pricing
+        ? (cacheTok / 1_000_000) * Math.max(0, mInfo.pricing.input - mInfo.pricing.cache)
+        : 0;
+      const stepUsage = { inTok, cacheTok, outTok, thinkTok, respTok, stepTotalTokens,
+        resolvedCost, savedCost, unpriced };
 
       if (tMs > 0) {
         const stepDate = new Date(tMs);
@@ -544,9 +685,36 @@ export function aggregateMultiWindowUsage({
       for (const k of presetKeys) {
         const w = presetWindows[k];
         if (k === 'all' || (tMs > 0 && tMs >= w.startMs && tMs <= w.endMs)) {
-          accumulateStepIntoBucket(accountBuckets[k], st, mInfo, stepCost, cascadeId);
+          accumulateStepIntoBucket(accountBuckets[k], stepUsage, cascadeId);
           if (isCurrentConv) {
-            accumulateStepIntoBucket(sessionBuckets[k], st, mInfo, stepCost, cascadeId);
+            accumulateStepIntoBucket(sessionBuckets[k], stepUsage, cascadeId);
+          }
+        }
+      }
+
+      if (poolCycleBuckets.size > 0 && tMs > 0 && tMs <= nowMs) {
+        let cachedPool = poolByModel.get(mInfo);
+        if (!cachedPool || cachedPool.key !== st.modelKey ||
+            cachedPool.response !== st.responseModel || cachedPool.displayName !== st.modelDisplayName) {
+          const ids = [st.modelKey, st.responseModel, mInfo.modelId, mInfo.label, st.modelDisplayName];
+          let poolKey = null;
+          if (hasDedicatedCarbonPool && isCarbonModelIdentifier(...ids)) poolKey = 'Carbon';
+          else if (hasDedicatedArgonPool && isArgonModelIdentifier(...ids)) poolKey = 'Argon';
+          else if (mInfo.family === 'Gemini') poolKey = 'Gemini';
+          else if (['Claude', 'GPT', 'Other'].includes(mInfo.family)) poolKey = 'Claude & GPT';
+          cachedPool = {
+            key: st.modelKey, response: st.responseModel, displayName: st.modelDisplayName,
+            bucket: poolCycleBuckets.get(poolKey),
+          };
+          poolByModel.set(mInfo, cachedPool);
+        }
+        const poolBucketEntry = cachedPool.bucket;
+        if (poolBucketEntry) {
+          if (tMs >= poolBucketEntry.start5hMs) {
+            accumulateStepIntoBucket(poolBucketEntry.b5h, stepUsage, cascadeId);
+          }
+          if (tMs >= poolBucketEntry.startWkMs) {
+            accumulateStepIntoBucket(poolBucketEntry.bWk, stepUsage, cascadeId);
           }
         }
       }
@@ -556,12 +724,15 @@ export function aggregateMultiWindowUsage({
         (tMs > 0 && tMs >= selectedWindow.startMs && tMs <= selectedWindow.endMs);
 
       if (inSelectedWindow) {
-        accumulateStepIntoBucket(selectedAccountBucket, st, mInfo, stepCost, cascadeId);
-        if (isCurrentConv) {
-          accumulateStepIntoBucket(selectedSessionBucket, st, mInfo, stepCost, cascadeId);
+        if (selectedWindow.key === 'custom') {
+          accumulateStepIntoBucket(selectedAccountBucket, stepUsage, cascadeId);
+          if (isCurrentConv) {
+            accumulateStepIntoBucket(selectedSessionBucket, stepUsage, cascadeId);
+          }
         }
         if (tMs > 0) {
           if (tMs < earliestSelectedStepMs) earliestSelectedStepMs = tMs;
+          if (tMs > latestSelectedStepMs && tMs <= MAX_TREND_TIMESTAMP_MS) latestSelectedStepMs = tMs;
           selectedWindowSteps.push({
             tMs,
             tokens: stepTotalTokens,
@@ -605,52 +776,15 @@ export function aggregateMultiWindowUsage({
   }
 
   // 构建当前选定时间窗口的自适应自然整点/整日趋势序列 (trendSeries)
-  const MAX_SAFE_MS = 8_640_000_000_000_000;
-  const safeMs = (val, fallback) =>
-    Number.isFinite(val) && val > 0 && val <= MAX_SAFE_MS ? val : fallback;
-  let latestSelectedStepMs = 0;
-  for (const item of selectedWindowSteps) {
-    if (item.tMs > latestSelectedStepMs && item.tMs <= MAX_SAFE_MS) {
-      latestSelectedStepMs = item.tMs;
-    }
-  }
-  const baseEndMs = safeMs(selectedWindow.endMs, Math.max(nowMs, latestSelectedStepMs || nowMs));
-  const trendEndMs = Math.max(baseEndMs, latestSelectedStepMs || 0);
-  const rawTrendStartMs =
-    selectedWindow.key === 'all'
-      ? safeMs(earliestSelectedStepMs, trendEndMs - 24 * 3600 * 1000)
-      : safeMs(selectedWindow.startMs, trendEndMs - 24 * 3600 * 1000);
-  const effectiveStartMs =
-    selectedWindow.key === 'all'
-      ? Math.min(
-          rawTrendStartMs,
-          earliestSelectedStepMs < Infinity
-            ? safeMs(earliestSelectedStepMs, rawTrendStartMs)
-            : rawTrendStartMs,
-          trendEndMs - 3600 * 1000
-        )
-      : Math.min(rawTrendStartMs, trendEndMs);
-  const trendStartMs = effectiveStartMs;
-  const rawSpanMs = Math.max(3600 * 1000, trendEndMs - effectiveStartMs);
+  const trend = planUsageTrend(selectedWindow, nowMs, earliestSelectedStepMs, latestSelectedStepMs);
+  const { start: trendStartMs, end: trendEndMs, hourly: useHourly } = trend;
   const pad2 = (n) => String(n).padStart(2, '0');
   const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
-  // 72 小时（3 天）以内按自然整点小时分桶；超过 72 小时按本地自然日分桶
-  const useHourly =
-    selectedWindow.key === 'today' ||
-    selectedWindow.key === '24h' ||
-    selectedWindow.key === '5h' ||
-    rawSpanMs <= 72 * 3600 * 1000;
-
   const trendSeries = [];
   if (useHourly) {
-    const startHourD = new Date(effectiveStartMs);
-    startHourD.setMinutes(0, 0, 0);
-    const endHourD = new Date(trendEndMs);
-    endHourD.setMinutes(0, 0, 0);
-
-    let firstHourMs = startHourD.getTime();
-    let lastHourMs = endHourD.getTime();
+    let firstHourMs = trend.first;
+    let lastHourMs = trend.last;
     if (selectedWindow.key === 'today') {
       const minTodayEndMs = firstHourMs + 5 * 3600 * 1000;
       if (lastHourMs < minTodayEndMs) {
@@ -700,8 +834,8 @@ export function aggregateMultiWindowUsage({
       });
     }
   } else {
-    const firstDayMs = getStartOfLocalDayMs(effectiveStartMs);
-    const lastDayMs = getStartOfLocalDayMs(trendEndMs);
+    const firstDayMs = trend.first;
+    const lastDayMs = trend.last;
     const dayStarts = [];
     const cursor = new Date(firstDayMs);
     cursor.setHours(0, 0, 0, 0);
@@ -719,26 +853,24 @@ export function aggregateMultiWindowUsage({
       dayStarts.unshift(prev.getTime());
     }
 
-    const stepDays = dayStarts.length > 60 ? Math.ceil(dayStarts.length / 45) : 1;
-    let bucketIdx = 0;
-    for (let i = 0; i < dayStarts.length; i += stepDays) {
+    const firstYear = new Date(dayStarts[0]).getFullYear();
+    const lastYear = new Date(dayStarts[dayStarts.length - 1]).getFullYear();
+    const showFullYear = firstYear !== lastYear || dayStarts.length > 90;
+
+    for (let i = 0; i < dayStarts.length; i++) {
       const sMs = dayStarts[i];
-      const endDayStartMs = dayStarts[Math.min(dayStarts.length - 1, i + stepDays - 1)];
-      const endCursor = new Date(endDayStartMs);
+      const endCursor = new Date(sMs);
       endCursor.setDate(endCursor.getDate() + 1);
       endCursor.setHours(0, 0, 0, 0);
       const eMs = endCursor.getTime();
 
       const sd = new Date(sMs);
-      const ed = new Date(endDayStartMs);
       const axisLabel = `${sd.getMonth() + 1}/${pad2(sd.getDate())}`;
-      const fullLabel =
-        stepDays === 1
-          ? `${sd.getMonth() + 1}月${sd.getDate()}日 (${WEEKDAY_NAMES[sd.getDay()]})`
-          : `${sd.getMonth() + 1}月${sd.getDate()}日 - ${ed.getMonth() + 1}月${ed.getDate()}日`;
+      const datePrefix = showFullYear ? `${sd.getFullYear()}年` : '';
+      const fullLabel = `${datePrefix}${sd.getMonth() + 1}月${sd.getDate()}日 (${WEEKDAY_NAMES[sd.getDay()]})`;
 
       trendSeries.push({
-        index: bucketIdx++,
+        index: i,
         startMs: sMs,
         endMs: eMs,
         granularity: 'day',
@@ -758,10 +890,14 @@ export function aggregateMultiWindowUsage({
   if (trendSeries.length > 0) {
     const firstBucketStart = trendSeries[0].startMs;
     const lastIdx = trendSeries.length - 1;
+    let previousBucketIndex = 0;
     for (const item of selectedWindowSteps) {
       let targetIdx = lastIdx;
+      const previousBucket = trendSeries[previousBucketIndex];
       if (item.tMs <= firstBucketStart) {
         targetIdx = 0;
+      } else if (item.tMs >= previousBucket.startMs && item.tMs < previousBucket.endMs) {
+        targetIdx = previousBucketIndex;
       } else {
         // 二分查找匹配的时间桶 [startMs, endMs)
         let lo = 0;
@@ -779,6 +915,7 @@ export function aggregateMultiWindowUsage({
           }
         }
       }
+      previousBucketIndex = targetIdx;
       const bucket = trendSeries[targetIdx];
       bucket.tokens += item.tokens;
       bucket.inputTokens += item.inputTokens || 0;
@@ -817,7 +954,45 @@ export function aggregateMultiWindowUsage({
   const weekBucket = finalizedPresets.week.account;
   const modelBreakdown = finalizeModelBreakdownMap(perModelStats);
 
-  return {
+  const formatCycleSummary = (b) => {
+    const fin = finalizeUsageBucket(b);
+    return {
+      calls: fin.calls,
+      tokens: fin.totalTokens,
+      inputTokens: fin.inputTokens,
+      cacheReadTokens: fin.cacheReadTokens,
+      outputTokens: fin.outputTokens,
+      costUsd: fin.costUsd,
+      unpricedCalls: fin.unpricedCalls,
+    };
+  };
+
+  const poolCycleStats = new Map();
+  let rawPoolsWeeklyCalls = 0;
+  let rawPoolsWeeklyTokens = 0;
+  let rawPoolsWeeklyCostUsd = 0;
+  let rawPoolsWeeklyUnpricedCalls = 0;
+  for (const [poolKey, entry] of poolCycleBuckets.entries()) {
+    poolCycleStats.set(poolKey, {
+      cycle5h: formatCycleSummary(entry.b5h),
+      cycleWeekly: formatCycleSummary(entry.bWk),
+    });
+    rawPoolsWeeklyCalls += entry.bWk.calls;
+    rawPoolsWeeklyTokens += entry.bWk.totalTokens;
+    rawPoolsWeeklyCostUsd += entry.bWk.costUsd;
+    rawPoolsWeeklyUnpricedCalls += entry.bWk.unpricedCalls || 0;
+  }
+  const poolsWeeklySummary =
+    poolCycleBuckets.size > 0
+      ? {
+          calls: rawPoolsWeeklyCalls,
+          tokens: rawPoolsWeeklyTokens,
+          costUsd: +rawPoolsWeeklyCostUsd.toFixed(2),
+          unpricedCalls: rawPoolsWeeklyUnpricedCalls,
+        }
+      : null;
+
+  const result = {
     selectedWindow,
     trendStartMs,
     trendEndMs,
@@ -831,5 +1006,22 @@ export function aggregateMultiWindowUsage({
     todayBucket,
     weekBucket,
     modelBreakdown,
+    poolCycleStats,
+    poolsWeeklySummary,
   };
+  if (modelInputs) {
+    if (!sameSnapshot) {
+      lastUsageSnapshot = {
+        timeZone, modelInputs, currentYear, entries: allEntriesToAggregate, dates: null, ranges: new Map(),
+      };
+    }
+    const { ranges } = lastUsageSnapshot;
+    ranges.delete(selectedWindow.key);
+    ranges.set(selectedWindow.key, {
+      windows, trend, result, earliest: earliestSelectedStepMs, latest: latestSelectedStepMs,
+    });
+    // 侧栏和悬浮窗可同时查看不同范围，共用时间索引并最多保留两份聚合结果。
+    if (ranges.size > 2) ranges.delete(ranges.keys().next().value);
+  }
+  return result;
 }

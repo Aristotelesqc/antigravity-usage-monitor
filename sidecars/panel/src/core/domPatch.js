@@ -179,6 +179,15 @@ export function patchKeyedList(container, items, { keyFn, sigFn, createRow, upda
     }
   }
 
+  if (!container.firstChild && orderedNodes.length > 1 && typeof document.createDocumentFragment === 'function') {
+    const fragment = document.createDocumentFragment();
+    for (const node of orderedNodes) {
+      fragment.appendChild(node);
+    }
+    container.appendChild(fragment);
+    return;
+  }
+
   // Reorder or insert nodes with minimal DOM moves
   for (let i = 0; i < orderedNodes.length; i++) {
     const targetNode = orderedNodes[i];

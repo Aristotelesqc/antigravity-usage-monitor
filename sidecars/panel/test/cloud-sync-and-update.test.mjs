@@ -289,7 +289,7 @@ test('repository migration: scrubs legacy yuhuan2498281558 cache URLs/TTL and mi
       downloadUrl: 'https://github.com/yuhuan2498281558/antigravity-usage-monitor/releases/latest/download/usage-monitor.zip',
       archiveFallbackUrl: 'https://codeload.github.com/yuhuan2498281558/antigravity-usage-monitor/zip/refs/heads/main',
       sourceUrl: 'https://raw.githubusercontent.com/yuhuan2498281558/antigravity-usage-monitor/main/pricing-catalog.json',
-      fetchedAtMs: Date.now() - 60_000, // 1 min ago from old repo -> must NOT block non-forced sync to yuhuan-dev
+      fetchedAtMs: Date.now() - 60_000,
       pricing: {
         'gemini-4-carbon-high': { input: 2.0, cache: 0.1, output: 10.0, short: 'carbon-4-high', family: 'Gemini' },
       },

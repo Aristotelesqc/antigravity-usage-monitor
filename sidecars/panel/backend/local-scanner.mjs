@@ -10,6 +10,7 @@
 
 import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   extractLiveActivity,
   extractModelSteps,
@@ -17,10 +18,13 @@ import {
   parseIsoMs,
 } from '../speed-metrics.mjs';
 import {
+  ANNOTATION_DIRS,
   BRAIN_DIR,
+  BRAIN_DIRS,
   CACHE_FILE,
   CACHE_SCHEMA_VERSION,
   CONVERSATIONS_DIR,
+  CONVERSATION_DIRS,
   DEEP_STATS_CACHE_CANDIDATES,
   cacheState,
   externalDeepStatsMemo,
@@ -28,38 +32,94 @@ import {
   saveJson,
   trajectoryCache,
 } from './config.mjs';
+import {
+  hasBuiltinNodeSqlite,
+  readAnnotationTitleForCascade,
+  readLocalSqliteTrajectory,
+  readLocalSummaryIndex,
+} from './cli-sqlite-reader.mjs';
 import { callLsRpc } from './ls-rpc.mjs';
 import { formatGenericModelSlug, getBaseModelLabel } from './model-pricing.mjs';
+import { PLACEHOLDER_MAP } from './pricing-catalog.mjs';
+
+const CONV_FILE_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(db|pb|db-wal)$/i;
+const TRANSCRIPT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * 扫描本地 `conversations` 目录，返回 `cascadeId -> 最新磁盘修改时间 (mtimeMs)` 映射表。
+ * 联合扫描本地多端（Desktop / CLI / IDE）的 `conversations` 与 `brain/<id>/.system_generated/logs/transcript.jsonl`，
+ * 按小写 `cascadeId` 归并关联磁盘文件路径。
  *
- * @returns {Map<string, number>}
+ * @returns {Map<string, string[]>}
  */
 function discoverLocalConversationFiles() {
   const map = new Map();
-  if (!existsSync(CONVERSATIONS_DIR)) return map;
-  try {
-    for (const name of readdirSync(CONVERSATIONS_DIR)) {
-      const m = name.match(
-        /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(db|pb|db-wal)$/i
-      );
-      if (!m) continue;
-      const cascadeId = m[1].toLowerCase();
-      try {
-        const st = statSync(join(CONVERSATIONS_DIR, name));
-        const prevMtime = map.get(cascadeId) || 0;
-        if (st.mtimeMs > prevMtime) {
-          map.set(cascadeId, st.mtimeMs);
+  const convDirs =
+    Array.isArray(CONVERSATION_DIRS) && CONVERSATION_DIRS.length > 0
+      ? CONVERSATION_DIRS
+      : [CONVERSATIONS_DIR];
+  for (const dir of convDirs) {
+    if (!dir || !existsSync(dir)) continue;
+    try {
+      for (const rawName of readdirSync(dir)) {
+        const name = String(rawName || '');
+        const m = name.match(CONV_FILE_RE);
+        if (!m) continue;
+        const cascadeId = m[1].toLowerCase();
+        if (!map.has(cascadeId)) map.set(cascadeId, []);
+        map.get(cascadeId).push(join(dir, name));
+      }
+    } catch {
+      // 忽略目录读取异常
+    }
+  }
+
+  const brainDirs =
+    Array.isArray(BRAIN_DIRS) && BRAIN_DIRS.length > 0 ? BRAIN_DIRS : [BRAIN_DIR];
+  for (const dir of brainDirs) {
+    if (!dir || !existsSync(dir)) continue;
+    try {
+      for (const rawName of readdirSync(dir)) {
+        const name = String(rawName || '').trim();
+        const cascadeId = name.toLowerCase();
+        if (!TRANSCRIPT_UUID_RE.test(cascadeId)) continue;
+        const transcriptPath = join(dir, name, '.system_generated', 'logs', 'transcript.jsonl');
+        if (!existsSync(transcriptPath)) continue;
+        if (!map.has(cascadeId)) map.set(cascadeId, []);
+        map.get(cascadeId).push(transcriptPath);
+      }
+    } catch {
+      // 忽略目录读取异常
+    }
+  }
+
+  const annotationDirs = Array.isArray(ANNOTATION_DIRS) ? ANNOTATION_DIRS : [];
+  if (annotationDirs.length > 0 && map.size > 0) {
+    for (const [cascadeId, fileList] of map.entries()) {
+      for (const annDir of annotationDirs) {
+        if (!annDir) continue;
+        const pbtxtPath = join(annDir, `${cascadeId}.pbtxt`);
+        if (existsSync(pbtxtPath)) {
+          fileList.push(pbtxtPath);
         }
-      } catch {
-        if (!map.has(cascadeId)) map.set(cascadeId, 0);
       }
     }
-  } catch {
-    // 忽略目录读取异常
   }
   return map;
+}
+
+function readConversationMtime(files = []) {
+  let mtimeMs = 0;
+  for (const nameOrPath of files) {
+    try {
+      const fullPath = /[\\/]|^[a-zA-Z]:/.test(nameOrPath)
+        ? nameOrPath
+        : join(CONVERSATIONS_DIR, nameOrPath);
+      mtimeMs = Math.max(mtimeMs, Number(statSync(fullPath)?.mtimeMs || 0));
+    } catch {
+      // 轨迹文件可能在目录枚举后被宿主删除。
+    }
+  }
+  return mtimeMs;
 }
 
 /**
@@ -99,9 +159,23 @@ export function loadExternalDeepStatsCache() {
 
     for (const item of Object.values(raw.perConvo)) {
       for (const e of item?.entries || []) {
+        const intrinsicDisplay =
+          PLACEHOLDER_MAP[e?.modelRuntimeId]?.label ||
+          formatGenericModelSlug(e?.modelCanonicalId || e?.model);
+        const isSessionDisplayAgg = /^session-display:/i.test(String(e?.modelAggregationId || ''));
+        const usableDisplayHint =
+          e?.modelDisplayName &&
+          !(
+            isSessionDisplayAgg &&
+            intrinsicDisplay &&
+            getBaseModelLabel(e.modelDisplayName) !== getBaseModelLabel(intrinsicDisplay)
+          )
+            ? e.modelDisplayName
+            : '';
         const display =
-          e?.modelDisplayName ||
-          formatGenericModelSlug(e?.modelCanonicalId || e?.model || e?.modelAggregationId);
+          usableDisplayHint ||
+          intrinsicDisplay ||
+          formatGenericModelSlug(e?.modelAggregationId);
         if (!display) continue;
         const base = getBaseModelLabel(display);
         if (e?.modelRuntimeId && !runtimeDisplayMap.has(e.modelRuntimeId)) {
@@ -140,18 +214,41 @@ export function loadExternalDeepStatsCache() {
         if (inputTokens === 0 && cacheReadTokens === 0 && outputTokens === 0) continue;
         const createdAtMs = e?.ts ? Date.parse(e.ts) || 0 : 0;
         if (createdAtMs > lastModifiedMs) lastModifiedMs = createdAtMs;
+        const stepIntrinsicLabel =
+          PLACEHOLDER_MAP[e?.modelRuntimeId]?.label ||
+          formatGenericModelSlug(e?.modelCanonicalId || e?.model);
+        const isSessionDisplayAgg = /^session-display:/i.test(String(e?.modelAggregationId || ''));
+        const safeStepDisplayName =
+          e?.modelDisplayName &&
+          !(
+            isSessionDisplayAgg &&
+            stepIntrinsicLabel &&
+            getBaseModelLabel(e.modelDisplayName) !== getBaseModelLabel(stepIntrinsicLabel)
+          )
+            ? e.modelDisplayName
+            : '';
         const resolvedDisplay =
-          e?.modelDisplayName ||
+          safeStepDisplayName ||
+          stepIntrinsicLabel ||
           runtimeDisplayMap.get(e?.model) ||
           runtimeDisplayMap.get(e?.modelRuntimeId) ||
-          formatGenericModelSlug(e?.modelCanonicalId || e?.model || e?.modelAggregationId) ||
+          formatGenericModelSlug(e?.modelAggregationId) ||
           '';
+        const rawUpstreamCandidate = String(e?.model || e?.modelCanonicalId || '').trim();
+        const inferredResponseModel =
+          /^session:/i.test(String(e?.modelAggregationId || '')) &&
+          rawUpstreamCandidate &&
+          !/^MODEL_/i.test(rawUpstreamCandidate) &&
+          !/\s/.test(rawUpstreamCandidate)
+            ? rawUpstreamCandidate
+            : '';
         steps.push({
           stepIndex: idx + 1,
           createdAt: e?.ts || '',
           createdAtMs,
           modelKey: e?.modelCanonicalId || e?.model || e?.modelRuntimeId || 'unknown',
           modelDisplayName: resolvedDisplay,
+          ...(inferredResponseModel ? { responseModel: inferredResponseModel } : {}),
           apiProvider: e?.provider || '',
           appSource,
           inputTokens,
@@ -181,6 +278,7 @@ export function loadExternalDeepStatsCache() {
 
 const MAX_CONCURRENT_RPC = 4;
 const LEGACY_MIGRATION_BATCH_SIZE = 8;
+const stepFieldChecks = new WeakMap();
 const MAX_SUBAGENT_RECONCILE_DEPTH = 4;
 const FAILED_RPC_COOLDOWN_MS = 60_000;
 const ACTIVE_FAILED_RPC_COOLDOWN_MS = 15_000;
@@ -190,6 +288,420 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const failedFetchCooldownMap = new Map();
 const liveActivityMemo = new Map();
 const transcriptTailMemo = new Map();
+
+function findTranscriptPath(cascadeId) {
+  if (!cascadeId) return '';
+  const normId = String(cascadeId).trim().toLowerCase();
+  if (!UUID_RE.test(normId)) return '';
+  const dirs = Array.isArray(BRAIN_DIRS) && BRAIN_DIRS.length > 0 ? BRAIN_DIRS : [BRAIN_DIR];
+  let bestPath = '';
+  let bestMtime = -1;
+  for (const dir of dirs) {
+    if (!dir) continue;
+    const candidate = join(dir, normId, '.system_generated', 'logs', 'transcript.jsonl');
+    if (!existsSync(candidate)) continue;
+    if (dirs.length === 1) return candidate;
+    try {
+      const mtime = Number(statSync(candidate)?.mtimeMs || 0);
+      if (mtime > bestMtime) {
+        bestMtime = mtime;
+        bestPath = candidate;
+      }
+    } catch {
+      if (!bestPath) bestPath = candidate;
+    }
+  }
+  return bestPath;
+}
+
+function inferConversationAppSource(diskFiles = [], extMatch = null) {
+  if (extMatch?.appSource && extMatch.appSource !== 'standalone') {
+    return extMatch.appSource;
+  }
+  for (const filePath of Array.isArray(diskFiles) ? diskFiles : []) {
+    const s = String(filePath || '');
+    if (/[\\/]antigravity-cli(?:[\\/]|$)/i.test(s)) return 'cli';
+    if (/[\\/]antigravity-ide(?:[\\/]|$)/i.test(s)) return 'ide';
+  }
+  return '';
+}
+
+function extractOfflineUserTitle(rawContent) {
+  if (typeof rawContent !== 'string' || !rawContent.trim()) return '';
+  const withoutSummary = rawContent
+    .replace(/<CONTEXT_SUMMARY>[\s\S]*?<\/CONTEXT_SUMMARY>/gi, '')
+    .replace(/<SYSTEM_MESSAGE>[\s\S]*$/i, '');
+  const reqMatches = [...withoutSummary.matchAll(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/gi)];
+  const body =
+    reqMatches.length > 0
+      ? reqMatches[reqMatches.length - 1][1]
+      : withoutSummary.replace(/<ADDITIONAL_METADATA>[\s\S]*$/i, '');
+  const firstLine = String(body || '')
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .find(Boolean);
+  if (!firstLine) return '';
+  return firstLine.length > 48 ? `${firstLine.slice(0, 47)}…` : firstLine;
+}
+
+function hasLocalSqliteDb(diskFiles = []) {
+  return Array.isArray(diskFiles) && diskFiles.some((f) => /\.db$/i.test(String(f || '')));
+}
+
+function findBestSqliteDbPath(diskFiles = []) {
+  if (!Array.isArray(diskFiles) || diskFiles.length === 0) return '';
+  let bestPath = '';
+  let bestMtime = -1;
+  for (const rawPath of diskFiles) {
+    const p = String(rawPath || '').trim();
+    if (!/\.db$/i.test(p)) continue;
+    const fullPath = /[\\/]|^[a-zA-Z]:/.test(p) ? p : join(CONVERSATIONS_DIR, p);
+    if (!existsSync(fullPath)) continue;
+    try {
+      const mtime = Number(statSync(fullPath)?.mtimeMs || 0);
+      if (mtime > bestMtime) {
+        bestMtime = mtime;
+        bestPath = fullPath;
+      }
+    } catch {
+      if (!bestPath) bestPath = fullPath;
+    }
+  }
+  return bestPath;
+}
+
+/**
+ * 当 Language Server RPC 离线或跨端不可达（如 `agy` CLI 独立会话目录）时，优先融合本地 SQLite
+ * (`conversations/<id>.db` + `conversation_summaries.db` + `annotations/<id>.pbtxt`) 与 `transcript.jsonl`
+ * （及可选 `.deep_stats_cache.json`）恢复完整步骤耗时、TTFT、思考/正文拆分、10 通道上下文构成与真实标题。
+ */
+function loadOfflineTranscriptConversation(conv, diskFiles, externalByLower, localSummary = null) {
+  const cidLower = String(conv?.cascadeId || '').trim().toLowerCase();
+  if (!cidLower) return null;
+  const extMatch = externalByLower?.get(cidLower) || null;
+  const sqliteDbPath = findBestSqliteDbPath(diskFiles);
+  const sqliteTraj = sqliteDbPath ? readLocalSqliteTrajectory(sqliteDbPath) : null;
+  const transcriptPath = findTranscriptPath(cidLower);
+
+  const transcriptLines = [];
+  if (transcriptPath && existsSync(transcriptPath)) {
+    try {
+      const raw = readFileSync(transcriptPath, 'utf8');
+      if (typeof raw === 'string' && raw.trim()) {
+        for (const line of raw.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed && typeof parsed === 'object') {
+              transcriptLines.push(parsed);
+            }
+          } catch {
+            // 忽略尾部半行或损坏 JSON 行
+          }
+        }
+      }
+    } catch {
+      // 忽略文件读取失败
+    }
+  }
+
+  if (!sqliteTraj && transcriptLines.length === 0 && !extMatch) {
+    return null;
+  }
+
+  let firstUserTitle = '';
+  const transcriptByStepIdx = new Map();
+  for (let rawIdx = 0; rawIdx < transcriptLines.length; rawIdx++) {
+    const line = transcriptLines[rawIdx];
+    const sIdx = Number.isFinite(Number(line.step_index)) ? Number(line.step_index) : rawIdx;
+    transcriptByStepIdx.set(sIdx, line);
+    const upperType = String(line.type || '').trim().toUpperCase();
+    if (
+      !firstUserTitle &&
+      (upperType === 'USER_INPUT' ||
+        upperType === 'CORTEX_STEP_TYPE_USER_INPUT' ||
+        (line.userInput && typeof line.userInput === 'object'))
+    ) {
+      firstUserTitle = extractOfflineUserTitle(
+        typeof line.content === 'string' ? line.content : line.userInput?.userResponse || ''
+      );
+    }
+  }
+
+  let steps = [];
+  let fromSqlite = false;
+
+  if (sqliteTraj && sqliteTraj.steps.length > 0) {
+    fromSqlite = true;
+    const sqliteRawSteps = [];
+    let maxSqliteStepIdx = -1;
+    let modelOrdinal = 0;
+
+    for (const sq of sqliteTraj.steps) {
+      const sIdx = Number(sq.metadata?.sourceTrajectoryStepInfo?.stepIndex ?? sq.idx);
+      if (Number.isFinite(sIdx) && sIdx > maxSqliteStepIdx) {
+        maxSqliteStepIdx = sIdx;
+      }
+      const tLine = transcriptByStepIdx.get(sIdx) || null;
+      if (sq.type === 'CORTEX_STEP_TYPE_USER_INPUT') {
+        sqliteRawSteps.push({
+          type: sq.type,
+          status: sq.status,
+          ...(typeof tLine?.content === 'string' ? { content: tLine.content } : {}),
+          ...(tLine?.userInput ? { userInput: tLine.userInput } : {}),
+          ...(Array.isArray(tLine?.media) ? { media: tLine.media } : {}),
+          metadata: sq.metadata,
+        });
+        continue;
+      }
+
+      if (sq.metadata?.modelUsage) {
+        const deepStep = extMatch?.steps?.[modelOrdinal] || null;
+        modelOrdinal += 1;
+        const mu = { ...sq.metadata.modelUsage };
+        if (!mu.model) {
+          const fallbackModel = String(
+            tLine?.model || tLine?.generator_model || deepStep?.modelKey || ''
+          ).trim();
+          if (fallbackModel) mu.model = fallbackModel;
+        }
+        if (!mu.responseModel && (tLine?.response_model || deepStep?.responseModel)) {
+          mu.responseModel = String(tLine?.response_model || deepStep?.responseModel).trim();
+        }
+        sqliteRawSteps.push({
+          type: sq.type,
+          status: sq.status,
+          plannerResponse: {
+            response: typeof tLine?.content === 'string' ? tLine.content : '',
+            thinking: typeof tLine?.thinking === 'string' ? tLine.thinking : '',
+            toolCalls: Array.isArray(tLine?.tool_calls) ? tLine.tool_calls : [],
+          },
+          metadata: {
+            ...sq.metadata,
+            modelUsage: mu,
+          },
+        });
+      }
+    }
+
+    // 补充可能已刷入 transcript.jsonl 但尚未刷入 SQLite 的尾部步骤
+    for (const [sIdx, line] of transcriptByStepIdx.entries()) {
+      if (sIdx <= maxSqliteStepIdx) continue;
+      const upperType = String(line.type || '').trim().toUpperCase();
+      if (
+        upperType === 'USER_INPUT' ||
+        upperType === 'CORTEX_STEP_TYPE_USER_INPUT' ||
+        (line.userInput && typeof line.userInput === 'object')
+      ) {
+        sqliteRawSteps.push(line);
+      } else if (
+        line.input_tokens !== undefined ||
+        line.cache_read_tokens !== undefined ||
+        line.output_tokens !== undefined
+      ) {
+        sqliteRawSteps.push({
+          type:
+            upperType === 'CHECKPOINT' || upperType === 'CORTEX_STEP_TYPE_CHECKPOINT'
+              ? 'CORTEX_STEP_TYPE_CHECKPOINT'
+              : String(line.type || 'PLANNER_RESPONSE'),
+          status: /CANCEL/i.test(String(line.status || ''))
+            ? 'CORTEX_STEP_STATUS_CANCELED'
+            : 'CORTEX_STEP_STATUS_DONE',
+          plannerResponse: {
+            response: typeof line.content === 'string' ? line.content : '',
+            thinking: typeof line.thinking === 'string' ? line.thinking : '',
+            toolCalls: Array.isArray(line.tool_calls) ? line.tool_calls : [],
+          },
+          metadata: {
+            createdAt: String(line.created_at || line.createdAt || ''),
+            sourceTrajectoryStepInfo: { stepIndex: sIdx },
+            modelUsage: {
+              model: String(line.model || line.generator_model || 'unknown').trim() || 'unknown',
+              inputTokens: line.input_tokens ?? 0,
+              cacheReadTokens: line.cache_read_tokens ?? 0,
+              outputTokens: line.output_tokens ?? 0,
+            },
+          },
+        });
+      }
+    }
+
+    steps = extractModelSteps(sqliteRawSteps, sqliteTraj.generatorMetadata || []);
+  }
+
+  if (steps.length === 0 && transcriptLines.length > 0) {
+    const syntheticSteps = [];
+    let modelOrdinal = 0;
+
+    for (let rawIdx = 0; rawIdx < transcriptLines.length; rawIdx++) {
+      const line = transcriptLines[rawIdx];
+      const rawType = String(line.type || '').trim();
+      const upperType = rawType.toUpperCase();
+      if (
+        upperType === 'USER_INPUT' ||
+        upperType === 'CORTEX_STEP_TYPE_USER_INPUT' ||
+        (line.userInput && typeof line.userInput === 'object')
+      ) {
+        syntheticSteps.push(line);
+        continue;
+      }
+
+      if (line.metadata?.modelUsage) {
+        syntheticSteps.push(line);
+        modelOrdinal += 1;
+        continue;
+      }
+
+      const hasTokenCounts =
+        line.input_tokens !== undefined ||
+        line.cache_read_tokens !== undefined ||
+        line.output_tokens !== undefined;
+      if (!hasTokenCounts) continue;
+
+      const deepStep = extMatch?.steps?.[modelOrdinal] || null;
+      modelOrdinal += 1;
+      const isCheckpoint =
+        upperType === 'CHECKPOINT' || upperType === 'CORTEX_STEP_TYPE_CHECKPOINT';
+      const rawStatus = String(line.status || '').trim().toUpperCase();
+      const mappedStatus = /CANCEL/.test(rawStatus)
+        ? 'CORTEX_STEP_STATUS_CANCELED'
+        : 'CORTEX_STEP_STATUS_DONE';
+      const finishedAt = String(
+        line.finished_generating_at ||
+          line.finishedGeneratingAt ||
+          line.completed_at ||
+          line.completedAt ||
+          ''
+      ).trim();
+      const modelKey =
+        String(line.model || line.generator_model || deepStep?.modelKey || 'unknown').trim() ||
+        'unknown';
+      const responseModel = String(line.response_model || deepStep?.responseModel || '').trim();
+      const apiProvider = String(line.api_provider || deepStep?.apiProvider || '').trim();
+      const modelDisplayName = String(
+        line.model_display_name || deepStep?.modelDisplayName || ''
+      ).trim();
+      const thinkingTokens = Number(line.thinking_tokens ?? deepStep?.thinkingTokens ?? 0) || 0;
+      const responseTokens = line.response_tokens ?? deepStep?.responseTokens;
+
+      syntheticSteps.push({
+        type: isCheckpoint ? 'CORTEX_STEP_TYPE_CHECKPOINT' : rawType || 'PLANNER_RESPONSE',
+        status: mappedStatus,
+        plannerResponse: {
+          response: typeof line.content === 'string' ? line.content : '',
+          thinking: typeof line.thinking === 'string' ? line.thinking : '',
+          toolCalls: Array.isArray(line.tool_calls) ? line.tool_calls : [],
+          ...(thinkingTokens > 0 ? { thinkingTokens } : {}),
+          ...(responseTokens !== undefined ? { responseTokens } : {}),
+        },
+        metadata: {
+          createdAt: String(line.created_at || line.createdAt || deepStep?.createdAt || ''),
+          ...(finishedAt ? { finishedGeneratingAt: finishedAt } : {}),
+          sourceTrajectoryStepInfo: {
+            stepIndex: Number.isFinite(Number(line.step_index)) ? Number(line.step_index) : rawIdx,
+          },
+          modelUsage: {
+            model: modelKey,
+            ...(responseModel ? { responseModel } : {}),
+            ...(apiProvider ? { apiProvider } : {}),
+            inputTokens: line.input_tokens ?? deepStep?.inputTokens ?? 0,
+            cacheReadTokens: line.cache_read_tokens ?? deepStep?.cacheReadTokens ?? 0,
+            outputTokens: line.output_tokens ?? deepStep?.outputTokens ?? 0,
+            ...(thinkingTokens > 0 ? { thinkingOutputTokens: thinkingTokens } : {}),
+            ...(responseTokens !== undefined ? { responseOutputTokens: responseTokens } : {}),
+          },
+          ...(modelDisplayName
+            ? { generatorMetadata: [{ chatModel: { modelDisplayName } }] }
+            : {}),
+        },
+      });
+    }
+
+    steps = syntheticSteps.length > 0 ? extractModelSteps(syntheticSteps, []) : [];
+  }
+
+  if (steps.length === 0 && Array.isArray(extMatch?.steps) && extMatch.steps.length > 0) {
+    const extSynthetic = extMatch.steps.map((ds, idx) => ({
+      type: 'PLANNER_RESPONSE',
+      status: 'CORTEX_STEP_STATUS_DONE',
+      plannerResponse: {
+        ...(ds.thinkingTokens > 0 ? { thinkingTokens: ds.thinkingTokens } : {}),
+        ...(ds.responseTokens !== undefined ? { responseTokens: ds.responseTokens } : {}),
+      },
+      metadata: {
+        createdAt: ds.createdAt || '',
+        sourceTrajectoryStepInfo: { stepIndex: ds.stepIndex ?? idx + 1 },
+        modelUsage: {
+          model: ds.modelKey || 'unknown',
+          ...(ds.responseModel ? { responseModel: ds.responseModel } : {}),
+          ...(ds.apiProvider ? { apiProvider: ds.apiProvider } : {}),
+          inputTokens: ds.inputTokens || 0,
+          cacheReadTokens: ds.cacheReadTokens || 0,
+          outputTokens: ds.outputTokens || 0,
+          ...(ds.thinkingTokens > 0 ? { thinkingOutputTokens: ds.thinkingTokens } : {}),
+          ...(ds.responseTokens !== undefined
+            ? { responseOutputTokens: ds.responseTokens }
+            : {}),
+        },
+        ...(ds.modelDisplayName
+          ? { generatorMetadata: [{ chatModel: { modelDisplayName: ds.modelDisplayName } }] }
+          : {}),
+      },
+    }));
+    steps = extractModelSteps(extSynthetic, []);
+  }
+
+  const defaultShortId = cidLower.slice(0, 8);
+  const nonShortTitle = (t) => {
+    const clean = String(t || '').trim();
+    return clean && clean.toLowerCase() !== defaultShortId ? clean : '';
+  };
+  const annotationTitle = nonShortTitle(readAnnotationTitleForCascade(cidLower));
+  const summaryTitle = nonShortTitle(localSummary?.title);
+  const currentTitle = nonShortTitle(conv.title);
+  const extTitle = nonShortTitle(extMatch?.title);
+  const resolvedTitle =
+    annotationTitle ||
+    summaryTitle ||
+    currentTitle ||
+    extTitle ||
+    firstUserTitle ||
+    String(conv.title || '').trim() ||
+    conv.cascadeId.slice(0, 8);
+
+  const parentConversationId = String(
+    localSummary?.parentConversationId ||
+      sqliteTraj?.parentConversationId ||
+      conv.parentConversationId ||
+      ''
+  )
+    .trim()
+    .toLowerCase();
+  const rawRootCid = String(sqliteTraj?.rootConversationId || conv.rootConversationId || '')
+    .trim()
+    .toLowerCase();
+  const rootConversationId =
+    rawRootCid && rawRootCid !== cidLower ? rawRootCid : parentConversationId;
+
+  const lastStepMs = steps[steps.length - 1]?.createdAtMs || 0;
+  return {
+    steps,
+    fromSqlite,
+    title: resolvedTitle,
+    accountName: extMatch?.accountName || '',
+    appSource: inferConversationAppSource(diskFiles, extMatch),
+    parentConversationId,
+    rootConversationId,
+    lastModifiedMs: Math.max(
+      conv.lastModifiedMs || 0,
+      localSummary?.lastModifiedMs || 0,
+      extMatch?.lastModifiedMs || 0,
+      lastStepMs
+    ),
+    subagentRefs: [],
+  };
+}
 
 /**
  * 读取指定会话在本地 `brain/<cascadeId>/.system_generated/logs/transcript.jsonl` 的尾部步骤。
@@ -203,20 +715,20 @@ function readTranscriptTailSteps(cascadeId, maxLines = 24) {
   if (!cascadeId) return [];
   const normId = String(cascadeId).trim().toLowerCase();
   if (!UUID_RE.test(normId)) return [];
-  const transcriptPath = join(
-    BRAIN_DIR,
-    normId,
-    '.system_generated',
-    'logs',
-    'transcript.jsonl'
-  );
-  if (!existsSync(transcriptPath)) return [];
+  const transcriptPath = findTranscriptPath(normId);
+  if (!transcriptPath) return [];
   try {
     const st = statSync(transcriptPath);
     const mtimeMs = Number(st?.mtimeMs || 0);
     const size = Number(st?.size || 0);
     const cached = transcriptTailMemo.get(normId);
-    if (cached && cached.mtimeMs === mtimeMs && cached.size === size && size > 0) {
+    if (
+      cached &&
+      cached.path === transcriptPath &&
+      cached.mtimeMs === mtimeMs &&
+      cached.size === size &&
+      size > 0
+    ) {
       return cached.steps;
     }
 
@@ -257,7 +769,7 @@ function readTranscriptTailSteps(cascadeId, maxLines = 24) {
     }
 
     if (typeof raw !== 'string' || !raw.trim()) {
-      transcriptTailMemo.set(normId, { mtimeMs, size, steps: [] });
+      transcriptTailMemo.set(normId, { path: transcriptPath, mtimeMs, size, steps: [] });
       return [];
     }
     const lines = raw.trim().split(/\r?\n/);
@@ -279,7 +791,7 @@ function readTranscriptTailSteps(cascadeId, maxLines = 24) {
       const oldestKey = transcriptTailMemo.keys().next().value;
       if (oldestKey !== undefined) transcriptTailMemo.delete(oldestKey);
     }
-    transcriptTailMemo.set(normId, { mtimeMs, size, steps });
+    transcriptTailMemo.set(normId, { path: transcriptPath, mtimeMs, size, steps });
     return steps;
   } catch {
     return [];
@@ -493,7 +1005,7 @@ function extractTrajectorySubagentMeta(trajRes, fallback = {}) {
  *
  * @param {{
  *   summariesObj?: Record<string, object>,
- *   currentAccountName?: string,
+ *   currentAccountName?: string|null,
  *   requestedConvId?: string,
  *   forceRefresh?: boolean
  * }} params
@@ -566,13 +1078,11 @@ export async function enumerateAndSyncConversations({
   }
 
   // 仅从归属于当前账号的缓存会话收集 subagentRefs，防止跨账号切换时将其他账号的子代理复活进当前会话列表
-  for (const [cacheKey, entry] of Object.entries(trajectoryCache)) {
-    const cacheKeyLower = String(cacheKey || '').toLowerCase();
+  for (const entry of Object.values(trajectoryCache)) {
     if (
       entry?.accountName &&
-      currentAccountName &&
-      entry.accountName !== currentAccountName &&
-      !summariesByLower.has(cacheKeyLower)
+      currentAccountName !== '' &&
+      entry.accountName !== currentAccountName
     ) {
       continue;
     }
@@ -584,28 +1094,40 @@ export async function enumerateAndSyncConversations({
     }
   }
 
+  const localSummaryByLower = readLocalSummaryIndex();
+  const STALE_LOCAL_RUNNING_MAX_AGE_MS = 10 * 60_000;
   const reqLower = String(requestedConvId || '').trim().toLowerCase();
   const rawConversations = [];
   for (const [cidLower, cascadeId] of canonicalIdByLower.entries()) {
     const item = summariesByLower.get(cidLower);
+    const localSum = item ? null : localSummaryByLower.get(cidLower) || null;
     const cached = trajectoryCache[cascadeId];
     if (
       cached?.accountName &&
-      currentAccountName &&
-      cached.accountName !== currentAccountName &&
-      !item
+      currentAccountName !== '' &&
+      cached.accountName !== currentAccountName
     ) {
       continue;
     }
-    const diskMtimeMs = diskConvMap.get(cidLower) || 0;
+    const lastModifiedTime = item?.lastModifiedTime || item?.createdTime || '';
+    const summaryMtimeMs = parseIsoMs(lastModifiedTime);
+    const diskMtimeMs = summaryMtimeMs ? null : readConversationMtime(diskConvMap.get(cidLower));
     const rawMeta = item?.trajectoryMetadata || item?.metadata || {};
     const parentConversationId = String(
-      rawMeta.parentConversationId || cached?.parentConversationId || ''
+      rawMeta.parentConversationId ||
+        localSum?.parentConversationId ||
+        cached?.parentConversationId ||
+        ''
     ).toLowerCase();
     const rootConversationId = String(
       rawMeta.rootConversationId || cached?.rootConversationId || parentConversationId || ''
     ).toLowerCase();
-    const subagentSpec = mergeSubagentSpecs(rawMeta.subagentSpec, cached?.subagentSpec);
+    const localAgentSpec =
+      parentConversationId && localSum?.agentName ? { role: localSum.agentName } : null;
+    const subagentSpec = mergeSubagentSpecs(
+      rawMeta.subagentSpec,
+      mergeSubagentSpecs(localAgentSpec, cached?.subagentSpec)
+    );
     const agentScriptName = rawMeta.agentScript?.name || cached?.agentScriptName || '';
     const createdTimeMs =
       parseIsoMs(item?.createdTime || rawMeta?.createdAt) || cached?.createdTimeMs || 0;
@@ -614,11 +1136,17 @@ export async function enumerateAndSyncConversations({
     const isSubagent =
       Boolean(parentConversationId) ||
       Boolean(rootConversationId && rootConversationId !== cidLower);
+    const latestLocalTouchMs = Math.max(diskMtimeMs || 0, localSum?.lastModifiedMs || 0);
+    const localStatus =
+      localSum?.status === 'CASCADE_RUN_STATUS_RUNNING' &&
+      latestLocalTouchMs > 0 &&
+      nowSweepMs - latestLocalTouchMs <= STALE_LOCAL_RUNNING_MAX_AGE_MS
+        ? 'CASCADE_RUN_STATUS_RUNNING'
+        : 'IDLE';
 
     if (item) {
-      const lastModifiedTime = item?.lastModifiedTime || item?.createdTime || '';
       const lastModifiedMs =
-        parseIsoMs(lastModifiedTime) || diskMtimeMs || cached?.lastModifiedMs || 0;
+        summaryMtimeMs || diskMtimeMs || cached?.lastModifiedMs || 0;
       const rawSummaryStepCount = Number(item?.stepCount || 0);
       const modelStepCount = Array.isArray(cached?.steps)
         ? cached.steps.length
@@ -648,12 +1176,17 @@ export async function enumerateAndSyncConversations({
       const cachedStepCount = Number(cached.steps?.length || 0);
       rawConversations.push({
         cascadeId,
-        title: cached.title || cascadeId.slice(0, 8),
+        title: localSum?.title || cached.title || cascadeId.slice(0, 8),
         stepCount: cachedStepCount,
-        rawStepCount: cachedStepCount,
-        status: 'IDLE',
-        lastModifiedTime: '',
-        lastModifiedMs: Math.max(cached.lastModifiedMs || 0, lastStepMs, diskMtimeMs),
+        rawStepCount: localSum?.stepCount || cachedStepCount,
+        status: localStatus,
+        lastModifiedTime: localSum?.lastModifiedTime || '',
+        lastModifiedMs: Math.max(
+          cached.lastModifiedMs || 0,
+          lastStepMs,
+          diskMtimeMs || 0,
+          localSum?.lastModifiedMs || 0
+        ),
         diskMtimeMs,
         inSummaries: false,
         isSubagent,
@@ -668,21 +1201,21 @@ export async function enumerateAndSyncConversations({
     } else {
       rawConversations.push({
         cascadeId,
-        title: cascadeId.slice(0, 8),
+        title: localSum?.title || cascadeId.slice(0, 8),
         stepCount: 0,
-        rawStepCount: 0,
-        status: 'IDLE',
-        lastModifiedTime: '',
-        lastModifiedMs: diskMtimeMs,
+        rawStepCount: localSum?.stepCount || 0,
+        status: localStatus,
+        lastModifiedTime: localSum?.lastModifiedTime || '',
+        lastModifiedMs: Math.max(diskMtimeMs || 0, localSum?.lastModifiedMs || 0),
         diskMtimeMs,
         inSummaries: false,
         needsInitialLoad: true,
-        isSubagent: false,
-        parentConversationId: '',
-        rootConversationId: '',
-        subagentSpec: null,
-        agentScriptName: '',
-        createdTimeMs: 0,
+        isSubagent,
+        parentConversationId,
+        rootConversationId,
+        subagentSpec,
+        agentScriptName,
+        createdTimeMs,
         spawnOrder: null,
         subagentRefs: null,
       });
@@ -724,19 +1257,33 @@ export async function enumerateAndSyncConversations({
     if (!Object.prototype.hasOwnProperty.call(lastCachedStep, 'contextBreakdown')) {
       return true;
     }
-    if (steps.some((s) => !Object.prototype.hasOwnProperty.call(s, 'responseModel'))) {
-      return true;
-    }
+    const { missingResponseModel, missingToolResultsTokens } = readStepFieldChecks(steps);
+    return missingResponseModel || missingToolResultsTokens;
+  }
+
+  function readStepFieldChecks(steps) {
+    const known = stepFieldChecks.get(steps);
+    if (known) return known;
+    let missingToolResultsTokens = false;
     for (let i = steps.length - 1; i >= 0; i--) {
       if (steps[i]?.contextBreakdown) {
-        return !Object.prototype.hasOwnProperty.call(
+        missingToolResultsTokens = !Object.prototype.hasOwnProperty.call(
           steps[i].contextBreakdown,
           'toolResultsTokens'
         );
+        break;
       }
     }
-    return false;
+    const checks = {
+      missingResponseModel: steps.some((s) => !Object.prototype.hasOwnProperty.call(s, 'responseModel')),
+      missingToolResultsTokens,
+      hasIncompleteTiming: steps.some((s) => s.speedReason === 'incomplete_or_invalid_timing'),
+    };
+    stepFieldChecks.set(steps, checks);
+    return checks;
   }
+
+  let lazyExternalByLower = null;
 
   /**
    * 批量拉取会话轨迹并提取步骤、子代理元数据 (`trajectory.metadata`) 与子代理调用引用 (`invokeSubagent`)。
@@ -819,8 +1366,13 @@ export async function enumerateAndSyncConversations({
               accountName: prev?.accountName || currentAccountName || '',
               title: conv.title,
               lastModifiedMs: resolvedLastModMs,
-              diskMtimeMs: conv.diskMtimeMs || 0,
+              diskMtimeMs:
+                conv.diskMtimeMs ?? readConversationMtime(diskConvMap.get(conv.cascadeId.toLowerCase())),
               wasRunning: isRunning,
+              contextLimitTelemetry: true,
+              speedClearedTelemetry: true,
+              turnRailTelemetry: true,
+              contextGroupsTelemetry: true,
               steps,
               subagentRefs,
             };
@@ -839,18 +1391,118 @@ export async function enumerateAndSyncConversations({
               (prev?.rootConversationId || '') !== (cacheEntry.rootConversationId || '');
             const stepsChanged =
               !prev ||
+              Boolean(prev.offlineTranscriptFallback) ||
               prev.signature !== sig ||
               Boolean(prev.wasRunning) !== isRunning ||
+              !prev.contextLimitTelemetry ||
+              !prev.speedClearedTelemetry ||
+              !prev.turnRailTelemetry ||
+              !prev.contextGroupsTelemetry ||
               metaChanged ||
-              JSON.stringify(prev.steps) !== JSON.stringify(steps);
+              !isDeepStrictEqual(prev.steps, steps);
 
+            if (!stepsChanged) cacheEntry.steps = prev.steps;
             trajectoryCache[conv.cascadeId] = cacheEntry;
             if (stepsChanged) {
               cacheDirty = true;
             }
           } catch (err) {
-            console.error(`Failed loading trajectory ${conv.cascadeId}: ${err.message}`);
-            if (!(isRunning && hasTailStepInfo)) {
+            let offlineRecovered = false;
+            if (!conv.inSummaries && (!prev || prev.offlineTranscriptFallback)) {
+              if (!lazyExternalByLower) {
+                lazyExternalByLower = new Map();
+                for (const ext of loadExternalDeepStatsCache().values()) {
+                  const extCid = String(ext?.cascadeId || '').toLowerCase();
+                  if (!extCid) continue;
+                  if (
+                    ext.accountName &&
+                    currentAccountName !== '' &&
+                    ext.accountName !== currentAccountName
+                  ) {
+                    continue;
+                  }
+                  const existingExt = lazyExternalByLower.get(extCid);
+                  if (!existingExt || (ext.steps?.length || 0) > (existingExt.steps?.length || 0)) {
+                    lazyExternalByLower.set(extCid, ext);
+                  }
+                }
+              }
+              const cidLower = conv.cascadeId.toLowerCase();
+              const diskFiles = diskConvMap.get(cidLower) || [];
+              const offlineFallback = loadOfflineTranscriptConversation(
+                conv,
+                diskFiles,
+                lazyExternalByLower,
+                localSummaryByLower.get(cidLower) || null
+              );
+              if (offlineFallback) {
+                offlineRecovered = true;
+                conv.title = offlineFallback.title;
+                conv.lastModifiedMs = offlineFallback.lastModifiedMs;
+                conv.stepCount = offlineFallback.steps.length;
+                conv.subagentRefs = offlineFallback.subagentRefs;
+                if (offlineFallback.parentConversationId) {
+                  conv.parentConversationId = offlineFallback.parentConversationId;
+                }
+                if (offlineFallback.rootConversationId) {
+                  conv.rootConversationId = offlineFallback.rootConversationId;
+                }
+                conv.isSubagent =
+                  Boolean(conv.parentConversationId) ||
+                  Boolean(conv.rootConversationId && conv.rootConversationId !== cidLower);
+                const resolvedDiskMtime = conv.diskMtimeMs ?? readConversationMtime(diskFiles);
+                const offlineEntry = {
+                  signature: sig,
+                  accountName:
+                    prev?.accountName || offlineFallback.accountName || currentAccountName || '',
+                  title: offlineFallback.title,
+                  ...(offlineFallback.appSource ? { appSource: offlineFallback.appSource } : {}),
+                  lastModifiedMs: offlineFallback.lastModifiedMs,
+                  diskMtimeMs: resolvedDiskMtime,
+                  wasRunning: isRunning,
+                  offlineTranscriptFallback: true,
+                  ...(offlineFallback.fromSqlite ? { offlineSqliteTelemetry: true } : {}),
+                  contextLimitTelemetry: true,
+                  speedClearedTelemetry: true,
+                  turnRailTelemetry: true,
+                  contextGroupsTelemetry: true,
+                  steps: offlineFallback.steps,
+                  subagentRefs: offlineFallback.subagentRefs,
+                };
+                if (conv.isSubagent) {
+                  offlineEntry.parentConversationId = conv.parentConversationId;
+                  offlineEntry.rootConversationId = conv.rootConversationId;
+                  if (conv.subagentSpec) offlineEntry.subagentSpec = conv.subagentSpec;
+                  if (conv.agentScriptName) offlineEntry.agentScriptName = conv.agentScriptName;
+                  if (conv.createdTimeMs) offlineEntry.createdTimeMs = conv.createdTimeMs;
+                  if (Number.isFinite(conv.spawnOrder)) offlineEntry.spawnOrder = conv.spawnOrder;
+                }
+                const changed =
+                  !prev ||
+                  prev.signature !== sig ||
+                  prev.title !== offlineEntry.title ||
+                  Boolean(prev.wasRunning) !== isRunning ||
+                  Boolean(prev.offlineSqliteTelemetry) !== Boolean(offlineEntry.offlineSqliteTelemetry) ||
+                  !isDeepStrictEqual(prev.steps, offlineEntry.steps);
+                if (!changed) offlineEntry.steps = prev.steps;
+                trajectoryCache[conv.cascadeId] = offlineEntry;
+                if (changed) {
+                  cacheDirty = true;
+                }
+              }
+            }
+            if (
+              !offlineRecovered &&
+              !(
+                !conv.inSummaries &&
+                /(?:\(404\)|\bnot_found\b|Language Server address unavailable)/i.test(
+                  String(err?.message || '')
+                )
+              )
+            ) {
+              console.error(`Failed loading trajectory ${conv.cascadeId}: ${err.message}`);
+            }
+            if (!(isRunning && (hasTailStepInfo || offlineRecovered))) {
               const cooldownMs =
                 isRunning || isReq ? ACTIVE_FAILED_RPC_COOLDOWN_MS : FAILED_RPC_COOLDOWN_MS;
               failedFetchCooldownMap.set(cooldownKey, { failedAt: nowPollMs, cooldownMs });
@@ -870,6 +1522,7 @@ export async function enumerateAndSyncConversations({
               }
             }
             if (
+              !offlineRecovered &&
               prev &&
               String(prev.signature || '').startsWith(`${CACHE_SCHEMA_VERSION}:`) &&
               !Array.isArray(prev.subagentRefs)
@@ -884,11 +1537,60 @@ export async function enumerateAndSyncConversations({
   }
 
   // 阶段 1：拉取常规新增/变更会话，以及摘要列表中尚未提取 subagentRefs 的会话
+  // 旧缓存只补读当前会话的宿主上限，避免重拉全部历史轨迹。
+  const contextTelemetryCascadeId = reqLower || rawConversations[0]?.cascadeId.toLowerCase();
+  const selectedRootId = rawConversations.find(
+    (c) => c.cascadeId.toLowerCase() === contextTelemetryCascadeId
+  )?.rootConversationId || contextTelemetryCascadeId;
+  function hasMissingTurnRailFields(cached) {
+    const steps = cached?.steps || [];
+    const lastCachedStep = steps[steps.length - 1];
+    if (!lastCachedStep) return false;
+    return !Object.prototype.hasOwnProperty.call(lastCachedStep, 'turnIndex');
+  }
+  function hasDroppedContextGroups(cached) {
+    if (cached?.contextGroupsTelemetry) return false;
+    const steps = cached?.steps || [];
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const st = steps[i];
+      if (!st || st.isCompactionStep) break;
+      if (st.contextBreakdown) {
+        const cb = st.contextBreakdown;
+        const cbSum =
+          Number(cb.totalTokens || 0) ||
+          Number(cb.messagesTokens || 0) +
+            Number(cb.systemToolsTokens || 0) +
+            Number(cb.mcpToolsTokens || 0) +
+            Number(cb.skillsTokens || 0) +
+            Number(cb.systemPromptTokens || 0) +
+            Number(cb.userRulesTokens || 0);
+        return Number(st.estimatedContextTokens || 0) > cbSum;
+      }
+    }
+    return false;
+  }
+
+  let remainingTimingRefreshes = LEGACY_MIGRATION_BATCH_SIZE;
   const toFetch = rawConversations.filter((conv) => {
     const sig = buildConvSig(conv);
     if (isFetchInCooldown(conv, sig)) return false;
+    const isRunning = conv.status === 'CASCADE_RUN_STATUS_RUNNING';
     const cached = trajectoryCache[conv.cascadeId];
     if (!cached || conv.needsInitialLoad) return true;
+    const lowerCid = conv.cascadeId.toLowerCase();
+    const isSelectedFamily =
+      lowerCid === contextTelemetryCascadeId ||
+      lowerCid === selectedRootId ||
+      Boolean(conv.rootConversationId && conv.rootConversationId.toLowerCase() === selectedRootId);
+    if (!cached.contextLimitTelemetry && lowerCid === contextTelemetryCascadeId) return true;
+    if (
+      (!cached.turnRailTelemetry ||
+        hasMissingTurnRailFields(cached) ||
+        hasDroppedContextGroups(cached)) &&
+      isSelectedFamily
+    ) {
+      return true;
+    }
     const hasCurrentSchema = String(cached.signature || '').startsWith(
       `${CACHE_SCHEMA_VERSION}:`
     );
@@ -896,17 +1598,46 @@ export async function enumerateAndSyncConversations({
     if (hasMissingStepFields(cached)) return true;
     const missingSubagentRefs = !Array.isArray(cached.subagentRefs);
     if (!conv.inSummaries) {
-      if (missingSubagentRefs && conv.cascadeId.toLowerCase() === reqLower) {
+      if (isRunning || cached.wasRunning) return true;
+      if (
+        cached.offlineTranscriptFallback &&
+        !cached.offlineSqliteTelemetry &&
+        hasBuiltinNodeSqlite() &&
+        hasLocalSqliteDb(diskConvMap.get(lowerCid))
+      ) {
         return true;
       }
-      return (
+      const localSum = localSummaryByLower.get(lowerCid);
+      if (cached.offlineTranscriptFallback && localSum?.title && cached.title !== localSum.title) {
+        return true;
+      }
+      if (missingSubagentRefs && lowerCid === reqLower) {
+        return true;
+      }
+      if (
         conv.diskMtimeMs > 0 &&
         conv.diskMtimeMs > (cached.diskMtimeMs || cached.lastModifiedMs || 0)
-      );
+      ) return true;
+    } else {
+      if (
+        cached.offlineTranscriptFallback ||
+        missingSubagentRefs ||
+        cached.signature !== sig ||
+        isRunning ||
+        cached.wasRunning
+      ) {
+        return true;
+      }
     }
-    if (missingSubagentRefs) return true;
-    const isRunning = conv.status === 'CASCADE_RUN_STATUS_RUNNING';
-    return cached.signature !== sig || isRunning || Boolean(cached.wasRunning);
+    // 保留已有效的历史测速，按批补读需要确认原始状态与生成结束时间的旧步骤。
+    if (!cached.speedClearedTelemetry && readStepFieldChecks(cached.steps).hasIncompleteTiming) {
+      if (conv.cascadeId.toLowerCase() === selectedRootId || conv.rootConversationId === selectedRootId) return true;
+      if (remainingTimingRefreshes > 0) {
+        remainingTimingRefreshes -= 1;
+        return true;
+      }
+    }
+    return false;
   });
 
   await fetchTrajectoryBatch(toFetch);
@@ -941,7 +1672,7 @@ export async function enumerateAndSyncConversations({
           let subConv = byLowerId.get(subCid);
           const subCached = trajectoryCache[subConv?.cascadeId || canonSubId];
           if (!subConv) {
-            const diskMtimeMs = diskConvMap.get(subCid) || 0;
+            const diskMtimeMs = readConversationMtime(diskConvMap.get(subCid));
             const lastStepMs = subCached?.steps?.[subCached.steps.length - 1]?.createdAtMs || 0;
             const stepCount = Number(subCached?.steps?.length || 0);
             subConv = {
@@ -989,10 +1720,16 @@ export async function enumerateAndSyncConversations({
 
           const targetCacheKey = subConv.cascadeId;
           const existingSubCache = trajectoryCache[targetCacheKey];
+          const isSelectedSubFamily = rootId === selectedRootId;
           const hasValidSubCache =
             existingSubCache &&
+            !(existingSubCache.offlineTranscriptFallback && subConv.inSummaries) &&
             String(existingSubCache.signature || '').startsWith(`${CACHE_SCHEMA_VERSION}:`) &&
-            !hasMissingStepFields(existingSubCache);
+            !hasMissingStepFields(existingSubCache) &&
+            (!isSelectedSubFamily ||
+              (Boolean(existingSubCache.turnRailTelemetry) &&
+                !hasMissingTurnRailFields(existingSubCache) &&
+                !hasDroppedContextGroups(existingSubCache)));
 
           if (hasValidSubCache) {
             let subMetaUpdated = false;
@@ -1184,8 +1921,9 @@ export async function enumerateAndSyncConversations({
         ))) ||
     conversations[0] ||
     null;
-  const safeReqId =
-    requestedConvId && !/[\\/]|\.\./.test(String(requestedConvId)) ? requestedConvId : null;
+  const requestedOwner = trajectoryCache[canonicalIdByLower.get(reqLower)]?.accountName;
+  const safeReqId = requestedConvId && !/[\\/]|\.\./.test(String(requestedConvId)) &&
+    (!requestedOwner || currentAccountName === '' || requestedOwner === currentAccountName) ? requestedConvId : null;
   const activeCascadeId = activeConvSummary?.cascadeId || safeReqId || null;
 
   return {

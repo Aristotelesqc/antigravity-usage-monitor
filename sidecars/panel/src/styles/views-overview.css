@@ -31,7 +31,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
   flex: 1;
@@ -47,10 +47,50 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   color: var(--text-secondary);
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* 配额池窗口行头：标题 + 周期用量内联（窄栏自适应截断，零额外纵向行高） */
+.quota-win-head {
+  gap: 8px;
+  min-width: 0;
+}
+
+.quota-win-left {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.quota-win-title {
+  font-size: var(--fs-base-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.quota-win-usage {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.quota-win-meta {
+  font-size: var(--fs-md);
+  flex-shrink: 0;
 }
 
 /* --- 2. 多任务实时运行卡片列表与 4 格测速指标矩阵 (Live Running Tasks List & 4-Cell Telemetry Matrix) --- */
@@ -90,7 +130,7 @@
 }
 
 .live-task-title {
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 600;
   line-height: 1.45;
   color: var(--text-primary);
@@ -118,7 +158,7 @@
   gap: 3px;
   height: 18px;
   padding: 0 6px;
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-secondary);
   background: var(--surface-panel);
@@ -168,7 +208,7 @@
 }
 
 .live-activity-phase {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -176,7 +216,7 @@
 }
 
 .live-activity-progress {
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--accent-primary);
   background: var(--accent-primary-soft);
@@ -187,13 +227,13 @@
 }
 
 .live-activity-sep {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .live-activity-detail {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -203,7 +243,7 @@
 }
 
 .live-activity-elapsed {
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   font-weight: 500;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -230,7 +270,7 @@
   gap: 10px;
   min-height: 22px;
   min-width: 0;
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
   line-height: 1.45;
 }
 
@@ -266,7 +306,7 @@
 }
 
 .live-sub-elapsed {
-  font-size: 11px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
   white-space: nowrap;
   min-width: 28px;
@@ -276,7 +316,7 @@
 
 .telemetry-matrix {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(var(--matrix-cols, 4), minmax(0, 1fr));
   flex-shrink: 0;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
@@ -298,12 +338,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--fs-md);
   color: var(--text-secondary);
 }
 
 .cell-value {
-  font-size: 14.5px;
+  font-size: var(--fs-lg);
   font-weight: 700;
   color: var(--text-primary);
   white-space: nowrap;
@@ -311,16 +351,41 @@
   text-overflow: ellipsis;
 }
 
-.cell-value.accent-speed {
+.cell-value.accent-speed,
+.accent-speed {
   color: var(--metric-speed);
 }
 
-.cell-value.accent-ok {
+.cell-value.accent-ok,
+.accent-ok,
+.cell-value.tone-good,
+.tone-good {
   color: var(--metric-ok);
 }
 
+.cell-value.tone-info,
+.tone-info {
+  color: var(--metric-info);
+}
+
+.cell-value.tone-warn,
+.tone-warn {
+  color: var(--metric-warn);
+}
+
+.cell-value.tone-danger,
+.tone-danger {
+  color: var(--metric-danger);
+}
+
+.cell-value.tone-muted,
+.tone-muted {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
 .cell-sub {
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -417,7 +482,7 @@
   padding: 2px 0 0 0;
   background: transparent;
   border: none;
-  font-size: 11.5px;
+  font-size: var(--fs-base-sm);
 }
 
 .legend-item {
@@ -487,7 +552,7 @@
   border: 1px solid var(--border-hairline);
   background: var(--surface-panel);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-md);
   border-radius: var(--radius-xs);
   cursor: pointer;
   white-space: nowrap;
@@ -533,7 +598,7 @@
   align-items: center;
   gap: 3px;
   padding: 1px 5px;
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   line-height: 1.25;
   border-radius: var(--radius-xs);
@@ -576,8 +641,8 @@
 }
 
 @media (max-width: 390px) {
-  .telemetry-matrix {
-    grid-template-columns: repeat(2, 1fr);
+  .telemetry-matrix:not([data-cols="1"]):not([data-cols="2"]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .dual-grid {
     grid-template-columns: 1fr;
