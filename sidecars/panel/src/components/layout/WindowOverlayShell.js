@@ -15,7 +15,11 @@ import {
   readInjectedWindowBridge,
 } from '../../../shared/window-bridge-protocol.mjs';
 import { App } from '../../App.js';
-import { applyAppearanceToRoot } from '../../core/appearance.js';
+import {
+  PANEL_SCALE_FACTORS,
+  applyAppearanceToRoot,
+  normalizeClientFontScale,
+} from '../../core/appearance.js';
 import {
   h,
   isEventInside,
@@ -1380,8 +1384,6 @@ export function mountWindowOverlay() {
   portalShadow.appendChild(portalStyleEl);
 
   const initialSettings = telemetryStore.getState().telemetry?.settings;
-  applyAppearanceToRoot(capsuleHost, initialSettings, { includeFontScale: false });
-  applyAppearanceToRoot(portalHost, initialSettings, { includeFontScale: true });
 
   // 悬停全景概览浮层（完全解耦至 widgetRegistry，由 hoverModules 动态驱动 0..4 个独立组件，零硬编码）
   const hoverUpdateVerText = h('span', { text: t('capsule.hoverNewVerGeneric') });
@@ -1590,9 +1592,19 @@ export function mountWindowOverlay() {
     [appInstance.el]
   );
 
+  function syncPortalAppearance(settings) {
+    applyAppearanceToRoot(capsuleHost, settings, { includeFontScale: false });
+    applyAppearanceToRoot(portalHost, settings, { includeFontScale: true });
+    const scaleKey = normalizeClientFontScale(settings?.fontScale);
+    popoverEl.setAttribute?.('data-font-scale', scaleKey);
+    hoverTipEl.setAttribute?.('data-font-scale', scaleKey);
+    multiPanelEl.setAttribute?.('data-font-scale', scaleKey);
+  }
+
   portalShadow.appendChild(multiPanelEl);
   portalShadow.appendChild(hoverTipEl);
   portalShadow.appendChild(popoverEl);
+  syncPortalAppearance(initialSettings);
   (document.body || document.documentElement).appendChild(portalHost);
 
   // --- 3. 几何测量、IDE 主题桥接、顶栏停靠与防溢出定位 ---
@@ -1931,8 +1943,17 @@ export function mountWindowOverlay() {
       const vh = Number(window.innerHeight || 800);
       const navRight = getLeftSidebarRightEdge(vw);
       const minLeft = navRight > 0 ? Math.max(12, navRight + 12) : 12;
-      const defaultCardW = Math.min(FLOATING_CARD_WIDTH, Math.max(280, vw - 24));
-      const defaultMultiW = Math.min(MULTI_PANEL_WIDTH, Math.max(280, vw - 24));
+      const curSettings = telemetryStore.getState().telemetry?.settings;
+      const panelScale =
+        PANEL_SCALE_FACTORS[normalizeClientFontScale(curSettings?.fontScale)] ?? 1;
+      const defaultCardW = Math.min(
+        Math.round(FLOATING_CARD_WIDTH * panelScale),
+        Math.max(280, vw - 24)
+      );
+      const defaultMultiW = Math.min(
+        Math.round(MULTI_PANEL_WIDTH * panelScale),
+        Math.max(280, vw - 24)
+      );
       const isDockComposer = capsuleHost.getAttribute('data-dock') === 'composer';
 
       if (multiOpen) {
@@ -1980,9 +2001,8 @@ export function mountWindowOverlay() {
 
       if (popoverOpen) {
         const maxPopCardW = Math.max(280, vw - minLeft - 12);
-        const curSettings = telemetryStore.getState().telemetry?.settings;
         const popWidthMode = normalizeClientPopoverWidthMode(curSettings?.popoverWidthMode);
-        let desiredPopW = Math.min(POPOVER_BASE_WIDTH, maxPopCardW);
+        let desiredPopW = Math.min(Math.round(POPOVER_BASE_WIDTH * panelScale), maxPopCardW);
         if (popWidthMode === 'custom') {
           desiredPopW = Math.min(
             normalizeClientPopoverWidth(curSettings?.popoverWidth),
@@ -2630,8 +2650,7 @@ export function mountWindowOverlay() {
     const telemetry = telSt.telemetry;
 
     setI18nLanguage(telemetry?.settings?.language);
-    applyAppearanceToRoot(capsuleHost, telemetry?.settings, { includeFontScale: false });
-    applyAppearanceToRoot(portalHost, telemetry?.settings, { includeFontScale: true });
+    syncPortalAppearance(telemetry?.settings);
 
     const showMulti = telemetry?.settings?.showTopbarMultiSession !== false;
     patchAttr(multiBtn, 'hidden', !showMulti);

@@ -44,16 +44,15 @@
   --border-strong: color-mix(in srgb, var(--border-hairline) 72%, var(--text-primary) 28%);
 
   /* Typography Hierarchy & Scalable Font Tokens */
-  --ui-font-scale: 1;
-  --fs-2xs: calc(9.5px * var(--ui-font-scale, 1));
-  --fs-xs: calc(10px * var(--ui-font-scale, 1));
-  --fs-sm: calc(10.5px * var(--ui-font-scale, 1));
-  --fs-md: calc(11px * var(--ui-font-scale, 1));
-  --fs-base-sm: calc(11.5px * var(--ui-font-scale, 1));
-  --fs-base: calc(12px * var(--ui-font-scale, 1));
-  --fs-body: calc(12.5px * var(--ui-font-scale, 1));
-  --fs-lg: calc(14.5px * var(--ui-font-scale, 1));
-  --fs-hero: calc(17px * var(--ui-font-scale, 1));
+  --fs-2xs: calc(10.5px * var(--ui-font-scale, 1));
+  --fs-xs: calc(11px * var(--ui-font-scale, 1));
+  --fs-sm: calc(11.5px * var(--ui-font-scale, 1));
+  --fs-md: calc(12px * var(--ui-font-scale, 1));
+  --fs-base-sm: calc(12.5px * var(--ui-font-scale, 1));
+  --fs-base: calc(13px * var(--ui-font-scale, 1));
+  --fs-body: calc(13px * var(--ui-font-scale, 1));
+  --fs-lg: calc(15px * var(--ui-font-scale, 1));
+  --fs-hero: calc(18px * var(--ui-font-scale, 1));
 
   --text-primary: var(--foreground, var(--vscode-foreground, var(--vscode-editor-foreground, hsl(215 22% 15%))));
   --text-secondary: var(--muted-foreground, var(--vscode-descriptionForeground, hsl(215 12% 44%)));
@@ -121,6 +120,46 @@
   --space-5: 12px;
 }
 
+:root[data-font-scale="sm"],
+:host([data-font-scale="sm"]),
+[data-font-scale="sm"] {
+  --ui-font-scale: 0.92;
+  --ui-panel-scale: 1;
+}
+
+:root[data-font-scale="md"],
+:host([data-font-scale="md"]),
+[data-font-scale="md"] {
+  --ui-font-scale: 1;
+  --ui-panel-scale: 1;
+}
+
+:root[data-font-scale="lg"],
+:host([data-font-scale="lg"]),
+[data-font-scale="lg"] {
+  --ui-font-scale: 1.14;
+  --ui-panel-scale: 1.09;
+}
+
+:root[data-font-scale="xl"],
+:host([data-font-scale="xl"]),
+[data-font-scale="xl"] {
+  --ui-font-scale: 1.28;
+  --ui-panel-scale: 1.18;
+}
+
+[data-font-scale] {
+  --fs-2xs: calc(10.5px * var(--ui-font-scale, 1));
+  --fs-xs: calc(11px * var(--ui-font-scale, 1));
+  --fs-sm: calc(11.5px * var(--ui-font-scale, 1));
+  --fs-md: calc(12px * var(--ui-font-scale, 1));
+  --fs-base-sm: calc(12.5px * var(--ui-font-scale, 1));
+  --fs-base: calc(13px * var(--ui-font-scale, 1));
+  --fs-body: calc(13px * var(--ui-font-scale, 1));
+  --fs-lg: calc(15px * var(--ui-font-scale, 1));
+  --fs-hero: calc(18px * var(--ui-font-scale, 1));
+}
+
 @media (prefers-color-scheme: dark) {
   html[data-standalone="true"] {
     color-scheme: dark;
@@ -173,7 +212,12 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea,
+table,
+th,
+td {
   font-family: inherit;
   font-size: inherit;
   font-stretch: inherit;
@@ -471,14 +515,14 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 var(--space-2);
+  min-height: calc(26px * var(--ui-font-scale, 1));
+  padding: 2px var(--space-2);
   border: none;
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--fs-base);
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.15;
   border-radius: var(--radius-pill);
   cursor: pointer;
   white-space: nowrap;
@@ -497,8 +541,8 @@ html[data-standalone="true"] .app-shell {
 .pill-tab-badge {
   display: inline-flex;
   align-items: center;
-  height: 14px;
-  line-height: 1;
+  min-height: 14px;
+  line-height: 1.15;
 }
 
 .pill-tab-badge {
@@ -545,8 +589,8 @@ html[data-standalone="true"] .app-shell {
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
-  height: 24px;
-  padding: 0 6px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
+  padding: 2px 6px;
   background: transparent;
   color: var(--text-primary);
   border: none;
@@ -672,7 +716,7 @@ html[data-standalone="true"] .app-shell {
 .number-input {
   display: inline-flex;
   align-items: stretch;
-  height: 28px;
+  min-height: calc(28px * var(--ui-font-scale, 1));
   background: var(--surface-panel);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
@@ -732,8 +776,8 @@ html[data-standalone="true"] .app-shell {
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
-  height: 26px;
-  padding: 0 var(--space-2);
+  min-height: calc(26px * var(--ui-font-scale, 1));
+  padding: 2px var(--space-2);
   background: var(--surface-panel);
   color: var(--text-primary);
   border: 1px solid var(--border-hairline);
@@ -786,7 +830,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .dt-day {
-  height: 22px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -862,8 +906,8 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 22px;
-  padding: 0 7px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
+  padding: 2px 7px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -972,8 +1016,8 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 var(--space-5);
+  min-height: calc(28px * var(--ui-font-scale, 1));
+  padding: 3px var(--space-5);
   background: var(--accent-primary);
   color: var(--text-inverse);
   border: 1px solid var(--accent-primary);
@@ -997,8 +1041,8 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 var(--space-4);
+  min-height: calc(28px * var(--ui-font-scale, 1));
+  padding: 3px var(--space-4);
   background: var(--surface-panel);
   color: var(--text-primary);
   border: 1px solid var(--border-strong);
@@ -1036,8 +1080,8 @@ html[data-standalone="true"] .app-shell {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
-  padding: 0 7px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
+  padding: 2px 7px;
   font-size: var(--fs-md);
   font-weight: 600;
   border-radius: var(--radius-xs);
@@ -1070,8 +1114,8 @@ html[data-standalone="true"] .app-shell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 20px;
-  padding: 0 6px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-secondary);
@@ -1101,8 +1145,9 @@ html[data-standalone="true"] .app-shell {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  min-width: calc(16px * var(--ui-font-scale, 1));
+  min-height: calc(16px * var(--ui-font-scale, 1));
+  padding: 0 3px;
   font-size: var(--fs-sm);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1309,8 +1354,8 @@ html[data-standalone="true"] .app-shell {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  height: 18px;
-  padding: 0 6px;
+  min-height: calc(18px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-secondary);
@@ -1700,8 +1745,8 @@ html[data-standalone="true"] .app-shell {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
-  padding: 0 6px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   border: 1px solid var(--border-hairline);
   background: var(--surface-panel);
   color: var(--text-secondary);
@@ -1971,8 +2016,8 @@ html[data-standalone="true"] .app-shell {
 .cons-row-title {
   display: inline-flex;
   align-items: center;
-  height: 20px;
-  line-height: 20px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  line-height: 1.3;
   font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
@@ -1982,16 +2027,16 @@ html[data-standalone="true"] .app-shell {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 20px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
 }
 
 .cons-share-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 20px;
-  line-height: 1;
-  padding: 0 6px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  line-height: 1.2;
+  padding: 1px 6px;
   font-size: var(--fs-base);
   font-weight: 600;
   color: var(--metric-ok);
@@ -2004,8 +2049,8 @@ html[data-standalone="true"] .app-shell {
 .cons-row-tok {
   display: inline-flex;
   align-items: center;
-  height: 20px;
-  line-height: 1;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  line-height: 1.25;
   font-size: var(--fs-base);
   font-weight: 500;
   color: var(--text-secondary);
@@ -2014,8 +2059,8 @@ html[data-standalone="true"] .app-shell {
 .cons-row-cost {
   display: inline-flex;
   align-items: center;
-  height: 20px;
-  line-height: 1;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  line-height: 1.25;
   font-size: var(--fs-base);
   font-weight: 700;
   color: var(--text-primary);
@@ -2092,7 +2137,7 @@ html[data-standalone="true"] .app-shell {
   top: 2px;
   left: var(--peak-x, 50%);
   transform: translateX(-50%);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   padding: 1px 6px;
   color: var(--text-primary);
@@ -2111,7 +2156,7 @@ html[data-standalone="true"] .app-shell {
   transform: translateX(var(--tip-shift, -50%));
   width: max-content;
   min-width: 152px;
-  max-width: min(300px, calc(100% - 8px));
+  max-width: min(320px, calc(100% - 8px));
   padding: 5px 9px;
   background: var(--surface-panel);
   border: 1px solid var(--border-strong);
@@ -2129,7 +2174,7 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  font-size: 10.5px;
+  font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
 
@@ -2141,7 +2186,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .trend-tip-calls {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
   max-width: 190px;
@@ -2157,7 +2202,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .trend-tip-tokens {
-  font-size: 12px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: var(--accent-primary);
   white-space: nowrap;
@@ -2165,7 +2210,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .trend-tip-cost {
-  font-size: 11px;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -2173,7 +2218,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .trend-tip-sub {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -2196,7 +2241,7 @@ html[data-standalone="true"] .app-shell {
 .trend-x-axis {
   position: relative;
   width: 100%;
-  height: 18px;
+  min-height: calc(18px * var(--ui-font-scale, 1));
   user-select: none;
 }
 
@@ -2205,10 +2250,10 @@ html[data-standalone="true"] .app-shell {
   top: 0;
   left: var(--tick-x, 0%);
   transform: translateX(-50%);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
-  line-height: 16px;
+  line-height: 1.35;
   cursor: pointer;
   transition: color var(--dur-instant) var(--ease-fast);
 }
@@ -2260,21 +2305,21 @@ html[data-standalone="true"] .app-shell {
 
 .trend-hm-weekdays {
   display: grid;
-  grid-template-rows: 15px repeat(7, var(--hm-cell));
+  grid-template-rows: calc(15px * var(--ui-font-scale, 1)) repeat(7, var(--hm-cell));
   row-gap: var(--hm-gap);
-  width: 14px;
+  width: calc(15px * var(--ui-font-scale, 1));
   flex-shrink: 0;
 }
 
 .trend-hm-month-spacer {
-  height: 15px;
+  height: calc(15px * var(--ui-font-scale, 1));
 }
 
 .trend-hm-wday {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  font-size: 9px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   color: var(--text-muted);
 }
@@ -2295,7 +2340,7 @@ html[data-standalone="true"] .app-shell {
 
 .trend-hm-months {
   position: relative;
-  height: 15px;
+  height: calc(15px * var(--ui-font-scale, 1));
   width: 100%;
 }
 
@@ -2303,8 +2348,8 @@ html[data-standalone="true"] .app-shell {
   position: absolute;
   top: 0;
   left: calc(var(--hm-col, 0) * (var(--hm-cell) + var(--hm-gap)));
-  font-size: 9.5px;
-  line-height: 14px;
+  font-size: var(--fs-2xs);
+  line-height: 1.25;
   color: var(--text-muted);
   white-space: nowrap;
   pointer-events: none;
@@ -2369,7 +2414,7 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   min-height: 16px;
 }
@@ -2386,7 +2431,7 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-muted);
 }
 
@@ -2447,7 +2492,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .month-cost {
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
   color: var(--text-secondary);
   min-height: 14px;
   white-space: nowrap;
@@ -2491,7 +2536,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .month-label {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
   padding: 1px 3px;
   border-radius: var(--radius-xs);
@@ -2505,7 +2550,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .month-tok {
-  font-size: 9px;
+  font-size: var(--fs-2xs);
   color: var(--text-muted);
   min-height: 12px;
   white-space: nowrap;
@@ -2559,13 +2604,14 @@ html[data-standalone="true"] .app-shell {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--fs-md);
+  font-size: var(--fs-base-sm);
 }
 
 .data-table th,
 .data-table td {
-  padding: 5px 4px;
+  padding: calc(5px * var(--ui-font-scale, 1)) calc(4px * var(--ui-font-scale, 1));
   text-align: left;
+  font-size: var(--fs-base-sm);
   border-bottom: 1px solid var(--border-hairline);
   white-space: nowrap;
 }
@@ -2602,7 +2648,7 @@ html[data-standalone="true"] .app-shell {
 .step-model-cell {
   display: inline-flex;
   align-items: baseline;
-  max-width: var(--step-model-max-w, 176px);
+  max-width: calc(var(--step-model-max-w, 176px) * var(--ui-font-scale, 1));
   min-width: 0;
   vertical-align: bottom;
 }
@@ -2657,8 +2703,9 @@ html[data-standalone="true"] .app-shell {
 
 .steps-inline-scope-select .select-trigger,
 .steps-inline-model-select .select-trigger {
-  height: 22px;
-  padding: 0 6px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
+  height: auto;
+  padding: 2px 6px;
   gap: 4px;
   min-width: 0;
   overflow: hidden;
@@ -2844,8 +2891,9 @@ html[data-standalone="true"] .app-shell {
 }
 
 .sstep-fit-model-select .select-trigger {
-  height: 22px;
-  padding: 0 6px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
+  height: auto;
+  padding: 2px 6px;
   gap: 4px;
   min-width: 0;
   overflow: hidden;
@@ -2901,7 +2949,7 @@ html[data-standalone="true"] .app-shell {
 .sstep-axis-label {
   fill: var(--text-muted);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 9.5px;
+  font-size: var(--fs-2xs);
   user-select: none;
   pointer-events: none;
 }
@@ -3009,7 +3057,7 @@ html[data-standalone="true"] .app-shell {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--fs-md);
   pointer-events: none;
   z-index: 2;
 }
@@ -3020,7 +3068,7 @@ html[data-standalone="true"] .app-shell {
   flex-wrap: wrap;
   gap: 4px 10px;
   padding-top: 2px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 
@@ -3059,7 +3107,7 @@ html[data-standalone="true"] .app-shell {
   flex-wrap: wrap;
   gap: 4px 8px;
   padding-top: 2px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
@@ -3119,7 +3167,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .sstep-fit-delta {
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 /* --- 4. 极简高密度模型总览列表 (Minimalist Session Model Summary Cards) --- */
@@ -3292,7 +3340,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .settings-subnav-bar .seg-btn {
-  height: 24px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
   font-size: var(--fs-base-sm);
   font-weight: 500;
 }
@@ -3310,9 +3358,9 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 25px;
+  min-height: calc(25px * var(--ui-font-scale, 1));
   min-width: 0;
-  padding: 0 6px;
+  padding: 2px 6px;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
   background: var(--surface-subtle);
@@ -3371,8 +3419,8 @@ html[data-standalone="true"] .app-shell {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 24px;
-  padding: 0 9px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
+  padding: 2px 9px;
   font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-secondary);
@@ -3495,7 +3543,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .structure-preview-canvas.is-scaled {
-  zoom: 0.86;
+  zoom: 0.9;
 }
 
 .wm-hover-tip.is-preview {
@@ -3541,6 +3589,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .preview-capsule-bar {
+  --ui-font-scale: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3686,8 +3735,8 @@ html[data-standalone="true"] .app-shell {
 .collapsible-badge {
   display: inline-flex;
   align-items: center;
-  height: 18px;
-  padding: 0 6px;
+  min-height: calc(18px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-secondary);
@@ -3832,8 +3881,8 @@ html[data-standalone="true"] .app-shell {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 24px;
-  padding: 0 9px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
+  padding: 2px 9px;
   font-size: var(--fs-md);
   font-weight: 500;
   color: var(--accent-primary);
@@ -3966,8 +4015,8 @@ html[data-standalone="true"] .app-shell {
 .settings-text-input {
   width: 100%;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px;
+  min-height: calc(28px * var(--ui-font-scale, 1));
+  padding: 2px 8px;
   background: var(--surface-subtle);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
@@ -3993,7 +4042,7 @@ html[data-standalone="true"] .app-shell {
 }
 
 .settings-number-wrap .number-input {
-  height: 24px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
   background: var(--surface-subtle);
 }
 
@@ -4086,8 +4135,8 @@ html[data-standalone="true"] .app-shell {
 
 .ctx-risk-accept-btn {
   margin-top: 2px;
-  height: 26px;
-  padding: 0 var(--space-3);
+  min-height: calc(26px * var(--ui-font-scale, 1));
+  padding: 2px var(--space-3);
   font-size: var(--fs-md);
 }
 
@@ -4099,7 +4148,7 @@ html[data-standalone="true"] .app-shell {
 
 /* --- 1. 顶栏胶囊宿主容器 (Titlebar Capsule Host) --- */
 :host(.wm-capsule-host) {
-  --ui-font-scale: 1;
+  --ui-font-scale: 1 !important;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4675,7 +4724,7 @@ html[data-standalone="true"] .app-shell {
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(522px, calc(100vw - 24px));
+  width: min(calc(522px * var(--ui-panel-scale, 1)), calc(100vw - 24px));
   max-height: calc(100vh - 54px);
   padding: var(--space-3) var(--space-4);
   display: flex;
@@ -4699,7 +4748,7 @@ html[data-standalone="true"] .app-shell {
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(464px, calc(100vw - 24px));
+  width: min(calc(464px * var(--ui-panel-scale, 1)), calc(100vw - 24px));
   max-height: calc(100vh - 54px);
   padding: 14px 16px;
   display: flex;
@@ -4805,8 +4854,8 @@ html[data-standalone="true"] .app-shell {
 .wm-pin-badge {
   display: inline-flex;
   align-items: center;
-  height: 16px;
-  padding: 0 5px;
+  min-height: calc(16px * var(--ui-font-scale, 1));
+  padding: 1px 5px;
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--accent-primary);
@@ -4818,8 +4867,8 @@ html[data-standalone="true"] .app-shell {
 .wm-session-tag {
   display: inline-flex;
   align-items: center;
-  height: 16px;
-  padding: 0 4px;
+  min-height: calc(16px * var(--ui-font-scale, 1));
+  padding: 1px 4px;
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--text-secondary);

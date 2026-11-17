@@ -156,8 +156,8 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  height: 18px;
-  padding: 0 6px;
+  min-height: calc(18px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-secondary);
@@ -547,8 +547,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 20px;
-  padding: 0 6px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   border: 1px solid var(--border-hairline);
   background: var(--surface-panel);
   color: var(--text-secondary);

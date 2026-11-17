@@ -37,7 +37,12 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea,
+table,
+th,
+td {
   font-family: inherit;
   font-size: inherit;
   font-stretch: inherit;

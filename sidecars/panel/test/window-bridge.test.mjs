@@ -1422,7 +1422,11 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(liveDotSvg.attributes.get('width'), '11', 'Enlarged live activity SVG dot size is 11');
     assert.equal(liveDotSvg.children[0].attributes.get('r'), '5', 'Enlarged dot circle radius is 5');
     assert.match(stylesCss, /\.wm-multi-dot\s*\{\s*width:\s*8px;\s*height:\s*8px;/, 'Topbar multi-session dot enlarged to 8px');
-    assert.match(stylesCss, /\.wm-hover-tip\s*\{[^}]*width:\s*min\(522px,\s*calc\(100vw - 24px\)\);/, 'Hover floating card width is 522px');
+    assert.match(
+      stylesCss,
+      /\.wm-hover-tip\s*\{[^}]*width:\s*min\(calc\(522px \* var\(--ui-panel-scale, 1\)\),\s*calc\(100vw - 24px\)\);/,
+      'Hover floating card base width is 522px and scales with --ui-panel-scale'
+    );
     assert.equal(multiPanelEl.querySelector('.wm-recent-list'), null, 'Recent sessions list removed so panel shows online sessions only');
     assert.equal(multiPanelEl.querySelector('.panel'), null, 'Single-layer multi-session panel without nested .panel box');
 
@@ -1563,19 +1567,25 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.themeAccent, 'host');
     assert.equal(portalHost.style.getPropertyValue('--user-accent-primary'), '', 'Host accent clears override');
 
-    // Font scale: switch to xl (1.15), verify portalHost scales while capsuleHost NEVER scales
+    // Font scale: switch to xl (1.28), verify portalHost and inner panels scale while capsuleHost NEVER scales
     assert.equal(fontScaleBtns.length, 4, 'Font scale segmented control has sm / md / lg / xl');
     fontScaleBtns[3].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.fontScale, 'xl');
-    assert.equal(portalHost.style.getPropertyValue('--ui-font-scale'), '1.15', 'Portal host scales to 1.15');
+    assert.equal(portalHost.style.getPropertyValue('--ui-font-scale'), '1.28', 'Portal host scales to 1.28');
+    assert.equal(portalHost.style.getPropertyValue('--ui-panel-scale'), '1.18', 'Portal host panel width scales to 1.18');
+    assert.equal(popoverEl.getAttribute('data-font-scale'), 'xl', 'Popover panel receives data-font-scale');
+    assert.equal(hoverTipEl.getAttribute('data-font-scale'), 'xl', 'Hover card receives data-font-scale');
+    assert.equal(multiPanelEl.getAttribute('data-font-scale'), 'xl', 'Multi-session panel receives data-font-scale');
     assert.equal(capsuleHost.style.getPropertyValue('--ui-font-scale'), '', 'Capsule host strictly excludes font scale');
     assert.equal(capsuleHost.hasAttribute('data-font-scale'), false);
     fontScaleBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.fontScale, 'md');
     assert.equal(portalHost.style.getPropertyValue('--ui-font-scale'), '');
+    assert.equal(portalHost.style.getPropertyValue('--ui-panel-scale'), '');
     assert.equal(portalHost.getAttribute('data-font-scale'), 'md');
+    assert.equal(popoverEl.getAttribute('data-font-scale'), 'md');
 
     // Live i18n switch: zh-CN -> en-US -> zh-CN without page reload
     langBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });

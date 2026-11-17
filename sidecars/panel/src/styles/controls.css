@@ -149,14 +149,14 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 var(--space-2);
+  min-height: calc(26px * var(--ui-font-scale, 1));
+  padding: 2px var(--space-2);
   border: none;
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--fs-base);
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.15;
   border-radius: var(--radius-pill);
   cursor: pointer;
   white-space: nowrap;
@@ -175,8 +175,8 @@
 .pill-tab-badge {
   display: inline-flex;
   align-items: center;
-  height: 14px;
-  line-height: 1;
+  min-height: 14px;
+  line-height: 1.15;
 }
 
 .pill-tab-badge {
@@ -223,8 +223,8 @@
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
-  height: 24px;
-  padding: 0 6px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
+  padding: 2px 6px;
   background: transparent;
   color: var(--text-primary);
   border: none;
@@ -350,7 +350,7 @@
 .number-input {
   display: inline-flex;
   align-items: stretch;
-  height: 28px;
+  min-height: calc(28px * var(--ui-font-scale, 1));
   background: var(--surface-panel);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
@@ -410,8 +410,8 @@
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
-  height: 26px;
-  padding: 0 var(--space-2);
+  min-height: calc(26px * var(--ui-font-scale, 1));
+  padding: 2px var(--space-2);
   background: var(--surface-panel);
   color: var(--text-primary);
   border: 1px solid var(--border-hairline);
@@ -464,7 +464,7 @@
 }
 
 .dt-day {
-  height: 22px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -540,8 +540,8 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 22px;
-  padding: 0 7px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
+  padding: 2px 7px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -650,8 +650,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 var(--space-5);
+  min-height: calc(28px * var(--ui-font-scale, 1));
+  padding: 3px var(--space-5);
   background: var(--accent-primary);
   color: var(--text-inverse);
   border: 1px solid var(--accent-primary);
@@ -675,8 +675,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 var(--space-4);
+  min-height: calc(28px * var(--ui-font-scale, 1));
+  padding: 3px var(--space-4);
   background: var(--surface-panel);
   color: var(--text-primary);
   border: 1px solid var(--border-strong);
@@ -714,8 +714,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 22px;
-  padding: 0 7px;
+  min-height: calc(22px * var(--ui-font-scale, 1));
+  padding: 2px 7px;
   font-size: var(--fs-md);
   font-weight: 600;
   border-radius: var(--radius-xs);
@@ -748,8 +748,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 20px;
-  padding: 0 6px;
+  min-height: calc(20px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-secondary);
@@ -779,8 +779,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  min-width: calc(16px * var(--ui-font-scale, 1));
+  min-height: calc(16px * var(--ui-font-scale, 1));
+  padding: 0 3px;
   font-size: var(--fs-sm);
   font-weight: 600;
   font-variant-numeric: tabular-nums;

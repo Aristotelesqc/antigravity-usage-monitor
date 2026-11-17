@@ -5,7 +5,7 @@
 
 /* --- 1. 顶栏胶囊宿主容器 (Titlebar Capsule Host) --- */
 :host(.wm-capsule-host) {
-  --ui-font-scale: 1;
+  --ui-font-scale: 1 !important;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -581,7 +581,7 @@
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(522px, calc(100vw - 24px));
+  width: min(calc(522px * var(--ui-panel-scale, 1)), calc(100vw - 24px));
   max-height: calc(100vh - 54px);
   padding: var(--space-3) var(--space-4);
   display: flex;
@@ -605,7 +605,7 @@
   position: fixed;
   top: 42px;
   left: 12px;
-  width: min(464px, calc(100vw - 24px));
+  width: min(calc(464px * var(--ui-panel-scale, 1)), calc(100vw - 24px));
   max-height: calc(100vh - 54px);
   padding: 14px 16px;
   display: flex;
@@ -711,8 +711,8 @@
 .wm-pin-badge {
   display: inline-flex;
   align-items: center;
-  height: 16px;
-  padding: 0 5px;
+  min-height: calc(16px * var(--ui-font-scale, 1));
+  padding: 1px 5px;
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--accent-primary);
@@ -724,8 +724,8 @@
 .wm-session-tag {
   display: inline-flex;
   align-items: center;
-  height: 16px;
-  padding: 0 4px;
+  min-height: calc(16px * var(--ui-font-scale, 1));
+  padding: 1px 4px;
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--text-secondary);

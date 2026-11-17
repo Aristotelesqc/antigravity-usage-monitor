@@ -616,3 +616,29 @@ test('Compaction liveActivity: detects in-progress & completed CHECKPOINT over p
   assert.equal(pTranscriptOnly.activeConversation.liveActivity.phase, 'compacting');
   assert.equal(pTranscriptOnly.activeConversation.liveActivity.label, '上下文压缩');
 });
+
+test('panel typography scales all view/table/chart CSS rules via --fs-* tokens without hardcoded px sizes', () => {
+  const stylesDir = fileURLToPath(new URL('../src/styles', import.meta.url));
+  const viewCssFiles = [
+    'controls.css',
+    'views-overview.css',
+    'views-tables.css',
+    'views-consumption.css',
+    'views-settings.css',
+  ];
+  for (const file of viewCssFiles) {
+    const css = fs.readFileSync(join(stylesDir, file), 'utf8');
+    const rawFontLines = css
+      .split(/\r?\n/)
+      .filter((line) => /font-size\s*:/.test(line) && !/var\(--fs-/.test(line));
+    assert.deepEqual(
+      rawFontLines,
+      [],
+      `${file} must route every font-size declaration through scalable --fs-* tokens`
+    );
+  }
+  const tokensCss = fs.readFileSync(join(stylesDir, 'tokens.css'), 'utf8');
+  assert.match(tokensCss, /:host\(\[data-font-scale="xl"\]\)/);
+  assert.match(tokensCss, /\[data-font-scale\]\s*\{[\s\S]*?--fs-base-sm:/);
+  assert.doesNotMatch(tokensCss, /:root,\s*:host\s*\{[^}]*--ui-font-scale\s*:\s*1\s*;/);
+});

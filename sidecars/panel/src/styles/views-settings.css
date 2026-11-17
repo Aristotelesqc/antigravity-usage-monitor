@@ -37,7 +37,7 @@
 }
 
 .settings-subnav-bar .seg-btn {
-  height: 24px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
   font-size: var(--fs-base-sm);
   font-weight: 500;
 }
@@ -55,9 +55,9 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 25px;
+  min-height: calc(25px * var(--ui-font-scale, 1));
   min-width: 0;
-  padding: 0 6px;
+  padding: 2px 6px;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
   background: var(--surface-subtle);
@@ -116,8 +116,8 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 24px;
-  padding: 0 9px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
+  padding: 2px 9px;
   font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-secondary);
@@ -240,7 +240,7 @@
 }
 
 .structure-preview-canvas.is-scaled {
-  zoom: 0.86;
+  zoom: 0.9;
 }
 
 .wm-hover-tip.is-preview {
@@ -286,6 +286,7 @@
 }
 
 .preview-capsule-bar {
+  --ui-font-scale: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -431,8 +432,8 @@
 .collapsible-badge {
   display: inline-flex;
   align-items: center;
-  height: 18px;
-  padding: 0 6px;
+  min-height: calc(18px * var(--ui-font-scale, 1));
+  padding: 1px 6px;
   font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-secondary);
@@ -577,8 +578,8 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 24px;
-  padding: 0 9px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
+  padding: 2px 9px;
   font-size: var(--fs-md);
   font-weight: 500;
   color: var(--accent-primary);
@@ -711,8 +712,8 @@
 .settings-text-input {
   width: 100%;
   min-width: 0;
-  height: 28px;
-  padding: 0 8px;
+  min-height: calc(28px * var(--ui-font-scale, 1));
+  padding: 2px 8px;
   background: var(--surface-subtle);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
@@ -738,7 +739,7 @@
 }
 
 .settings-number-wrap .number-input {
-  height: 24px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
   background: var(--surface-subtle);
 }
 
@@ -831,7 +832,7 @@
 
 .ctx-risk-accept-btn {
   margin-top: 2px;
-  height: 26px;
-  padding: 0 var(--space-3);
+  min-height: calc(26px * var(--ui-font-scale, 1));
+  padding: 2px var(--space-3);
   font-size: var(--fs-md);
 }

@@ -1558,8 +1558,15 @@ const THEME_ACCENT_PRESETS = Object.freeze([
 const FONT_SCALE_FACTORS = Object.freeze({
   sm: 0.92,
   md: 1,
-  lg: 1.08,
-  xl: 1.15,
+  lg: 1.14,
+  xl: 1.28,
+});
+
+const PANEL_SCALE_FACTORS = Object.freeze({
+  sm: 1,
+  md: 1,
+  lg: 1.09,
+  xl: 1.18,
 });
 
 function normalizeClientThemeAccent(raw) {
@@ -1611,10 +1618,13 @@ function applyAppearanceToRoot(targetEl, settings, { includeFontScale = true } =
   if (includeFontScale) {
     const scaleKey = normalizeClientFontScale(settings?.fontScale);
     const factor = FONT_SCALE_FACTORS[scaleKey] ?? 1;
+    const panelFactor = PANEL_SCALE_FACTORS[scaleKey] ?? 1;
     setOrClearStyleVar(targetEl, '--ui-font-scale', factor === 1 ? '' : String(factor));
+    setOrClearStyleVar(targetEl, '--ui-panel-scale', panelFactor === 1 ? '' : String(panelFactor));
     targetEl.setAttribute?.('data-font-scale', scaleKey);
   } else {
     setOrClearStyleVar(targetEl, '--ui-font-scale', '');
+    setOrClearStyleVar(targetEl, '--ui-panel-scale', '');
     if (typeof targetEl.removeAttribute === 'function') {
       targetEl.removeAttribute('data-font-scale');
     }
@@ -10882,7 +10892,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
       if (reason && !refs.speedReason) {
         refs.speedReason = h('div', {
           className: 'text-muted',
-          style: 'font-size: var(--fs-2xs);',
+          style: 'font-size: var(--fs-xs);',
         });
         refs.wrapEl.appendChild(refs.speedReason);
       }
@@ -19384,8 +19394,6 @@ function mountWindowOverlay() {
   portalShadow.appendChild(portalStyleEl);
 
   const initialSettings = telemetryStore.getState().telemetry?.settings;
-  applyAppearanceToRoot(capsuleHost, initialSettings, { includeFontScale: false });
-  applyAppearanceToRoot(portalHost, initialSettings, { includeFontScale: true });
 
   // 悬停全景概览浮层（完全解耦至 widgetRegistry，由 hoverModules 动态驱动 0..4 个独立组件，零硬编码）
   const hoverUpdateVerText = h('span', { text: t('capsule.hoverNewVerGeneric') });
@@ -19594,9 +19602,19 @@ function mountWindowOverlay() {
     [appInstance.el]
   );
 
+  function syncPortalAppearance(settings) {
+    applyAppearanceToRoot(capsuleHost, settings, { includeFontScale: false });
+    applyAppearanceToRoot(portalHost, settings, { includeFontScale: true });
+    const scaleKey = normalizeClientFontScale(settings?.fontScale);
+    popoverEl.setAttribute?.('data-font-scale', scaleKey);
+    hoverTipEl.setAttribute?.('data-font-scale', scaleKey);
+    multiPanelEl.setAttribute?.('data-font-scale', scaleKey);
+  }
+
   portalShadow.appendChild(multiPanelEl);
   portalShadow.appendChild(hoverTipEl);
   portalShadow.appendChild(popoverEl);
+  syncPortalAppearance(initialSettings);
   (document.body || document.documentElement).appendChild(portalHost);
 
   // --- 3. 几何测量、IDE 主题桥接、顶栏停靠与防溢出定位 ---
@@ -19935,8 +19953,17 @@ function mountWindowOverlay() {
       const vh = Number(window.innerHeight || 800);
       const navRight = getLeftSidebarRightEdge(vw);
       const minLeft = navRight > 0 ? Math.max(12, navRight + 12) : 12;
-      const defaultCardW = Math.min(FLOATING_CARD_WIDTH, Math.max(280, vw - 24));
-      const defaultMultiW = Math.min(MULTI_PANEL_WIDTH, Math.max(280, vw - 24));
+      const curSettings = telemetryStore.getState().telemetry?.settings;
+      const panelScale =
+        PANEL_SCALE_FACTORS[normalizeClientFontScale(curSettings?.fontScale)] ?? 1;
+      const defaultCardW = Math.min(
+        Math.round(FLOATING_CARD_WIDTH * panelScale),
+        Math.max(280, vw - 24)
+      );
+      const defaultMultiW = Math.min(
+        Math.round(MULTI_PANEL_WIDTH * panelScale),
+        Math.max(280, vw - 24)
+      );
       const isDockComposer = capsuleHost.getAttribute('data-dock') === 'composer';
 
       if (multiOpen) {
@@ -19984,9 +20011,8 @@ function mountWindowOverlay() {
 
       if (popoverOpen) {
         const maxPopCardW = Math.max(280, vw - minLeft - 12);
-        const curSettings = telemetryStore.getState().telemetry?.settings;
         const popWidthMode = normalizeClientPopoverWidthMode(curSettings?.popoverWidthMode);
-        let desiredPopW = Math.min(POPOVER_BASE_WIDTH, maxPopCardW);
+        let desiredPopW = Math.min(Math.round(POPOVER_BASE_WIDTH * panelScale), maxPopCardW);
         if (popWidthMode === 'custom') {
           desiredPopW = Math.min(
             normalizeClientPopoverWidth(curSettings?.popoverWidth),
@@ -20634,8 +20660,7 @@ function mountWindowOverlay() {
     const telemetry = telSt.telemetry;
 
     setI18nLanguage(telemetry?.settings?.language);
-    applyAppearanceToRoot(capsuleHost, telemetry?.settings, { includeFontScale: false });
-    applyAppearanceToRoot(portalHost, telemetry?.settings, { includeFontScale: true });
+    syncPortalAppearance(telemetry?.settings);
 
     const showMulti = telemetry?.settings?.showTopbarMultiSession !== false;
     patchAttr(multiBtn, 'hidden', !showMulti);
@@ -21235,14 +21260,17 @@ async function bootstrapApp(mountTarget = document.getElementById('app-root')) {
   const appInstance = App();
   mountTarget.appendChild(appInstance.el);
 
+  const syncDocAppearance = (settings) => {
+    setI18nLanguage(settings?.language);
+    if (typeof document !== 'undefined' && document.documentElement) {
+      applyAppearanceToRoot(document.documentElement, settings, { includeFontScale: true });
+    }
+  };
+  syncDocAppearance(telemetryStore.getState().telemetry?.settings);
+
   const unsubAppearance = telemetryStore.subscribe(
     (st) => st.telemetry?.settings,
-    (settings) => {
-      setI18nLanguage(settings?.language);
-      if (typeof document !== 'undefined' && document.documentElement) {
-        applyAppearanceToRoot(document.documentElement, settings, { includeFontScale: true });
-      }
-    }
+    syncDocAppearance
   );
 
   const stopPolling = startAsyncTelemetryLoop(2000);
