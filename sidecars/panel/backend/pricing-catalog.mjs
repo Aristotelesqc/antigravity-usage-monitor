@@ -33,6 +33,24 @@ import {
 export const MODEL_PRICING = {};
 export const PLACEHOLDER_MAP = {};
 export let pricingCatalogRevision = 0;
+let pricingPhaseBoundariesMs = [];
+
+/**
+ * 返回给定时刻已跨过的全局价格阶段边界计数，供遥测与聚合快照在跨越优惠截止时间点时自动失效重算。
+ *
+ * @param {number} [atMs=Date.now()]
+ * @returns {number}
+ */
+export function getPricingPhaseEpoch(atMs = Date.now()) {
+  const t = Number(atMs);
+  if (!Number.isFinite(t) || t <= 0 || pricingPhaseBoundariesMs.length === 0) return 0;
+  let epoch = 0;
+  for (let i = 0; i < pricingPhaseBoundariesMs.length; i++) {
+    if (t >= pricingPhaseBoundariesMs[i]) epoch = i + 1;
+    else break;
+  }
+  return epoch;
+}
 
 /**
  * 校验字符串是否为合法的 SemVer 2.0 语义化版本号格式（支持 `-prerelease` 与 `+build` 元数据）。
@@ -189,13 +207,7 @@ function normalizeModelFamily(rawFamily) {
   return f;
 }
 
-/**
- * 校验单条模型价格配置是否合法：
- * - `input`/`cache`/`output` 必须为原生 `number` 类型（阻止 `Number(null) === 0` 或 `Number("") === 0` 的隐式转换漏洞）；
- * - 数值必须非负且 `<= 10000`，且至少 `input > 0` 或 `output > 0`（拒绝全 0 伪价格将未定价模型篡改为 $0.00）；
- * - `short`/`family` 必须为非空字符串。
- */
-function isValidPricingEntry(entry) {
+function isValidPricingRateTriplet(entry) {
   if (!entry || typeof entry !== 'object') return false;
   if (
     typeof entry.input !== 'number' ||
@@ -209,6 +221,52 @@ function isValidPricingEntry(entry) {
   if (!Number.isFinite(cache) || cache < 0 || cache > 10000) return false;
   if (!Number.isFinite(output) || output < 0 || output > 10000) return false;
   if (input === 0 && output === 0) return false;
+  return true;
+}
+
+/**
+ * 校验并归一化单个时间阶段单价配置（左闭右开 `[fromMs, untilMs)`）。
+ * 至少需声明合法的 `from` 或 `until` ISO 时间戳，且若同时声明须满足 `fromMs < untilMs`。
+ */
+function sanitizePricingPhase(rawPhase) {
+  if (!isValidPricingRateTriplet(rawPhase)) return null;
+  let from = null;
+  let fromMs = -Infinity;
+  if (rawPhase.from !== undefined && rawPhase.from !== null) {
+    if (typeof rawPhase.from !== 'string' || !rawPhase.from.trim()) return null;
+    const parsedFrom = parseIsoMs(rawPhase.from.trim());
+    if (!parsedFrom || parsedFrom <= 0) return null;
+    from = rawPhase.from.trim();
+    fromMs = parsedFrom;
+  }
+  let until = null;
+  let untilMs = Infinity;
+  if (rawPhase.until !== undefined && rawPhase.until !== null) {
+    if (typeof rawPhase.until !== 'string' || !rawPhase.until.trim()) return null;
+    const parsedUntil = parseIsoMs(rawPhase.until.trim());
+    if (!parsedUntil || parsedUntil <= 0) return null;
+    until = rawPhase.until.trim();
+    untilMs = parsedUntil;
+  }
+  if (from === null && until === null) return null;
+  if (fromMs >= untilMs) return null;
+  return {
+    ...(from !== null ? { from, fromMs } : {}),
+    ...(until !== null ? { until, untilMs } : {}),
+    input: rawPhase.input,
+    cache: rawPhase.cache,
+    output: rawPhase.output,
+  };
+}
+
+/**
+ * 校验单条模型价格配置是否合法：
+ * - `input`/`cache`/`output` 必须为原生 `number` 类型（阻止 `Number(null) === 0` 或 `Number("") === 0` 的隐式转换漏洞）；
+ * - 数值必须非负且 `<= 10000`，且至少 `input > 0` 或 `output > 0`（拒绝全 0 伪价格将未定价模型篡改为 $0.00）；
+ * - `short`/`family` 必须为非空字符串。
+ */
+function isValidPricingEntry(entry) {
+  if (!isValidPricingRateTriplet(entry)) return false;
   if (typeof entry.short !== 'string' || !entry.short.trim()) return false;
   if (typeof entry.family !== 'string' || !entry.family.trim()) return false;
   return true;
@@ -239,12 +297,20 @@ export function sanitizeCatalogPayload(raw) {
     for (const [k, v] of Object.entries(raw.pricing)) {
       const key = String(k || '').trim();
       if (!key || !isValidPricingEntry(v)) continue;
+      let phases = null;
+      if (Array.isArray(v.phases)) {
+        const cleanedPhases = v.phases.map(sanitizePricingPhase).filter(Boolean);
+        if (cleanedPhases.length > 0) {
+          phases = cleanedPhases;
+        }
+      }
       pricing[key] = {
         input: v.input,
         cache: v.cache,
         output: v.output,
         short: String(v.short).trim(),
         family: normalizeModelFamily(v.family),
+        ...(phases ? { phases } : {}),
       };
       validPricingCount++;
     }
@@ -359,6 +425,16 @@ export function rebuildActiveCatalog() {
 
   for (const k of Object.keys(MODEL_PRICING)) delete MODEL_PRICING[k];
   Object.assign(MODEL_PRICING, nextPricing);
+
+  const boundarySet = new Set();
+  for (const entry of Object.values(nextPricing)) {
+    if (!Array.isArray(entry?.phases)) continue;
+    for (const ph of entry.phases) {
+      if (Number.isFinite(ph.fromMs) && ph.fromMs > 0) boundarySet.add(ph.fromMs);
+      if (Number.isFinite(ph.untilMs) && ph.untilMs > 0) boundarySet.add(ph.untilMs);
+    }
+  }
+  pricingPhaseBoundariesMs = Array.from(boundarySet).sort((a, b) => a - b);
 
   for (const k of Object.keys(PLACEHOLDER_MAP)) delete PLACEHOLDER_MAP[k];
   Object.assign(PLACEHOLDER_MAP, nextPlaceholders);

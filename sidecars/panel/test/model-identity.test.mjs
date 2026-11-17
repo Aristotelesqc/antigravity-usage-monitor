@@ -11,7 +11,8 @@ import {
 import { backendHarness } from './backend-harness.mjs';
 
 const FLASH = 'MODEL_PLACEHOLDER_M318', ARGON = 'MODEL_PLACEHOLDER_M418';
-const createdAtMs = Date.now() - 20_000;
+const PROMO_CLOCK_MS = Date.parse('2026-11-17T12:00:20Z');
+const createdAtMs = PROMO_CLOCK_MS - 20_000;
 function step(index, model, checkpoint = false) {
   return { type: checkpoint ? 'CORTEX_STEP_TYPE_CHECKPOINT' : 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
     status: 'CORTEX_STEP_STATUS_DONE', metadata: {
@@ -22,7 +23,7 @@ function step(index, model, checkpoint = false) {
     } };
 }
 async function payload(steps, options = {}) {
-  return backendHarness({ summaries: { test: { stepCount: steps.length } },
+  return backendHarness({ clock: () => PROMO_CLOCK_MS, summaries: { test: { stepCount: steps.length } },
     trajectories: { test: { trajectory: { steps } } }, ...options }).buildTelemetryPayloadInternal('test');
 }
 
@@ -135,7 +136,7 @@ test('upstream responseModel is preserved alongside placeholder modelKey for Ste
 });
 
 test('server model catalog overrides static placeholder mapping', () => {
-  const {resolveModelInfo} = backendHarness();
+  const {resolveModelInfo} = backendHarness({ clock: () => PROMO_CLOCK_MS });
   const result = resolveModelInfo(ARGON, new Map([[ARGON, {modelId:'gemini-3.8-flash-high', label:'Gemini 3.8 Flash (High)'}]]));
   assert.equal(result.shortName,'flash-3.8-high'); assert.equal(result.pricing.input,0.75);
 });
@@ -256,6 +257,7 @@ test('Orchestrator (Carbon) direct/planning and inferred compaction steps resolv
 
 test('Orchestrator (Argon) resolves to orch-argon, annotates upstream ID, and is not misclassified as Carbon', async () => {
   const h = backendHarness({
+    clock: () => PROMO_CLOCK_MS,
     summaries: { test: { stepCount: 1 } },
     trajectories: {
       test: {
@@ -488,7 +490,7 @@ test('orchestratorIdMode defaults to compact, persists via settings action, and 
 });
 
 test('historical placeholders (M15/M16/M47/M84/M132/M133/M264/M330) and verified internal routing slugs resolve and price accurately without wildcarding unknown slugs', () => {
-  const { resolveModelInfo } = backendHarness();
+  const { resolveModelInfo } = backendHarness({ clock: () => PROMO_CLOCK_MS });
 
   const expectedPlaceholders = [
     ['MODEL_PLACEHOLDER_M84', 'flash-3.5-high', 1.5, 9.0],

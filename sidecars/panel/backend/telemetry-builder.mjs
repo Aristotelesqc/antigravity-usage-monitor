@@ -38,7 +38,7 @@ import {
   isArgonModelIdentifier,
   isCarbonModelIdentifier,
 } from './model-pricing.mjs';
-import { getCloudStatus, pricingCatalogRevision } from './pricing-catalog.mjs';
+import { getCloudStatus, getPricingPhaseEpoch, pricingCatalogRevision } from './pricing-catalog.mjs';
 import { buildOfficialQuotaPools } from './quota-pools.mjs';
 import {
   aggregateMultiWindowUsage,
@@ -701,7 +701,11 @@ export async function buildTelemetryPayloadInternal(
   const activeSteps = activeEntry?.steps || [];
   const subagentSummaries = activeConvSummary?.subagents || [];
   if (subagentSummaries.length) lastMainPreparation = null;
-  const modelInputs = { catalogRevision: pricingCatalogRevision, dynamicModelMap };
+  const modelInputs = {
+    catalogRevision: pricingCatalogRevision,
+    phaseEpoch: getPricingPhaseEpoch(),
+    dynamicModelMap,
+  };
   const mainUnit = buildAgentUnitTelemetry({
     agentId: 'main',
     cascadeId: activeCascadeId,

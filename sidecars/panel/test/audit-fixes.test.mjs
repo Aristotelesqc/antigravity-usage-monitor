@@ -19,9 +19,13 @@ import { stripModuleSyntax } from '../scripts/build-bundle.mjs';
 const nowMs = Date.now();
 const nowIso = new Date(nowMs - 5_000).toISOString();
 const doneIso = new Date(nowMs - 3_000).toISOString();
+const promoMs = Date.parse('2026-11-17T12:00:00Z');
+const promoNowIso = new Date(promoMs - 5_000).toISOString();
+const promoDoneIso = new Date(promoMs - 3_000).toISOString();
 
 test('BUG-01 & INCON-01: Google-proxied Claude/GPT/o-series never misclassify as Gemini, and M429/M322/M149/M20 resolve accurately', () => {
   const h = backendHarness({
+    clock: () => promoMs,
     userStatus: {
       cascadeModelConfigData: {
         clientModelConfigs: [
@@ -222,8 +226,8 @@ test('BUG-03, BUG-12 & BUG-16: negative/NaN token sanitization, deferred costUsd
     status: 'CORTEX_STEP_STATUS_DONE',
     metadata: {
       sourceTrajectoryStepInfo: { stepIndex: idx + 1 },
-      createdAt: nowIso,
-      completedAt: doneIso,
+      createdAt: promoNowIso,
+      completedAt: promoDoneIso,
       modelUsage: {
         model: 'MODEL_PLACEHOLDER_M318', // gemini-3.8-flash-high: $0.75/1M input, $3.75/1M output
         inputTokens: '0',
@@ -233,7 +237,8 @@ test('BUG-03, BUG-12 & BUG-16: negative/NaN token sanitization, deferred costUsd
     },
   }));
   const h = backendHarness({
-    summaries: { micro: { stepCount: 100, lastModifiedTime: doneIso, status: 'IDLE' } },
+    clock: () => promoMs,
+    summaries: { micro: { stepCount: 100, lastModifiedTime: promoDoneIso, status: 'IDLE' } },
     trajectories: { micro: { trajectory: { steps: microSteps } } },
   });
   const p = await h.buildTelemetryPayloadInternal('micro', false, { range: 'today' });
