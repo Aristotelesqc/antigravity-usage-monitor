@@ -12,54 +12,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inferCompactionStepModels, normalizeCachedStep } from '../speed-metrics.mjs';
+import { inferCompactionStepModels, normalizeCachedStep } from '../trajectory-metrics.mjs';
 import { writeTrajectoryCacheFile } from './trajectory-cache-file.mjs';
-import {
-  DEFAULT_HOVER_MODULES,
-  DEFAULT_OVERVIEW_METRICS,
-  DEFAULT_OVERVIEW_MODULES,
-  DEFAULT_POPOVER_WIDTH,
-  DEFAULT_SETTINGS_SCHEMA,
-  DEFAULT_STEP_TABLE_COLUMNS,
-  DEFAULT_STEP_TOKEN_COMBO_FORMAT,
-  DEFAULT_TOPBAR_SLOTS,
-  FONT_SCALE_KEYS,
-  MAX_POPOVER_WIDTH,
-  MAX_TOPBAR_SLOTS,
-  MIN_POPOVER_WIDTH,
-  MIN_TOPBAR_SLOTS,
-  MODEL_DISPLAY_MODES,
-  ORCHESTRATOR_ID_MODES,
-  OVERVIEW_METRIC_KEYS,
-  OVERVIEW_MODULE_KEYS,
-  PLUGIN_UPDATE_MODES,
-  POPOVER_WIDTH_MODES,
-  STEP_TABLE_COLUMN_KEYS,
-  SUPPORTED_LANGUAGES,
-  THEME_ACCENT_KEYS,
-  TOPBAR_SLOT_KEYS,
-  WINDOW_MOUNT_MODES,
-  createDefaultSettingsObject,
-  normalizeFontScale,
-  normalizeFullSettings,
-  normalizeHoverModules,
-  normalizeLanguageSetting,
-  normalizeModelDisplayMode,
-  normalizeOrchestratorIdMode,
-  normalizeOverviewMetrics,
-  normalizeOverviewModules,
-  normalizePluginUpdateMode,
-  normalizePopoverWidth,
-  normalizePopoverWidthMode,
-  normalizeStandalonePort,
-  normalizeStepTableColumns,
-  normalizeStepTokenComboFormat,
-  normalizeThemeAccent,
-  normalizeTopbarCapsuleSlots,
-  normalizeWeeklyLimitMode,
-  normalizeWindowMountMode,
-  parseStepTokenComboSegments,
-} from './settings-schema.mjs';
+import { normalizeFullSettings } from './settings-schema.mjs';
 
 export {
   DEFAULT_HOVER_MODULES,
@@ -75,17 +30,12 @@ export {
   MAX_TOPBAR_SLOTS,
   MIN_POPOVER_WIDTH,
   MIN_TOPBAR_SLOTS,
-  MODEL_DISPLAY_MODES,
-  ORCHESTRATOR_ID_MODES,
   OVERVIEW_METRIC_KEYS,
   OVERVIEW_MODULE_KEYS,
-  PLUGIN_UPDATE_MODES,
-  POPOVER_WIDTH_MODES,
   STEP_TABLE_COLUMN_KEYS,
   SUPPORTED_LANGUAGES,
   THEME_ACCENT_KEYS,
   TOPBAR_SLOT_KEYS,
-  WINDOW_MOUNT_MODES,
   createDefaultSettingsObject,
   normalizeFontScale,
   normalizeFullSettings,
@@ -408,7 +358,9 @@ export function computeRuntimeCodeVersion() {
     join(HERE, 'bridge-daemon.mjs'),
     join(HERE, 'mcp-entry.mjs'),
     join(HERE, 'cli-statusline.mjs'),
-    join(HERE, 'speed-metrics.mjs'),
+    join(HERE, 'trajectory-metrics.mjs'),
+    join(HERE, 'shared', 'settings-normalization.mjs'),
+    join(HERE, 'shared', 'window-bridge-protocol.mjs'),
     LOCAL_CATALOG_FILE,
   ];
   const backendDir = join(HERE, 'backend');
@@ -446,7 +398,10 @@ let initialCacheMigrated =
   loadedTrajectoryCache !== undefined &&
   !isPlainObject(loadedTrajectoryCache);
 
-const safeCacheEntries = [];
+/**
+ * 内存中的会话轨迹步骤缓存：`cascadeId -> { signature, accountName, title, lastModifiedMs, diskMtimeMs, wasRunning, steps }`
+ */
+const trajectoryCache = Object.create(null);
 if (isPlainObject(loadedTrajectoryCache)) {
   for (const [id, entry] of Object.entries(loadedTrajectoryCache)) {
     if (!id || !isPlainObject(entry)) {
@@ -473,20 +428,25 @@ if (isPlainObject(loadedTrajectoryCache)) {
         break;
       }
     }
-    safeCacheEntries.push([
-      id,
-      {
-        ...entry,
-        steps: finalSteps,
-      },
-    ]);
+    trajectoryCache[id] = { ...entry, steps: finalSteps };
   }
 }
 
-/**
- * 内存中的会话轨迹步骤缓存：`cascadeId -> { signature, accountName, title, lastModifiedMs, diskMtimeMs, wasRunning, steps }`
- */
-export const trajectoryCache = Object.fromEntries(safeCacheEntries);
+export function getCachedTrajectory(cascadeId) {
+  return trajectoryCache[cascadeId];
+}
+
+export function listCachedTrajectoryEntries() {
+  return Object.entries(trajectoryCache);
+}
+
+export function setCachedTrajectory(cascadeId, entry) {
+  trajectoryCache[cascadeId] = entry;
+}
+
+export function removeCachedTrajectory(cascadeId) {
+  delete trajectoryCache[cascadeId];
+}
 
 /**
  * 缓存状态与外部深层统计缓存 Memo。
@@ -494,11 +454,15 @@ export const trajectoryCache = Object.fromEntries(safeCacheEntries);
  */
 export const CACHE_RUNNING_SAVE_INTERVAL_MS = 30_000;
 
-export const cacheState = {
+const cacheState = {
   needsSave: initialCacheMigrated,
   lastSavedAtMs: 0,
   flushTimer: null,
 };
+
+export function hasPendingTrajectoryCacheSave() {
+  return cacheState.needsSave;
+}
 
 function cancelPendingCacheFlushTimer() {
   if (cacheState.flushTimer) {
@@ -632,10 +596,12 @@ export const pluginUpdateState = {
 
 /**
  * 清空内存态轨迹缓存、外部深层统计 Memo 与配额摘要短期缓存，并将磁盘缓存重置为空对象。
+ * 空缓存落盘成功后再清理内存，写入失败时可继续使用内存数据并重试。
  *
  * @returns {boolean} 是否成功写回空白缓存文件
  */
 export function clearRuntimeCaches() {
+  if (!saveJson(CACHE_FILE, {})) return false;
   cancelPendingCacheFlushTimer();
   for (const key of Object.keys(trajectoryCache)) {
     delete trajectoryCache[key];
@@ -655,5 +621,5 @@ export function clearRuntimeCaches() {
   quotaSummaryCache.accountGeneration += 1;
   quotaSummaryCache.data = null;
   quotaSummaryCache.error = null;
-  return saveJson(CACHE_FILE, {});
+  return true;
 }

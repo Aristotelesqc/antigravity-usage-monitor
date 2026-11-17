@@ -13,8 +13,8 @@ import {
   createSpeedAccumulator,
   finishSpeed,
   parseIsoMs,
-} from '../speed-metrics.mjs';
-import { roundMetric, trajectoryCache } from './config.mjs';
+} from '../trajectory-metrics.mjs';
+import { listCachedTrajectoryEntries, roundMetric } from './config.mjs';
 import { loadExternalDeepStatsCache } from './local-scanner.mjs';
 import {
   computeStepCost,
@@ -550,7 +550,7 @@ export function aggregateMultiWindowUsage({
 
   // 构建大小写归一化的内存缓存与跨端深层缓存索引，彻底杜绝 `${appSource}:${cascadeId}` 键不匹配导致的双倍重复计费
   const allLiveByLower = new Map();
-  for (const [rawId, entry] of Object.entries(trajectoryCache)) {
+  for (const [rawId, entry] of listCachedTrajectoryEntries()) {
     const cidLower = String(rawId || '').toLowerCase();
     if (!cidLower || !entry || typeof entry !== 'object') continue;
     const prev = allLiveByLower.get(cidLower);

@@ -7,6 +7,17 @@ import { createReactiveStore } from '../core/reactive.js';
 import { callSidecarApi, getWindowBridgeConfig, isWindowOverlayMode } from '../core/httpClient.js';
 import { isEnglishLocale, normalizeI18nLanguage, t } from '../i18n/index.js';
 import { normalizeClientFontScale, normalizeClientThemeAccent } from '../core/appearance.js';
+import {
+  DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_TOPBAR_SLOTS,
+  OVERVIEW_METRIC_KEYS,
+  TOPBAR_SLOT_KEYS,
+  normalizeOverviewMetrics,
+  normalizeTopbarCapsuleSlots,
+  normalizeWeeklyLimitMode,
+  normalizeWindowMountMode,
+} from '../../shared/settings-normalization.mjs';
+import { WINDOW_BRIDGE_ROUTE_KEY, readInjectedWindowBridge } from '../../shared/window-bridge-protocol.mjs';
 
 const CASCADE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -25,7 +36,7 @@ export function extractHostRouteCascadeId() {
   if (m && CASCADE_UUID_RE.test(m[1])) {
     return m[1];
   }
-  const extBridgeRouteId = String(window.__AGUsageMonitorBridge?.hostRouteCascadeId || '').trim();
+  const extBridgeRouteId = String(readInjectedWindowBridge()?.[WINDOW_BRIDGE_ROUTE_KEY] || '').trim();
   if (extBridgeRouteId && CASCADE_UUID_RE.test(extBridgeRouteId)) {
     return extBridgeRouteId;
   }
@@ -107,23 +118,9 @@ let loopActive = false;
 let loopIntervalMs = 2000;
 let loopTickFn = null;
 
-export const CLIENT_TOPBAR_SLOT_KEYS = Object.freeze([
-  'context',
-  'tps',
-  'ttft',
-  'avg_tps',
-  'cost',
-  'session_cost',
-  'cache_hit',
-  'session_tokens',
-  'quota_auto',
-  'gemini_5h',
-  'gemini_weekly',
-  'claude_5h',
-  'claude_weekly',
-]);
+export const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
 
-export const DEFAULT_CLIENT_TOPBAR_SLOTS = Object.freeze(['tps', 'ttft', 'context']);
+export const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
 
 export const CLIENT_OVERVIEW_MODULE_KEYS = Object.freeze([
   'metrics',
@@ -141,24 +138,9 @@ export const DEFAULT_CLIENT_OVERVIEW_MODULES = Object.freeze([
 
 export const DEFAULT_CLIENT_HOVER_MODULES = Object.freeze(['metrics', 'context', 'quotas']);
 
-export const CLIENT_OVERVIEW_METRIC_KEYS = Object.freeze([
-  'tps',
-  'ttft',
-  'avg_tps',
-  'step_cost',
-  'session_cost',
-  'cache_hit',
-  'session_tokens',
-  'context_usage',
-  'quota_tightest',
-]);
+export const CLIENT_OVERVIEW_METRIC_KEYS = OVERVIEW_METRIC_KEYS;
 
-export const DEFAULT_CLIENT_OVERVIEW_METRICS = Object.freeze([
-  'tps',
-  'ttft',
-  'avg_tps',
-  'step_cost',
-]);
+export const DEFAULT_CLIENT_OVERVIEW_METRICS = DEFAULT_OVERVIEW_METRICS;
 
 export const CLIENT_STEP_COLUMN_KEYS = Object.freeze([
   'step',
@@ -308,12 +290,7 @@ function normalizeClientOrderedList(raw, { allowedKeys, defaultItems, minLen, ma
  * @returns {string[]}
  */
 export function normalizeClientTopbarSlots(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_TOPBAR_SLOT_KEYS,
-    defaultItems: DEFAULT_CLIENT_TOPBAR_SLOTS,
-    minLen: 1,
-    maxLen: 5,
-  });
+  return normalizeTopbarCapsuleSlots(raw);
 }
 
 /**
@@ -353,12 +330,7 @@ export function normalizeClientOverviewModules(raw) {
  * @returns {string[]}
  */
 export function normalizeClientOverviewMetrics(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_METRIC_KEYS,
-    defaultItems: DEFAULT_CLIENT_OVERVIEW_METRICS,
-    minLen: 1,
-    maxLen: 4,
-  });
+  return normalizeOverviewMetrics(raw);
 }
 
 /**
@@ -402,12 +374,7 @@ export function normalizeClientOrchestratorIdMode(mode) {
  * @returns {'dual'|'composer'|'sidebar'}
  */
 export function normalizeClientWindowMountMode(mode, legacyEnableOverlay) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'composer' || m === 'input') return 'composer';
-  if (m === 'sidebar' || m === 'off') return 'sidebar';
-  if (m === 'dual' || m === 'topbar') return 'dual';
-  if (legacyEnableOverlay === false) return 'sidebar';
-  return 'dual';
+  return normalizeWindowMountMode(mode, legacyEnableOverlay);
 }
 
 function isEquivalentTelemetry(prev, next) {
@@ -423,15 +390,6 @@ function isEquivalentTelemetry(prev, next) {
     }
     return true;
   };
-  const normMount = (mode, legacyEnableOverlay) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    if (m === 'composer' || m === 'input') return 'composer';
-    if (m === 'sidebar' || m === 'off') return 'sidebar';
-    if (m === 'dual' || m === 'topbar') return 'dual';
-    if (legacyEnableOverlay === false) return 'sidebar';
-    return 'dual';
-  };
-
   // 1. 比对系统设置项（外观语言/主题/字号、模型显示策略、更新策略、挂载与结构布局配置）
   const pAct = prev.activeConversation;
   const nAct = next.activeConversation;
@@ -503,8 +461,8 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.pluginUpdateMode ?? '') !== (nSet?.pluginUpdateMode ?? '')) return false;
   if (pSet?.autoUpdatePlugin !== nSet?.autoUpdatePlugin) return false;
   if (
-    normMount(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
-    normMount(nSet?.windowMountMode, nSet?.enableWindowOverlay)
+    normalizeClientWindowMountMode(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
+    normalizeClientWindowMountMode(nSet?.windowMountMode, nSet?.enableWindowOverlay)
   ) {
     return false;
   }
@@ -1137,9 +1095,7 @@ export async function saveSettingsPatch(patch) {
     safePatch.fontScale = normalizeClientFontScale(safePatch.fontScale);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
-    const mode = safePatch.weeklyLimitMode;
-    safePatch.weeklyLimitMode =
-      mode === 'custom_tokens' || mode === 'custom_cost' ? mode : 'official';
+    safePatch.weeklyLimitMode = normalizeWeeklyLimitMode(safePatch.weeklyLimitMode);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'enableCliStatusLine')) {
     safePatch.enableCliStatusLine = Boolean(safePatch.enableCliStatusLine);

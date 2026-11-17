@@ -8,7 +8,7 @@
  *    绝不借用其他模型单价伪造费用。
  */
 
-import { parseIsoMs } from '../speed-metrics.mjs';
+import { parseIsoMs } from '../trajectory-metrics.mjs';
 import { MODEL_PRICING, PLACEHOLDER_MAP } from './pricing-catalog.mjs';
 
 /**

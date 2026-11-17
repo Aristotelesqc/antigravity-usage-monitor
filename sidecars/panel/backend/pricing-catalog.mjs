@@ -11,7 +11,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseIsoMs } from '../speed-metrics.mjs';
+import { parseIsoMs } from '../trajectory-metrics.mjs';
 import {
   DEFAULT_ARCHIVE_FALLBACK_URL,
   DEFAULT_DOWNLOAD_URL,

@@ -744,12 +744,6 @@
   min-height: 26px;
 }
 
-.topbar-header-right {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 .btn-ghost-sm {
   display: inline-flex;
   align-items: center;
@@ -779,34 +773,6 @@
 .btn-ghost-sm:disabled {
   opacity: 0.42;
   cursor: default;
-}
-
-.topbar-slot-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.topbar-slot-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 4px 2px 6px;
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-xs);
-  background: transparent;
-  transition: border-color var(--dur-instant) var(--ease-fast);
-}
-
-.topbar-slot-row:focus-within,
-.topbar-slot-row:has(.is-open) {
-  z-index: 30;
-  border-color: var(--border-strong);
-}
-
-.topbar-slot-row .select-menu {
-  max-height: 216px;
 }
 
 .slot-index-badge {

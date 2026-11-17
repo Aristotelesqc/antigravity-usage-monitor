@@ -330,11 +330,12 @@ test('CDP multi-window sync injects, skips healthy windows, hot-upgrades on vers
       const msg = JSON.parse(raw);
       if (msg.method === 'Runtime.evaluate') {
         const expr = msg.params.expression;
-        if (expr.includes('__AGUsageMonitorBridge =')) {
+        const ctx = windowContexts.get(this.targetId);
+        const previousBridge = ctx.__AGUsageMonitorBridge;
+        const value = vm.runInContext(expr, ctx);
+        if (ctx.__AGUsageMonitorBridge && ctx.__AGUsageMonitorBridge !== previousBridge) {
           injectEvalCount += 1;
         }
-        const ctx = windowContexts.get(this.targetId);
-        const value = vm.runInContext(expr, ctx);
         Promise.resolve(value).then((result) =>
           this._emit('message', {
             data: JSON.stringify({ id: msg.id, result: { result: { value: result } } }),
@@ -734,6 +735,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
   let liveSubagentPollActive = false;
   const fetchedUrls = [];
   const fetchedHeaders = [];
+  const createdForms = [];
 
   const docListeners = new Map();
   const winListeners = new Map();
@@ -743,7 +745,11 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     hidden: false,
     documentElement: docRoot,
     body,
-    createElement: (tag) => new MockNode(tag),
+    createElement: (tag) => {
+      const node = new MockNode(tag);
+      if (tag === 'form') createdForms.push(node);
+      return node;
+    },
     createElementNS: (_ns, tag) => new MockNode(tag),
     createTextNode: (txt) => {
       const t = new MockNode('#text');
@@ -2701,6 +2707,9 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       firstLegendSlotBefore,
       'Hover legend updates strictly in-place without DOM node replacement or appendChild'
     );
+
+    assert.equal(createdForms.some((form) => form.className.includes('settings-account-form')), false);
+    assert.equal(fetchedUrls.some((url) => url.includes('/api/accounts')), false);
 
     // Verify in-place bridge port rotation preserves exact DOM host nodes without remount
     fetchShouldFail = false;

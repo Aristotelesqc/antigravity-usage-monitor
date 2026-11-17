@@ -1,20 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { backendHarness } from './backend-harness.mjs';
 import {
   extractContextBreakdown,
   extractModelSteps,
   normalizeCachedStep,
-} from '../speed-metrics.mjs';
+} from '../trajectory-metrics.mjs';
 import {
   formatCountdown,
   formatUsd,
   speedReasonText,
 } from '../src/core/formatters.js';
 import { createReactiveStore } from '../src/core/reactive.js';
-import { stripModuleSyntax } from '../scripts/build-bundle.mjs';
+import { buildBundle, stripModuleSyntax } from '../scripts/build-bundle.mjs';
 
 const nowMs = Date.now();
 const nowIso = new Date(nowMs - 5_000).toISOString();
@@ -423,6 +425,31 @@ test('BUG-20 & BUG-24: reactive store microtask deduplication, stripModuleSyntax
   const appBundle = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.ok(appBundle.startsWith('(() => {\n\'use strict\';'));
   assert.ok(appBundle.trimEnd().endsWith('})();'));
+});
+
+test('bundle validation rejects incompatible imports and duplicate bindings before touching output', (t) => {
+  const tempDir = fs.mkdtempSync(fileURLToPath(new URL('./.bundle-test-', import.meta.url)));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  for (const dir of ['src', 'shared']) {
+    fs.cpSync(new URL(`../${dir}/`, import.meta.url), join(tempDir, dir), { recursive: true });
+  }
+  const outputs = ['app.js', 'styles.css', 'index.html'];
+  for (const file of outputs) fs.writeFileSync(join(tempDir, file), file);
+
+  const iconSource = join(tempDir, 'src', 'icons', 'svgRegistry.js');
+  const original = fs.readFileSync(iconSource, 'utf8');
+  for (const [prefix, error] of [
+    ["import { SVG_NS /* comment */ as ns } from './SvgIcon.js';", /svgRegistry\.js.*without aliases/],
+    ["import { SVG_NS } from './SvgIcon.js';", /svgRegistry\.js.*SvgIcon\.js.*earlier in jsOrder/],
+    ["import './missing.js';", /svgRegistry\.js.*missing\.js.*earlier in jsOrder/],
+    ['const SVG_NS = "duplicate";', /Identifier 'SVG_NS' has already been declared/],
+  ]) {
+    fs.writeFileSync(iconSource, `${prefix}\n${original}`);
+    assert.throws(() => buildBundle(tempDir), error);
+    for (const file of outputs) {
+      assert.equal(fs.readFileSync(join(tempDir, file), 'utf8'), file);
+    }
+  }
 });
 
 test('Compaction liveActivity: detects in-progress & completed CHECKPOINT over pre-compaction tool operations across RPC and transcript.jsonl', async () => {

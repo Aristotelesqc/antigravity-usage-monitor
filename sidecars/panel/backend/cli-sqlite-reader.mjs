@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { parseIsoMs } from '../speed-metrics.mjs';
+import { parseIsoMs } from '../trajectory-metrics.mjs';
 import { ANNOTATION_DIRS, PRODUCT_DATA_ROOTS, localSummaryMemo } from './config.mjs';
 
 const UUID_FILE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

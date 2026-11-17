@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import * as metrics from '../speed-metrics.mjs';
+import * as metrics from '../trajectory-metrics.mjs';
 import { stripModuleSyntax } from '../scripts/build-bundle.mjs';
 
 const REAL_CATALOG_RAW = JSON.parse(
@@ -20,6 +20,8 @@ const BACKEND_MODULE_FILES = [
   '../backend/context-windows.mjs',
   '../backend/account-oauth.mjs',
   '../backend/account-switch.mjs',
+  '../shared/settings-normalization.mjs',
+  '../shared/window-bridge-protocol.mjs',
   '../backend/settings-schema.mjs',
   '../backend/config.mjs',
   '../backend/cli-sqlite-reader.mjs',
@@ -69,6 +71,7 @@ export function backendHarness({
   execFileImpl=null,
   sourceText=null,
   clock=null,
+  timerApi={ setTimeout, clearTimeout },
   metricsImplementation=metrics,
 }={}) {
   const mainUrl = pluginRootPath ? `file://${pluginRootPath}/sidecars/panel/main.mjs` : 'file:///test/sidecars/panel/main.mjs';
@@ -76,7 +79,7 @@ export function backendHarness({
   const source = stripEsmSyntax(sourceText ?? loadCombinedBackendSource(), mainUrl);
   const state={calls:[],errors:[],saves:[],settings,trajectories,summaries,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,gitConfigText,deepStats,deepStatsMtimeMs:1};
   const ctx={
-    ...metricsImplementation, URL, AbortSignal, Buffer, TextDecoder, setTimeout, clearTimeout, isDeepStrictEqual, randomUUID,
+    ...metricsImplementation, URL, AbortSignal, Buffer, TextDecoder, ...timerApi, isDeepStrictEqual, randomUUID,
     ...(clock ? { Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [clock()])); }
       static now() { return clock(); }
@@ -155,6 +158,7 @@ export function backendHarness({
       }
     },
     writeTrajectoryCacheFile:(p,data)=>{
+      if (state.cacheWriteError) throw state.cacheWriteError;
       state.saves.push({path:p,data:JSON.parse(JSON.stringify(data))});
     },
     homedir:()=>'/test-home',dirname:path.dirname,join:path.join,basename:path.basename,delimiter:path.delimiter,pathToFileURL,fileURLToPath:()=>mainPath,
@@ -179,6 +183,6 @@ export function backendHarness({
       return {ok:true,json:async()=>data};
     },
   };
-  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,resolvePricingAt,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,getPricingPhaseEpoch,detectCustomGitForkRepo,persistTrajectoryCacheIfNeeded,flushTrajectoryCacheNow,cacheState,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns,normalizeStepTokenComboFormat,parseStepTokenComboSegments,normalizeModelDisplayMode,normalizePopoverWidthMode,normalizePopoverWidth,normalizeStandalonePort,setStandalonePortListener,parseAnnotationPbtxtTitle,readLocalSummarySnapshot,readLocalSqliteTrajectory,computeSqliteWalSig,buildCliStatusSnapshot,buildCliStatusLineCommand,isManagedCliStatusLineCommand,applyCliStatusLineToSettingsObject,cliDisplayWidth,parseCliModelAndEffort,formatCliStatusLineCapsule};',ctx);
+  vm.runInNewContext(source+'\n globalThis.api={buildTelemetryPayloadInternal,executeTelemetryAction,computeStepCost,resolveModelInfo,resolvePricingAt,inferFamilyFromProviderOrKey,isArgonModelIdentifier,isCarbonModelIdentifier,getBaseModelLabel,formatUpstreamModelId,PLACEHOLDER_MAP,normalizeQuotaFraction,classifyOfficialBucketWindow,classifyQuotaPoolIdentity,buildOfficialQuotaPools,resolveTimeWindow,sanitizeCatalogPayload,rebuildActiveCatalog,getPricingPhaseEpoch,detectCustomGitForkRepo,persistTrajectoryCacheIfNeeded,flushTrajectoryCacheNow,getCachedTrajectory,listCachedTrajectoryEntries,hasPendingTrajectoryCacheSave,syncCloudCatalog,getCloudStatus,isValidSemver,compareSemver,performPluginUpdate,resolveMigratedGitRemoteUrl,loadSettings,executeSettingsAction,executeModelContextWindowAction,executeResetSettingsAction,executeRebuildCacheAction,clearRuntimeCaches,normalizeTopbarCapsuleSlots,normalizeHoverModules,normalizeOverviewModules,normalizeOverviewMetrics,normalizeStepTableColumns,normalizeStepTokenComboFormat,parseStepTokenComboSegments,normalizeModelDisplayMode,normalizePopoverWidthMode,normalizePopoverWidth,normalizeStandalonePort,setStandalonePortListener,parseAnnotationPbtxtTitle,readLocalSummarySnapshot,readLocalSqliteTrajectory,computeSqliteWalSig,buildCliStatusSnapshot,buildCliStatusLineCommand,isManagedCliStatusLineCommand,applyCliStatusLineToSettingsObject,cliDisplayWidth,parseCliModelAndEffort,formatCliStatusLineCapsule};',ctx);
   return {...ctx.api,state};
 }

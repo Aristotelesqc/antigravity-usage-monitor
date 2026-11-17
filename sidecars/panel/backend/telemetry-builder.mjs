@@ -16,16 +16,17 @@ import {
   speedMetric,
   summarizeSpeed,
   summarizeTtft,
-} from '../speed-metrics.mjs';
+} from '../trajectory-metrics.mjs';
 import {
   CLI_STATUS_SNAPSHOT_FILE,
   computeRuntimeCodeVersion,
+  getCachedTrajectory,
   inFlightRequests,
+  listCachedTrajectoryEntries,
   loadSettings,
   lsRuntimeEndpoint,
   roundMetric,
   saveJson,
-  trajectoryCache,
 } from './config.mjs';
 import { getContextWindowGroups, getContextWindowModels } from './context-windows.mjs';
 import { readLocalSummarySnapshot } from './cli-sqlite-reader.mjs';
@@ -60,9 +61,10 @@ function roundSessionCost(val) {
 
 function findTrajectoryCacheEntry(cascadeId) {
   if (!cascadeId) return null;
-  if (trajectoryCache[cascadeId]) return trajectoryCache[cascadeId];
+  const entry = getCachedTrajectory(cascadeId);
+  if (entry) return entry;
   const targetLower = String(cascadeId).toLowerCase();
-  for (const [k, v] of Object.entries(trajectoryCache)) {
+  for (const [k, v] of listCachedTrajectoryEntries()) {
     if (k.toLowerCase() === targetLower) return v;
   }
   return null;
@@ -98,7 +100,7 @@ function readTrajectoryModelFacts(steps) {
 /** 合并各会话的上游模型与上下文上限，步骤数组更新后重新提取对应会话的数据。 */
 function buildKnownUpstreamModelMap(contextLimits, currentAccountName) {
   const knownUpstreamByModelKey = new Map();
-  for (const entry of Object.values(trajectoryCache)) {
+  for (const [, entry] of listCachedTrajectoryEntries()) {
     if (!entry?.steps?.length) continue;
     const facts = readTrajectoryModelFacts(entry.steps);
     for (const [key, model] of facts.upstream) knownUpstreamByModelKey.set(key, model);

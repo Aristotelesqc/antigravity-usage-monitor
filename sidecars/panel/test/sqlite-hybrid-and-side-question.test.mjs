@@ -653,12 +653,26 @@ test('Hybrid SQLite+WAL mode skips trajectory RPCs for local DBs, falls back to 
 
 test('persistTrajectoryCacheIfNeeded throttles RUNNING disk writes to 30s and flushes immediately on IDLE or cache rebuild', () => {
   let now = 1_000_000;
-  const h = backendHarness({ clock: () => now });
+  const scheduled = new Map();
+  const h = backendHarness({
+    cache: { live: { title: 'Cached session', steps: [] } },
+    clock: () => now,
+    timerApi: {
+      setTimeout(_callback, delay) {
+        const id = Symbol();
+        scheduled.set(id, delay);
+        return id;
+      },
+      clearTimeout(id) {
+        scheduled.delete(id);
+      },
+    },
+  });
 
   // 1st save (lastSavedAtMs === 0) flushes immediately even while running
   h.persistTrajectoryCacheIfNeeded({ hasRunningSessions: true, allowThrottleInTest: true });
   assert.equal(h.state.saves.length, 1);
-  assert.equal(h.cacheState.needsSave, false);
+  assert.equal(h.hasPendingTrajectoryCacheSave(), false);
 
   // Subsequent saves within 30s window while RUNNING are throttled in memory
   now += 2_000;
@@ -666,22 +680,31 @@ test('persistTrajectoryCacheIfNeeded throttles RUNNING disk writes to 30s and fl
   now += 2_000;
   h.persistTrajectoryCacheIfNeeded({ hasRunningSessions: true, allowThrottleInTest: true });
   assert.equal(h.state.saves.length, 1, '2s polling during RUNNING must not rewrite disk every tick');
-  assert.equal(h.cacheState.needsSave, true);
-  assert.ok(h.cacheState.flushTimer !== null);
+  assert.equal(h.hasPendingTrajectoryCacheSave(), true);
+  assert.deepEqual([...scheduled.values()], [28_000]);
 
   // Transitioning to IDLE flushes immediately and clears pending timer
   now += 2_000;
   h.persistTrajectoryCacheIfNeeded({ hasRunningSessions: false, allowThrottleInTest: true });
   assert.equal(h.state.saves.length, 2, 'transition to IDLE flushes immediately');
-  assert.equal(h.cacheState.needsSave, false);
-  assert.equal(h.cacheState.flushTimer, null);
+  assert.equal(h.hasPendingTrajectoryCacheSave(), false);
+  assert.equal(scheduled.size, 0);
 
   // Re-arming throttle then calling executeRebuildCacheAction cancels timer cleanly
   now += 2_000;
   h.persistTrajectoryCacheIfNeeded({ hasRunningSessions: true, allowThrottleInTest: true });
-  assert.ok(h.cacheState.flushTimer !== null);
+  assert.equal(scheduled.size, 1);
+  h.state.cacheWriteError = new Error('Disk unavailable');
+  assert.equal(h.executeRebuildCacheAction().status, 500);
+  assert.equal(h.getCachedTrajectory('live').title, 'Cached session');
+  assert.equal(h.hasPendingTrajectoryCacheSave(), true);
+  assert.equal(scheduled.size, 1);
+
+  h.state.cacheWriteError = null;
   const rebuildRes = h.executeRebuildCacheAction();
   assert.equal(rebuildRes.ok, true);
-  assert.equal(h.cacheState.flushTimer, null);
-  assert.equal(h.cacheState.needsSave, false);
+  assert.equal(scheduled.size, 0);
+  assert.equal(h.hasPendingTrajectoryCacheSave(), false);
+  assert.equal(h.listCachedTrajectoryEntries().length, 0);
+  assert.deepEqual(h.state.saves.at(-1).data, {});
 });

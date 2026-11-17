@@ -16,7 +16,7 @@ import {
   extractModelSteps,
   getMaxMeaningfulStepIndex,
   parseIsoMs,
-} from '../speed-metrics.mjs';
+} from '../trajectory-metrics.mjs';
 import {
   ANNOTATION_DIRS,
   BRAIN_DIR,
@@ -25,11 +25,14 @@ import {
   CONVERSATIONS_DIR,
   CONVERSATION_DIRS,
   DEEP_STATS_CACHE_CANDIDATES,
-  cacheState,
+  getCachedTrajectory,
+  hasPendingTrajectoryCacheSave,
+  listCachedTrajectoryEntries,
   externalDeepStatsMemo,
   loadJson,
   persistTrajectoryCacheIfNeeded,
-  trajectoryCache,
+  removeCachedTrajectory,
+  setCachedTrajectory,
 } from './config.mjs';
 import {
   computeSqliteWalSig,
@@ -1144,7 +1147,7 @@ export async function enumerateAndSyncConversations({
     }
   }
 
-  let cacheDirty = cacheState.needsSave;
+  let cacheDirty = hasPendingTrajectoryCacheSave();
   const diskConvMap = discoverLocalConversationFiles();
 
   // 构建大小写不敏感索引，将同一会话的不同大小写键合并至唯一规范键（优先保留 summariesObj 中的原始键以兼容 RPC）
@@ -1194,7 +1197,7 @@ export async function enumerateAndSyncConversations({
     }
   }
 
-  for (const rawCacheKey of Object.keys(trajectoryCache)) {
+  for (const [rawCacheKey] of listCachedTrajectoryEntries()) {
     const lower = String(rawCacheKey || '').trim().toLowerCase();
     if (!lower) continue;
     const existingCanon = canonicalIdByLower.get(lower);
@@ -1202,18 +1205,18 @@ export async function enumerateAndSyncConversations({
       // 标准 UUID 统一收敛为小写键，避免大小写分裂产生双份条目
       const normalizedKey = UUID_RE.test(rawCacheKey) ? lower : rawCacheKey;
       if (normalizedKey !== rawCacheKey) {
-        trajectoryCache[normalizedKey] = trajectoryCache[rawCacheKey];
-        delete trajectoryCache[rawCacheKey];
+        setCachedTrajectory(normalizedKey, getCachedTrajectory(rawCacheKey));
+        removeCachedTrajectory(rawCacheKey);
         cacheDirty = true;
       }
       canonicalIdByLower.set(lower, normalizedKey);
     } else if (existingCanon !== rawCacheKey) {
-      const targetEntry = trajectoryCache[existingCanon];
-      const dupEntry = trajectoryCache[rawCacheKey];
+      const targetEntry = getCachedTrajectory(existingCanon);
+      const dupEntry = getCachedTrajectory(rawCacheKey);
       if (!targetEntry || (dupEntry?.steps?.length || 0) > (targetEntry?.steps?.length || 0)) {
-        trajectoryCache[existingCanon] = dupEntry;
+        setCachedTrajectory(existingCanon, dupEntry);
       }
-      delete trajectoryCache[rawCacheKey];
+      removeCachedTrajectory(rawCacheKey);
       cacheDirty = true;
     }
   }
@@ -1225,7 +1228,7 @@ export async function enumerateAndSyncConversations({
   }
 
   // 仅从归属于当前账号的缓存会话收集 subagentRefs，防止跨账号切换时将其他账号的子代理复活进当前会话列表
-  for (const entry of Object.values(trajectoryCache)) {
+  for (const [, entry] of listCachedTrajectoryEntries()) {
     if (
       entry?.accountName &&
       currentAccountName !== '' &&
@@ -1249,7 +1252,7 @@ export async function enumerateAndSyncConversations({
   for (const [cidLower, cascadeId] of canonicalIdByLower.entries()) {
     const item = summariesByLower.get(cidLower);
     const localSum = item ? null : localSummaryByLower.get(cidLower) || null;
-    const cached = trajectoryCache[cascadeId];
+    const cached = getCachedTrajectory(cascadeId);
     if (
       cached?.accountName &&
       currentAccountName !== '' &&
@@ -1525,7 +1528,7 @@ export async function enumerateAndSyncConversations({
           const cooldownKey = `${conv.cascadeId.toLowerCase()}::${sig}`;
           const isRunning = conv.status === 'CASCADE_RUN_STATUS_RUNNING';
           const isReq = Boolean(reqLower && conv.cascadeId.toLowerCase() === reqLower);
-          const prev = trajectoryCache[conv.cascadeId];
+          const prev = getCachedTrajectory(conv.cascadeId);
           let partialTailSteps = [];
           let hasTailStepInfo = false;
           try {
@@ -1723,7 +1726,7 @@ export async function enumerateAndSyncConversations({
               !isDeepStrictEqual(prev.steps, steps);
 
             if (!stepsChanged) cacheEntry.steps = prev.steps;
-            trajectoryCache[conv.cascadeId] = cacheEntry;
+            setCachedTrajectory(conv.cascadeId, cacheEntry);
             if (stepsChanged) {
               cacheDirty = true;
             }
@@ -1806,7 +1809,7 @@ export async function enumerateAndSyncConversations({
                   Boolean(prev.offlineSqliteTelemetry) !== Boolean(offlineEntry.offlineSqliteTelemetry) ||
                   !isDeepStrictEqual(prev.steps, offlineEntry.steps);
                 if (!changed) offlineEntry.steps = prev.steps;
-                trajectoryCache[conv.cascadeId] = offlineEntry;
+                setCachedTrajectory(conv.cascadeId, offlineEntry);
                 if (changed) {
                   cacheDirty = true;
                 }
@@ -1845,10 +1848,11 @@ export async function enumerateAndSyncConversations({
             if (
               !offlineRecovered &&
               prev &&
+              getCachedTrajectory(conv.cascadeId) === prev &&
               String(prev.signature || '').startsWith(`${CACHE_SCHEMA_VERSION}:`) &&
               !Array.isArray(prev.subagentRefs)
             ) {
-              prev.subagentRefs = [];
+              setCachedTrajectory(conv.cascadeId, { ...prev, subagentRefs: [] });
               cacheDirty = true;
             }
           }
@@ -1896,7 +1900,7 @@ export async function enumerateAndSyncConversations({
     const sig = buildConvSig(conv);
     if (isFetchInCooldown(conv, sig)) return false;
     const isRunning = conv.status === 'CASCADE_RUN_STATUS_RUNNING';
-    const cached = trajectoryCache[conv.cascadeId];
+    const cached = getCachedTrajectory(conv.cascadeId);
     if (!cached || conv.needsInitialLoad) return true;
     const lowerCid = conv.cascadeId.toLowerCase();
     const isSelectedFamily =
@@ -1983,7 +1987,7 @@ export async function enumerateAndSyncConversations({
       const missingSubagentsToFetch = [];
 
       for (const parentConv of [...rawConversations]) {
-        const parentCached = trajectoryCache[parentConv.cascadeId];
+        const parentCached = getCachedTrajectory(parentConv.cascadeId);
         const refs = parentConv.subagentRefs || parentCached?.subagentRefs || [];
         if (!Array.isArray(refs) || refs.length === 0) continue;
 
@@ -2001,7 +2005,7 @@ export async function enumerateAndSyncConversations({
           const canonSubId = canonicalIdByLower.get(subCid) || subCid;
           canonicalIdByLower.set(subCid, canonSubId);
           let subConv = byLowerId.get(subCid);
-          const subCached = trajectoryCache[subConv?.cascadeId || canonSubId];
+          const subCached = getCachedTrajectory(subConv?.cascadeId || canonSubId);
           if (!subConv) {
             const subDiskFiles = diskConvMap.get(subCid) || [];
             const subDbInfo = sqliteAvailable ? resolveBestSqliteDbInfo(subDiskFiles) : null;
@@ -2059,7 +2063,7 @@ export async function enumerateAndSyncConversations({
           }
 
           const targetCacheKey = subConv.cascadeId;
-          const existingSubCache = trajectoryCache[targetCacheKey];
+          const existingSubCache = getCachedTrajectory(targetCacheKey);
           const isSelectedSubFamily = rootId === selectedRootId;
           const hasValidSubCache =
             existingSubCache &&
@@ -2076,42 +2080,37 @@ export async function enumerateAndSyncConversations({
                 !hasDroppedContextGroups(existingSubCache)));
 
           if (hasValidSubCache) {
-            let subMetaUpdated = false;
+            const updatedMetadata = {};
             if (existingSubCache.parentConversationId !== subConv.parentConversationId) {
-              existingSubCache.parentConversationId = subConv.parentConversationId;
-              subMetaUpdated = true;
+              updatedMetadata.parentConversationId = subConv.parentConversationId;
             }
             if (existingSubCache.rootConversationId !== subConv.rootConversationId) {
-              existingSubCache.rootConversationId = subConv.rootConversationId;
-              subMetaUpdated = true;
+              updatedMetadata.rootConversationId = subConv.rootConversationId;
             }
             const nextSpec = sanitizeSubagentSpec(subConv.subagentSpec);
             if (
               nextSpec &&
               JSON.stringify(existingSubCache.subagentSpec || null) !== JSON.stringify(nextSpec)
             ) {
-              existingSubCache.subagentSpec = nextSpec;
-              subMetaUpdated = true;
+              updatedMetadata.subagentSpec = nextSpec;
             }
             if (
               subConv.createdTimeMs &&
               existingSubCache.createdTimeMs !== subConv.createdTimeMs
             ) {
-              existingSubCache.createdTimeMs = subConv.createdTimeMs;
-              subMetaUpdated = true;
+              updatedMetadata.createdTimeMs = subConv.createdTimeMs;
             }
             if (
               Number.isFinite(subConv.spawnOrder) &&
               existingSubCache.spawnOrder !== subConv.spawnOrder
             ) {
-              existingSubCache.spawnOrder = subConv.spawnOrder;
-              subMetaUpdated = true;
+              updatedMetadata.spawnOrder = subConv.spawnOrder;
             }
             if (!Array.isArray(existingSubCache.subagentRefs)) {
-              existingSubCache.subagentRefs = [];
-              subMetaUpdated = true;
+              updatedMetadata.subagentRefs = [];
             }
-            if (subMetaUpdated) {
+            if (Object.keys(updatedMetadata).length > 0) {
+              setCachedTrajectory(targetCacheKey, { ...existingSubCache, ...updatedMetadata });
               cacheDirty = true;
             }
           } else {
@@ -2137,7 +2136,7 @@ export async function enumerateAndSyncConversations({
       if (attemptedFetchIds.has(c.cascadeId.toLowerCase()) || isFetchInCooldown(c, sig)) {
         return false;
       }
-      const cached = trajectoryCache[c.cascadeId];
+      const cached = getCachedTrajectory(c.cascadeId);
       return cached && !Array.isArray(cached.subagentRefs);
     })
     .slice(0, LEGACY_MIGRATION_BATCH_SIZE);
@@ -2171,9 +2170,9 @@ export async function enumerateAndSyncConversations({
     }
     if (candidate && candidate !== conv.rootConversationId) {
       conv.rootConversationId = candidate;
-      const cached = trajectoryCache[conv.cascadeId];
+      const cached = getCachedTrajectory(conv.cascadeId);
       if (cached && cached.rootConversationId !== candidate) {
-        cached.rootConversationId = candidate;
+        setCachedTrajectory(conv.cascadeId, { ...cached, rootConversationId: candidate });
         cacheDirty = true;
       }
     }
@@ -2182,7 +2181,7 @@ export async function enumerateAndSyncConversations({
   const hasRunningSessions = rawConversations.some(
     (c) => c.status === 'CASCADE_RUN_STATUS_RUNNING'
   );
-  if (cacheDirty || (cacheState.needsSave && !hasRunningSessions)) {
+  if (cacheDirty || (hasPendingTrajectoryCacheSave() && !hasRunningSessions)) {
     persistTrajectoryCacheIfNeeded({ hasRunningSessions });
   }
 
@@ -2259,12 +2258,12 @@ export async function enumerateAndSyncConversations({
       }
       const aStart =
         a.createdTimeMs ||
-        trajectoryCache[a.cascadeId]?.steps?.[0]?.createdAtMs ||
+        getCachedTrajectory(a.cascadeId)?.steps?.[0]?.createdAtMs ||
         a.lastModifiedMs ||
         0;
       const bStart =
         b.createdTimeMs ||
-        trajectoryCache[b.cascadeId]?.steps?.[0]?.createdAtMs ||
+        getCachedTrajectory(b.cascadeId)?.steps?.[0]?.createdAtMs ||
         b.lastModifiedMs ||
         0;
       return aStart - bStart || String(a.cascadeId).localeCompare(String(b.cascadeId));
@@ -2293,7 +2292,7 @@ export async function enumerateAndSyncConversations({
         ))) ||
     conversations[0] ||
     null;
-  const requestedOwner = trajectoryCache[canonicalIdByLower.get(reqLower)]?.accountName;
+  const requestedOwner = getCachedTrajectory(canonicalIdByLower.get(reqLower))?.accountName;
   const safeReqId = requestedConvId && !/[\\/]|\.\./.test(String(requestedConvId)) &&
     (!requestedOwner || currentAccountName === '' || requestedOwner === currentAccountName) ? requestedConvId : null;
   const activeCascadeId = activeConvSummary?.cascadeId || safeReqId || null;
