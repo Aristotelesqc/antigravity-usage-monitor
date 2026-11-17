@@ -597,3 +597,58 @@ test('pluginUpdateMode supports manual (default), auto, and off with legacy auto
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(gitTriggered, true, 'pluginUpdateMode=auto triggers background update check');
 });
+
+test('argon-b / argon-trial deployment shards resolve phased pricing without wildcarding unknown single-letter suffixes, and custom Git forks suppress upstream update badges', async () => {
+  const hPromo = backendHarness({ clock: () => Date.parse('2026-11-20T00:00:00Z') });
+  for (const shardSlug of ['gemini-4-argon-b', 'gemini-4-argon-trial']) {
+    const promoInfo = hPromo.resolveModelInfo(shardSlug);
+    assert.equal(promoInfo.label, 'Gemini 4 Argon');
+    assert.equal(promoInfo.shortName, 'argon-4');
+    assert.equal(promoInfo.pricing.input, 2.0);
+    assert.equal(promoInfo.pricing.output, 10.0);
+
+    const postInfo = hPromo.resolveModelInfo(shardSlug, new Map(), '', '', '', '2026-12-05T00:00:00Z');
+    assert.equal(postInfo.pricing.input, 4.0);
+    assert.equal(postInfo.pricing.output, 20.0);
+  }
+
+  // Unverified single-letter shard must NOT recklessly fall back to base model pricing
+  const unknownShard = hPromo.resolveModelInfo('gemini-4-argon-z');
+  assert.equal(unknownShard.pricing, null);
+
+  // Custom Git fork: upstream cloud catalog sync updates model pricing, while suppressing upstream version badge
+  const forkH = backendHarness({
+    hasGitDir: true,
+    gitConfigText: '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://github.com/custom-contributor/antigravity-usage-monitor.git\n',
+    pluginManifest: { name: 'usage-monitor', version: '1.5.0' },
+    remoteFetch: async () => ({
+      ok: true,
+      json: async () => ({
+        schemaVersion: 1,
+        catalogVersion: '2026.12.10.1',
+        updatedAt: '2026-12-10T10:00:00Z',
+        latestPluginVersion: '1.9.0',
+        pricing: {
+          'gemini-5-experimental': {
+            input: 6.0,
+            cache: 0.3,
+            output: 30.0,
+            short: 'gem-5-exp',
+            family: 'Gemini',
+          },
+        },
+      }),
+    }),
+  });
+
+  assert.equal(forkH.detectCustomGitForkRepo(), 'custom-contributor/antigravity-usage-monitor');
+  const statusAfterSync = await forkH.syncCloudCatalog({ force: true });
+  assert.equal(statusAfterSync.catalogVersion, '2026.12.10.1');
+  assert.equal(statusAfterSync.updateAvailable, false, 'custom fork must not show false update badge from upstream repo');
+  assert.equal(statusAfterSync.latestPluginVersion, '1.5.0');
+  assert.equal(
+    statusAfterSync.releaseUrl,
+    'https://github.com/custom-contributor/antigravity-usage-monitor/releases/latest'
+  );
+  assert.equal(forkH.resolveModelInfo('gemini-5-experimental').pricing.input, 6.0);
+});

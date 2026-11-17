@@ -327,6 +327,9 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'fmt.subAgent': '子代理',
   'fmt.subBadge': '子{index}',
   'fmt.subBadgeShort': '子',
+  'fmt.sideQuestion': '旁路提问',
+  'fmt.sideBadge': '旁{index}',
+  'fmt.sideBadgeShort': '旁',
   'fmt.selectedCount': '已选 {count} {unit}',
   'fmt.selectedListTitle': '已选 ({count})：{names}',
   'fmt.selectPlaceholder': '请选择',
@@ -851,6 +854,9 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'fmt.subAgent': 'Subagent',
   'fmt.subBadge': 'S{index}',
   'fmt.subBadgeShort': 'Sub',
+  'fmt.sideQuestion': 'Side Question',
+  'fmt.sideBadge': 'Q{index}',
+  'fmt.sideBadgeShort': 'Q',
   'fmt.selectedCount': '{count} {unit} selected',
   'fmt.selectedListTitle': 'Selected ({count}): {names}',
   'fmt.selectPlaceholder': 'Select',
@@ -3901,29 +3907,76 @@ function getAgentBadgeClass(index = 0, isMain = false) {
  * @returns {string}
  */
 function formatAgentBadgeText(agent) {
+  const isSideQ = Boolean(
+    agent?.isSideQuestion ||
+      agent?.typeName === 'side_question' ||
+      /^旁\d*$/.test(String(agent?.badgeText || ''))
+  );
   if (!isEnglishLocale()) {
     if (!agent || agent.isMain) return agent?.badgeText || '主';
+    if (isSideQ) {
+      const sIdx = Number(agent.sideIndex || 0);
+      return agent.badgeText || (sIdx > 0 ? `旁${sIdx}` : '旁');
+    }
     return agent.badgeText || `子${agent.index || ''}`;
   }
   if (!agent || agent.isMain) return t('fmt.mainBadge');
-  return agent.index ? t('fmt.subBadge', { index: agent.index }) : t('fmt.subBadgeShort');
+  if (isSideQ) {
+    const m = String(agent.badgeText || '').match(/^旁(\d+)$/);
+    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
+    return sIdx > 0 ? t('fmt.sideBadge', { index: sIdx }) : t('fmt.sideBadgeShort');
+  }
+  const subMatch = String(agent.badgeText || '').match(/^子(\d+)$/);
+  const subOrd = Number(subMatch ? subMatch[1] : agent.index || 0);
+  return subOrd > 0 ? t('fmt.subBadge', { index: subOrd }) : t('fmt.subBadgeShort');
 }
 
 /**
- * 格式化主/子代理的完整显示名称（如 `子代理 #1 · Codebase Researcher`）。
+ * 格式化主/子代理或旁路提问的完整显示名称（如 `子代理 #1 · Codebase Researcher` / `旁路提问 #1 · ...`）。
  *
  * @param {object|null|undefined} agent
  * @returns {string}
  */
 function formatAgentLabel(agent) {
+  const isSideQ = Boolean(
+    agent?.isSideQuestion ||
+      agent?.typeName === 'side_question' ||
+      /^旁/.test(String(agent?.badgeText || agent?.shortLabel || ''))
+  );
   if (!isEnglishLocale()) {
     if (!agent) return '主代理';
     if (agent.isMain) return agent.shortLabel || '主代理';
+    if (isSideQ) {
+      const sIdx = Number(agent.sideIndex || 0);
+      const fallbackShort = sIdx > 0 ? `旁路提问 #${sIdx}` : '旁路提问';
+      const rolePart =
+        agent.role &&
+        agent.role !== '旁路提问' &&
+        agent.role !== 'Side Question' &&
+        agent.role !== agent.shortLabel
+          ? ` · ${agent.role}`
+          : '';
+      return `${agent.shortLabel || fallbackShort}${rolePart}`;
+    }
     const rolePart = agent.role && agent.role !== '子代理' ? ` · ${agent.role}` : '';
     return `${agent.shortLabel || '子代理'}${rolePart}`;
   }
   if (!agent || agent.isMain) return t('fmt.mainAgent');
-  const idx = Number(agent.index || 0);
+  if (isSideQ) {
+    const m = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
+    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
+    const baseLabel = sIdx > 0 ? `${t('fmt.sideQuestion')} #${sIdx}` : t('fmt.sideQuestion');
+    const rolePart =
+      agent.role &&
+      agent.role !== '旁路提问' &&
+      agent.role !== 'Side Question' &&
+      agent.role !== agent.shortLabel
+        ? ` · ${agent.role}`
+        : '';
+    return `${baseLabel}${rolePart}`;
+  }
+  const subMatch = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
+  const idx = Number(subMatch ? subMatch[1] : agent.index || 0);
   const baseLabel = idx > 0 ? `${t('fmt.subAgent')} #${idx}` : t('fmt.subAgent');
   const rolePart =
     agent.role && agent.role !== '子代理' && agent.role !== 'Subagent' ? ` · ${agent.role}` : '';
@@ -4012,8 +4065,8 @@ function resolveScopedConversation(
     }
     if (effectiveCtxScope === 'auto') {
       ctxAgent =
-        agents.find((a) => a.agentId === aggregated.activeAgentId) ||
-        agents.find((a) => a.isRunning) ||
+        agents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
+        agents.find((a) => !a.isSideQuestion && a.isRunning) ||
         mainAgent;
     }
   }
@@ -9359,7 +9412,9 @@ const ContextWindowWidget = defineComponent({
           const activeBadgeText = isEnglishLocale()
             ? rawActiveBadge === '主'
               ? t('fmt.mainBadge')
-              : rawActiveBadge.replace(/^子(\d+)$/, (_, n) => t('fmt.subBadge', { index: n }))
+              : rawActiveBadge
+                  .replace(/^子(\d+)$/, (_, n) => t('fmt.subBadge', { index: n }))
+                  .replace(/^旁(\d+)$/, (_, n) => t('fmt.sideBadge', { index: n }))
             : rawActiveBadge;
 
           const pillItems = [
@@ -11705,10 +11760,12 @@ const StepTableWidget = defineComponent({
             const badgeText = isEnglishLocale()
               ? formatAgentBadgeText({
                   isMain: !st.isSubagent,
+                  isSideQuestion: Boolean(st.isSideQuestion),
+                  sideIndex: st.sideIndex || 0,
                   index: st.agentIndex || 0,
                   badgeText: st.agentBadge,
                 })
-              : st.agentBadge || (st.isSubagent ? '子' : '主');
+              : st.agentBadge || (st.isSideQuestion ? '旁' : st.isSubagent ? '子' : '主');
             patchText(refs.agentBadgeEl, badgeText);
 
             if (interactiveBadges && onSelectAgentScopes) {
@@ -15490,7 +15547,7 @@ const TopSessionHeader = defineComponent({
       } else if (isRunning) {
         const runningAgent = (telemetry?.activeConversation?.agents || []).find((a) => a.isRunning);
         const runSuffix =
-          hasSubagents && runningAgent ? ` · ${runningAgent.badgeText || runningAgent.shortLabel}` : '';
+          hasSubagents && runningAgent ? ` · ${formatAgentBadgeText(runningAgent)}` : '';
         patchSvgIcon(statusIcon, 'bolt');
         patchText(statusText, t('header.statusGenerating', { suffix: runSuffix }));
         patchClasses(statusTag, {

@@ -131,7 +131,7 @@ export function formatGenericModelSlug(slug = '') {
     .trim()
     .replace(/^session-display:/i, '');
   if (!s || /^MODEL_PLACEHOLDER_/i.test(s)) return '';
-  if (/^gemini-4-argon-(?:f|disabled)$/i.test(s)) return 'Gemini 4 Argon';
+  if (/^gemini-4-argon-(?:b|f|trial|disabled)$/i.test(s)) return 'Gemini 4 Argon';
   if (/^gemini-3\.8-flash-n$/i.test(s)) return 'Gemini 3.8 Flash';
   if (/^gemini-3\.7-flash-safety-le$/i.test(s)) return 'Gemini 3.7 Flash';
   if (/^gemini-3-flash-(?:[abd]|agent)$/i.test(s)) return 'Gemini 3.5 Flash';

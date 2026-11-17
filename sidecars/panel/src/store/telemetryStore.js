@@ -1358,29 +1358,76 @@ export function getAgentBadgeClass(index = 0, isMain = false) {
  * @returns {string}
  */
 export function formatAgentBadgeText(agent) {
+  const isSideQ = Boolean(
+    agent?.isSideQuestion ||
+      agent?.typeName === 'side_question' ||
+      /^旁\d*$/.test(String(agent?.badgeText || ''))
+  );
   if (!isEnglishLocale()) {
     if (!agent || agent.isMain) return agent?.badgeText || '主';
+    if (isSideQ) {
+      const sIdx = Number(agent.sideIndex || 0);
+      return agent.badgeText || (sIdx > 0 ? `旁${sIdx}` : '旁');
+    }
     return agent.badgeText || `子${agent.index || ''}`;
   }
   if (!agent || agent.isMain) return t('fmt.mainBadge');
-  return agent.index ? t('fmt.subBadge', { index: agent.index }) : t('fmt.subBadgeShort');
+  if (isSideQ) {
+    const m = String(agent.badgeText || '').match(/^旁(\d+)$/);
+    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
+    return sIdx > 0 ? t('fmt.sideBadge', { index: sIdx }) : t('fmt.sideBadgeShort');
+  }
+  const subMatch = String(agent.badgeText || '').match(/^子(\d+)$/);
+  const subOrd = Number(subMatch ? subMatch[1] : agent.index || 0);
+  return subOrd > 0 ? t('fmt.subBadge', { index: subOrd }) : t('fmt.subBadgeShort');
 }
 
 /**
- * 格式化主/子代理的完整显示名称（如 `子代理 #1 · Codebase Researcher`）。
+ * 格式化主/子代理或旁路提问的完整显示名称（如 `子代理 #1 · Codebase Researcher` / `旁路提问 #1 · ...`）。
  *
  * @param {object|null|undefined} agent
  * @returns {string}
  */
 export function formatAgentLabel(agent) {
+  const isSideQ = Boolean(
+    agent?.isSideQuestion ||
+      agent?.typeName === 'side_question' ||
+      /^旁/.test(String(agent?.badgeText || agent?.shortLabel || ''))
+  );
   if (!isEnglishLocale()) {
     if (!agent) return '主代理';
     if (agent.isMain) return agent.shortLabel || '主代理';
+    if (isSideQ) {
+      const sIdx = Number(agent.sideIndex || 0);
+      const fallbackShort = sIdx > 0 ? `旁路提问 #${sIdx}` : '旁路提问';
+      const rolePart =
+        agent.role &&
+        agent.role !== '旁路提问' &&
+        agent.role !== 'Side Question' &&
+        agent.role !== agent.shortLabel
+          ? ` · ${agent.role}`
+          : '';
+      return `${agent.shortLabel || fallbackShort}${rolePart}`;
+    }
     const rolePart = agent.role && agent.role !== '子代理' ? ` · ${agent.role}` : '';
     return `${agent.shortLabel || '子代理'}${rolePart}`;
   }
   if (!agent || agent.isMain) return t('fmt.mainAgent');
-  const idx = Number(agent.index || 0);
+  if (isSideQ) {
+    const m = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
+    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
+    const baseLabel = sIdx > 0 ? `${t('fmt.sideQuestion')} #${sIdx}` : t('fmt.sideQuestion');
+    const rolePart =
+      agent.role &&
+      agent.role !== '旁路提问' &&
+      agent.role !== 'Side Question' &&
+      agent.role !== agent.shortLabel
+        ? ` · ${agent.role}`
+        : '';
+    return `${baseLabel}${rolePart}`;
+  }
+  const subMatch = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
+  const idx = Number(subMatch ? subMatch[1] : agent.index || 0);
   const baseLabel = idx > 0 ? `${t('fmt.subAgent')} #${idx}` : t('fmt.subAgent');
   const rolePart =
     agent.role && agent.role !== '子代理' && agent.role !== 'Subagent' ? ` · ${agent.role}` : '';
@@ -1469,8 +1516,8 @@ export function resolveScopedConversation(
     }
     if (effectiveCtxScope === 'auto') {
       ctxAgent =
-        agents.find((a) => a.agentId === aggregated.activeAgentId) ||
-        agents.find((a) => a.isRunning) ||
+        agents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
+        agents.find((a) => !a.isSideQuestion && a.isRunning) ||
         mainAgent;
     }
   }

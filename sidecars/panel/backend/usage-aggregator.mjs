@@ -523,6 +523,11 @@ export function aggregateMultiWindowUsage({
   let latestSelectedStepMs = 0;
 
   const currentYear = new Date(nowMs).getFullYear();
+  const monthBoundsMs = Array.from({ length: 13 }, (_, idx) =>
+    new Date(currentYear, idx, 1).getTime()
+  );
+  const yearStartMs = monthBoundsMs[0];
+  const nextYearStartMs = monthBoundsMs[12];
   const monthlySeries = Array.from({ length: 12 }, (_, idx) => ({
     month: idx + 1,
     label: `${idx + 1}月`,
@@ -665,20 +670,24 @@ export function aggregateMultiWindowUsage({
       const stepUsage = { inTok, cacheTok, outTok, thinkTok, respTok, stepTotalTokens,
         resolvedCost, savedCost, unpriced };
 
-      if (tMs > 0) {
-        const stepDate = new Date(tMs);
-        if (stepDate.getFullYear() === currentYear) {
-          const mBucket = monthlySeries[stepDate.getMonth()];
-          if (mBucket) {
-            mBucket.calls += 1;
-            mBucket.inputTokens += inTok;
-            mBucket.cacheReadTokens += cacheTok;
-            mBucket.responseTokens += respTok;
-            mBucket.thinkingTokens += thinkTok;
-            mBucket.totalTokens += stepTotalTokens;
-            mBucket.costUsd += resolvedCost;
-            mBucket.unpricedCalls = (mBucket.unpricedCalls || 0) + unpriced;
+      if (tMs >= yearStartMs && tMs < nextYearStartMs) {
+        let monthIdx = 11;
+        for (let m = 0; m < 12; m++) {
+          if (tMs < monthBoundsMs[m + 1]) {
+            monthIdx = m;
+            break;
           }
+        }
+        const mBucket = monthlySeries[monthIdx];
+        if (mBucket) {
+          mBucket.calls += 1;
+          mBucket.inputTokens += inTok;
+          mBucket.cacheReadTokens += cacheTok;
+          mBucket.responseTokens += respTok;
+          mBucket.thinkingTokens += thinkTok;
+          mBucket.totalTokens += stepTotalTokens;
+          mBucket.costUsd += resolvedCost;
+          mBucket.unpricedCalls = (mBucket.unpricedCalls || 0) + unpriced;
         }
       }
 

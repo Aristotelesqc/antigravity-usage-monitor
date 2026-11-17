@@ -28,6 +28,7 @@ import {
   trajectoryCache,
 } from './config.mjs';
 import { getContextWindowGroups, getContextWindowModels } from './context-windows.mjs';
+import { readLocalSummarySnapshot } from './cli-sqlite-reader.mjs';
 import { enumerateAndSyncConversations } from './local-scanner.mjs';
 import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
 import { callLsRpc, getContextModelCatalog, getOfficialQuotaSummary } from './ls-rpc.mjs';
@@ -513,6 +514,8 @@ function buildAgentUnitTelemetry({
   agentId,
   cascadeId,
   isMain,
+  isSideQuestion = false,
+  sideIndex = 0,
   index,
   shortLabel,
   badgeText,
@@ -540,6 +543,7 @@ function buildAgentUnitTelemetry({
       agentRole: role,
       agentIndex: index,
       isSubagent: !isMain,
+      ...(isSideQuestion ? { isSideQuestion: true, sideIndex } : {}),
     },
     reuseInputs
   );
@@ -561,6 +565,7 @@ function buildAgentUnitTelemetry({
       agentId,
       cascadeId,
       isMain,
+      ...(isSideQuestion ? { isSideQuestion: true, sideIndex } : {}),
       index,
       shortLabel,
       badgeText,
@@ -607,14 +612,20 @@ function buildAgentUnitTelemetry({
 }
 
 async function readTelemetrySources(requestedConvId, forceQuotaRefresh, currentAccountName, accountScope, userStatus) {
+  const localSummaries = readLocalSummarySnapshot(undefined, { forceRefresh: forceQuotaRefresh });
   const [allTrajRes, officialQuotaInfo, contextModelCatalog] = await Promise.all([
-    callLsRpc('GetAllCascadeTrajectories', {}).catch(() => ({})),
+    localSummaries.available
+      ? Promise.resolve(null)
+      : callLsRpc('GetAllCascadeTrajectories', {}).catch(() => ({})),
     userStatus ? getOfficialQuotaSummary(forceQuotaRefresh, currentAccountName) : null,
     getContextModelCatalog(),
   ]);
 
   const sessions = await enumerateAndSyncConversations({
-    summariesObj: allTrajRes?.trajectorySummaries || {},
+    summariesObj: localSummaries.available
+      ? localSummaries.summariesObj
+      : allTrajRes?.trajectorySummaries || {},
+    sideQuestionParents: localSummaries.available ? localSummaries.sideQuestionParents : {},
     currentAccountName: accountScope,
     requestedConvId,
     forceRefresh: forceQuotaRefresh,
@@ -751,6 +762,8 @@ export async function buildTelemetryPayloadInternal(
   let totalFamilyCacheReadTokens = sessionCacheReadTokens;
   let totalFamilyOutputTokens = sessionOutputTokens;
 
+  let normalSubCount = 0;
+  let sideQuestionCount = 0;
   for (let idx = 0; idx < subagentSummaries.length; idx++) {
     const subSum = subagentSummaries[idx];
     const subCid = subSum.cascadeId;
@@ -760,24 +773,53 @@ export async function buildTelemetryPayloadInternal(
     for (const step of subRawSteps) allCombinedRawSteps.push(step);
 
     const subSpec = subSum.subagentSpec || subEntry?.subagentSpec || null;
+    const isSideQ = Boolean(
+      subSum.isSideQuestion || subEntry?.isSideQuestion || subSpec?.typeName === 'side_question'
+    );
     const rawRole =
       subSpec?.role || subSum.agentScriptName || subEntry?.agentScriptName || subSpec?.typeName || '';
     const subIndex = idx + 1;
-    const shortLabel = `子代理 #${subIndex}`;
-    const badgeText = `子${subIndex}`;
-    const roleLabel = rawRole || '子代理';
-    const typeName = subSpec?.typeName || '';
+    let sideIndex = 0;
+    let shortLabel = '';
+    let badgeText = '';
+    let roleLabel = '';
+    let typeName = '';
+    let agentLabel = '';
+    if (isSideQ) {
+      sideIndex = ++sideQuestionCount;
+      shortLabel = `旁路提问 #${sideIndex}`;
+      badgeText = `旁${sideIndex}`;
+      const cleanSideRole =
+        rawRole &&
+        rawRole !== '旁路提问' &&
+        rawRole !== 'Side Question' &&
+        rawRole !== 'side_question'
+          ? rawRole
+          : '';
+      roleLabel = cleanSideRole || '旁路提问';
+      typeName = 'side_question';
+      agentLabel = cleanSideRole ? `${shortLabel} · ${cleanSideRole}` : shortLabel;
+    } else {
+      const subOrd = ++normalSubCount;
+      shortLabel = `子代理 #${subOrd}`;
+      badgeText = `子${subOrd}`;
+      roleLabel = rawRole || '子代理';
+      typeName = subSpec?.typeName || '';
+      agentLabel = rawRole ? `${shortLabel} · ${rawRole}` : shortLabel;
+    }
 
     const subUnit = buildAgentUnitTelemetry({
       agentId: subCid,
       cascadeId: subCid,
       isMain: false,
+      isSideQuestion: isSideQ,
+      sideIndex,
       index: subIndex,
       shortLabel,
       badgeText,
       role: roleLabel,
       typeName,
-      agentLabel: rawRole ? `${shortLabel} · ${rawRole}` : shortLabel,
+      agentLabel,
       status: subSum.status || 'IDLE',
       rawSteps: subRawSteps,
       liveActivity: subSum.liveActivity || null,
@@ -882,6 +924,31 @@ export async function buildTelemetryPayloadInternal(
             .sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0))[0] ||
           latestActiveAgent;
 
+    // 汇总视图与自动跟随上下文始终锁定主线（主代理与常规子代理），防止旁路提问抽屉篡改主会话 10 通道上下文水位
+    const mainlineAgents = allAgents.filter((a) => !a.isSideQuestion);
+    const activeMainlineAgent = !latestActiveAgent.isSideQuestion
+      ? latestActiveAgent
+      : mainlineAgents.find((a) => a.isRunning) ||
+        mainlineAgents
+          .slice()
+          .sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0))[0] ||
+        mainAgentTelemetry;
+    const mainlineWithSteps = mainlineAgents.filter((a) => a.stepCount > 0);
+    const contextMetricAgent = !latestMetricAgent.isSideQuestion
+      ? latestMetricAgent
+      : mainlineWithSteps.find((a) => a.isRunning) ||
+        mainlineWithSteps
+          .slice()
+          .sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0))[0] ||
+        mainAgentTelemetry;
+
+    const aggregatedRoleLabel =
+      normalSubCount > 0 && sideQuestionCount > 0
+        ? `主代理 + ${normalSubCount} 子代理 + ${sideQuestionCount} 旁问`
+        : sideQuestionCount > 0
+          ? `主代理 + ${sideQuestionCount} 旁路提问`
+          : `主代理 + ${subAgentTelemetries.length} 子代理`;
+
     const totalCostUsd = roundSessionCost(totalRawSessionCostUsd);
     const totalUnpricedCalls = allAgents.reduce(
       (sum, a) => sum + (a.sessionUnpricedCalls || 0),
@@ -908,6 +975,9 @@ export async function buildTelemetryPayloadInternal(
           agentRole: activeActivityAgent.role,
           agentIndex: activeActivityAgent.index,
           isMain: Boolean(activeActivityAgent.isMain),
+          ...(activeActivityAgent.isSideQuestion
+            ? { isSideQuestion: true, sideIndex: activeActivityAgent.sideIndex || 0 }
+            : {}),
           parallelCount: runningSubs.length > 1 ? runningSubs.length : 1,
         }
       : null;
@@ -919,12 +989,12 @@ export async function buildTelemetryPayloadInternal(
       index: -1,
       shortLabel: '全部汇总',
       badgeText: '全部',
-      role: `主代理 + ${subAgentTelemetries.length} 子代理`,
+      role: aggregatedRoleLabel,
       typeName: 'all',
-      activeAgentId: latestActiveAgent.agentId,
-      activeAgentShortLabel: latestActiveAgent.shortLabel,
-      activeAgentBadge: latestActiveAgent.badgeText,
-      activeAgentRole: latestActiveAgent.role,
+      activeAgentId: activeMainlineAgent.agentId,
+      activeAgentShortLabel: activeMainlineAgent.shortLabel,
+      activeAgentBadge: activeMainlineAgent.badgeText,
+      activeAgentRole: activeMainlineAgent.role,
       isRunning: allAgents.some((a) => a.isRunning),
       status: allAgents.some((a) => a.isRunning) ? 'CASCADE_RUN_STATUS_RUNNING' : 'IDLE',
       liveActivity: aggregatedLiveActivity,
@@ -948,7 +1018,7 @@ export async function buildTelemetryPayloadInternal(
       activeModelShort: latestMetricAgent.activeModelShort,
       activeModelLabel: latestMetricAgent.activeModelLabel,
       activeModelUpstream: latestMetricAgent.activeModelUpstream,
-      context: latestMetricAgent.context,
+      context: contextMetricAgent.context,
       modelBreakdown: combinedModelBreakdown,
       lastModifiedMs: latestActiveAgent.lastModifiedMs,
     };
@@ -1273,10 +1343,15 @@ export async function buildTelemetryPayloadInternal(
     const rootFallbackMs =
       rootConv.lastModifiedMs || rootEntry?.lastModifiedMs || rootConv.createdTimeMs || 0;
 
+    let runNormalSubIdx = 0;
+    let runSideIdx = 0;
     const subItems = rawSubs.map((subSum, idx) => {
       const subCid = subSum.cascadeId;
       const subEntry = findTrajectoryCacheEntry(subCid);
       const subSpec = subSum.subagentSpec || subEntry?.subagentSpec || null;
+      const isSideQ = Boolean(
+        subSum.isSideQuestion || subEntry?.isSideQuestion || subSpec?.typeName === 'side_question'
+      );
       const rawRole =
         subSpec?.role ||
         subSum.agentScriptName ||
@@ -1284,9 +1359,28 @@ export async function buildTelemetryPayloadInternal(
         subSpec?.typeName ||
         '';
       const subIndex = idx + 1;
-      const badgeText = `子${subIndex}`;
-      const shortLabel = `子代理 #${subIndex}`;
-      const role = rawRole || shortLabel;
+      let sideIndex = 0;
+      let badgeText = '';
+      let shortLabel = '';
+      let role = '';
+      if (isSideQ) {
+        sideIndex = ++runSideIdx;
+        badgeText = `旁${sideIndex}`;
+        shortLabel = `旁路提问 #${sideIndex}`;
+        const cleanSide =
+          rawRole &&
+          rawRole !== '旁路提问' &&
+          rawRole !== 'Side Question' &&
+          rawRole !== 'side_question'
+            ? rawRole
+            : '';
+        role = cleanSide || shortLabel;
+      } else {
+        const nOrd = ++runNormalSubIdx;
+        badgeText = `子${nOrd}`;
+        shortLabel = `子代理 #${nOrd}`;
+        role = rawRole || shortLabel;
+      }
       const isSubRunning = subSum.status === 'CASCADE_RUN_STATUS_RUNNING';
       const stepCount = Number(subSum.stepCount ?? subEntry?.steps?.length ?? 0);
       const subModMs = subSum.lastModifiedMs || subEntry?.lastModifiedMs || 0;
@@ -1303,10 +1397,11 @@ export async function buildTelemetryPayloadInternal(
       return {
         cascadeId: subCid,
         index: subIndex,
+        ...(isSideQ ? { isSideQuestion: true, sideIndex } : {}),
         badgeText,
         shortLabel,
         role,
-        typeName: subSpec?.typeName || '',
+        typeName: isSideQ ? 'side_question' : subSpec?.typeName || '',
         isRunning: isSubRunning,
         status: subSum.status || 'IDLE',
         stepCount,
