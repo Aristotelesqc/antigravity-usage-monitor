@@ -2235,6 +2235,47 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(trendTooltipEl.hasAttribute('hidden'), false, 'Tooltip opens on heatmap cell hover');
     assert.equal(activeCell.classList.contains('is-hovered'), true);
     assert.match(trendTooltipEl.querySelector('.trend-tip-tokens').textContent, /100\.0k tok/);
+
+    // Crossing 2px inter-cell gaps keeps highlight/tooltip steady without flickering, and fast jumps snap to nearest cell
+    const hmBodyEl = heatmapStageEl.querySelector('.trend-heatmap-body');
+    const hmTotalWeeks = Number(hmBodyEl.style.getPropertyValue('--hm-weeks'));
+    const origGridRectFn = hmGridEl.getBoundingClientRect;
+    hmGridEl.getBoundingClientRect = () => ({
+      left: 100,
+      top: 200,
+      width: hmTotalWeeks * 10 - 2,
+      height: 7 * 10 - 2,
+      right: 100 + hmTotalWeeks * 10 - 2,
+      bottom: 200 + 7 * 10 - 2,
+    });
+    const activeCol = Number(activeCell.getAttribute('data-hm-col'));
+    const activeRow = Number(activeCell.getAttribute('data-hm-row'));
+    hmGridEl.dispatchEvent({ type: 'mouseover', target: hmGridEl });
+    assert.equal(trendTooltipEl.hasAttribute('hidden'), false, 'Container mouseover in gap does not blink tooltip');
+    hmGridEl.dispatchEvent({
+      type: 'mousemove',
+      target: hmGridEl,
+      clientX: 100 + activeCol * 10 + 9,
+      clientY: 200 + activeRow * 10 + 4,
+    });
+    assert.equal(trendTooltipEl.hasAttribute('hidden'), false, 'Tooltip stays visible in 2px gap beside active cell');
+    assert.equal(activeCell.classList.contains('is-hovered'), true, 'Active cell stays highlighted across bordering gap');
+
+    const snappedCol5Cell = realDayCells.find(
+      (c) => c.getAttribute('data-hm-col') === '5' && c.getAttribute('data-hm-row') === '2'
+    );
+    assert.ok(snappedCol5Cell, 'Target cell at col=5,row=2 exists');
+    hmGridEl.dispatchEvent({
+      type: 'mousemove',
+      target: hmGridEl,
+      clientX: 100 + 5 * 10 + 8.4,
+      clientY: 200 + 2 * 10 + 4,
+    });
+    assert.equal(trendTooltipEl.hasAttribute('hidden'), false, 'Tooltip stays visible when snapping across distant gap');
+    assert.equal(activeCell.classList.contains('is-hovered'), false);
+    assert.equal(snappedCol5Cell.classList.contains('is-hovered'), true, 'Fast pointer jump into distant gap snaps to nearest cell');
+    hmGridEl.getBoundingClientRect = origGridRectFn;
+
     hmGridEl.dispatchEvent({ type: 'mouseleave' });
     assert.equal(trendTooltipEl.hasAttribute('hidden'), true, 'Tooltip hides on mouseleave');
 

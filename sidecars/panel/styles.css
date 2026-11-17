@@ -2361,6 +2361,7 @@ html[data-standalone="true"] .app-shell {
   grid-auto-flow: column;
   grid-auto-columns: var(--hm-cell);
   gap: var(--hm-gap);
+  cursor: pointer;
 }
 
 .trend-hm-cell {
