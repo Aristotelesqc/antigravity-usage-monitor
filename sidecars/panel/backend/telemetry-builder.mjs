@@ -1488,6 +1488,7 @@ export async function buildTelemetryPayloadInternal(
 
   const finalPayload = {
     timestamp: new Date().toISOString(),
+    hostPlatform: process.platform || 'unknown',
     uiBundleVersion,
     settings,
     contextWindowModels: getContextWindowGroups(getContextWindowModels(clientConfigs, contextModelCatalog)).map((group) => {

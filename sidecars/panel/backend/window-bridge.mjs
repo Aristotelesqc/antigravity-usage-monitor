@@ -81,6 +81,10 @@ export function resolveDevToolsPortCandidates(
     return [
       join(homeDir, 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort'),
       join(homeDir, 'Library', 'Application Support', 'Antigravity IDE', 'DevToolsActivePort'),
+      join(homeDir, 'Library', 'Application Support', 'antigravity', 'DevToolsActivePort'),
+      join(homeDir, 'Library', 'Application Support', 'antigravity-ide', 'DevToolsActivePort'),
+      join(homeDir, '.config', 'Antigravity', 'DevToolsActivePort'),
+      join(homeDir, '.config', 'Antigravity IDE', 'DevToolsActivePort'),
     ];
   }
   const configHome = env?.XDG_CONFIG_HOME || join(homeDir, '.config');
@@ -1408,6 +1412,7 @@ export function createWindowBridgeController(options) {
         port,
         token,
         bundleVersion,
+        platform: String(platform || ''),
         mountMode,
         [WINDOW_BRIDGE_ROUTE_KEY]: ideRouteId || '',
         isIdeChatFrame: Boolean(isIdeChatFrame),

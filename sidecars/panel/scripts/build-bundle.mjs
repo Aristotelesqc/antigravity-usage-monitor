@@ -459,7 +459,10 @@ export function buildBundle(panelDir = PANEL_DIR) {
 
   const cssBundle =
     cssOrder
-      .map((rel) => `/* --- ${rel} --- */\n${readFileSync(join(panelDir, rel), 'utf8').trim()}`)
+      .map(
+        (rel) =>
+          `/* --- ${rel} --- */\n${readFileSync(join(panelDir, rel), 'utf8').replace(/\r\n/g, '\n').trim()}`
+      )
       .join('\n\n') + '\n';
 
   const jsOrder = [
@@ -520,7 +523,7 @@ export function buildBundle(panelDir = PANEL_DIR) {
     .map((rel) => {
       const path = resolve(panelDir, rel);
       if (bundledPaths.has(path)) throw new Error(`${rel}: duplicate entry in jsOrder`);
-      const raw = readFileSync(path, 'utf8');
+      const raw = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
       const stripped = stripModuleSyntax(raw, (specifier, clause) =>
         validateBundleImport(path, specifier, clause, bundledPaths)
       );
@@ -536,6 +539,7 @@ export function buildBundle(panelDir = PANEL_DIR) {
   const indexHtmlPath = join(panelDir, 'index.html');
   const html = existsSync(indexHtmlPath)
     ? readFileSync(indexHtmlPath, 'utf8')
+      .replace(/\r\n/g, '\n')
       .replace(/href="\/styles\.css(?:\?v=[^"]*)?"/, `href="/styles.css?v=${ver}"`)
       .replace(/src="\/app\.js(?:\?v=[^"]*)?"/, `src="/app.js?v=${ver}"`)
     : null;

@@ -71,7 +71,7 @@ test('DevToolsActivePort parsing, cross-platform discovery (2.0 + IDE), and stri
   assert.equal(winPaths[3], path.join('C:\\Local', 'Antigravity IDE', 'DevToolsActivePort'));
 
   const macPaths = resolveDevToolsPortCandidates({}, 'darwin', '/Users/dev');
-  assert.equal(macPaths.length, 2);
+  assert.equal(macPaths.length, 6);
   assert.equal(
     macPaths[0],
     path.join('/Users/dev', 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort')
@@ -79,6 +79,22 @@ test('DevToolsActivePort parsing, cross-platform discovery (2.0 + IDE), and stri
   assert.equal(
     macPaths[1],
     path.join('/Users/dev', 'Library', 'Application Support', 'Antigravity IDE', 'DevToolsActivePort')
+  );
+  assert.equal(
+    macPaths[2],
+    path.join('/Users/dev', 'Library', 'Application Support', 'antigravity', 'DevToolsActivePort')
+  );
+  assert.equal(
+    macPaths[3],
+    path.join('/Users/dev', 'Library', 'Application Support', 'antigravity-ide', 'DevToolsActivePort')
+  );
+  assert.equal(
+    macPaths[4],
+    path.join('/Users/dev', '.config', 'Antigravity', 'DevToolsActivePort')
+  );
+  assert.equal(
+    macPaths[5],
+    path.join('/Users/dev', '.config', 'Antigravity IDE', 'DevToolsActivePort')
   );
 
   const linuxPaths = resolveDevToolsPortCandidates({ XDG_CONFIG_HOME: '/home/dev/.config' }, 'linux', '/home/dev');
@@ -5716,5 +5732,279 @@ test('v1.5 feedback E2E: sticky bridge port/token across hot-reloads, CDP->HTTP 
     assert.equal(mockWin.__AGUsageMonitorBridge.transportMode, 'http', 'updateBridge immediately heals transportMode back to http');
   } finally {
     ov.dispose();
+  }
+});
+
+test('WindowOverlayShell macOS (darwin) adaptation: sets data-os="mac", uses 12px fixed right fallback, and reserves 80px for traffic lights', async () => {
+  const panelDir = path.resolve(import.meta.dirname, '..');
+  const appJs = fs.readFileSync(path.join(panelDir, 'app.js'), 'utf8');
+  const stylesCss = fs.readFileSync(path.join(panelDir, 'styles.css'), 'utf8');
+  assert.match(stylesCss, /:host\(\.wm-capsule-host\[data-dock="fixed"\]\[data-os="mac"\]\)\s*\{\s*right:\s*12px;/);
+
+  function runOverlayForPlatform(platformKey, { withTitlebar = false, auxLeft = 0, winWidth = 1280 } = {}) {
+    function makeNode(tag) {
+      const attrs = new Map();
+      const clsSet = new Set();
+      const listeners = new Map();
+      let rectOverride = null;
+      const el = {
+        tagName: String(tag || 'DIV').toUpperCase(),
+        id: '',
+        textContent: '',
+        dataset: {},
+        offsetWidth: 0,
+        offsetHeight: 0,
+        clientWidth: 0,
+        scrollWidth: 0,
+        parentNode: null,
+        parentElement: null,
+        shadowRoot: null,
+        children: [],
+        style: {
+          setProperty(k, v) { this[k] = String(v); },
+          removeProperty(k) { delete this[k]; },
+          getPropertyValue(k) { return this[k] || ''; },
+        },
+        get isConnected() {
+          let cur = el;
+          while (cur) {
+            if (cur === body || cur === docEl) return true;
+            cur = cur.parentNode;
+          }
+          return false;
+        },
+        get firstChild() { return el.children[0] || null; },
+        get firstElementChild() { return el.children[0] || null; },
+        get lastElementChild() { return el.children[el.children.length - 1] || null; },
+        get className() { return [...clsSet].join(' '); },
+        set className(v) {
+          clsSet.clear();
+          for (const c of String(v || '').split(/\s+/).filter(Boolean)) clsSet.add(c);
+          attrs.set('class', [...clsSet].join(' '));
+        },
+        classList: {
+          add: (...cs) => cs.forEach((c) => c && clsSet.add(c)),
+          remove: (...cs) => cs.forEach((c) => clsSet.delete(c)),
+          contains: (c) => clsSet.has(c),
+          toggle(c, force) {
+            const on = force !== undefined ? Boolean(force) : !clsSet.has(c);
+            if (on) clsSet.add(c);
+            else clsSet.delete(c);
+            return on;
+          },
+        },
+        setAttribute(k, v) {
+          if (k === 'class') { el.className = v; return; }
+          attrs.set(k, String(v));
+          if (k === 'id') el.id = String(v);
+        },
+        getAttribute: (k) => (k === 'class' ? el.className : attrs.has(k) ? attrs.get(k) : null),
+        hasAttribute: (k) => attrs.has(k),
+        removeAttribute: (k) => attrs.delete(k),
+        appendChild(ch) {
+          if (!ch) return ch;
+          if (ch.parentNode?.removeChild) ch.parentNode.removeChild(ch);
+          ch.parentNode = el;
+          ch.parentElement = el;
+          el.children.push(ch);
+          return ch;
+        },
+        insertBefore(ch, ref) {
+          if (!ref) return el.appendChild(ch);
+          if (ch.parentNode?.removeChild) ch.parentNode.removeChild(ch);
+          ch.parentNode = el;
+          ch.parentElement = el;
+          const i = el.children.indexOf(ref);
+          if (i < 0) el.children.push(ch);
+          else el.children.splice(i, 0, ch);
+          return ch;
+        },
+        removeChild(ch) {
+          const i = el.children.indexOf(ch);
+          if (i >= 0) {
+            el.children.splice(i, 1);
+            ch.parentNode = null;
+            ch.parentElement = null;
+          }
+          return ch;
+        },
+        remove() { if (el.parentNode?.removeChild) el.parentNode.removeChild(el); },
+        closest: () => null,
+        contains(t) {
+          let cur = t;
+          while (cur) { if (cur === el) return true; cur = cur.parentNode; }
+          return false;
+        },
+        attachShadow() {
+          const sr = makeNode('shadow-root');
+          el.shadowRoot = sr;
+          return sr;
+        },
+        addEventListener(type, fn) {
+          if (!listeners.has(type)) listeners.set(type, []);
+          listeners.get(type).push(fn);
+        },
+        removeEventListener() {},
+        setRect(r) { rectOverride = r; },
+        getBoundingClientRect() {
+          return rectOverride || { left: 0, right: 64, top: 6, bottom: 34, width: 64, height: 28 };
+        },
+        querySelectorAll(sel) {
+          const out = [];
+          const walk = (n) => {
+            for (const c of n.children || []) {
+              if (sel === '[class*="@container/titlebar"]' && c.className.includes('@container/titlebar')) out.push(c);
+              else if (sel === '[data-testid="toggle-aux-sidebar"]' && c.getAttribute('data-testid') === 'toggle-aux-sidebar') out.push(c);
+              else if (sel === ':scope > div.shrink-0' && n === el && c.classList.contains('shrink-0')) out.push(c);
+              walk(c);
+            }
+          };
+          walk(el);
+          return out;
+        },
+        querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
+      };
+      return el;
+    }
+
+    const docEl = makeNode('html');
+    const body = makeNode('body');
+    docEl.appendChild(body);
+
+    if (withTitlebar) {
+      const tb = makeNode('div');
+      tb.className = 'flex @container/titlebar';
+      tb.setRect({ left: 0, right: winWidth, top: 0, bottom: 36, width: winWidth, height: 36 });
+      const titleGroup = makeNode('div');
+      const rightGroup = makeNode('div');
+      rightGroup.className = 'shrink-0';
+      const siblingBtn = makeNode('button');
+      siblingBtn.setRect({ left: winWidth - 56, right: winWidth, top: 4, bottom: 32, width: 56, height: 28 });
+      rightGroup.appendChild(siblingBtn);
+      tb.appendChild(titleGroup);
+      tb.appendChild(rightGroup);
+      body.appendChild(tb);
+    } else if (auxLeft > 0) {
+      const auxBtn = makeNode('button');
+      auxBtn.setAttribute('data-testid', 'toggle-aux-sidebar');
+      auxBtn.setRect({ left: auxLeft, right: auxLeft + 28, top: 8, bottom: 34, width: 28, height: 26 });
+      body.appendChild(auxBtn);
+    }
+
+    const payload = {
+      timestamp: '2026-11-17T00:00:00Z',
+      hostPlatform: platformKey,
+      settings: { windowMountMode: 'dual', enableWindowOverlay: true, showTopbarMultiSession: true, topbarCapsuleSlots: ['tps', 'ttft', 'context'] },
+      cloudStatus: { updateAvailable: false },
+      account: { planName: 'Pro' },
+      runningConversations: [],
+      conversations: [],
+      activeConversation: { cascadeId: '11111111-2222-3333-4444-555555555555', stepCount: 1, context: { totalTokens: 10000, limitTokens: 256000 } },
+      quotas: { pools: [] },
+    };
+
+    const mockWin = {
+      innerWidth: winWidth,
+      innerHeight: 800,
+      location: { pathname: '/c/11111111-2222-3333-4444-555555555555', search: '' },
+      __AGUsageMonitorBridge: {
+        port: 43111,
+        token: 'c'.repeat(64),
+        bundleVersion: 'ver-mac',
+        platform: platformKey,
+        stylesCss,
+        initialTelemetry: payload,
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      getComputedStyle: () => ({ paddingRight: '8px', getPropertyValue: () => '' }),
+      fetch: async () => ({ ok: true, status: 200, json: async () => payload }),
+    };
+    const mockDoc = {
+      hidden: false,
+      body,
+      head: makeNode('head'),
+      documentElement: docEl,
+      createElement: makeNode,
+      createElementNS: (_ns, t) => makeNode(t),
+      createTextNode: (txt) => ({ nodeType: 3, textContent: String(txt ?? ''), parentNode: null }),
+      getElementById: (id) => body.children.find((c) => c.id === id) || null,
+      querySelector: (s) => body.querySelector(s),
+      querySelectorAll: (s) => body.querySelectorAll(s),
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    const sb = {
+      window: mockWin,
+      document: mockDoc,
+      navigator: { language: 'zh-CN', platform: platformKey === 'darwin' ? 'MacIntel' : 'Win32' },
+      URLSearchParams,
+      AbortController,
+      queueMicrotask,
+      requestAnimationFrame: (fn) => setTimeout(fn, 0),
+      cancelAnimationFrame: clearTimeout,
+      setTimeout,
+      clearTimeout,
+      setInterval,
+      clearInterval,
+      Promise,
+      Math,
+      Date,
+      JSON,
+      Number,
+      String,
+      Boolean,
+      Array,
+      Object,
+      Map,
+      Set,
+      RegExp,
+      Error,
+      TypeError,
+      parseFloat,
+      parseInt,
+      isNaN,
+      Infinity,
+    };
+    sb.globalThis = sb;
+    vm.runInNewContext(appJs, sb);
+    const cap = body._foundCap || (function findCap(n) {
+      if (n.id === 'ag-usage-monitor-capsule') return n;
+      for (const c of n.children || []) { const r = findCap(c); if (r) return r; }
+      return null;
+    })(body);
+    return { ov: mockWin.__AGUsageMonitorOverlay, cap };
+  }
+
+  // 1. Fixed fallback without native anchor: macOS uses 12px right inset vs Windows 144px window-controls reserve
+  const macFixed = runOverlayForPlatform('darwin');
+  const winFixed = runOverlayForPlatform('win32');
+  try {
+    assert.equal(macFixed.cap.getAttribute('data-os'), 'mac');
+    assert.equal(macFixed.cap.style.right, '12px');
+    assert.equal(winFixed.cap.getAttribute('data-os'), 'default');
+    assert.equal(winFixed.cap.style.right, '144px');
+  } finally {
+    macFixed.ov.dispose();
+    winFixed.ov.dispose();
+  }
+
+  // 2. Fixed fallback with native top-right button at x=1230 on 1280px viewport: macOS hugs button at 56px instead of jumping to 144px
+  const macAnchored = runOverlayForPlatform('darwin', { auxLeft: 1230, winWidth: 1280 });
+  try {
+    assert.equal(macAnchored.cap.style.right, '56px');
+  } finally {
+    macAnchored.ov.dispose();
+  }
+
+  // 3. Flow titlebar narrow window (610px): macOS 80px traffic-light reserve retains 'wide' capsule while Windows 168px reserve collapses
+  const macNarrowFlow = runOverlayForPlatform('darwin', { withTitlebar: true, winWidth: 610 });
+  const winNarrowFlow = runOverlayForPlatform('win32', { withTitlebar: true, winWidth: 610 });
+  try {
+    assert.equal(macNarrowFlow.cap.getAttribute('data-layout'), 'wide');
+    assert.notEqual(winNarrowFlow.cap.getAttribute('data-layout'), 'wide');
+  } finally {
+    macNarrowFlow.ov.dispose();
+    winNarrowFlow.ov.dispose();
   }
 });

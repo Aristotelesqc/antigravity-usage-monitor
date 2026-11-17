@@ -3084,6 +3084,7 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
   if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
   if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if ((prev.hostPlatform || '') !== (next.hostPlatform || '')) return false;
   if (Boolean(pSet?.contextWindowRiskAccepted) !== Boolean(nSet?.contextWindowRiskAccepted)) {
     return false;
   }
@@ -4174,6 +4175,24 @@ function resolveScopedConversation(
     scopedConv,
     ctxAgent,
   };
+}
+
+/**
+ * 判断宿主系统是否为 macOS (`darwin`)：优先读取后端遥测或双栖桥接注入的 `platform`，首帧缺省时回退 UA/平台标识。
+ *
+ * @param {Record<string, any>|null|undefined} telemetry
+ * @returns {boolean}
+ */
+function isMacHostPlatform(telemetry) {
+  const p = String(telemetry?.hostPlatform || readInjectedWindowBridge()?.platform || '')
+    .trim()
+    .toLowerCase();
+  if (p) return p === 'darwin';
+  if (typeof navigator !== 'undefined') {
+    const ua = String(navigator.platform || navigator.userAgent || '');
+    return /\b(?:mac|darwin)\b|macintosh|mac\s*os/i.test(ua);
+  }
+  return false;
 }
 
 // --- src/components/ui/TopLongPillNav.js ---
@@ -19888,6 +19907,8 @@ function mountWindowOverlay() {
     return true;
   }
 
+  const isMac = () => isMacHostPlatform(telemetryStore.getState().telemetry);
+
   function updateFixedFallbackPosition() {
     const dockMode = capsuleHost.getAttribute('data-dock');
     if (dockMode === 'flow' || dockMode === 'ide-titlebar' || dockMode === 'composer') {
@@ -19897,18 +19918,29 @@ function mountWindowOverlay() {
     }
     try {
       const vw = Number(window.innerWidth || 1280);
-      let rightOffset = 144;
+      const minRight = isMac() ? 12 : 144;
+      let rightOffset = minRight;
       const anchor = findNativeTopRightAnchor();
       if (anchor?.getBoundingClientRect) {
         const r = anchor.getBoundingClientRect();
         if (r.width > 0 && r.left > 0 && r.left < vw) {
-          rightOffset = Math.max(144, Math.ceil(vw - r.left + 6));
+          rightOffset = Math.max(minRight, Math.ceil(vw - r.left + 6));
         }
       }
       capsuleHost.style.top = '7px';
       capsuleHost.style.right = `${rightOffset}px`;
     } catch {
       // 忽略回退坐标计算异常
+    }
+  }
+
+  function syncCapsuleOsAttr() {
+    const nextOs = isMac() ? 'mac' : 'default';
+    if (capsuleHost.getAttribute('data-os') !== nextOs) {
+      patchAttr(capsuleHost, 'data-os', nextOs);
+      if (capsuleHost.getAttribute('data-dock') === 'fixed') {
+        updateFixedFallbackPosition();
+      }
     }
   }
 
@@ -19981,10 +20013,19 @@ function mountWindowOverlay() {
               }
             }
           }
-          if (!hasVisibleWindowControls && navigator?.windowControlsOverlay?.visible) {
+          if (navigator?.windowControlsOverlay?.visible) {
             const wcoRect = navigator.windowControlsOverlay.getTitlebarAreaRect?.();
-            if (wcoRect && wcoRect.width > 0 && tbRect.right > wcoRect.right + 4) {
-              rightSiblingsWidth += tbRect.right - wcoRect.right;
+            if (wcoRect && wcoRect.width > 0) {
+              if (!hasVisibleWindowControls && tbRect.right > wcoRect.right + 4) {
+                rightSiblingsWidth += tbRect.right - wcoRect.right;
+              }
+              const leftOverlayInset = wcoRect.left - tbRect.left;
+              if (leftOverlayInset > leftContentWidth) {
+                leftContentWidth = Math.min(
+                  Math.round(tbRect.width * 0.45),
+                  Math.ceil(leftOverlayInset)
+                );
+              }
             }
           }
 
@@ -19997,10 +20038,11 @@ function mountWindowOverlay() {
         if (tbRect.width > 0) {
           const titleEl = titlebar.firstElementChild;
           const titleInner = titleEl?.firstElementChild;
+          const macTrafficReserve = isMac() ? 80 : 168;
           const contentStart = titleInner?.getBoundingClientRect
             ? Math.max(8, titleInner.getBoundingClientRect().left - tbRect.left)
-            : tbRect.left < 168
-              ? 168 - tbRect.left
+            : tbRect.left < macTrafficReserve
+              ? macTrafficReserve - tbRect.left
               : 12;
           const minTitleWidth = 180;
           let siblingButtonsWidth = 64;
@@ -20278,6 +20320,7 @@ function mountWindowOverlay() {
     if (bodyOrDoc && !portalHost.isConnected) {
       bodyOrDoc.appendChild(portalHost);
     }
+    syncCapsuleOsAttr();
     ensureWorkbenchThemeObserved();
 
     const dockTarget = resolveRuntimeDockTarget();
@@ -20762,6 +20805,7 @@ function mountWindowOverlay() {
 
     setI18nLanguage(telemetry?.settings?.language);
     syncPortalAppearance(telemetry?.settings);
+    syncCapsuleOsAttr();
 
     const showMulti = telemetry?.settings?.showTopbarMultiSession !== false;
     patchAttr(multiBtn, 'hidden', !showMulti);
