@@ -313,13 +313,53 @@ function scaleBucketsExact(buckets, keys, targetTotal) {
   return out;
 }
 
+function extractRawBreakdownChannels(breakdown) {
+  const rawMessages = Number(breakdown?.messagesTokens || 0);
+  const hasGranularMsgBreakdown =
+    Boolean(breakdown) &&
+    Object.prototype.hasOwnProperty.call(breakdown, 'toolResultsTokens');
+  const channels = {
+    userInput: hasGranularMsgBreakdown
+      ? Number(breakdown?.userInputTokens || 0)
+      : rawMessages,
+    assistant: Number(breakdown?.assistantTokens || 0),
+    toolResults: Number(breakdown?.toolResultsTokens || 0),
+    subagent: Number(breakdown?.subagentTokens || 0),
+    checkpoint: Number(breakdown?.checkpointTokens || 0),
+    systemTools: Number(breakdown?.systemToolsTokens || 0),
+    mcpTools: Number(breakdown?.mcpToolsTokens || 0),
+    skills: Number(breakdown?.skillsTokens || 0),
+    systemPrompt: Number(breakdown?.systemPromptTokens || 0),
+    userRules: Number(breakdown?.userRulesTokens || 0),
+  };
+  const msgSubtotal =
+    channels.userInput +
+    channels.assistant +
+    channels.toolResults +
+    channels.subagent +
+    channels.checkpoint;
+  if (rawMessages > msgSubtotal) {
+    channels.userInput += rawMessages - msgSubtotal;
+  }
+  return channels;
+}
+
+function resolveCompactionSummaryTokens(compactionStep) {
+  const respTok = Number(compactionStep?.responseTokens || 0);
+  if (respTok > 0) return respTok;
+  return resolveStepOutputTokens(compactionStep);
+}
+
 /**
  * 从当前活跃会话的最新步骤提取上下文 10 通道拆解、自动压缩水位与缓存命中率。
  *
  * `chatStartMetadata.contextWindowMetadata` 记录在步骤请求发送前且基于宿主离线估算器：
  * 1. 先按该步模型 API 真实计费输入（`inputTokens + cacheReadTokens`）对请求前 10 通道做等比整数对齐，消除离线估算偏差；
  * 2. 再将该步自身新生成的输出（`outputTokens`）补入 `assistantTokens`，并滚动推进后续无独立拆解的步骤，
- *    使上下文窗口总占用与调用明细表的单步 `contextTokens` 严格一致。
+ *    使上下文窗口总占用与调用明细表的单步 `contextTokens` 严格一致；
+ * 3. 当末尾或最近边界为上下文压缩步骤（`isCompactionStep`）且压缩后尚未产生新的 `contextBreakdown` 时，
+ *    继承压缩前最近一次拆解中的 5 个会话静态通道（`systemPrompt` / `systemTools` / `mcpTools` / `skills` / `userRules`），
+ *    清空已被折叠的历史对话通道，并将压缩步生成的摘要正文计入 `checkpointTokens`，避免误把压缩前全量输入当作压缩后水位。
  *
  * @param {object[]} enrichedActiveSteps
  * @param {object|null} latestEnriched
@@ -332,85 +372,113 @@ function extractActiveContextTelemetry(
   sessionInputTokens,
   sessionCacheReadTokens
 ) {
-  let latestBreakdown = latestEnriched?.contextBreakdown || null;
-  let breakdownIdx = latestBreakdown ? enrichedActiveSteps.length - 1 : -1;
-  if (!latestBreakdown && !latestEnriched?.isCompactionStep) {
-    for (let i = enrichedActiveSteps.length - 1; i >= 0; i--) {
-      if (enrichedActiveSteps[i]?.isCompactionStep) {
-        break;
+  let lastCompactionIdx = -1;
+  for (let i = enrichedActiveSteps.length - 1; i >= 0; i--) {
+    if (enrichedActiveSteps[i]?.isCompactionStep) {
+      lastCompactionIdx = i;
+      break;
+    }
+  }
+
+  let latestBreakdown = null;
+  let breakdownIdx = -1;
+  for (let i = enrichedActiveSteps.length - 1; i > lastCompactionIdx; i--) {
+    if (enrichedActiveSteps[i]?.contextBreakdown) {
+      latestBreakdown = enrichedActiveSteps[i].contextBreakdown;
+      breakdownIdx = i;
+      break;
+    }
+  }
+
+  let channels = extractRawBreakdownChannels(latestBreakdown);
+  let fallbackPreCompactionLimit = 0;
+
+  if (latestBreakdown && breakdownIdx > lastCompactionIdx) {
+    const rawBreakdownTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + channels[k], 0);
+    if (rawBreakdownTotal > 0) {
+      const bdStep = enrichedActiveSteps[breakdownIdx];
+      const bdPromptTokens =
+        Number(bdStep?.inputTokens || 0) + Number(bdStep?.cacheReadTokens || 0);
+      const bdOutTokens = resolveStepOutputTokens(bdStep);
+      // 仅当模型 API 返回了完整的请求级输入（排除省略 cacheReadTokens 的残缺网关或极小合成桩数据）时对齐至真实分词口径
+      if (bdPromptTokens >= rawBreakdownTotal * 0.5) {
+        channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, bdPromptTokens);
+        channels.assistant += bdOutTokens;
+        let runningTotal = bdPromptTokens + bdOutTokens;
+
+        for (let m = breakdownIdx + 1; m < enrichedActiveSteps.length; m++) {
+          const stepM = enrichedActiveSteps[m];
+          if (!stepM || stepM.isCompactionStep) break;
+          const mPrompt =
+            Number(stepM.inputTokens || 0) + Number(stepM.cacheReadTokens || 0);
+          const mOut = resolveStepOutputTokens(stepM);
+          if (mPrompt >= runningTotal * 0.5) {
+            if (mPrompt > runningTotal) {
+              const delta = mPrompt - runningTotal;
+              if (enrichedActiveSteps[m - 1]?.hasToolCalls) {
+                channels.toolResults += delta;
+              } else {
+                channels.userInput += delta;
+              }
+            } else if (mPrompt < runningTotal) {
+              channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, mPrompt);
+            }
+            channels.assistant += mOut;
+            runningTotal = mPrompt + mOut;
+          }
+        }
       }
+    }
+  } else if (lastCompactionIdx >= 0) {
+    const compactionStep = enrichedActiveSteps[lastCompactionIdx];
+    let preStep = null;
+    for (let i = lastCompactionIdx - 1; i >= 0; i--) {
       if (enrichedActiveSteps[i]?.contextBreakdown) {
-        latestBreakdown = enrichedActiveSteps[i].contextBreakdown;
-        breakdownIdx = i;
+        preStep = enrichedActiveSteps[i];
         break;
       }
     }
-  }
-  const rawMessages = Number(latestBreakdown?.messagesTokens || 0);
-  const hasGranularMsgBreakdown =
-    Boolean(latestBreakdown) &&
-    Object.prototype.hasOwnProperty.call(latestBreakdown, 'toolResultsTokens');
-  let channels = {
-    userInput: hasGranularMsgBreakdown
-      ? Number(latestBreakdown?.userInputTokens || 0)
-      : rawMessages,
-    assistant: Number(latestBreakdown?.assistantTokens || 0),
-    toolResults: Number(latestBreakdown?.toolResultsTokens || 0),
-    subagent: Number(latestBreakdown?.subagentTokens || 0),
-    checkpoint: Number(latestBreakdown?.checkpointTokens || 0),
-    systemTools: Number(latestBreakdown?.systemToolsTokens || 0),
-    mcpTools: Number(latestBreakdown?.mcpToolsTokens || 0),
-    skills: Number(latestBreakdown?.skillsTokens || 0),
-    systemPrompt: Number(latestBreakdown?.systemPromptTokens || 0),
-    userRules: Number(latestBreakdown?.userRulesTokens || 0),
-  };
-  const msgSubtotal =
-    channels.userInput +
-    channels.assistant +
-    channels.toolResults +
-    channels.subagent +
-    channels.checkpoint;
-  if (rawMessages > msgSubtotal) {
-    channels.userInput += rawMessages - msgSubtotal;
-  }
-  const rawBreakdownTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + channels[k], 0);
+    if (preStep) {
+      fallbackPreCompactionLimit = Number(preStep.maxContextBudgetTokens || 0);
+      let preChannels = extractRawBreakdownChannels(preStep.contextBreakdown);
+      const preRawTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + preChannels[k], 0);
+      const prePromptTokens =
+        Number(preStep.inputTokens || 0) + Number(preStep.cacheReadTokens || 0);
+      if (preRawTotal > 0 && prePromptTokens >= preRawTotal * 0.5) {
+        preChannels = scaleBucketsExact(preChannels, CONTEXT_CHANNEL_KEYS, prePromptTokens);
+      }
+      channels.systemTools = preChannels.systemTools;
+      channels.mcpTools = preChannels.mcpTools;
+      channels.skills = preChannels.skills;
+      channels.systemPrompt = preChannels.systemPrompt;
+      channels.userRules = preChannels.userRules;
+    }
+    channels.userInput = 0;
+    channels.assistant = 0;
+    channels.toolResults = 0;
+    channels.subagent = 0;
+    channels.checkpoint = resolveCompactionSummaryTokens(compactionStep);
 
-  if (
-    latestBreakdown &&
-    breakdownIdx >= 0 &&
-    !latestEnriched?.isCompactionStep &&
-    rawBreakdownTotal > 0
-  ) {
-    const bdStep = enrichedActiveSteps[breakdownIdx];
-    const bdPromptTokens =
-      Number(bdStep?.inputTokens || 0) + Number(bdStep?.cacheReadTokens || 0);
-    const bdOutTokens = resolveStepOutputTokens(bdStep);
-    // 仅当模型 API 返回了完整的请求级输入（排除省略 cacheReadTokens 的残缺网关或极小合成桩数据）时对齐至真实分词口径
-    if (bdPromptTokens >= rawBreakdownTotal * 0.5) {
-      channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, bdPromptTokens);
-      channels.assistant += bdOutTokens;
-      let runningTotal = bdPromptTokens + bdOutTokens;
-
-      for (let m = breakdownIdx + 1; m < enrichedActiveSteps.length; m++) {
-        const stepM = enrichedActiveSteps[m];
-        if (!stepM || stepM.isCompactionStep) break;
-        const mPrompt =
-          Number(stepM.inputTokens || 0) + Number(stepM.cacheReadTokens || 0);
-        const mOut = resolveStepOutputTokens(stepM);
-        if (mPrompt >= runningTotal * 0.5) {
-          if (mPrompt > runningTotal) {
-            const delta = mPrompt - runningTotal;
-            if (enrichedActiveSteps[m - 1]?.hasToolCalls) {
-              channels.toolResults += delta;
-            } else {
-              channels.userInput += delta;
-            }
-          } else if (mPrompt < runningTotal) {
-            channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, mPrompt);
+    let runningTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + channels[k], 0);
+    for (let m = lastCompactionIdx + 1; m < enrichedActiveSteps.length; m++) {
+      const stepM = enrichedActiveSteps[m];
+      if (!stepM || stepM.isCompactionStep) continue;
+      const mPrompt =
+        Number(stepM.inputTokens || 0) + Number(stepM.cacheReadTokens || 0);
+      const mOut = resolveStepOutputTokens(stepM);
+      if (mPrompt > 0 && (runningTotal === 0 || mPrompt >= runningTotal * 0.35)) {
+        if (mPrompt > runningTotal) {
+          const delta = mPrompt - runningTotal;
+          if (m > lastCompactionIdx + 1 && enrichedActiveSteps[m - 1]?.hasToolCalls) {
+            channels.toolResults += delta;
+          } else {
+            channels.userInput += delta;
           }
-          channels.assistant += mOut;
-          runningTotal = mPrompt + mOut;
+        } else if (mPrompt < runningTotal) {
+          channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, mPrompt);
         }
+        channels.assistant += mOut;
+        runningTotal = mPrompt + mOut;
       }
     }
   }
@@ -430,17 +498,25 @@ function extractActiveContextTelemetry(
   const ctxBreakdownTotal =
     ctxMessages + ctxSystemTools + ctxMcpTools + ctxSkills + ctxSystemPrompt + ctxUserRules;
 
+  const isLatestCompaction = Boolean(latestEnriched?.isCompactionStep);
   const ctxCached = latestEnriched?.cacheReadTokens || 0;
   const ctxFreshInput = latestEnriched?.inputTokens || 0;
   const ctxThinking = latestEnriched?.thinkingTokens || 0;
   const ctxResponse = latestEnriched?.responseTokens || 0;
   const ctxOut = resolveStepOutputTokens(latestEnriched);
-  const ctxTotal =
-    ctxBreakdownTotal > 0 ? ctxBreakdownTotal : ctxCached + ctxFreshInput + ctxOut;
-  const compactionLimitTokens = Number(latestEnriched?.maxContextBudgetTokens || 256000);
-  const compactionUsedTokens = Number(
-    ctxTotal || latestEnriched?.estimatedContextTokens || ctxCached + ctxFreshInput
+  const ctxTotal = isLatestCompaction
+    ? ctxBreakdownTotal
+    : ctxBreakdownTotal > 0
+      ? ctxBreakdownTotal
+      : ctxCached + ctxFreshInput + ctxOut;
+  const compactionLimitTokens = Number(
+    (isLatestCompaction && !latestEnriched?.reportedContextLimitTokens && fallbackPreCompactionLimit > 0
+      ? fallbackPreCompactionLimit
+      : latestEnriched?.maxContextBudgetTokens) || 256000
   );
+  const compactionUsedTokens = isLatestCompaction
+    ? Number(ctxTotal)
+    : Number(ctxTotal || latestEnriched?.estimatedContextTokens || ctxCached + ctxFreshInput);
   const compactionUsedPct =
     compactionLimitTokens > 0
       ? Math.min(100, +((compactionUsedTokens / compactionLimitTokens) * 100).toFixed(1))
@@ -1268,34 +1344,8 @@ export async function buildTelemetryPayloadInternal(
 
     let contextUsedPct = null;
     if (lastRootStep) {
-      const limitTokens = Number(lastRootStep.maxContextBudgetTokens || 256000);
-      const cb = lastRootStep.contextBreakdown;
-      const cbTotal = cb
-        ? Number(cb.messagesTokens || 0) +
-          Number(cb.systemToolsTokens || 0) +
-          Number(cb.mcpToolsTokens || 0) +
-          Number(cb.skillsTokens || 0) +
-          Number(cb.systemPromptTokens || 0) +
-          Number(cb.userRulesTokens || 0)
-        : 0;
-      const apiPrompt =
-        Number(lastRootStep.inputTokens || 0) + Number(lastRootStep.cacheReadTokens || 0);
-      const apiOut = resolveStepOutputTokens(lastRootStep);
-      const fallbackTotal = apiPrompt + apiOut;
-      const estTotal = Math.max(cbTotal, Number(lastRootStep.estimatedContextTokens || 0));
-      const hasAlignedApiPrompt =
-        !lastRootStep.isCompactionStep &&
-        apiPrompt > 0 &&
-        (estTotal === 0 || apiPrompt >= estTotal * 0.5);
-      const usedTokens = Number(
-        hasAlignedApiPrompt
-          ? fallbackTotal
-          : cbTotal > 0
-            ? cbTotal
-            : lastRootStep.estimatedContextTokens || fallbackTotal
-      );
-      contextUsedPct =
-        limitTokens > 0 ? Math.min(100, +((usedTokens / limitTokens) * 100).toFixed(1)) : 0;
+      contextUsedPct = extractActiveContextTelemetry(rootSteps, lastRootStep, 0, 0).context
+        .compactionUsedPct;
     }
 
     let modelShort = '';

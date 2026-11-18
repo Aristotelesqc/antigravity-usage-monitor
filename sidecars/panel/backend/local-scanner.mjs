@@ -1688,7 +1688,7 @@ export async function enumerateAndSyncConversations({
               contextLimitTelemetry: true,
               speedClearedTelemetry: true,
               turnRailTelemetry: true,
-              contextGroupsTelemetry: true,
+              contextGroupsTelemetry: 2,
               steps,
               subagentRefs,
             };
@@ -1789,7 +1789,7 @@ export async function enumerateAndSyncConversations({
                   contextLimitTelemetry: true,
                   speedClearedTelemetry: true,
                   turnRailTelemetry: true,
-                  contextGroupsTelemetry: true,
+                  contextGroupsTelemetry: 2,
                   steps: offlineFallback.steps,
                   subagentRefs: offlineFallback.subagentRefs,
                 };
@@ -1874,8 +1874,12 @@ export async function enumerateAndSyncConversations({
     return !Object.prototype.hasOwnProperty.call(lastCachedStep, 'turnIndex');
   }
   function hasDroppedContextGroups(cached) {
-    if (cached?.contextGroupsTelemetry) return false;
+    if (cached?.contextGroupsTelemetry === 2) return false;
     const steps = cached?.steps || [];
+    if (steps.some((st) => st?.isCompactionStep)) {
+      return true;
+    }
+    if (cached?.contextGroupsTelemetry) return false;
     for (let i = steps.length - 1; i >= 0; i--) {
       const st = steps[i];
       if (!st || st.isCompactionStep) break;

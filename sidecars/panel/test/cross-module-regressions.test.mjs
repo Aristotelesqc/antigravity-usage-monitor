@@ -429,7 +429,7 @@ test('BUG-20 & BUG-24: reactive store microtask deduplication, stripModuleSyntax
 
 test('bundle validation rejects incompatible imports and duplicate bindings before touching output', (t) => {
   const tempDir = fs.mkdtempSync(fileURLToPath(new URL('./.bundle-test-', import.meta.url)));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }));
   for (const dir of ['src', 'shared']) {
     fs.cpSync(new URL(`../${dir}/`, import.meta.url), join(tempDir, dir), { recursive: true });
   }
@@ -649,4 +649,170 @@ test('panel typography scales all view/table/chart CSS rules via --fs-* tokens w
     const rawArtifact = fs.readFileSync(join(panelRoot, artifact), 'utf8');
     assert.equal(rawArtifact.includes('\r\n'), false, `${artifact} must normalize line endings to LF`);
   }
+});
+
+test('post-compaction context preserves static channels + checkpoint summary, capsule fits 100% without ellipsis, and .step-model-compact follows --accent-primary', async () => {
+  const convId = '99999999-8888-4777-8666-555555555555';
+  const preStep = {
+    type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+    status: 'CORTEX_STEP_STATUS_DONE',
+    metadata: {
+      createdAt: '2026-11-18T03:00:00Z',
+      finishedGeneratingAt: '2026-11-18T03:00:05Z',
+      sourceTrajectoryStepInfo: { stepIndex: 10 },
+      modelUsage: {
+        model: 'MODEL_PLACEHOLDER_M429',
+        apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
+        inputTokens: '5400',
+        cacheReadTokens: '270000',
+        outputTokens: '1200',
+      },
+    },
+  };
+  const checkpointStep = {
+    type: 'CORTEX_STEP_TYPE_CHECKPOINT',
+    status: 'CORTEX_STEP_STATUS_DONE',
+    metadata: {
+      createdAt: '2026-11-18T03:01:00Z',
+      finishedGeneratingAt: '2026-11-18T03:01:06Z',
+      sourceTrajectoryStepInfo: { stepIndex: 12 },
+      modelUsage: {
+        apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
+        inputTokens: '5400',
+        cacheReadTokens: '270000',
+        outputTokens: '3800',
+        thinkingOutputTokens: '800',
+        responseOutputTokens: '3000',
+      },
+    },
+  };
+  const preGeneratorMetadata = [
+    {
+      stepIndices: [10],
+      chatModel: {
+        responseModel: 'gemini-4-carbon-high',
+        modelDisplayName: 'Gemini 4 Carbon (High)',
+        chatStartMetadata: {
+          contextWindowMetadata: {
+            estimatedTokensUsed: 275_400,
+            maxContextTokens: 384_000,
+            tokenBreakdown: {
+              groups: [
+                {
+                  type: 'TOKEN_TYPE_SYSTEM_PROMPT',
+                  numTokens: 16_000,
+                  children: [
+                    { name: 'identity', numTokens: 10_000 },
+                    { name: 'skills', numTokens: 4_000 },
+                    { name: 'user_rules', numTokens: 2_000 },
+                  ],
+                },
+                {
+                  type: 'TOKEN_TYPE_TOOLS',
+                  numTokens: 10_000,
+                  children: [
+                    { name: 'run_command', numTokens: 8_000 },
+                    { name: 'mcp_gradio_predict', numTokens: 2_000 },
+                  ],
+                },
+                {
+                  type: 'TOKEN_TYPE_CHAT_MESSAGES',
+                  numTokens: 249_400,
+                  children: [
+                    { name: '1: USER_INPUT', numTokens: 49_400 },
+                    { name: '2: PLANNER_RESPONSE', numTokens: 80_000 },
+                    { name: '3: GENERIC', numTokens: 120_000 },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+  ];
+
+  const h = backendHarness({
+    clock: () => Date.parse('2026-11-18T03:02:00Z'),
+    summaries: {
+      [convId]: {
+        summary: 'Compaction test',
+        stepCount: 2,
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        lastModifiedTime: '2026-11-18T03:01:06Z',
+      },
+    },
+    trajectories: {
+      [convId]: {
+        numTotalSteps: 2,
+        trajectory: {
+          steps: [preStep, checkpointStep],
+          generatorMetadata: preGeneratorMetadata,
+        },
+      },
+    },
+  });
+
+  const payload = await h.buildTelemetryPayloadInternal(convId);
+  const ctx = payload.activeConversation.context;
+
+  // Static channels must survive compaction while old chat history resets and checkpoint summary is recorded
+  assert.equal(ctx.systemPromptTokens, 10_000);
+  assert.equal(ctx.skillsTokens, 4_000);
+  assert.equal(ctx.userRulesTokens, 2_000);
+  assert.equal(ctx.systemToolsTokens, 8_000);
+  assert.equal(ctx.mcpToolsTokens, 2_000);
+  assert.equal(ctx.checkpointTokens, 3_000, 'checkpoint summary uses responseTokens excluding thinkingTokens');
+  assert.equal(ctx.userInputTokens, 0);
+  assert.equal(ctx.assistantTokens, 0);
+  assert.equal(ctx.toolResultsTokens, 0);
+  assert.equal(ctx.subagentTokens, 0);
+  assert.equal(ctx.totalTokens, 29_000, 'must not leak 275.4k pre-compaction input into post-compaction total');
+  assert.equal(ctx.compactionLimitTokens, 384_000, 'inherits 384k custom context budget across compaction step');
+  assert.equal(ctx.usedPct, 7.6);
+  assert.equal(payload.conversations[0].contextUsedPct, 7.6, 'Multi-Session quick stats must also reflect post-compaction %');
+
+  // Subsequent lightweight step without its own tokenBreakdown rolls forward cleanly on top of compacted baseline
+  h.state.summaries[convId].stepCount = 3;
+  h.state.summaries[convId].lastModifiedTime = '2026-11-18T03:02:10Z';
+  h.state.trajectories[convId] = {
+    numTotalSteps: 3,
+    trajectory: {
+      steps: [
+        preStep,
+        checkpointStep,
+        {
+          type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+          status: 'CORTEX_STEP_STATUS_DONE',
+          metadata: {
+            createdAt: '2026-11-18T03:02:05Z',
+            finishedGeneratingAt: '2026-11-18T03:02:10Z',
+            sourceTrajectoryStepInfo: { stepIndex: 14 },
+            modelUsage: {
+              model: 'MODEL_PLACEHOLDER_M429',
+              apiProvider: 'API_PROVIDER_GOOGLE_GEMINI',
+              inputTokens: '1500',
+              cacheReadTokens: '29000',
+              outputTokens: '600',
+            },
+          },
+        },
+      ],
+      generatorMetadata: preGeneratorMetadata,
+    },
+  };
+  const payloadFollowup = await h.buildTelemetryPayloadInternal(convId, true);
+  const ctx2 = payloadFollowup.activeConversation.context;
+  assert.equal(ctx2.systemPromptTokens, 10_000);
+  assert.equal(ctx2.checkpointTokens, 3_000);
+  assert.equal(ctx2.userInputTokens, 1_500);
+  assert.equal(ctx2.assistantTokens, 600);
+  assert.equal(ctx2.totalTokens, 31_100);
+
+  // Verify capsule 100% slot CSS and non-hardcoded compaction suffix color
+  const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(stylesCss, /\.wm-ctx-seg\s*\{[^}]*width:\s*58px;/);
+  assert.match(stylesCss, /\.wm-ctx-pct\s*\{[^}]*max-width:\s*none;[^}]*overflow:\s*visible;[^}]*text-overflow:\s*clip;/s);
+  assert.match(stylesCss, /\.step-model-compact\s*\{[^}]*color:\s*var\(--accent-primary\);/);
+  assert.doesNotMatch(stylesCss, /\.step-model-compact\s*\{[^}]*--metric-info/);
 });

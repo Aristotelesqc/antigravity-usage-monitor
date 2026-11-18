@@ -1943,19 +1943,17 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
       }
 
       if (ownGenRecords.length > 0) {
-        const lastRec = ownGenRecords[ownGenRecords.length - 1];
-        try {
-          const fullLast = decodeProtoGeneratorMeta(lastRec.rawData, true);
-          if (fullLast) lastRec.gm = fullLast;
-        } catch {
-          // 保留轻量版本
-        }
-        if (!hasContextBreakdownPayload(lastRec.gm?.chatModel) && ownGenRecords.length >= 2) {
-          const prevRec = ownGenRecords[ownGenRecords.length - 2];
+        // 从末尾向前定位最近一条包含完整上下文拆解（tokenBreakdown / promptSections / tools / messagePrompts）的记录，
+        // 避免末尾紧跟 CHECKPOINT 压缩步或多条纯 plannerConfig 记录时漏解压缩前的静态上下文构成。
+        for (let i = ownGenRecords.length - 1; i >= 0; i--) {
+          const rec = ownGenRecords[i];
           try {
-            const fullPrev = decodeProtoGeneratorMeta(prevRec.rawData, true);
-            if (fullPrev && hasContextBreakdownPayload(fullPrev.chatModel)) {
-              prevRec.gm = fullPrev;
+            const fullDecoded = decodeProtoGeneratorMeta(rec.rawData, true);
+            if (fullDecoded) {
+              rec.gm = fullDecoded;
+              if (hasContextBreakdownPayload(fullDecoded.chatModel)) {
+                break;
+              }
             }
           } catch {
             // 保留轻量版本

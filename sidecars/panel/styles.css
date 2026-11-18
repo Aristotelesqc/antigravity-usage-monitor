@@ -2670,7 +2670,7 @@ html[data-standalone="true"] .app-shell {
 .step-model-compact {
   flex-shrink: 0;
   white-space: nowrap;
-  color: var(--metric-info, var(--accent-primary));
+  color: var(--accent-primary);
   font-weight: 500;
 }
 
@@ -4381,11 +4381,11 @@ html[data-standalone="true"] .app-shell {
   flex-shrink: 0;
 }
 
-/* 环形上下文指示器（固定预占宽度 50px：14px 环 + 5px 间距 + 31px 百分比槽位） */
+/* 环形上下文指示器（固定预占宽度 58px：14px 环 + 5px 间距 + 完整容纳四字符 100%） */
 .wm-ctx-seg {
   justify-content: center;
   gap: 5px;
-  width: 50px;
+  width: 58px;
 }
 
 .wm-ring-svg {
@@ -4420,8 +4420,10 @@ html[data-standalone="true"] .app-shell {
 }
 
 .wm-ctx-pct {
-  min-width: 27px;
-  max-width: 31px;
+  min-width: 28px;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
   text-align: left;
   font-weight: 500;
   color: var(--text-primary);

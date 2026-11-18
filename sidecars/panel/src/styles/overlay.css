@@ -232,11 +232,11 @@
   flex-shrink: 0;
 }
 
-/* 环形上下文指示器（固定预占宽度 50px：14px 环 + 5px 间距 + 31px 百分比槽位） */
+/* 环形上下文指示器（固定预占宽度 58px：14px 环 + 5px 间距 + 完整容纳四字符 100%） */
 .wm-ctx-seg {
   justify-content: center;
   gap: 5px;
-  width: 50px;
+  width: 58px;
 }
 
 .wm-ring-svg {
@@ -271,8 +271,10 @@
 }
 
 .wm-ctx-pct {
-  min-width: 27px;
-  max-width: 31px;
+  min-width: 28px;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
   text-align: left;
   font-weight: 500;
   color: var(--text-primary);

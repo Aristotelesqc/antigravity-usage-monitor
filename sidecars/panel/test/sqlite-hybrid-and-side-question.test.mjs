@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readLocalSqliteTrajectory } from '../backend/cli-sqlite-reader.mjs';
 import { backendHarness } from './backend-harness.mjs';
 import { i18nStore } from '../src/i18n/index.js';
 import {
@@ -707,4 +708,81 @@ test('persistTrajectoryCacheIfNeeded throttles RUNNING disk writes to 30s and fl
   assert.equal(h.hasPendingTrajectoryCacheSave(), false);
   assert.equal(h.listCachedTrajectoryEntries().length, 0);
   assert.deepEqual(h.state.saves.at(-1).data, {});
+});
+
+test('SQLite trajectory reader scans backwards past trailing plannerConfig-only gen_metadata rows to preserve pre-compaction tokenBreakdown', (t) => {
+  const sqliteMod =
+    typeof process.getBuiltinModule === 'function' ? process.getBuiltinModule('node:sqlite') : null;
+  if (!sqliteMod?.DatabaseSync) {
+    t.skip('node:sqlite DatabaseSync unavailable');
+    return;
+  }
+  const { DatabaseSync } = sqliteMod;
+  const tempRoot = mkdtempSync(join(tmpdir(), 'agy-sqlite-compact-'));
+  t.after(() => rmSync(tempRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }));
+
+  const cid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const dbPath = join(tempRoot, `${cid}.db`);
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE trajectory_meta (trajectory_id TEXT, cascade_id TEXT, trajectory_type INTEGER, source INTEGER);
+    CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, metadata BLOB, step_payload BLOB);
+    CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB);
+  `);
+  db.prepare('INSERT INTO trajectory_meta VALUES (?, ?, 1, 1)').run(cid, cid);
+  db.prepare('INSERT INTO steps VALUES (0, 15, 3, ?, NULL)').run(
+    encodeStepMeta({
+      createdSec: 1794960010,
+      finishedSec: 1794960014,
+      stepIndex: 0,
+      originCascadeId: cid,
+      modelEnumInt: 1429,
+      inputTokens: 10000,
+      cacheReadTokens: 110000,
+      outputTokens: 500,
+    })
+  );
+  // Step 1: CHECKPOINT compaction step (step_type = 23)
+  db.prepare('INSERT INTO steps VALUES (1, 23, 3, ?, NULL)').run(
+    encodeStepMeta({
+      createdSec: 1794960020,
+      finishedSec: 1794960024,
+      stepIndex: 1,
+      originCascadeId: cid,
+      modelEnumInt: 1429,
+      inputTokens: 10000,
+      cacheReadTokens: 110000,
+      outputTokens: 2400,
+      thinkingTokens: 400,
+      responseTokens: 2000,
+    })
+  );
+
+  // gen_metadata[0] has the full tokenBreakdown, followed by 3 plannerConfig-only records [1..3]
+  db.prepare('INSERT INTO gen_metadata VALUES (0, ?)').run(
+    encodeGenMeta({
+      stepIndex: 0,
+      cascadeId: cid,
+      responseModel: 'gemini-4-carbon-high',
+      modelDisplayName: 'Gemini 4 Carbon (High)',
+      estimatedTokensUsed: 120_000,
+      maxContextTokens: 384_000,
+      userMsgTokens: 120_000,
+    })
+  );
+  const plannerOnlyBlob = encodeFieldBytes(3, encodeFieldBytes(28, 'gemini-4-carbon-high'));
+  db.prepare('INSERT INTO gen_metadata VALUES (1, ?)').run(plannerOnlyBlob);
+  db.prepare('INSERT INTO gen_metadata VALUES (2, ?)').run(plannerOnlyBlob);
+  db.prepare('INSERT INTO gen_metadata VALUES (3, ?)').run(plannerOnlyBlob);
+  db.close();
+
+  const res = readLocalSqliteTrajectory(dbPath, { cascadeId: cid });
+  assert.ok(res);
+  assert.equal(res.steps.length, 2);
+  assert.equal(res.steps[1].type, 'CORTEX_STEP_TYPE_CHECKPOINT');
+  const gm0 = res.generatorMetadata.find((g) => g.stepIndices.includes(0));
+  assert.ok(
+    gm0?.chatModel?.chatStartMetadata?.contextWindowMetadata?.tokenBreakdown?.groups?.length > 0,
+    'must decode tokenBreakdown on gen_metadata[0] even with 3 trailing plannerConfig-only records'
+  );
 });
