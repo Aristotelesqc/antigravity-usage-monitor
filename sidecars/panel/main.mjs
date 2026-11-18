@@ -11,12 +11,7 @@
 
 import { Worker } from 'node:worker_threads';
 import { Response, SidecarApp } from 'sidecar_sdk';
-import {
-  bootWindowBridgeRuntime,
-  dispatchBridgeApiRequest,
-  isLocalHostRequest,
-  readLocalAsync,
-} from './backend/api-actions.mjs';
+import { isLocalHostRequest, readLocalAsync } from './backend/http-helpers.mjs';
 
 const app = new SidecarApp();
 
@@ -144,9 +139,20 @@ async function ensureActiveWorker() {
   return activeWorker;
 }
 
+let testHarnessApiModulePromise = null;
+
+function getTestHarnessApiModule() {
+  testHarnessApiModulePromise ||= import('./backend/api-actions.mjs');
+  return testHarnessApiModulePromise;
+}
+
 async function forwardApiCall(pathname, method, data) {
   if (isTestHarnessEnv) {
-    return dispatchBridgeApiRequest(pathname, method, data);
+    if (typeof dispatchBridgeApiRequest === 'function') {
+      return dispatchBridgeApiRequest(pathname, method, data);
+    }
+    const mod = await getTestHarnessApiModule();
+    return mod.dispatchBridgeApiRequest(pathname, method, data);
   }
   const upperMethod = String(method || 'GET').toUpperCase();
   try {
@@ -223,7 +229,13 @@ app.api('/api/plugin-update', (_data, req) => handleProtectedApi('/api/plugin-up
 
 app.run();
 if (isTestHarnessEnv) {
-  bootWindowBridgeRuntime({ allowDynamicLs: false });
+  if (typeof bootWindowBridgeRuntime === 'function') {
+    bootWindowBridgeRuntime({ allowDynamicLs: false });
+  } else {
+    void getTestHarnessApiModule().then((mod) =>
+      mod.bootWindowBridgeRuntime({ allowDynamicLs: false })
+    );
+  }
 } else {
   void ensureActiveWorker();
 }

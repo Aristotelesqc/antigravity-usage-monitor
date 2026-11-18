@@ -182,6 +182,7 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   'live.currentSession': 'Current Session',
   'live.switchSessionTitle': 'Switch monitor to session: {title}',
   'live.thinking': 'Thinking',
+  'live.generating': 'Generating',
   'live.running': 'Running',
   'live.done': 'Done',
   'live.doneWithSteps': 'Done ({steps} steps)',

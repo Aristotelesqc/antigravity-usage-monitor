@@ -800,7 +800,7 @@ export const SettingsStructureTab = defineComponent({
       items: draftStepColumns,
       options: getStepColumnOptions(draftStepTokenComboFormat),
       minItems: 2,
-      maxItems: 15,
+      maxItems: 14,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
         draftStepColumns = normalizeClientStepColumns(previewItems);

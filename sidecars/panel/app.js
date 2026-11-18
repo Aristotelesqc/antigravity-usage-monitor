@@ -598,6 +598,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'live.currentSession': '当前会话',
   'live.switchSessionTitle': '点击切换查看会话：{title}',
   'live.thinking': '推理中',
+  'live.generating': '生成中',
   'live.running': '运行中',
   'live.done': '已完成',
   'live.doneWithSteps': '已完成 ({steps} 步)',
@@ -1125,6 +1126,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'live.currentSession': 'Current Session',
   'live.switchSessionTitle': 'Switch monitor to session: {title}',
   'live.thinking': 'Thinking',
+  'live.generating': 'Generating',
   'live.running': 'Running',
   'live.done': 'Done',
   'live.doneWithSteps': 'Done ({steps} steps)',
@@ -14357,7 +14359,7 @@ const SettingsStructureTab = defineComponent({
       items: draftStepColumns,
       options: getStepColumnOptions(draftStepTokenComboFormat),
       minItems: 2,
-      maxItems: 15,
+      maxItems: 14,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
         draftStepColumns = normalizeClientStepColumns(previewItems);
@@ -15580,20 +15582,24 @@ const TopSessionHeader = defineComponent({
 
     let lastActiveCascadeId = '';
 
+    function syncSessionScopeOnCascadeChange(telemetry) {
+      const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
+      if (!currentCascadeId) return;
+      if (lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
+        lastActiveCascadeId = currentCascadeId;
+        const uiSt = uiStore.getState();
+        if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
+          uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
+        }
+      } else {
+        lastActiveCascadeId = currentCascadeId;
+      }
+    }
+
     function renderHeaderState() {
       const telSt = telemetryStore.getState();
       const uiSt = uiStore.getState();
       const telemetry = telSt.telemetry;
-      const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
-      if (currentCascadeId && lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
-        lastActiveCascadeId = currentCascadeId;
-        if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
-          uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-          return;
-        }
-      } else if (currentCascadeId) {
-        lastActiveCascadeId = currentCascadeId;
-      }
       if (!uiSt.monitorVisible) return;
 
       patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
@@ -15751,7 +15757,10 @@ const TopSessionHeader = defineComponent({
         syncState: st.syncState,
         telemetry: st.telemetry,
       }),
-      () => renderHeaderState()
+      (slice) => {
+        syncSessionScopeOnCascadeChange(slice.telemetry);
+        renderHeaderState();
+      }
     );
 
     const unsubI18n = i18nStore.subscribe(

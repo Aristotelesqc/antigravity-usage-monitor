@@ -1597,7 +1597,11 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
       rawName = 'edit_file';
     } else if (stepType.includes('GREP_SEARCH') || fallbackStep?.grepSearch) {
       rawName = 'grep_search';
-    } else if (stepType.includes('FIND_BY_NAME') || fallbackStep?.findByName) {
+    } else if (
+      stepType.includes('FIND_BY_NAME') ||
+      stepType === 'CORTEX_STEP_TYPE_FIND' ||
+      fallbackStep?.findByName
+    ) {
       rawName = 'find_by_name';
     } else if (stepType.includes('SEARCH_WEB') || fallbackStep?.searchWeb) {
       rawName = 'search_web';

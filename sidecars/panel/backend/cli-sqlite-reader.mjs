@@ -114,7 +114,7 @@ function isSqliteBusyError(err) {
  * 以只读模式打开 SQLite 数据库执行查询并在 `finally` 中立即关闭连接，避免长连接阻塞宿主 WAL checkpoint。
  * 遇到瞬时锁竞争（`SQLITE_BUSY`）时自动重试 1 次。
  */
-function withReadOnlySqliteDb(dbPath, queryFn) {
+export function withReadOnlySqliteDb(dbPath, queryFn) {
   const DatabaseSync = getNodeSqliteDatabaseSync();
   if (!DatabaseSync) return null;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -729,6 +729,11 @@ export function readLocalSummarySnapshot(productRoots = PRODUCT_DATA_ROOTS, { fo
     targets.push({ rootName: basename(root).toLowerCase(), dbPath });
   }
 
+  const rootsKey = roots
+    .map((r) => String(r || '').trim())
+    .filter(Boolean)
+    .join('\n');
+
   if (targets.length === 0) {
     if (productRoots === PRODUCT_DATA_ROOTS) {
       localSummaryMemo.sig = '';
@@ -737,23 +742,41 @@ export function readLocalSummarySnapshot(productRoots = PRODUCT_DATA_ROOTS, { fo
       localSummaryMemo.summariesObj = {};
       localSummaryMemo.sideQuestionParents = {};
     }
+    if (rootsKey && localSummaryMemo.byRootsKey instanceof Map) {
+      localSummaryMemo.byRootsKey.delete(rootsKey);
+    }
     return { available: false, sig: '', byId: new Map(), summariesObj: {}, sideQuestionParents: {} };
   }
 
   const sig = sigParts.join('||');
-  if (
-    !forceRefresh &&
-    productRoots === PRODUCT_DATA_ROOTS &&
-    localSummaryMemo.sig === sig &&
-    localSummaryMemo.available
-  ) {
-    return {
-      available: true,
-      sig,
-      byId: localSummaryMemo.byId,
-      summariesObj: localSummaryMemo.summariesObj || {},
-      sideQuestionParents: localSummaryMemo.sideQuestionParents || {},
-    };
+  if (!forceRefresh) {
+    if (
+      productRoots === PRODUCT_DATA_ROOTS &&
+      localSummaryMemo.sig === sig &&
+      localSummaryMemo.available
+    ) {
+      return {
+        available: true,
+        sig,
+        byId: localSummaryMemo.byId,
+        summariesObj: localSummaryMemo.summariesObj || {},
+        sideQuestionParents: localSummaryMemo.sideQuestionParents || {},
+      };
+    }
+    if (rootsKey && localSummaryMemo.byRootsKey instanceof Map) {
+      const cached = localSummaryMemo.byRootsKey.get(rootsKey);
+      if (cached && cached.sig === sig && cached.available) {
+        localSummaryMemo.byRootsKey.delete(rootsKey);
+        localSummaryMemo.byRootsKey.set(rootsKey, cached);
+        return {
+          available: true,
+          sig,
+          byId: cached.byId,
+          summariesObj: cached.summariesObj,
+          sideQuestionParents: cached.sideQuestionParents,
+        };
+      }
+    }
   }
 
   const nextMap = new Map();
@@ -990,6 +1013,18 @@ export function readLocalSummarySnapshot(productRoots = PRODUCT_DATA_ROOTS, { fo
     localSummaryMemo.available = true;
     localSummaryMemo.summariesObj = nextSummariesObj;
     localSummaryMemo.sideQuestionParents = nextSideQuestionParents;
+  } else if (rootsKey && localSummaryMemo.byRootsKey instanceof Map) {
+    if (!localSummaryMemo.byRootsKey.has(rootsKey) && localSummaryMemo.byRootsKey.size >= 8) {
+      localSummaryMemo.byRootsKey.delete(localSummaryMemo.byRootsKey.keys().next().value);
+    }
+    localSummaryMemo.byRootsKey.delete(rootsKey);
+    localSummaryMemo.byRootsKey.set(rootsKey, {
+      available: true,
+      sig,
+      byId: nextMap,
+      summariesObj: nextSummariesObj,
+      sideQuestionParents: nextSideQuestionParents,
+    });
   }
 
   return {
@@ -1807,8 +1842,8 @@ function cleanShortPromptTitle(rawText, maxChars = 80) {
     .replace(/<CONTEXT_SUMMARY>[\s\S]*?<\/CONTEXT_SUMMARY>/gi, '')
     .replace(/<SYSTEM_MESSAGE>[\s\S]*$/i, '')
     .replace(/<ADDITIONAL_METADATA>[\s\S]*$/i, '');
-  const reqMatch = withoutTags.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/i);
-  const target = reqMatch ? reqMatch[1] : withoutTags;
+  const reqMatches = [...withoutTags.matchAll(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/gi)];
+  const target = reqMatches.length > 0 ? reqMatches[reqMatches.length - 1][1] : withoutTags;
   const singleLine = target.replace(/\s+/g, ' ').trim();
   if (!singleLine) return '';
   return singleLine.length <= maxChars ? singleLine : `${singleLine.slice(0, maxChars - 1).trimEnd()}…`;

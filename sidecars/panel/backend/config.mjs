@@ -552,6 +552,7 @@ export const localSummaryMemo = {
   available: false,
   summariesObj: {},
   sideQuestionParents: {},
+  byRootsKey: new Map(),
 };
 
 /** 并发请求去重表（防止同一参数并发重复拉取）。 */
@@ -615,6 +616,7 @@ export function clearRuntimeCaches() {
   localSummaryMemo.available = false;
   localSummaryMemo.summariesObj = {};
   localSummaryMemo.sideQuestionParents = {};
+  localSummaryMemo.byRootsKey.clear();
   quotaSummaryCache.ts = 0;
   quotaSummaryCache.lastAttemptTs = 0;
   quotaSummaryCache.accountName = '';

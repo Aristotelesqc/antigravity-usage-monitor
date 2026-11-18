@@ -7,6 +7,7 @@ import vm from 'node:vm';
 import { backendHarness } from './backend-harness.mjs';
 import {
   extractContextBreakdown,
+  extractLiveActivity,
   extractModelSteps,
   normalizeCachedStep,
 } from '../trajectory-metrics.mjs';
@@ -965,4 +966,145 @@ test('post-compaction context preserves static channels + checkpoint summary, ca
   assert.match(stylesCss, /@container\s*\(max-width:\s*30em\)\s*\{[\s\S]*?\.pill-tab-badge\s*\{\s*display:\s*none\s*!important;/);
   assert.doesNotMatch(stylesCss, /\.structure-preview-canvas[^{]*\{[^}]*zoom:/, 'Structure preview must stay 1:1 without zoom distortion');
   assert.match(stylesCss, /\.preview-capsule-bar\s*\{[^}]*"Google Sans Flex"/s);
+});
+
+test('P0 audit fixes: main/bridge-daemon import isolation, standalone lsAddr, dual-window stepRevision LRU, CORTEX_STEP_TYPE_FIND, preview i18n, and header render purity', async () => {
+  // 1. Static import isolation on main.mjs and bridge-daemon.mjs
+  const mainSrc = fs.readFileSync(new URL('../main.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(
+    mainSrc,
+    /^import\s+[\s\S]*?from\s+['"]\.\/backend\/(?:api-actions|config)\.mjs['"]/m,
+    'main.mjs must not statically import api-actions.mjs or config.mjs in the host parent process'
+  );
+  const daemonSrc = fs.readFileSync(new URL('../bridge-daemon.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(
+    daemonSrc,
+    /^import\s+[\s\S]*?from\s+['"]\.\/backend\/config\.mjs['"]/m,
+    'bridge-daemon.mjs must not statically import config.mjs before --standalone env overrides'
+  );
+
+  // 2. Dual-window alternating stepDetails='display' stepRevision cache hit + rebuild invalidation
+  const makeConv = (prompt) => ({
+    trajectory: {
+      steps: [
+        {
+          type: 'CORTEX_STEP_TYPE_USER_INPUT',
+          userInput: { userResponse: prompt },
+          metadata: { createdAt: '2026-11-18T05:00:00Z' },
+        },
+        {
+          type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+          status: 'CORTEX_STEP_STATUS_DONE',
+          plannerResponse: { response: 'done' },
+          metadata: {
+            createdAt: '2026-11-18T05:00:01Z',
+            completedAt: '2026-11-18T05:00:02Z',
+            modelUsage: {
+              model: 'MODEL_PLACEHOLDER_M65',
+              inputTokens: '1200',
+              outputTokens: '60',
+            },
+          },
+        },
+      ],
+    },
+  });
+  const cidA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const cidB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const h = backendHarness({
+    summaries: {
+      [cidA]: { summary: 'A', stepCount: 2, lastModifiedTime: '2026-11-18T05:00:02Z' },
+      [cidB]: { summary: 'B', stepCount: 2, lastModifiedTime: '2026-11-18T05:00:03Z' },
+    },
+    trajectories: {
+      [cidA]: makeConv('Prompt A'),
+      [cidB]: makeConv('Prompt B'),
+    },
+  });
+
+  const firstA = JSON.parse(
+    (await h.executeTelemetryAction({ conversationId: cidA, stepDetails: 'display', stepRevision: '' })).body
+  );
+  const firstB = JSON.parse(
+    (await h.executeTelemetryAction({ conversationId: cidB, stepDetails: 'display', stepRevision: '' })).body
+  );
+  const secondA = JSON.parse(
+    (await h.executeTelemetryAction({
+      conversationId: cidA,
+      stepDetails: 'display',
+      stepRevision: firstA.stepRevision,
+    })).body
+  );
+  const secondB = JSON.parse(
+    (await h.executeTelemetryAction({
+      conversationId: cidB,
+      stepDetails: 'display',
+      stepRevision: firstB.stepRevision,
+    })).body
+  );
+  assert.equal(secondA.stepsUnchanged, true);
+  assert.equal(secondB.stepsUnchanged, true);
+  assert.equal(secondA.activeConversation.recentSteps, undefined);
+  assert.equal(secondB.activeConversation.recentSteps, undefined);
+
+  h.executeRebuildCacheAction();
+  const afterRebuildA = JSON.parse(
+    (await h.executeTelemetryAction({
+      conversationId: cidA,
+      stepDetails: 'display',
+      stepRevision: firstA.stepRevision,
+    })).body
+  );
+  assert.equal(afterRebuildA.stepsUnchanged, false);
+  assert.equal(Array.isArray(afterRebuildA.activeConversation.recentSteps), true);
+
+  // 3. CORTEX_STEP_TYPE_FIND live activity resolution
+  const findAct = extractLiveActivity(
+    [
+      {
+        type: 'CORTEX_STEP_TYPE_FIND',
+        status: 'CORTEX_STEP_STATUS_RUNNING',
+        metadata: { createdAt: '2026-11-18T05:00:00Z' },
+      },
+    ],
+    true
+  );
+  assert.equal(findAct?.label, '查找文件');
+
+  // 4. Preview i18n ('live.generating'), stepColumns maxItems: 14, SQLite busy helper reuse, and pure header render
+  const { setI18nLanguage } = await import('../src/i18n/index.js');
+  const { buildStructurePreviewTelemetry } = await import(
+    '../src/components/settings/structurePreviewMock.js'
+  );
+  setI18nLanguage('zh-CN');
+  assert.equal(
+    buildStructurePreviewTelemetry().runningConversations[0].mainActivity.label,
+    '生成中'
+  );
+  setI18nLanguage('en-US');
+  assert.equal(
+    buildStructurePreviewTelemetry().runningConversations[0].mainActivity.label,
+    'Generating'
+  );
+  setI18nLanguage('zh-CN');
+
+  const structureTabSrc = fs.readFileSync(
+    new URL('../src/views/settings/SettingsStructureTab.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(structureTabSrc, /options:\s*getStepColumnOptions[\s\S]{0,120}?maxItems:\s*14\b/);
+
+  const cliStatusSrc = fs.readFileSync(new URL('../cli-statusline.mjs', import.meta.url), 'utf8');
+  assert.match(cliStatusSrc, /\bwithReadOnlySqliteDb\b/);
+  assert.doesNotMatch(cliStatusSrc, /\bnew\s+DatabaseSync\s*\(/);
+
+  const headerSrc = fs.readFileSync(
+    new URL('../src/components/layout/TopSessionHeader.js', import.meta.url),
+    'utf8'
+  );
+  const renderBody = headerSrc.slice(
+    headerSrc.indexOf('function renderHeaderState()'),
+    headerSrc.indexOf('const unsubTelemetry =')
+  );
+  assert.doesNotMatch(renderBody, /\buiStore\.setState\b/);
 });

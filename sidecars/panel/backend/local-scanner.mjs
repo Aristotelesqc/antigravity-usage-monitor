@@ -354,6 +354,12 @@ const failedFetchCooldownMap = new Map();
 const liveActivityMemo = new Map();
 const transcriptTailMemo = new Map();
 
+export function clearScannerRuntimeMemos() {
+  failedFetchCooldownMap.clear();
+  liveActivityMemo.clear();
+  transcriptTailMemo.clear();
+}
+
 function findTranscriptPath(cascadeId) {
   if (!cascadeId) return '';
   const normId = String(cascadeId).trim().toLowerCase();

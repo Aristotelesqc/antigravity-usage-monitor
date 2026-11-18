@@ -25,9 +25,9 @@ import {
   summarizeTtft,
 } from './trajectory-metrics.mjs';
 import {
-  getNodeSqliteDatabaseSync,
   readLocalSqliteTrajectory,
   readLocalSummaryIndex,
+  withReadOnlySqliteDb,
 } from './backend/cli-sqlite-reader.mjs';
 import {
   ensureCliStatusLineConfigured,
@@ -145,43 +145,35 @@ function findConversationIdByWorkspaceFts(cliRoot, cwd) {
   if (!cwd) return '';
   const summariesDbPath = join(cliRoot, 'conversation_summaries.db');
   if (!existsSync(summariesDbPath)) return '';
-  const DatabaseSync = getNodeSqliteDatabaseSync();
-  if (!DatabaseSync) return '';
 
   const normCwd = normalizePathForMatch(cwd);
   if (!normCwd) return '';
 
-  let db = null;
   try {
-    db = new DatabaseSync(summariesDbPath, { readOnly: true });
-    const rows = db
-      .prepare(
-        `SELECT conversation_id, workspace, last_modified_time
-           FROM conversations_fts
-          WHERE chunk_index = -1
-          ORDER BY last_modified_time DESC
-          LIMIT 40`
-      )
-      .all();
-    for (const row of rows || []) {
-      const ws = normalizePathForMatch(row?.workspace);
-      const cid = String(row?.conversation_id || '').trim().toLowerCase();
-      if (cid && ws && ws === normCwd) {
-        return cid;
+    const matched = withReadOnlySqliteDb(summariesDbPath, (db) => {
+      const rows = db
+        .prepare(
+          `SELECT conversation_id, workspace, last_modified_time
+             FROM conversations_fts
+            WHERE chunk_index = -1
+            ORDER BY last_modified_time DESC
+            LIMIT 40`
+        )
+        .all();
+      for (const row of rows || []) {
+        const ws = normalizePathForMatch(row?.workspace);
+        const cid = String(row?.conversation_id || '').trim().toLowerCase();
+        if (cid && ws && ws === normCwd) {
+          return cid;
+        }
       }
-    }
+      return '';
+    });
+    return matched || '';
   } catch {
     // 忽略不存在 conversations_fts 表或读取失败
-  } finally {
-    if (db) {
-      try {
-        db.close();
-      } catch {
-        // 忽略关闭异常
-      }
-    }
+    return '';
   }
-  return '';
 }
 
 /**

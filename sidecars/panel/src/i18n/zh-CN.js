@@ -182,6 +182,7 @@ export const I18N_MESSAGES_ZH_CN = Object.freeze({
   'live.currentSession': '当前会话',
   'live.switchSessionTitle': '点击切换查看会话：{title}',
   'live.thinking': '推理中',
+  'live.generating': '生成中',
   'live.running': '运行中',
   'live.done': '已完成',
   'live.doneWithSteps': '已完成 ({steps} 步)',

@@ -22,6 +22,7 @@ const BACKEND_MODULE_FILES = [
   '../backend/account-switch.mjs',
   '../shared/settings-normalization.mjs',
   '../shared/window-bridge-protocol.mjs',
+  '../backend/http-helpers.mjs',
   '../backend/settings-schema.mjs',
   '../backend/config.mjs',
   '../backend/cli-sqlite-reader.mjs',
