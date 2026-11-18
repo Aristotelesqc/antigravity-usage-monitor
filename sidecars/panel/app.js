@@ -1544,6 +1544,89 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.resetConfirmBtn': '再次点击确认重置',
   'settings.oth.resettingBtn': '重置中…',
   'settings.oth.resetAllDone': '已恢复全部默认设置',
+
+  // Structured Live Activity Actions
+  'live.act.run_command': '执行命令',
+  'live.act.read_file': '读取文件',
+  'live.act.edit_file': '修改文件',
+  'live.act.write_file': '写入文件',
+  'live.act.grep_search': '搜索代码',
+  'live.act.find_file': '查找文件',
+  'live.act.read_url': '读取网页',
+  'live.act.search_web': '网页搜索',
+  'live.act.invoke_subagent': '调用子代理',
+  'live.act.send_message': '通信子代理',
+  'live.act.manage_subagents': '管理子代理',
+  'live.act.manage_task': '后台任务',
+  'live.act.schedule': '定时任务',
+  'live.act.ask_question': '等待用户选择',
+  'live.act.search_marketplace': '查询插件',
+  'live.act.mcp_tool': '调用 MCP',
+  'live.act.tool_call': '调用工具',
+  'live.act.thinking': '推理中',
+  'live.act.compacting': '上下文压缩',
+  'live.act.responding': '正在输出回复',
+  'live.act.waiting_subagent': '等待子代理',
+  'live.act.starting': '启动中',
+  'live.act.done': '已完成',
+  'live.act.awaitingApproval': '等待确认 · {label}',
+  'live.act.compactionResuming': '已完成压缩，正在恢复推理',
+
+  // SVG Charts (SessionStepCharts & TrendAreaChart)
+  'chart.step.empty': '当前范围暂无可绘制的调用步骤',
+  'chart.step.excluded': '未纳入',
+  'chart.step.zeroSteps': '0 步',
+  'chart.step.stepAdd': '本步 +{tokens}',
+  'chart.step.ioSplit': '入 {inTok} · 缓 {cacheTok} · 出 {outTok}',
+  'chart.step.cacheShort': '缓存 {pct}%',
+  'chart.step.compactionCheckpoint': '上下文自动压缩检查点',
+  'chart.step.cacheHitOut': '缓存命中 {pct}% · 输出 +{outTok}',
+  'chart.step.ttftShort': '首字 {sec}s',
+  'chart.step.outAndCtx': '输出 {outTok} · 上下文 {ctxTok}',
+  'chart.step.compactionStep': '上下文压缩步',
+  'chart.step.noSpeedSample': '无测速样本',
+  'chart.step.ctxAndCache': '上下文 {ctxTok} · 缓存 {pct}%',
+  'chart.step.noTtftSample': '无首字计时样本',
+  'chart.step.cumCost': '累计 {cost}',
+  'chart.step.cacheAndStepTok': '缓存 {pct}% · 本步 {tokens}',
+  'chart.step.noSamples': '无样本',
+  'chart.step.peakShort': '峰 {val}',
+  'chart.step.peakPill': '峰值 {tag} · {val}',
+  'chart.step.stepsCount': '{count}步',
+  'chart.step.multiPrefix': '{count} 模型 · ',
+  'chart.step.sumTokens': '{prefix}累计 {tokens}',
+  'chart.step.peakTokens': '{prefix}峰值 {tokens}',
+  'chart.step.currentCtx': '当前 {tokens}',
+  'chart.step.meanTps': '{prefix}均值 {val} tok/s',
+  'chart.step.meanSec': '{prefix}均值 {val}s',
+  'chart.step.noValidSamples': '暂无有效样本',
+  'chart.step.sumCost': '{prefix}累计 {cost}',
+  'chart.fit.empty': '该模型暂无有效拟合样本',
+  'chart.fit.loess': 'LOESS 拟合',
+  'chart.fit.olsLinear': 'OLS 线性',
+  'chart.fit.olsReg': 'OLS 回归',
+  'chart.fit.observed': '观测值',
+  'chart.fit.tipFit': '拟合 {val}',
+  'chart.fit.tipObs': '观测 {val}',
+  'chart.fit.zeroSamples': '0 样本',
+  'chart.fit.peerMean': '{label} 均 {val}',
+  'chart.fit.peerCompare': '同图对比：{peers}',
+  'chart.fit.curvesCount': '{count} 条拟合线',
+  'chart.fit.multiBadge': '{steps}步 · {models} 模型对比',
+  'chart.fit.singleBadge': '{steps}步 · 均 {mean}',
+  'chart.fit.olsTitle': 'OLS: y = {slope}x + {intercept} · 样本标准差 SD = ±{sd}',
+  'chart.trend.hmMonthYear': '{yy}年{month}月',
+  'chart.trend.hmMonthOnly': '{month}月',
+  'chart.trend.wdayMon': '一',
+  'chart.trend.wdayWed': '三',
+  'chart.trend.wdayFri': '五',
+  'chart.trend.wdaySun': '日',
+  'chart.trend.hmAria': '每日用量热力格子图',
+  'chart.trend.hmLess': '少',
+  'chart.trend.hmMore': '多',
+  'chart.trend.hmActivePeak': '活跃 {active}/{total} 天 · 峰值 {label} · {tokens}',
+  'chart.trend.hmActiveZero': '活跃 0/{total} 天',
+  'chart.trend.peakPill': '峰值 {label} · {tokens}',
 });
 return { I18N_MESSAGES_ZH_CN };
 })();
@@ -2075,6 +2158,89 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.resetConfirmBtn': 'Click Again to Confirm',
   'settings.oth.resettingBtn': 'Resetting…',
   'settings.oth.resetAllDone': 'All preferences restored to defaults',
+
+  // Structured Live Activity Actions
+  'live.act.run_command': 'Run Command',
+  'live.act.read_file': 'Read File',
+  'live.act.edit_file': 'Edit File',
+  'live.act.write_file': 'Write File',
+  'live.act.grep_search': 'Search Code',
+  'live.act.find_file': 'Find Files',
+  'live.act.read_url': 'Read Web Page',
+  'live.act.search_web': 'Search Web',
+  'live.act.invoke_subagent': 'Invoke Subagent',
+  'live.act.send_message': 'Message Subagent',
+  'live.act.manage_subagents': 'Manage Subagents',
+  'live.act.manage_task': 'Manage Task',
+  'live.act.schedule': 'Schedule Task',
+  'live.act.ask_question': 'Waiting for User Choice',
+  'live.act.search_marketplace': 'Search Plugins',
+  'live.act.mcp_tool': 'Call MCP Tool',
+  'live.act.tool_call': 'Call Tool',
+  'live.act.thinking': 'Thinking',
+  'live.act.compacting': 'Compacting Context',
+  'live.act.responding': 'Responding',
+  'live.act.waiting_subagent': 'Waiting for Subagent',
+  'live.act.starting': 'Starting',
+  'live.act.done': 'Completed',
+  'live.act.awaitingApproval': 'Awaiting Approval · {label}',
+  'live.act.compactionResuming': 'Compaction finished, resuming reasoning',
+
+  // SVG Charts (SessionStepCharts & TrendAreaChart)
+  'chart.step.empty': 'No plottable steps in current scope',
+  'chart.step.excluded': 'Excluded',
+  'chart.step.zeroSteps': '0 steps',
+  'chart.step.stepAdd': 'Step +{tokens}',
+  'chart.step.ioSplit': 'In {inTok} · Cache {cacheTok} · Out {outTok}',
+  'chart.step.cacheShort': 'Cache {pct}%',
+  'chart.step.compactionCheckpoint': 'Auto-compaction checkpoint',
+  'chart.step.cacheHitOut': 'Cache hit {pct}% · Out +{outTok}',
+  'chart.step.ttftShort': 'TTFT {sec}s',
+  'chart.step.outAndCtx': 'Out {outTok} · Context {ctxTok}',
+  'chart.step.compactionStep': 'Compaction step',
+  'chart.step.noSpeedSample': 'No speed sample',
+  'chart.step.ctxAndCache': 'Context {ctxTok} · Cache {pct}%',
+  'chart.step.noTtftSample': 'No TTFT sample',
+  'chart.step.cumCost': 'Total {cost}',
+  'chart.step.cacheAndStepTok': 'Cache {pct}% · Step {tokens}',
+  'chart.step.noSamples': 'No samples',
+  'chart.step.peakShort': 'Peak {val}',
+  'chart.step.peakPill': 'Peak {tag} · {val}',
+  'chart.step.stepsCount': '{count} steps',
+  'chart.step.multiPrefix': '{count} models · ',
+  'chart.step.sumTokens': '{prefix}Total {tokens}',
+  'chart.step.peakTokens': '{prefix}Peak {tokens}',
+  'chart.step.currentCtx': 'Current {tokens}',
+  'chart.step.meanTps': '{prefix}Avg {val} tok/s',
+  'chart.step.meanSec': '{prefix}Avg {val}s',
+  'chart.step.noValidSamples': 'No valid samples',
+  'chart.step.sumCost': '{prefix}Total {cost}',
+  'chart.fit.empty': 'No valid regression samples for this model',
+  'chart.fit.loess': 'LOESS Fit',
+  'chart.fit.olsLinear': 'OLS Linear',
+  'chart.fit.olsReg': 'OLS Reg',
+  'chart.fit.observed': 'Observed',
+  'chart.fit.tipFit': 'Fit {val}',
+  'chart.fit.tipObs': 'Obs {val}',
+  'chart.fit.zeroSamples': '0 samples',
+  'chart.fit.peerMean': '{label} Avg {val}',
+  'chart.fit.peerCompare': 'Compare: {peers}',
+  'chart.fit.curvesCount': '{count} fit curves',
+  'chart.fit.multiBadge': '{steps} steps · {models} models',
+  'chart.fit.singleBadge': '{steps} steps · Avg {mean}',
+  'chart.fit.olsTitle': 'OLS: y = {slope}x + {intercept} · Sample SD = ±{sd}',
+  'chart.trend.hmMonthYear': "{month}/{yy}",
+  'chart.trend.hmMonthOnly': 'M{month}',
+  'chart.trend.wdayMon': 'M',
+  'chart.trend.wdayWed': 'W',
+  'chart.trend.wdayFri': 'F',
+  'chart.trend.wdaySun': 'S',
+  'chart.trend.hmAria': 'Daily usage heatmap',
+  'chart.trend.hmLess': 'Less',
+  'chart.trend.hmMore': 'More',
+  'chart.trend.hmActivePeak': 'Active {active}/{total}d · Peak {label} · {tokens}',
+  'chart.trend.hmActiveZero': 'Active 0/{total}d',
+  'chart.trend.peakPill': 'Peak {label} · {tokens}',
 });
 return { I18N_MESSAGES_EN_US };
 })();
@@ -2529,7 +2695,7 @@ return { defineComponent };
 })();
 
 // --- src/core/formatters.js ---
-const { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName } = (() => {
+const { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatLiveActivityLabel, formatLiveActivityDetail } = (() => {
 /**
  * @fileoverview Pure formatting utilities for speed metrics, token counts,
  * USD estimates, countdown timers, and custom datetime displays.
@@ -2736,23 +2902,35 @@ function resolveModelDisplayInfo(target, settings = {}, options = {}) {
   }
 
   const shortText = String(
-    target.activeModelShort ?? target.modelShort ?? target.shortName ?? ''
+    target.activeBaseModelShort ??
+      target.baseModelShort ??
+      target.activeModelShort ??
+      target.modelShort ??
+      target.shortName ??
+      ''
   ).trim();
   const labelText = String(
-    target.activeModelLabel ?? target.modelLabel ?? target.label ?? ''
+    target.activeBaseModelLabel ??
+      target.baseModelLabel ??
+      target.activeModelLabel ??
+      target.modelLabel ??
+      target.label ??
+      ''
   ).trim();
   const upstreamText = String(
-    target.activeModelUpstream ?? target.modelUpstream ?? target.upstreamName ?? ''
+    target.baseModelUpstream ??
+      target.activeModelUpstream ??
+      target.modelUpstream ??
+      target.upstreamName ??
+      ''
   ).trim();
+  const rawCompactionText = `${target.activeModelShort ?? target.modelShort ?? ''} ${target.activeModelLabel ?? target.modelLabel ?? ''} ${target.activeModelUpstream ?? target.modelUpstream ?? ''}`;
   const responseText = String(target.responseModel ?? '').trim();
   const modelKeyText = String(target.modelKey ?? '').trim();
 
   const isCompaction =
     Boolean(target.isCompactionStep) ||
-    /·(?:压缩|compact)\s*$/iu.test(shortText) ||
-    /·(?:压缩|compact)\s*$/iu.test(upstreamText) ||
-    /·(?:压缩|compact)\s*$/iu.test(labelText) ||
-    /\[自动压缩\]\s*$/u.test(labelText);
+    /·(?:压缩|compact)(?=\s|$)|\[自动压缩\]/iu.test(rawCompactionText);
 
   const compactionSuffix = isCompaction ? t('fmt.compactionSuffix') : '';
 
@@ -2989,7 +3167,135 @@ function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
     };
   });
 }
-return { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName };
+
+/**
+ * 根据代理索引返回对应的微边框语义徽章样式类名。
+ *
+ * @param {number} [index=0]
+ * @param {boolean} [isMain=false]
+ * @returns {string}
+ */
+function getAgentBadgeClass(index = 0, isMain = false) {
+  if (isMain || index <= 0) return 'badge-main';
+  const slot = ((index - 1) % 3) + 1;
+  return `badge-sub-${slot}`;
+}
+
+/**
+ * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理或旁路提问的紧凑徽章文本（零正则反拆中文）。
+ *
+ * @param {object|null|undefined} agent
+ * @returns {string}
+ */
+function formatAgentBadgeText(agent) {
+  if (!agent) return t('fmt.mainBadge');
+  const kind =
+    agent.agentKind ||
+    (agent.isMain
+      ? 'main'
+      : agent.isSideQuestion || agent.typeName === 'side_question'
+        ? 'side_question'
+        : 'subagent');
+  if (kind === 'all') return t('header.scopeAllShort');
+  if (kind === 'main') return t('fmt.mainBadge');
+  if (kind === 'side_question') {
+    const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
+    if (ord > 0) return t('fmt.sideBadge', { index: ord });
+    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    return t('fmt.sideBadgeShort');
+  }
+  const ord = Number(agent.agentOrdinal || agent.index || 0);
+  if (ord > 0) return t('fmt.subBadge', { index: ord });
+  if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+  return t('fmt.subBadgeShort');
+}
+
+/**
+ * 基于结构化 `agentKind` / `agentOrdinal` / `customRole` 格式化代理完整显示名称（零正则反拆中文）。
+ *
+ * @param {object|null|undefined} agent
+ * @returns {string}
+ */
+function formatAgentLabel(agent) {
+  if (!agent) return t('fmt.mainAgent');
+  const kind =
+    agent.agentKind ||
+    (agent.isMain
+      ? 'main'
+      : agent.isSideQuestion || agent.typeName === 'side_question'
+        ? 'side_question'
+        : 'subagent');
+  if (kind === 'all') return t('header.scopeAll');
+  if (kind === 'main') return t('fmt.mainAgent');
+
+  const rawCustom =
+    agent.customRole !== undefined
+      ? String(agent.customRole || '').trim()
+      : String(agent.role || '').trim();
+  if (kind === 'side_question') {
+    const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
+    const baseLabel = ord > 0 ? `${t('fmt.sideQuestion')} #${ord}` : t('fmt.sideQuestion');
+    const isGeneric =
+      !rawCustom ||
+      rawCustom === baseLabel ||
+      rawCustom === agent.shortLabel ||
+      rawCustom === t('fmt.sideQuestion') ||
+      rawCustom === 'Side Question' ||
+      rawCustom === 'side_question';
+    return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+  }
+
+  const ord = Number(agent.agentOrdinal || agent.index || 0);
+  const baseLabel = ord > 0 ? `${t('fmt.subAgent')} #${ord}` : t('fmt.subAgent');
+  const isGeneric =
+    !rawCustom ||
+    rawCustom === baseLabel ||
+    rawCustom === agent.shortLabel ||
+    rawCustom === t('fmt.subAgent') ||
+    rawCustom === 'Subagent';
+  return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+}
+
+/**
+ * 基于后端结构化 `actionKey` + `waitingApproval` 渲染实时动作短标题（兼容自定义 `label` 回退）。
+ *
+ * @param {object|null|undefined} act
+ * @param {string} [fallbackKey='live.thinking']
+ * @returns {string}
+ */
+function formatLiveActivityLabel(act, fallbackKey = 'live.thinking') {
+  if (!act || typeof act !== 'object') return t(fallbackKey);
+  let baseLabel = '';
+  if (act.actionKey) {
+    const i18nKey = `live.act.${act.actionKey}`;
+    const translated = t(i18nKey);
+    if (translated && translated !== i18nKey) {
+      baseLabel = translated;
+    }
+  }
+  if (!baseLabel) {
+    baseLabel = String(act.label || '').trim() || t(fallbackKey);
+  }
+  if (act.waitingApproval) {
+    return t('live.act.awaitingApproval', { label: baseLabel });
+  }
+  return baseLabel;
+}
+
+/**
+ * 基于后端结构化 `detailKey` 渲染实时动作补充说明（兼容自由文本 `detail`）。
+ *
+ * @param {object|null|undefined} act
+ * @returns {string}
+ */
+function formatLiveActivityDetail(act) {
+  if (!act || typeof act !== 'object') return '';
+  if (act.detailKey === 'compaction_resuming') {
+    return t('live.act.compactionResuming');
+  }
+  return String(act.detail || '');
+}
+return { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatLiveActivityLabel, formatLiveActivityDetail };
 })();
 
 // --- src/core/httpClient.js ---
@@ -3273,7 +3579,7 @@ return { getViewTabs, uiStore, getVisibleMonitorView };
 })();
 
 // --- src/store/telemetryStore.js ---
-const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, resolveScopedConversation, isMacHostPlatform } = (() => {
+const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -4295,101 +4601,6 @@ function stopAsyncTelemetryLoop() {
   }
 }
 
-/**
- * 根据代理索引返回对应的微边框语义徽章样式类名。
- *
- * @param {number} [index=0]
- * @param {boolean} [isMain=false]
- * @returns {string}
- */
-function getAgentBadgeClass(index = 0, isMain = false) {
-  if (isMain || index <= 0) return 'badge-main';
-  const slot = ((index - 1) % 3) + 1;
-  return `badge-sub-${slot}`;
-}
-
-/**
- * 格式化主/子代理的紧凑短徽章文本（中文如 `主` / `子1`，英文如 `Main` / `S1`）。
- *
- * @param {object|null|undefined} agent
- * @returns {string}
- */
-function formatAgentBadgeText(agent) {
-  const isSideQ = Boolean(
-    agent?.isSideQuestion ||
-      agent?.typeName === 'side_question' ||
-      /^旁\d*$/.test(String(agent?.badgeText || ''))
-  );
-  if (!isEnglishLocale()) {
-    if (!agent || agent.isMain) return agent?.badgeText || '主';
-    if (isSideQ) {
-      const sIdx = Number(agent.sideIndex || 0);
-      return agent.badgeText || (sIdx > 0 ? `旁${sIdx}` : '旁');
-    }
-    return agent.badgeText || `子${agent.index || ''}`;
-  }
-  if (!agent || agent.isMain) return t('fmt.mainBadge');
-  if (isSideQ) {
-    const m = String(agent.badgeText || '').match(/^旁(\d+)$/);
-    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
-    return sIdx > 0 ? t('fmt.sideBadge', { index: sIdx }) : t('fmt.sideBadgeShort');
-  }
-  const subMatch = String(agent.badgeText || '').match(/^子(\d+)$/);
-  const subOrd = Number(subMatch ? subMatch[1] : agent.index || 0);
-  return subOrd > 0 ? t('fmt.subBadge', { index: subOrd }) : t('fmt.subBadgeShort');
-}
-
-/**
- * 格式化主/子代理或旁路提问的完整显示名称（如 `子代理 #1 · Codebase Researcher` / `旁路提问 #1 · ...`）。
- *
- * @param {object|null|undefined} agent
- * @returns {string}
- */
-function formatAgentLabel(agent) {
-  const isSideQ = Boolean(
-    agent?.isSideQuestion ||
-      agent?.typeName === 'side_question' ||
-      /^旁/.test(String(agent?.badgeText || agent?.shortLabel || ''))
-  );
-  if (!isEnglishLocale()) {
-    if (!agent) return '主代理';
-    if (agent.isMain) return agent.shortLabel || '主代理';
-    if (isSideQ) {
-      const sIdx = Number(agent.sideIndex || 0);
-      const fallbackShort = sIdx > 0 ? `旁路提问 #${sIdx}` : '旁路提问';
-      const rolePart =
-        agent.role &&
-        agent.role !== '旁路提问' &&
-        agent.role !== 'Side Question' &&
-        agent.role !== agent.shortLabel
-          ? ` · ${agent.role}`
-          : '';
-      return `${agent.shortLabel || fallbackShort}${rolePart}`;
-    }
-    const rolePart = agent.role && agent.role !== '子代理' ? ` · ${agent.role}` : '';
-    return `${agent.shortLabel || '子代理'}${rolePart}`;
-  }
-  if (!agent || agent.isMain) return t('fmt.mainAgent');
-  if (isSideQ) {
-    const m = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
-    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
-    const baseLabel = sIdx > 0 ? `${t('fmt.sideQuestion')} #${sIdx}` : t('fmt.sideQuestion');
-    const rolePart =
-      agent.role &&
-      agent.role !== '旁路提问' &&
-      agent.role !== 'Side Question' &&
-      agent.role !== agent.shortLabel
-        ? ` · ${agent.role}`
-        : '';
-    return `${baseLabel}${rolePart}`;
-  }
-  const subMatch = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
-  const idx = Number(subMatch ? subMatch[1] : agent.index || 0);
-  const baseLabel = idx > 0 ? `${t('fmt.subAgent')} #${idx}` : t('fmt.subAgent');
-  const rolePart =
-    agent.role && agent.role !== '子代理' && agent.role !== 'Subagent' ? ` · ${agent.role}` : '';
-  return `${baseLabel}${rolePart}`;
-}
 
 /**
  * 解析当前选中的主/子代理作用域视图数据与独立上下文窗口检视目标。
@@ -4536,7 +4747,7 @@ function isMacHostPlatform(telemetry) {
   }
   return false;
 }
-return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, resolveScopedConversation, isMacHostPlatform };
+return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform };
 })();
 
 // --- src/components/ui/TopLongPillNav.js ---
@@ -5939,7 +6150,9 @@ function buildHeatmapMonthTicks(slots, firstDow, totalWeeks) {
     if (totalWeeks > 16 && c.col >= totalWeeks - 1) continue;
     if (ticks.length > 0 && c.col < nextAllowedCol) continue;
     const showYear = crossYear && (c.month === 1 || ticks.length === 0);
-    const text = showYear ? `${String(c.year).slice(-2)}年${c.month}月` : `${c.month}月`;
+    const text = showYear
+      ? t('chart.trend.hmMonthYear', { yy: String(c.year).slice(-2), month: c.month })
+      : t('chart.trend.hmMonthOnly', { month: c.month });
     ticks.push({ col: c.col, text });
     nextAllowedCol = c.col + (showYear ? baseMinGap + 1 : baseMinGap);
   }
@@ -6074,26 +6287,41 @@ function createTrendAreaChart() {
   const plotStage = h('div', { className: 'trend-plot-stage' }, [peakPill, svg]);
 
   // 类 GitHub 每日小格子热力图容器（> 90 天模式）
-  const weekdayLabels = ['一', '', '三', '', '五', '', '日'];
+  const wdayMonEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayMon') });
+  const wdayWedEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayWed') });
+  const wdayFriEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayFri') });
+  const wdaySunEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdaySun') });
   const hmWeekdaysEl = h('div', { className: 'trend-hm-weekdays', 'aria-hidden': 'true' }, [
     h('span', { className: 'trend-hm-month-spacer' }),
-    ...weekdayLabels.map((txt) => h('span', { className: 'trend-hm-wday', text: txt })),
+    wdayMonEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdayWedEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdayFriEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdaySunEl,
   ]);
   const hmMonthsEl = h('div', { className: 'trend-hm-months' });
-  const hmGridEl = h('div', { className: 'trend-hm-grid', role: 'grid', 'aria-label': '每日用量热力格子图' });
+  const hmGridEl = h('div', {
+    className: 'trend-hm-grid',
+    role: 'grid',
+    'aria-label': t('chart.trend.hmAria'),
+  });
   const hmTrackEl = h('div', { className: 'trend-hm-track' }, [hmMonthsEl, hmGridEl]);
   const hmScrollEl = h('div', { className: 'trend-hm-scroll' }, [hmTrackEl]);
   const hmBodyEl = h('div', { className: 'trend-heatmap-body' }, [hmWeekdaysEl, hmScrollEl]);
 
   const hmSummaryEl = h('span', { className: 'trend-hm-summary text-mono', text: '' });
+  const hmLessEl = h('span', { text: t('chart.trend.hmLess') });
+  const hmMoreEl = h('span', { text: t('chart.trend.hmMore') });
   const hmLegendEl = h('span', { className: 'trend-hm-legend', 'aria-hidden': 'true' }, [
-    h('span', { text: '少' }),
+    hmLessEl,
     h('span', { className: 'trend-hm-swatch lv-0' }),
     h('span', { className: 'trend-hm-swatch lv-1' }),
     h('span', { className: 'trend-hm-swatch lv-2' }),
     h('span', { className: 'trend-hm-swatch lv-3' }),
     h('span', { className: 'trend-hm-swatch lv-4' }),
-    h('span', { text: '多' }),
+    hmMoreEl,
   ]);
   const hmFooterEl = h('div', { className: 'trend-hm-footer' }, [hmSummaryEl, hmLegendEl]);
   const heatmapStage = h('div', { className: 'trend-heatmap-stage', hidden: true }, [
@@ -6122,7 +6350,10 @@ function createTrendAreaChart() {
 
   function populateTooltipContent(slot) {
     patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
-    patchText(tipCallsEl, `${Math.max(0, Math.floor(Number(slot.calls) || 0))} 次`);
+    patchText(
+      tipCallsEl,
+      t('cons.callsCount', { calls: Math.max(0, Math.floor(Number(slot.calls) || 0)) })
+    );
     const slotTok = safeSlotTokens(slot.tokens);
     patchText(tipTokensEl, `${formatTokensPrecise(slotTok)} tok`);
     const slotCost = Number.isFinite(Number(slot.costUsd)) ? Math.max(0, Number(slot.costUsd)) : 0;
@@ -6142,7 +6373,11 @@ function createTrendAreaChart() {
     if (hasSubBreakdown) {
       patchText(
         tipSubEl,
-        `入 ${formatTokensPrecise(safeSlotTokens(slot.inputTokens))} · 缓 ${formatTokensPrecise(safeSlotTokens(slot.cacheReadTokens))} · 出 ${formatTokensPrecise(safeSlotTokens(slot.outputTokens))}`
+        t('chart.step.ioSplit', {
+          inTok: formatTokensPrecise(safeSlotTokens(slot.inputTokens)),
+          cacheTok: formatTokensPrecise(safeSlotTokens(slot.cacheReadTokens)),
+          outTok: formatTokensPrecise(safeSlotTokens(slot.outputTokens)),
+        })
       );
     }
   }
@@ -6491,19 +6726,28 @@ function createTrendAreaChart() {
     const nonZeroVals = [];
 
     for (let i = 0; i < slots.length; i++) {
-      const t = safeSlotTokens(slots[i]?.tokens);
-      if (t > 0) {
+      const tokVal = safeSlotTokens(slots[i]?.tokens);
+      if (tokVal > 0) {
         activeDays++;
-        nonZeroVals.push(t);
+        nonZeroVals.push(tokVal);
       }
-      if (t >= maxTokens) {
-        maxTokens = t;
+      if (tokVal >= maxTokens) {
+        maxTokens = tokVal;
         peakIdx = i;
       }
     }
 
+    const locale = getEffectiveLocale();
+    patchText(wdayMonEl, t('chart.trend.wdayMon'));
+    patchText(wdayWedEl, t('chart.trend.wdayWed'));
+    patchText(wdayFriEl, t('chart.trend.wdayFri'));
+    patchText(wdaySunEl, t('chart.trend.wdaySun'));
+    patchAttr(hmGridEl, 'aria-label', t('chart.trend.hmAria'));
+    patchText(hmLessEl, t('chart.trend.hmLess'));
+    patchText(hmMoreEl, t('chart.trend.hmMore'));
+
     const sig =
-      `${useHeatmap ? 'hm' : `line:${viewW}`}|` +
+      `${locale}|${useHeatmap ? 'hm' : `line:${viewW}`}|` +
       slots
         .map(
           (s) =>
@@ -6583,8 +6827,13 @@ function createTrendAreaChart() {
       const peakSlot = slots[peakIdx];
       const summaryText =
         maxTokens > 0 && peakSlot?.label
-          ? `活跃 ${activeDays}/${slots.length} 天 · 峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
-          : `活跃 0/${slots.length} 天`;
+          ? t('chart.trend.hmActivePeak', {
+              active: activeDays,
+              total: slots.length,
+              label: peakSlot.label,
+              tokens: formatTokensPrecise(maxTokens),
+            })
+          : t('chart.trend.hmActiveZero', { total: slots.length });
       patchText(hmSummaryEl, summaryText);
 
       if (hoveredIdx >= slots.length) {
@@ -6683,7 +6932,10 @@ function createTrendAreaChart() {
     const peakSlot = slots[peakIdx];
     const peakText =
       maxTokens > 0 && peakSlot?.label
-        ? `峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
+        ? t('chart.trend.peakPill', {
+            label: peakSlot.label,
+            tokens: formatTokensPrecise(maxTokens),
+          })
         : formatTokensPrecise(maxTokens);
     patchText(peakPill, peakText);
     const pctLeft = Math.max(12, Math.min(88, (peakPt.x / viewW) * 100));
@@ -6734,16 +6986,16 @@ const MODEL_COLOR_VARS = Object.freeze([
  * @returns {string}
  */
 function getStepModelGroupKey(step) {
-  if (!step || typeof step !== 'object') return '模型未知';
-  const rawLabel = String(step.modelLabel || step.label || '')
+  if (!step || typeof step !== 'object') return t('fmt.unknownModel');
+  const rawLabel = String(step.baseModelLabel || step.modelLabel || step.label || '')
     .replace(/\s*\[自动压缩\]\s*$/u, '')
     .replace(/\s*\((?:Max|XHigh|High|Medium|Low|Thinking|Extra Low|Tiered)\)\s*$/i, '')
     .trim();
   if (rawLabel) return rawLabel;
-  const rawShort = String(step.modelShort || step.shortName || '')
-    .replace(/·压缩\s*$/u, '')
+  const rawShort = String(step.baseModelShort || step.modelShort || step.shortName || '')
+    .replace(/·(?:压缩|Compact)\s*$/iu, '')
     .trim();
-  return rawShort || '模型未知';
+  return rawShort || t('fmt.unknownModel');
 }
 
 /**
@@ -7270,7 +7522,17 @@ function computeStepTickIndices(count) {
 function formatStepAxisTag(st, showAgentPrefix) {
   const num = `#${Number(st?.stepIndex ?? 0)}`;
   if (!showAgentPrefix) return num;
-  const badge = st?.agentBadge || (st?.isSubagent ? '子' : '主');
+  const badge = formatAgentBadgeText({
+    agentKind:
+      st?.agentKind || (!st?.isSubagent ? 'main' : st?.isSideQuestion ? 'side_question' : 'subagent'),
+    agentOrdinal:
+      st?.agentOrdinal || (st?.isSideQuestion ? st?.sideIndex || 0 : st?.agentIndex || 0),
+    isMain: !st?.isSubagent,
+    isSideQuestion: Boolean(st?.isSideQuestion),
+    sideIndex: st?.sideIndex || 0,
+    index: st?.agentIndex || 0,
+    badgeText: st?.agentBadge,
+  });
   return `${badge}${num}`;
 }
 
@@ -7405,7 +7667,7 @@ function createSessionLineChart() {
 
   const emptyHintEl = h('div', {
     className: 'sstep-empty-hint text-muted',
-    text: '当前范围暂无可绘制的调用步骤',
+    text: t('chart.step.empty'),
     hidden: true,
   });
 
@@ -7483,7 +7745,10 @@ function createSessionLineChart() {
 
     patchText(tipHeadLeft, pt.stepTag);
     patchText(tipHeadRight, pt.modelText);
-    patchText(tipMainLeft, pt.valid ? formatChartMetricValue(currentMetric, pt.value) : '未纳入');
+    patchText(
+      tipMainLeft,
+      pt.valid ? formatChartMetricValue(currentMetric, pt.value) : t('chart.step.excluded')
+    );
     patchText(tipMainRight, pt.secondaryRight || '');
     patchAttr(tipSub, 'hidden', !pt.subDetail);
     if (pt.subDetail) {
@@ -7610,6 +7875,7 @@ function createSessionLineChart() {
       ? steps
       : steps.filter((st) => st && targetKeySet.has(getStepModelGroupKey(st)));
 
+    patchText(emptyHintEl, t('chart.step.empty'));
     if (!matchedSteps.length) {
       currentPoints = [];
       lastSig = 'empty';
@@ -7623,7 +7889,7 @@ function createSessionLineChart() {
       patchAttr(peakPill, 'hidden', true);
       patchAttr(emptyHintEl, 'hidden', false);
       clearHover();
-      return { summaryBadge: '0 步' };
+      return { summaryBadge: t('chart.step.zeroSteps') };
     }
 
     const modelColorMap = new Map();
@@ -7637,7 +7903,7 @@ function createSessionLineChart() {
         const disp = resolveModelDisplayInfo({ modelLabel: gk, label: gk }, displaySettings, {
           fallback: gk,
         });
-        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+        modelLabelByGroup.set(gk, disp.baseText || disp.text || gk);
       }
     }
     for (const st of matchedSteps) {
@@ -7650,7 +7916,7 @@ function createSessionLineChart() {
       }
       if (!modelLabelByGroup.has(gk)) {
         const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
-        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+        modelLabelByGroup.set(gk, disp.baseText || disp.text || gk);
       }
     }
 
@@ -7710,41 +7976,62 @@ function createSessionLineChart() {
 
       if (metric === 'totalTokens') {
         value = isMultiCompare ? modelCumTok : runningTokens;
-        secondaryRight = `本步 +${formatTokens(stepTotalTok)}`;
-        subDetail = `入 ${formatTokens(inTok)} · 缓 ${formatTokens(cacheTok)} · 出 ${formatTokens(outTok)}`;
+        secondaryRight = t('chart.step.stepAdd', { tokens: formatTokens(stepTotalTok) });
+        subDetail = t('chart.step.ioSplit', {
+          inTok: formatTokens(inTok),
+          cacheTok: formatTokens(cacheTok),
+          outTok: formatTokens(outTok),
+        });
       } else if (metric === 'context') {
         value = ctxTok;
         if (hasPrevCtx) {
           const sign = ctxDelta >= 0 ? '+' : '-';
           secondaryRight = `${sign}${formatTokens(Math.abs(ctxDelta))}`;
         } else {
-          secondaryRight = `缓存 ${Number(st.cacheHitPct ?? 0)}%`;
+          secondaryRight = t('chart.step.cacheShort', { pct: Number(st.cacheHitPct ?? 0) });
         }
         subDetail = st.isCompactionStep
-          ? '上下文自动压缩检查点'
-          : `缓存命中 ${Number(st.cacheHitPct ?? 0)}% · 输出 +${formatTokens(outTok)}`;
+          ? t('chart.step.compactionCheckpoint')
+          : t('chart.step.cacheHitOut', {
+              pct: Number(st.cacheHitPct ?? 0),
+              outTok: formatTokens(outTok),
+            });
       } else if (metric === 'tps') {
         valid = !st.isCompactionStep && Number.isFinite(st.tokPerSec) && st.tokPerSec > 0;
         value = valid ? Number(st.tokPerSec) : 0;
-        secondaryRight = Number.isFinite(st.ttftSec) ? `首字 ${st.ttftSec.toFixed(1)}s` : '';
+        secondaryRight = Number.isFinite(st.ttftSec)
+          ? t('chart.step.ttftShort', { sec: st.ttftSec.toFixed(1) })
+          : '';
         subDetail = valid
-          ? `输出 ${formatTokens(outTok)} · 上下文 ${formatTokens(ctxTok)}`
-          : speedReasonText(st.selectedSpeedReason) || (st.isCompactionStep ? '上下文压缩步' : '无测速样本');
+          ? t('chart.step.outAndCtx', {
+              outTok: formatTokens(outTok),
+              ctxTok: formatTokens(ctxTok),
+            })
+          : speedReasonText(st.selectedSpeedReason) ||
+            (st.isCompactionStep ? t('chart.step.compactionStep') : t('chart.step.noSpeedSample'));
       } else if (metric === 'ttft') {
         valid = !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0;
         value = valid ? Number(st.ttftSec) : 0;
         secondaryRight = Number.isFinite(st.tokPerSec) ? `${st.tokPerSec.toFixed(1)} tok/s` : '';
         subDetail = valid
-          ? `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(st.cacheHitPct ?? 0)}%`
+          ? t('chart.step.ctxAndCache', {
+              ctxTok: formatTokens(ctxTok),
+              pct: Number(st.cacheHitPct ?? 0),
+            })
           : st.isCompactionStep
-            ? '上下文压缩步'
-            : '无首字计时样本';
+            ? t('chart.step.compactionStep')
+            : t('chart.step.noTtftSample');
       } else if (metric === 'cost') {
         valid = stepCost !== null;
         value = valid ? stepCost : 0;
         const shownCumCost = isMultiCompare ? modelCumCost : runningCost;
-        secondaryRight = `累计 ${formatUsd(shownCumCost, { precise: shownCumCost > 0 && shownCumCost < 0.1 })}`;
-        subDetail = `缓存 ${Number(st.cacheHitPct ?? 0)}% · 本步 ${formatTokens(stepTotalTok)}`;
+        secondaryRight = t('chart.step.cumCost', {
+          cost: formatUsd(shownCumCost, { precise: shownCumCost > 0 && shownCumCost < 0.1 }),
+        });
+        subDetail = t('chart.step.cacheAndStepTok', {
+          pct: Number(st.cacheHitPct ?? 0),
+          tokens: formatTokens(stepTotalTok),
+        });
       }
 
       if (valid) {
@@ -7804,11 +8091,12 @@ function createSessionLineChart() {
     const validPoints = points.filter((p) => p.valid);
     patchAttr(emptyHintEl, 'hidden', validPoints.length > 0);
 
+    const locale = getEffectiveLocale();
     const colorSig = Array.from(modelColorMap.entries())
       .map(([k, v]) => `${k}=${v}`)
       .join(',');
     const sig =
-      `${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
+      `${locale}|${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
       points
         .map((p) => `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}`)
         .join('|');
@@ -7943,12 +8231,12 @@ function createSessionLineChart() {
           patchStyleVar(swatch, '--swatch-bg', colorVar);
           const stStat = perModelStats.get(gk);
           const baseLabel = modelLabelByGroup.get(gk) || gk;
-          let summarySuffix = '无样本';
+          let summarySuffix = t('chart.step.noSamples');
           if (stStat && stStat.count > 0) {
             if (metric === 'totalTokens') {
               summarySuffix = formatTokens(stStat.cumTok);
             } else if (metric === 'context') {
-              summarySuffix = `峰 ${formatTokens(stStat.max)}`;
+              summarySuffix = t('chart.step.peakShort', { val: formatTokens(stStat.max) });
             } else if (metric === 'tps' || metric === 'ttft') {
               summarySuffix = formatChartMetricCompact(metric, stStat.sum / stStat.count);
             } else if (metric === 'cost') {
@@ -7986,7 +8274,10 @@ function createSessionLineChart() {
       const peakPt = points[peakIdx];
       patchText(
         peakPill,
-        `峰值 ${peakPt.stepTag} · ${formatChartMetricCompact(metric, peakPt.value)}`
+        t('chart.step.peakPill', {
+          tag: peakPt.stepTag,
+          val: formatChartMetricCompact(metric, peakPt.value),
+        })
       );
       patchStyleVar(peakPill, '--sstep-accent', isMultiCompare ? peakPt.dotColor : accentColor);
       const pctLeft = Math.max(14, Math.min(86, (peakPt.x / viewW) * 100));
@@ -8002,28 +8293,42 @@ function createSessionLineChart() {
       showHoverAt(hoveredIdx);
     }
 
-    let summaryBadge = `${matchedSteps.length}步`;
+    let summaryBadge = t('chart.step.stepsCount', { count: matchedSteps.length });
     const activeCompareCount = isMultiCompare ? targetKeys.length : 1;
-    const multiPrefix = isMultiCompare ? `${activeCompareCount} 模型 · ` : '';
+    const multiPrefix = isMultiCompare
+      ? t('chart.step.multiPrefix', { count: activeCompareCount })
+      : '';
     if (metric === 'totalTokens') {
-      summaryBadge = `${multiPrefix}累计 ${formatTokens(runningTokens)}`;
+      summaryBadge = t('chart.step.sumTokens', {
+        prefix: multiPrefix,
+        tokens: formatTokens(runningTokens),
+      });
     } else if (metric === 'context') {
       const lastCtx = points[points.length - 1]?.value || 0;
       summaryBadge = isMultiCompare
-        ? `${multiPrefix}峰值 ${formatTokens(maxVal)}`
-        : `当前 ${formatTokens(lastCtx)}`;
+        ? t('chart.step.peakTokens', { prefix: multiPrefix, tokens: formatTokens(maxVal) })
+        : t('chart.step.currentCtx', { tokens: formatTokens(lastCtx) });
     } else if (metric === 'tps') {
       summaryBadge =
         validCount > 0
-          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)} tok/s`
-          : '暂无有效样本';
+          ? t('chart.step.meanTps', {
+              prefix: multiPrefix,
+              val: (validSum / validCount).toFixed(1),
+            })
+          : t('chart.step.noValidSamples');
     } else if (metric === 'ttft') {
       summaryBadge =
         validCount > 0
-          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)}s`
-          : '暂无有效样本';
+          ? t('chart.step.meanSec', {
+              prefix: multiPrefix,
+              val: (validSum / validCount).toFixed(1),
+            })
+          : t('chart.step.noValidSamples');
     } else if (metric === 'cost') {
-      summaryBadge = `${multiPrefix}累计 ${formatUsd(runningCost, { precise: runningCost > 0 && runningCost < 0.1 })}`;
+      summaryBadge = t('chart.step.sumCost', {
+        prefix: multiPrefix,
+        cost: formatUsd(runningCost, { precise: runningCost > 0 && runningCost < 0.1 }),
+      });
     }
 
     return { summaryBadge };
@@ -8114,7 +8419,7 @@ function createModelFitChart() {
 
   const emptyHintEl = h('div', {
     className: 'sstep-empty-hint text-muted',
-    text: '该模型暂无有效拟合样本',
+    text: t('chart.fit.empty'),
     hidden: true,
   });
 
@@ -8129,14 +8434,16 @@ function createModelFitChart() {
     tipSub,
   ]);
 
-  const fitMethodLabelEl = h('span', { text: 'LOESS 拟合' });
+  const fitMethodLabelEl = h('span', { text: t('chart.fit.loess') });
+  const olsLegendTextEl = h('span', { text: t('chart.fit.olsLinear') });
   const olsLegendWrapEl = h('span', { className: 'sstep-fit-legend-ols' }, [
     h('span', { className: 'sstep-fit-swatch is-ols' }),
-    h('span', { text: 'OLS 线性' }),
+    olsLegendTextEl,
   ]);
+  const obsLegendTextEl = h('span', { text: t('chart.fit.observed') });
   const singleLegendEl = h('span', { className: 'sstep-fit-legend' }, [
     h('span', { className: 'sstep-fit-swatch is-scatter' }),
-    h('span', { text: '观测值' }),
+    obsLegendTextEl,
     h('span', { className: 'sstep-fit-swatch is-curve' }),
     fitMethodLabelEl,
     h('span', { className: 'sstep-fit-swatch is-ci' }),
@@ -8219,8 +8526,14 @@ function createModelFitChart() {
     patchAttr(tooltipEl, 'hidden', false);
     patchText(tipHeadLeft, sp.stepTag);
     patchText(tipHeadRight, sp.modelText);
-    patchText(tipMainLeft, `拟合 ${formatChartMetricValue(currentMetric, sp.fitVal)}`);
-    patchText(tipMainRight, `观测 ${formatChartMetricValue(currentMetric, sp.rawVal)}`);
+    patchText(
+      tipMainLeft,
+      t('chart.fit.tipFit', { val: formatChartMetricValue(currentMetric, sp.fitVal) })
+    );
+    patchText(
+      tipMainRight,
+      t('chart.fit.tipObs', { val: formatChartMetricValue(currentMetric, sp.rawVal) })
+    );
 
     patchAttr(tipSub, 'hidden', false);
     if (sp.compareHint) {
@@ -8234,7 +8547,10 @@ function createModelFitChart() {
       const ctxTok = Math.max(0, Number(sp.st?.contextTokens || 0));
       patchText(
         tipSub,
-        `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(sp.st?.cacheHitPct ?? 0)}%`
+        t('chart.step.ctxAndCache', {
+          ctxTok: formatTokens(ctxTok),
+          pct: Number(sp.st?.cacheHitPct ?? 0),
+        })
       );
     }
 
@@ -8500,10 +8816,15 @@ function createModelFitChart() {
           xVal: globalX,
           rawVal,
           stepTag: formatStepAxisTag(st, showAgentPrefix),
-          modelText: disp.text.replace(/·压缩\s*$/u, '').trim() || disp.text,
+          modelText: disp.baseText || disp.text,
         });
       }
     }
+
+    const locale = getEffectiveLocale();
+    patchText(emptyHintEl, t('chart.fit.empty'));
+    patchText(obsLegendTextEl, t('chart.fit.observed'));
+    patchText(olsLegendTextEl, t('chart.fit.olsLinear'));
 
     if (fitCacheMetric !== metric) {
       fitCache.clear();
@@ -8528,9 +8849,10 @@ function createModelFitChart() {
       patchAttr(singleLegendEl, 'hidden', false);
       patchAttr(multiLegendEl, 'hidden', true);
       patchAttr(emptyHintEl, 'hidden', false);
+      patchText(fitMethodLabelEl, t('chart.fit.loess'));
       patchText(fitStatsEl, 'n = 0');
       clearHover();
-      return { sampleCount: 0, summaryBadge: '0 样本' };
+      return { sampleCount: 0, summaryBadge: t('chart.fit.zeroSamples') };
     }
 
     patchAttr(emptyHintEl, 'hidden', true);
@@ -8612,7 +8934,12 @@ function createModelFitChart() {
             if (interp !== null) {
               peerParts.push(`${other.label} ${formatChartMetricCompact(metric, interp)}`);
             } else {
-              peerParts.push(`${other.label} 均 ${formatChartMetricCompact(metric, other.pubFit.mean)}`);
+              peerParts.push(
+                t('chart.fit.peerMean', {
+                  label: other.label,
+                  val: formatChartMetricCompact(metric, other.pubFit.mean),
+                })
+              );
             }
           }
           return {
@@ -8625,7 +8952,10 @@ function createModelFitChart() {
             ciHigh: s.pubFit.sampleCiHigh[i],
             ciHalf: s.pubFit.sampleCiHalf[i],
             seriesColor: s.colorVar,
-            compareHint: peerParts.length > 0 ? `同图对比：${peerParts.join(' · ')}` : '',
+            compareHint:
+              peerParts.length > 0
+                ? t('chart.fit.peerCompare', { peers: peerParts.join(' · ') })
+                : '',
           };
         });
         s.samples = sSamples;
@@ -8635,7 +8965,7 @@ function createModelFitChart() {
       currentSamples = combinedSamples;
 
       const sig =
-        `multi|${viewW}|${targetKeys.join(',')}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+        `multi|${locale}|${viewW}|${targetKeys.join(',')}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
         seriesList
           .map(
             (s) =>
@@ -8749,7 +9079,7 @@ function createModelFitChart() {
         fitStatsEl,
         seriesList.length <= 2
           ? seriesList.map((s) => `R²=${s.pubFit.r2.toFixed(2)}`).join(' · ')
-          : `${seriesList.length} 条拟合线`
+          : t('chart.fit.curvesCount', { count: seriesList.length })
       );
       patchAttr(fitStatsEl, 'title', r2SummaryTitle);
 
@@ -8761,7 +9091,10 @@ function createModelFitChart() {
 
       return {
         sampleCount: combinedSamples.length,
-        summaryBadge: `${combinedSamples.length}步 · ${seriesList.length} 模型对比`,
+        summaryBadge: t('chart.fit.multiBadge', {
+          steps: combinedSamples.length,
+          models: seriesList.length,
+        }),
       };
     }
 
@@ -8776,7 +9109,10 @@ function createModelFitChart() {
     const rawYs = filtered.map((d) => d.rawVal);
     const pubFit = reusePublicationFit(null, xs, rawYs, maxBound, false);
 
-    patchText(fitMethodLabelEl, pubFit.method === 'LOESS' ? 'LOESS 拟合' : 'OLS 回归');
+    patchText(
+      fitMethodLabelEl,
+      pubFit.method === 'LOESS' ? t('chart.fit.loess') : t('chart.fit.olsReg')
+    );
     patchAttr(olsLegendWrapEl, 'hidden', filtered.length < 6);
 
     let dataMin = Infinity;
@@ -8829,7 +9165,7 @@ function createModelFitChart() {
     currentSamples = samples;
 
     const sig =
-      `single|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+      `single|${locale}|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
       samples.map((s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}`).join('|');
 
     if (sig !== lastSig) {
@@ -8905,7 +9241,10 @@ function createModelFitChart() {
       }
     }
 
-    const summaryBadge = `${samples.length}步 · 均 ${formatChartMetricCompact(metric, pubFit.mean)}`;
+    const summaryBadge = t('chart.fit.singleBadge', {
+      steps: samples.length,
+      mean: formatChartMetricCompact(metric, pubFit.mean),
+    });
     if (samples.length >= 2) {
       const rSign = pubFit.r >= 0 ? '+' : '';
       const slopeSign = pubFit.slope >= 0 ? '+' : '';
@@ -8913,7 +9252,11 @@ function createModelFitChart() {
       patchAttr(
         fitStatsEl,
         'title',
-        `OLS: y = ${slopeSign}${pubFit.slope.toFixed(3)}x + ${pubFit.intercept.toFixed(2)} · 样本标准差 SD = ±${pubFit.sd.toFixed(2)}`
+        t('chart.fit.olsTitle', {
+          slope: `${slopeSign}${pubFit.slope.toFixed(3)}`,
+          intercept: pubFit.intercept.toFixed(2),
+          sd: pubFit.sd.toFixed(2),
+        })
       );
     } else {
       patchText(fitStatsEl, `n = ${samples.length}`);
@@ -9262,15 +9605,16 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
   };
 }
 
-function translateRawAgentBadge(rawBadge) {
-  if (!rawBadge) return '';
-  if (!isEnglishLocale()) return String(rawBadge);
-  const str = String(rawBadge).trim();
-  if (str === '主') return t('fmt.mainBadge');
-  const m = str.match(/^子(\d+)$/);
-  if (m) return t('fmt.subBadge', { index: m[1] });
-  if (str === '子') return t('fmt.subBadgeShort');
-  return str;
+function resolveActiveBadgeText(active) {
+  if (!active?.activeAgentBadge && !active?.activeAgentKind) return '';
+  return formatAgentBadgeText({
+    agentKind:
+      active.activeAgentKind ||
+      (!active.activeAgentId || active.activeAgentId === 'main' ? 'main' : 'subagent'),
+    agentOrdinal: Number(active.activeAgentOrdinal || 0),
+    isMain: !active.activeAgentId || active.activeAgentId === 'main',
+    badgeText: active.activeAgentBadge,
+  });
 }
 
 /**
@@ -9292,7 +9636,7 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
       fallback: t('fmt.unknownModel'),
     }).text;
     const reason = speedReasonText(active.latestSpeedReason);
-    const badgeStr = translateRawAgentBadge(active.activeAgentBadge);
+    const badgeStr = resolveActiveBadgeText(active);
     const modelAndAgent =
       hasSubagents && badgeStr ? `[${badgeStr}] ${activeModelDisplay}` : activeModelDisplay;
     const hasSpeed = Number.isFinite(active.latestTokPerSec) && Number(active.latestTokPerSec) > 0;
@@ -9876,14 +10220,16 @@ const ContextWindowWidget = defineComponent({
       if (interactiveInspector) {
         patchAttr(ctxInspectorBar, 'hidden', !hasSubagents);
         if (hasSubagents && ctxAgent) {
-          const rawActiveBadge = aggregated?.activeAgentBadge || '主';
-          const activeBadgeText = isEnglishLocale()
-            ? rawActiveBadge === '主'
-              ? t('fmt.mainBadge')
-              : rawActiveBadge
-                  .replace(/^子(\d+)$/, (_, n) => t('fmt.subBadge', { index: n }))
-                  .replace(/^旁(\d+)$/, (_, n) => t('fmt.sideBadge', { index: n }))
-            : rawActiveBadge;
+          const activeBadgeText = formatAgentBadgeText({
+            agentKind:
+              aggregated?.activeAgentKind ||
+              (!aggregated?.activeAgentId || aggregated.activeAgentId === 'main'
+                ? 'main'
+                : 'subagent'),
+            agentOrdinal: Number(aggregated?.activeAgentOrdinal || 0),
+            isMain: !aggregated?.activeAgentId || aggregated.activeAgentId === 'main',
+            badgeText: aggregated?.activeAgentBadge,
+          });
 
           const pillItems = [
             {
@@ -10430,19 +10776,77 @@ return { buildQuotaPoolItems, createPoolQuotaRow, formatQuotaSummaryFooter, sync
 })();
 
 // --- src/components/widgets/LiveActivityWidget.js ---
-const { LiveActivityWidget } = (() => {
+const { buildFallbackRunningConversations, LiveActivityWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Live Running Tasks Widget (`LiveActivityWidget.js`).
  * Displays active multi-session running conversations & collapsible subagent activity
- * with an isolated 1s elapsed timer lifecycle.
+ * with an isolated 1s elapsed timer lifecycle. Supports both Overview/Hover widget mode
+ * and controlled Multi-Session Floating Panel mode (`WindowOverlayShell.js`).
  */
 
+
+function buildFallbackRunningConversations(
+  data,
+  { agents = [], aggregated = null, latestTokPerSec = undefined, contextUsedPct = undefined } = {}
+) {
+  if (!data) return [];
+  if (Array.isArray(data.runningConversations) && data.runningConversations.length > 0) {
+    return data.runningConversations;
+  }
+  const activeConv = data.activeConversation || {};
+  if (!activeConv.isRunning && !aggregated?.isRunning) return [];
+  return [
+    {
+      cascadeId: activeConv.cascadeId || 'current',
+      title: activeConv.title || t('live.currentSession'),
+      isCurrentSelected: true,
+      isMainRunning: Boolean(activeConv.isRunning),
+      isRunning: true,
+      mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
+      subagentCount: Math.max(0, (agents?.length || 1) - 1),
+      runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
+      ...(latestTokPerSec !== undefined ? { latestTokPerSec } : {}),
+      ...(contextUsedPct !== undefined ? { contextUsedPct } : {}),
+      subagents: (agents || [])
+        .filter((a) => !a.isMain)
+        .map((s, idx) => ({
+          cascadeId: s.cascadeId || s.agentId,
+          index: s.index || idx + 1,
+          agentKind: s.agentKind || (s.isSideQuestion ? 'side_question' : 'subagent'),
+          agentOrdinal: s.agentOrdinal || (s.isSideQuestion ? s.sideIndex || 0 : s.index || idx + 1),
+          customRole: s.customRole,
+          ...(s.isSideQuestion ? { isSideQuestion: true, sideIndex: s.sideIndex || 0 } : {}),
+          badgeText: formatAgentBadgeText({ ...s, index: s.index || idx + 1 }),
+          shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
+          role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
+          isRunning: Boolean(s.isRunning),
+          stepCount: Number(s.stepCount || 0),
+          lastModifiedMs: s.lastModifiedMs || 0,
+          liveActivity: s.liveActivity || {
+            phase: s.isRunning ? 'thinking' : 'done',
+            actionKey: s.isRunning ? 'thinking' : 'done',
+            label: s.isRunning ? t('live.thinking') : t('live.done'),
+            detail: '',
+            stepProgress: '',
+            startedAtMs: s.lastModifiedMs || 0,
+            signature: `${s.agentId}:${s.stepCount || 0}`,
+          },
+        })),
+    },
+  ];
+}
 
 const LiveActivityWidget = defineComponent({
   name: 'LiveActivityWidget',
   setup({ props, onCleanup }) {
     const interactive = props.interactive !== false;
     const preview = Boolean(props.preview);
+    const defaultExpandRunningSubs = Boolean(props.defaultExpandRunningSubs);
+    const showSessionExtras = Boolean(props.showSessionExtras);
+    const onSelectSession =
+      typeof props.onSelectSession === 'function' ? props.onSelectSession : null;
+    const onLayoutChange =
+      typeof props.onLayoutChange === 'function' ? props.onLayoutChange : null;
     const getCtxAgentId =
       typeof props.getCtxAgentId === 'function'
         ? props.getCtxAgentId
@@ -10456,10 +10860,19 @@ const LiveActivityWidget = defineComponent({
       'aria-live': 'polite',
     });
 
-    const expandedTaskConvIds = new Set();
+    const manualSubExpandMap = new Map();
     const activityTimersMap = new Map();
     let liveTickTimer = null;
-    let latestData = null;
+    let latestUpdateArgs = null;
+
+    function resolveIsExpanded(item) {
+      const runSubCount = Number(item?.runningSubagentCount || 0);
+      if (!interactive) return runSubCount > 0;
+      if (manualSubExpandMap.has(item.cascadeId)) {
+        return Boolean(manualSubExpandMap.get(item.cascadeId));
+      }
+      return defaultExpandRunningSubs ? runSubCount > 0 : false;
+    }
 
     function bindLiveElapsedTimer(timerKey, sig, rawStartMs, targetEl) {
       const now = Date.now();
@@ -10522,6 +10935,20 @@ const LiveActivityWidget = defineComponent({
         className: 'live-task-title',
         text: t('live.currentSession'),
       });
+      const hereTagEl = showSessionExtras
+        ? h('span', {
+            className: 'wm-session-tag is-here',
+            hidden: true,
+            text: t('multi.hereTag'),
+          })
+        : null;
+      const metricsEl = showSessionExtras
+        ? h('span', {
+            className: 'wm-task-metrics text-mono',
+            hidden: true,
+            text: '',
+          })
+        : null;
       const subToggleBtn = h('button', {
         type: 'button',
         className: 'live-sub-toggle',
@@ -10534,8 +10961,16 @@ const LiveActivityWidget = defineComponent({
       });
 
       const headerEl = h('div', { className: 'live-task-header' }, [
-        h('div', { className: 'live-task-title-wrap' }, [dotWrap, titleEl]),
-        h('div', { className: 'live-task-header-right' }, [subToggleBtn, elapsedEl]),
+        h('div', { className: 'live-task-title-wrap' }, [
+          dotWrap,
+          titleEl,
+          ...(hereTagEl ? [hereTagEl] : []),
+        ]),
+        h('div', { className: 'live-task-header-right' }, [
+          ...(metricsEl ? [metricsEl] : []),
+          subToggleBtn,
+          elapsedEl,
+        ]),
       ]);
 
       const mainBadge = h('span', {
@@ -10576,6 +11011,8 @@ const LiveActivityWidget = defineComponent({
           cardEl,
           dotIcon,
           titleEl,
+          hereTagEl,
+          metricsEl,
           subToggleBtn,
           elapsedEl,
           mainBadge,
@@ -10614,103 +11051,86 @@ const LiveActivityWidget = defineComponent({
       };
     }
 
-    function update({ data } = {}) {
-      latestData = data || null;
-      if (!data) {
+    function update({ data = null, items = null, hostRouteConversationId = '' } = {}) {
+      latestUpdateArgs = { data, items, hostRouteConversationId };
+      if (!data && !Array.isArray(items)) {
         patchAttr(liveActivityBar, 'hidden', true);
         stopLiveTicker();
         return;
       }
 
-      const { agents, aggregated } = resolveScopedConversation(
-        data,
-        'all',
-        getCtxAgentId()
-      );
+      let rawRunningList = Array.isArray(items) ? items : null;
+      if (!rawRunningList) {
+        const { agents, aggregated } = resolveScopedConversation(
+          data,
+          'all',
+          getCtxAgentId()
+        );
+        rawRunningList = buildFallbackRunningConversations(data, { agents, aggregated });
+      }
 
-      const rawRunningList =
-        Array.isArray(data.runningConversations) && data.runningConversations.length > 0
-          ? data.runningConversations
-          : data.activeConversation?.isRunning || aggregated?.isRunning
-            ? [
-                {
-                  cascadeId: data.activeConversation?.cascadeId || 'current',
-                  title: data.activeConversation?.title || t('live.currentSession'),
-                  isCurrentSelected: true,
-                  isMainRunning: Boolean(data.activeConversation?.isRunning),
-                  isRunning: true,
-                  mainActivity:
-                    data.activeConversation?.liveActivity || aggregated?.liveActivity || null,
-                  subagentCount: Math.max(0, agents.length - 1),
-                  runningSubagentCount: agents.filter((a) => !a.isMain && a.isRunning).length,
-                  subagents: agents
-                    .filter((a) => !a.isMain)
-                    .map((s, idx) => ({
-                      cascadeId: s.cascadeId || s.agentId,
-                      index: s.index || idx + 1,
-                      badgeText: formatAgentBadgeText({ ...s, index: s.index || idx + 1 }),
-                      shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-                      role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
-                      isRunning: Boolean(s.isRunning),
-                      stepCount: Number(s.stepCount || 0),
-                      lastModifiedMs: s.lastModifiedMs || 0,
-                      liveActivity: s.liveActivity || {
-                        phase: s.isRunning ? 'thinking' : 'done',
-                        label: s.isRunning ? t('live.thinking') : t('live.done'),
-                        detail: '',
-                        stepProgress: '',
-                        startedAtMs: s.lastModifiedMs || 0,
-                        signature: `${s.agentId}:${s.stepCount || 0}`,
-                      },
-                    })),
-                },
-              ]
-            : [];
+      if (manualSubExpandMap.size > 0) {
+        const runningIdsSet = new Set(rawRunningList.map((item) => item.cascadeId));
+        for (const id of [...manualSubExpandMap.keys()]) {
+          if (!runningIdsSet.has(id)) {
+            manualSubExpandMap.delete(id);
+          }
+        }
+      }
 
       const hasRunningTasks = rawRunningList.length > 0;
       patchAttr(liveActivityBar, 'hidden', !hasRunningTasks);
       if (!hasRunningTasks) {
         stopLiveTicker();
-        expandedTaskConvIds.clear();
+        patchKeyedList(liveActivityBar, [], {});
         return;
       }
+
+      if (!isVisibleFn()) {
+        pauseTicker();
+        return;
+      }
+
+      const locale = getEffectiveLocale();
+      const hostRouteLower = showSessionExtras
+        ? String(hostRouteConversationId || extractHostRouteCascadeId() || '').toLowerCase()
+        : '';
 
       const activeTimerKeys = new Set();
       for (const item of rawRunningList) {
         activeTimerKeys.add(`main:${item.cascadeId}`);
-        for (const sub of item.subagents || []) {
-          if (sub?.isRunning) {
-            activeTimerKeys.add(`sub:${sub.cascadeId}`);
+        const subCount = Number(item.subagentCount || item.subagents?.length || 0);
+        const isExp = resolveIsExpanded(item);
+        if (subCount > 0 && isExp) {
+          for (const sub of item.subagents || []) {
+            if (sub?.isRunning) {
+              activeTimerKeys.add(`sub:${sub.cascadeId}`);
+            }
           }
         }
       }
 
-      const runningIdsSet = new Set(rawRunningList.map((item) => item.cascadeId));
-      for (const id of [...expandedTaskConvIds]) {
-        if (!runningIdsSet.has(id)) {
-          expandedTaskConvIds.delete(id);
-        }
-      }
-
-      const locale = getEffectiveLocale();
       patchKeyedList(liveActivityBar, rawRunningList, {
         keyFn: (item) => item.cascadeId,
         sigFn: (item) => {
-          const isExp = interactive
-            ? expandedTaskConvIds.has(item.cascadeId)
-            : Number(item.runningSubagentCount || 0) > 0;
+          const isExp = resolveIsExpanded(item);
+          const isHere =
+            showSessionExtras &&
+            Boolean(hostRouteLower) &&
+            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
           const subSig = (item.subagents || [])
             .map(
               (s) =>
                 `${s.cascadeId}:${s.isRunning}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
             )
             .join('|');
-          return `${locale}:${item.cascadeId}:${item.title}:${item.isMainRunning}:${item.subagentCount}:${item.runningSubagentCount}:${isExp}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
+          return `${locale}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${item.runningSubagentCount}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
         },
         createRow: createLiveTaskCard,
         updateRow: (refs, item) => {
           const act = item.mainActivity || {
             phase: 'thinking',
+            actionKey: 'thinking',
             label: t('live.thinking'),
             detail: '',
             stepProgress: '',
@@ -10729,9 +11149,18 @@ const LiveActivityWidget = defineComponent({
           const convTitle = item.title || item.cascadeId?.slice(0, 8) || t('live.currentSession');
           patchText(refs.titleEl, convTitle);
           if (interactive && !preview) {
-            patchAttr(refs.titleEl, 'title', t('live.switchSessionTitle', { title: convTitle }));
-            refs.titleEl.onclick = () => {
-              if (item.cascadeId && item.cascadeId !== 'current') {
+            patchAttr(
+              refs.titleEl,
+              'title',
+              onSelectSession
+                ? t('multi.inspectSessionTitle', { title: convTitle })
+                : t('live.switchSessionTitle', { title: convTitle })
+            );
+            refs.titleEl.onclick = (e) => {
+              e?.stopPropagation?.();
+              if (onSelectSession) {
+                onSelectSession(item.cascadeId);
+              } else if (item.cascadeId && item.cascadeId !== 'current') {
                 uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
                 telemetryStore.setState({ selectedConversationId: item.cascadeId });
                 fetchTelemetry({ force: false });
@@ -10739,11 +11168,32 @@ const LiveActivityWidget = defineComponent({
             };
           }
 
+          if (showSessionExtras && refs.hereTagEl && refs.metricsEl) {
+            const isHere =
+              Boolean(hostRouteLower) &&
+              String(item.cascadeId || '').toLowerCase() === hostRouteLower;
+            patchText(refs.hereTagEl, t('multi.hereTag'));
+            patchAttr(refs.hereTagEl, 'hidden', !isHere);
+
+            const metricParts = [];
+            if (Number.isFinite(item.latestTokPerSec) && item.latestTokPerSec > 0) {
+              metricParts.push(
+                `${item.latestTokPerSec >= 100 ? Math.round(item.latestTokPerSec) : item.latestTokPerSec.toFixed(1)} t/s`
+              );
+            }
+            if (item.contextUsedPct != null && Number.isFinite(Number(item.contextUsedPct))) {
+              metricParts.push(`${Math.round(Number(item.contextUsedPct))}%`);
+            }
+            const metricsStr = metricParts.join(' · ');
+            patchAttr(refs.metricsEl, 'hidden', !metricsStr);
+            if (metricsStr) {
+              patchText(refs.metricsEl, metricsStr);
+            }
+          }
+
           const subCount = Number(item.subagentCount || item.subagents?.length || 0);
           const runSubCount = Number(item.runningSubagentCount || 0);
-          const isExpanded = interactive
-            ? expandedTaskConvIds.has(item.cascadeId)
-            : runSubCount > 0;
+          const isExpanded = resolveIsExpanded(item);
           patchText(refs.mainBadge, t('fmt.mainBadge'));
           patchAttr(refs.mainBadge, 'hidden', subCount === 0);
           patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
@@ -10763,39 +11213,37 @@ const LiveActivityWidget = defineComponent({
               );
               refs.subToggleBtn.onclick = (e) => {
                 e.stopPropagation();
-                if (expandedTaskConvIds.has(item.cascadeId)) {
-                  expandedTaskConvIds.delete(item.cascadeId);
-                } else {
-                  expandedTaskConvIds.add(item.cascadeId);
-                }
-                if (latestData) update({ data: latestData });
+                manualSubExpandMap.set(item.cascadeId, !isExpanded);
+                if (latestUpdateArgs) update(latestUpdateArgs);
+                onLayoutChange?.();
               };
             }
           }
 
+          const mainLabel = formatLiveActivityLabel(act, 'live.thinking');
+          const detailStr = formatLiveActivityDetail(act);
           const mainTimerKey = `main:${item.cascadeId}`;
           activeTimerKeys.add(mainTimerKey);
           bindLiveElapsedTimer(
             mainTimerKey,
-            `${item.cascadeId}:${act.signature || act.label}`,
+            `${item.cascadeId}:${act.signature || mainLabel}`,
             act.startedAtMs,
             refs.elapsedEl
           );
 
-          patchText(refs.mainPhase, act.label || t('live.thinking'));
+          patchText(refs.mainPhase, mainLabel);
           const progText = act.stepProgress ? `[${act.stepProgress}]` : '';
           patchAttr(refs.mainProgress, 'hidden', !progText);
           if (progText) {
             patchText(refs.mainProgress, progText);
           }
 
-          const detailStr = act.detail || '';
           patchAttr(refs.mainSep, 'hidden', !detailStr);
           patchAttr(refs.mainDetail, 'hidden', !detailStr);
           patchText(refs.mainDetail, detailStr);
 
-          if (interactive) {
-            const fullTooltip = `[${convTitle}] ${t('fmt.mainAgent')} · ${act.label || ''}${progText ? ` ${progText}` : ''}${detailStr ? ` · ${detailStr}` : ''}`;
+          if (interactive && !showSessionExtras) {
+            const fullTooltip = `[${convTitle}] ${t('fmt.mainAgent')} · ${mainLabel}${progText ? ` ${progText}` : ''}${detailStr ? ` · ${detailStr}` : ''}`;
             patchAttr(refs.cardEl, 'title', fullTooltip);
           }
 
@@ -10811,6 +11259,7 @@ const LiveActivityWidget = defineComponent({
               updateRow: (subRefs, sub) => {
                 const subAct = sub.liveActivity || {
                   phase: sub.isRunning ? 'thinking' : 'done',
+                  actionKey: sub.isRunning ? 'thinking' : 'done',
                   label: sub.isRunning ? t('live.thinking') : t('live.done'),
                   detail: '',
                   stepProgress: '',
@@ -10827,20 +11276,30 @@ const LiveActivityWidget = defineComponent({
                 patchAttr(subRefs.subBadge, 'class', `agent-badge ${badgeCls}`);
                 patchText(subRefs.subBadge, subBadgeText);
 
-                const roleText = sub.role || sub.shortLabel || t('fmt.subAgent');
+                const fallbackRole =
+                  sub.agentKind === 'side_question' || sub.isSideQuestion
+                    ? `${t('fmt.sideQuestion')}${sub.agentOrdinal || sub.sideIndex ? ` #${sub.agentOrdinal || sub.sideIndex}` : ''}`
+                    : `${t('fmt.subAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`;
+                const roleText =
+                  sub.customRole !== undefined
+                    ? sub.customRole || fallbackRole
+                    : sub.role || sub.shortLabel || fallbackRole;
                 patchText(subRefs.subRole, roleText);
 
-                const rawSubLabel = sub.isRunning
-                  ? subAct.label || ''
-                  : subAct.label || t('live.done');
+                const subLabel = sub.isRunning
+                  ? formatLiveActivityLabel(subAct, 'live.running')
+                  : formatLiveActivityLabel(subAct, 'live.done');
+                const subDetail = formatLiveActivityDetail(subAct);
                 const subProg = subAct.stepProgress ? ` [${subAct.stepProgress}]` : '';
-                const summaryStr = [`${rawSubLabel}${subProg}`.trim(), subAct.detail || '']
-                  .filter(Boolean)
-                  .join(' ');
+                const summaryStr = showSessionExtras
+                  ? sub.isRunning
+                    ? `${subLabel}${subProg}${subDetail ? ` · ${subDetail}` : ''}`
+                    : t('live.doneWithSteps', { steps: sub.stepCount || 0 })
+                  : [`${subLabel}${subProg}`.trim(), subDetail].filter(Boolean).join(' ');
                 patchAttr(subRefs.subSummary, 'hidden', !summaryStr);
                 patchText(subRefs.subSummary, summaryStr);
 
-                if (interactive) {
+                if (interactive && !showSessionExtras) {
                   patchAttr(
                     subRefs.rowEl,
                     'title',
@@ -10853,8 +11312,8 @@ const LiveActivityWidget = defineComponent({
                   activeTimerKeys.add(subTimerKey);
                   bindLiveElapsedTimer(
                     subTimerKey,
-                    `${sub.cascadeId}:${subAct.signature || subAct.label}`,
-                    subAct.startedAtMs,
+                    `${sub.cascadeId}:${subAct.signature || subLabel}`,
+                    subAct.startedAtMs || sub.lastModifiedMs,
                     subRefs.subElapsed
                   );
                 } else {
@@ -10894,7 +11353,7 @@ const LiveActivityWidget = defineComponent({
     };
   },
 });
-return { LiveActivityWidget };
+return { buildFallbackRunningConversations, LiveActivityWidget };
 })();
 
 // --- src/registries/widgetRegistry.js ---
@@ -11528,7 +11987,7 @@ return { STEP_COLUMN_KEYS, DEFAULT_STEP_COLUMN_KEYS, formatCustomTokenComboHeade
 })();
 
 // --- src/components/widgets/CapsuleBarWidget.js ---
-const { RING_RADIUS, RING_CIRCUMFERENCE, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget } = (() => {
+const { RING_RADIUS, RING_CIRCUMFERENCE, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget } = (() => {
 /**
  * @fileoverview Shared Decoupled Capsule Bar Primitives & Widget (`CapsuleBarWidget.js`).
  * Powers both the live host window capsule (`WindowOverlayShell.js`) and the
@@ -11538,6 +11997,91 @@ const { RING_RADIUS, RING_CIRCUMFERENCE, createCapsuleSlotNode, syncCapsuleSlotN
 
 const RING_RADIUS = 5.2;
 const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
+
+/**
+ * Compute shared context ring + 1..5 capsule slot metric payload from telemetry & scoped conversation.
+ */
+function buildCapsuleSlotContext(
+  data,
+  { scopedConv = null, overviewConv = null, ctxAgent = null, aggregated = null } = {}
+) {
+  if (!data) return { hasTelemetry: false };
+  const activeConv = data.activeConversation || {};
+  const overviewActive = overviewConv || scopedConv || aggregated || activeConv;
+  const capActive = scopedConv || aggregated || activeConv || {};
+  const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
+  const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
+  const totalTokens = Number(ctx.totalTokens || 0);
+  const usedPct =
+    limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
+  const dashOffset = +(
+    RING_CIRCUMFERENCE *
+    (1 - Math.max(0, Math.min(100, usedPct)) / 100)
+  ).toFixed(2);
+
+  const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
+  const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
+  const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
+  const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
+  const sessionTokens =
+    Number(capActive.stepCount || 0) > 0 ||
+    capActive.totalTokens != null ||
+    capInTok + capCacheTok + capOutTok > 0
+      ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
+      : null;
+
+  return {
+    hasTelemetry: true,
+    usedPct,
+    dashOffset,
+    isRunning,
+    tps: scopedConv?.latestTokPerSec ?? aggregated?.latestTokPerSec ?? activeConv.latestTokPerSec ?? null,
+    avgTps: scopedConv?.avgTokPerSec ?? aggregated?.avgTokPerSec ?? activeConv.avgTokPerSec ?? null,
+    ttft: scopedConv?.latestTtftSec ?? aggregated?.latestTtftSec ?? activeConv.latestTtftSec ?? null,
+    stepCost:
+      scopedConv?.latestStepCostUsd ??
+      aggregated?.latestStepCostUsd ??
+      activeConv.latestStepCostUsd ??
+      null,
+    sessionCost:
+      scopedConv?.sessionCostUsd ?? aggregated?.sessionCostUsd ?? activeConv.sessionCostUsd ?? null,
+    cacheHitPct:
+      Number(capActive.stepCount || 0) > 0
+        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
+        : null,
+    latestPromptTokens: capActive.latestPromptTokens ?? null,
+    sessionTokens,
+    quotas: data.quotas,
+  };
+}
+
+/**
+ * Compute multi-session button state & normalized running conversation list.
+ */
+function resolveMultiSessionCapsuleState(
+  data,
+  { agents = [], aggregated = null, latestTokPerSec = undefined, contextUsedPct = undefined } = {}
+) {
+  const rawRunningList = buildFallbackRunningConversations(data, {
+    agents,
+    aggregated,
+    latestTokPerSec,
+    contextUsedPct,
+  });
+  const runningCount = rawRunningList.length;
+  const runningSubCount = rawRunningList.reduce(
+    (acc, item) => acc + Number(item.runningSubagentCount || 0),
+    0
+  );
+  const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+  const multiBtnText =
+    runningCount > 0
+      ? runningSubCount > 0
+        ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+        : t('capsule.multiRunning', { count: runningCount })
+      : t('capsule.multiZero');
+  return { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText };
+}
 
 /**
  * Create a single reusable capsule metric slot node (`0..4`) with an optional SVG context ring.
@@ -11795,75 +12339,26 @@ const CapsuleBarWidget = defineComponent({
         return;
       }
 
-      const { scopedConv, ctxAgent, aggregated } = resolveScopedConversation(
+      const { agents, scopedConv, ctxAgent, aggregated } = resolveScopedConversation(
         data,
         'all',
         'auto'
       );
-      const activeConv = data.activeConversation || {};
-      const capActive = scopedConv || aggregated || activeConv;
-      const ctx = ctxAgent?.context || capActive.context || activeConv.context || {};
-      const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
-      const totalTokens = Number(ctx.totalTokens || 0);
-      const usedPct =
-        limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
-      const dashOffset = +(
-        RING_CIRCUMFERENCE *
-        (1 - Math.max(0, Math.min(100, usedPct)) / 100)
-      ).toFixed(2);
-
-      const rawRunningList = Array.isArray(data.runningConversations)
-        ? data.runningConversations
-        : [];
-      const runningCount = rawRunningList.length;
-      const runningSubCount = rawRunningList.reduce(
-        (acc, item) => acc + Number(item.runningSubagentCount || 0),
-        0
-      );
-      const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+      const slotCtx = buildCapsuleSlotContext(data, { scopedConv, ctxAgent, aggregated });
+      const { runningCount, hasWaiting, multiBtnText } = resolveMultiSessionCapsuleState(data, {
+        agents,
+        aggregated,
+        contextUsedPct: slotCtx.usedPct,
+      });
 
       patchClasses(multiBtn, {
         'is-running': runningCount > 0 && !hasWaiting,
         'is-waiting': runningCount > 0 && hasWaiting,
       });
-      const multiBtnText =
-        runningCount > 0
-          ? runningSubCount > 0
-            ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
-            : t('capsule.multiRunning', { count: runningCount })
-          : t('capsule.multiZero');
       patchText(multiLabel, multiBtnText);
 
-      const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
-      const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
-      const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
-      const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
-      const sessionTokens =
-        Number(capActive.stepCount || 0) > 0 ||
-        capActive.totalTokens != null ||
-        capInTok + capCacheTok + capOutTok > 0
-          ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
-          : null;
-
-      patchClasses(capsuleBtn, { 'is-running': isRunning });
-      syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, {
-        hasTelemetry: true,
-        usedPct,
-        dashOffset,
-        isRunning,
-        tps: capActive.latestTokPerSec ?? null,
-        avgTps: capActive.avgTokPerSec ?? null,
-        ttft: capActive.latestTtftSec ?? null,
-        stepCost: capActive.latestStepCostUsd ?? null,
-        sessionCost: capActive.sessionCostUsd ?? null,
-        cacheHitPct:
-          Number(capActive.stepCount || 0) > 0
-            ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
-            : null,
-        latestPromptTokens: capActive.latestPromptTokens ?? null,
-        sessionTokens,
-        quotas: data.quotas,
-      });
+      patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
+      syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
     }
 
     return {
@@ -11879,7 +12374,7 @@ const CapsuleBarWidget = defineComponent({
     };
   },
 });
-return { RING_RADIUS, RING_CIRCUMFERENCE, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget };
+return { RING_RADIUS, RING_CIRCUMFERENCE, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget };
 })();
 
 // --- src/components/widgets/StepTableWidget.js ---
@@ -11892,14 +12387,11 @@ const { formatTurnPromptText, StepTableWidget } = (() => {
  */
 
 
-function formatTurnPromptText(rawPrompt) {
+function formatTurnPromptText(rawPrompt, { hasMedia = false, mediaOnly = false } = {}) {
   const text = String(rawPrompt || '').trim();
-  if (!text || !isEnglishLocale()) return text;
-  if (text === '[图片/附件提问]') return t('steps.turnMediaOnly');
-  if (text.endsWith(' [附图]')) {
-    return `${text.slice(0, -5)} ${t('steps.turnMediaSuffix')}`;
-  }
-  return text;
+  if (mediaOnly || (!text && hasMedia)) return t('steps.turnMediaOnly');
+  if (!text) return '';
+  return hasMedia ? `${text} ${t('steps.turnMediaSuffix')}` : text;
 }
 
 const StepTableWidget = defineComponent({
@@ -12079,7 +12571,13 @@ const StepTableWidget = defineComponent({
       const getStepIsLatest = (st) =>
         Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
       const getStepPrompt = (st) =>
-        (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
+        (useRootTurn
+          ? (st?.rootTurnPromptClean ?? st?.rootTurnPrompt ?? st?.turnPromptClean ?? st?.turnPrompt)
+          : (st?.turnPromptClean ?? st?.turnPrompt)) || '';
+      const getStepHasMedia = (st) =>
+        Boolean(useRootTurn ? (st?.rootTurnHasMedia ?? st?.turnHasMedia) : st?.turnHasMedia);
+      const getStepMediaOnly = (st) =>
+        Boolean(useRootTurn ? (st?.rootTurnMediaOnly ?? st?.turnMediaOnly) : st?.turnMediaOnly);
       const turnKeys = showStepTurnRail ? tableSteps.map((st) => {
         const tIdx = getStepTurnIdx(st);
         if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
@@ -12088,8 +12586,13 @@ const StepTableWidget = defineComponent({
       const formattedPrompts = new Map();
       function formattedTurnPrompt(st) {
         const raw = getStepPrompt(st);
-        if (!formattedPrompts.has(raw)) formattedPrompts.set(raw, formatTurnPromptText(raw));
-        return formattedPrompts.get(raw);
+        const hasMedia = getStepHasMedia(st);
+        const mediaOnly = getStepMediaOnly(st);
+        const cacheKey = `${mediaOnly ? 2 : hasMedia ? 1 : 0}:${raw}`;
+        if (!formattedPrompts.has(cacheKey)) {
+          formattedPrompts.set(cacheKey, formatTurnPromptText(raw, { hasMedia, mediaOnly }));
+        }
+        return formattedPrompts.get(cacheKey);
       }
 
       const decoratedSteps = tableSteps.map((st, idx) => {
@@ -12211,28 +12714,38 @@ const StepTableWidget = defineComponent({
             const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
             const clickableCls = interactiveBadges && onSelectAgentScopes ? ' is-clickable' : '';
             patchAttr(refs.agentBadgeEl, 'class', `agent-badge${clickableCls} ${badgeCls}`);
-            const badgeText = isEnglishLocale()
-              ? formatAgentBadgeText({
-                  isMain: !st.isSubagent,
-                  isSideQuestion: Boolean(st.isSideQuestion),
-                  sideIndex: st.sideIndex || 0,
-                  index: st.agentIndex || 0,
-                  badgeText: st.agentBadge,
-                })
-              : st.agentBadge || (st.isSideQuestion ? '旁' : st.isSubagent ? '子' : '主');
+            const badgeText = formatAgentBadgeText({
+              agentKind:
+                st.agentKind ||
+                (!st.isSubagent ? 'main' : st.isSideQuestion ? 'side_question' : 'subagent'),
+              agentOrdinal:
+                st.agentOrdinal || (st.isSideQuestion ? st.sideIndex || 0 : st.agentIndex || 0),
+              isMain: !st.isSubagent,
+              isSideQuestion: Boolean(st.isSideQuestion),
+              sideIndex: st.sideIndex || 0,
+              index: st.agentIndex || 0,
+              badgeText: st.agentBadge,
+            });
             patchText(refs.agentBadgeEl, badgeText);
 
             if (interactiveBadges && onSelectAgentScopes) {
               const targetScope = st.agentId || 'main';
               const isSoleTarget =
                 effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
-              const agentName = isEnglishLocale()
-                ? formatAgentLabel({
-                    isMain: !st.isSubagent,
-                    index: st.agentIndex || 0,
-                    role: st.agentRole || '',
-                  })
-                : st.agentLabel || t('steps.unitAgent');
+              const agentName = formatAgentLabel({
+                agentKind:
+                  st.agentKind ||
+                  (!st.isSubagent ? 'main' : st.isSideQuestion ? 'side_question' : 'subagent'),
+                agentOrdinal:
+                  st.agentOrdinal || (st.isSideQuestion ? st.sideIndex || 0 : st.agentIndex || 0),
+                customRole: st.agentCustomRole,
+                isMain: !st.isSubagent,
+                isSideQuestion: Boolean(st.isSideQuestion),
+                sideIndex: st.sideIndex || 0,
+                index: st.agentIndex || 0,
+                role: st.agentRole || '',
+                shortLabel: st.agentLabel || '',
+              });
               patchAttr(
                 refs.agentBadgeEl,
                 'title',
@@ -12634,8 +13147,12 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     ...mainAgent,
     agentId: 'all',
     isMain: false,
-    badgeText: '全部',
+    agentKind: 'all',
+    agentOrdinal: 0,
+    badgeText: t('header.scopeAllShort'),
     activeAgentId: 'main',
+    activeAgentKind: 'main',
+    activeAgentOrdinal: 0,
     stepCount: 24,
     speedSampleCount: 23,
     speedSummary: { sampleCount: 23, excludedCount: 1 },
@@ -12649,7 +13166,7 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     cacheReadTokens: 1540000,
     outputTokens: 28400,
     totalTokens: 1754800,
-    activeAgentBadge: '主',
+    activeAgentBadge: t('fmt.mainBadge'),
     modelBreakdown: [...mainAgent.modelBreakdown, ...subAgent1.modelBreakdown],
     recentSteps: mockSteps,
   };
@@ -17281,17 +17798,20 @@ const StepsDetailView = defineComponent({
     let isDirty = false;
 
     function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
-      const activeCand = getStepModelGroupKey({
-        modelLabel: scopedConv?.activeModelLabel,
-        modelShort: scopedConv?.activeModelShort,
-      });
-      if (
-        activeCand &&
-        activeCand !== '模型未知' &&
-        activeCand !== t('fmt.unknownModel') &&
-        availableModelKeys.has(activeCand)
-      ) {
-        return activeCand;
+      if (scopedConv?.hasKnownModel !== false) {
+        const activeCand = getStepModelGroupKey({
+          baseModelLabel: scopedConv?.activeBaseModelLabel,
+          baseModelShort: scopedConv?.activeBaseModelShort,
+          modelLabel: scopedConv?.activeModelLabel,
+          modelShort: scopedConv?.activeModelShort,
+        });
+        if (
+          activeCand &&
+          activeCand !== t('fmt.unknownModel') &&
+          availableModelKeys.has(activeCand)
+        ) {
+          return activeCand;
+        }
       }
       for (let i = chronoSteps.length - 1; i >= 0; i--) {
         const st = chronoSteps[i];
@@ -17471,7 +17991,7 @@ const StepsDetailView = defineComponent({
         if (!stepModelOptionMap.has(gk)) {
           const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
           stepModelOptionMap.set(gk, {
-            label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
+            label: disp.baseText || disp.text || gk,
             calls: 0,
           });
         }
@@ -17502,7 +18022,7 @@ const StepsDetailView = defineComponent({
         });
         perModelOptions.push({
           value: gk,
-          label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
+          label: disp.baseText || disp.text || gk,
           meta: t('header.convMetaSteps', { count: Number(m.calls || 0) }),
         });
       }
@@ -19262,9 +19782,6 @@ function mountWindowOverlay() {
   let multiPinned = false;
   let hoverLeaveTimer = null;
   let multiLeaveTimer = null;
-  const manualSubExpandMap = new Map();
-  const multiTimersMap = new Map();
-  let multiLiveTickTimer = null;
   let hasPointerCoords = Boolean(
     carryOverPointer &&
       Number.isFinite(carryOverPointer.x) &&
@@ -19360,52 +19877,6 @@ function mountWindowOverlay() {
       }
       setMultiOpen(false);
     }, 90);
-  }
-
-  function bindMultiElapsedTimer(timerKey, sig, rawStartMs, targetEl) {
-    const now = Date.now();
-    const prev = multiTimersMap.get(timerKey);
-    let startMs = prev?.startMs || 0;
-    if (!prev || prev.sig !== sig) {
-      const validRaw = Number(rawStartMs || 0);
-      startMs = validRaw > 0 && validRaw <= now + 2000 ? validRaw : now;
-    } else if (startMs <= 0 && Number(rawStartMs) > 0 && Number(rawStartMs) <= now + 2000) {
-      startMs = Number(rawStartMs);
-    }
-    multiTimersMap.set(timerKey, { sig, startMs, el: targetEl });
-    const elapsedSec = Math.max(0, (now - startMs) / 1000);
-    patchText(targetEl, formatElapsedSec(elapsedSec));
-  }
-
-  function tickMultiElapsedDisplay() {
-    const now = Date.now();
-    for (const entry of multiTimersMap.values()) {
-      if (!entry?.el) continue;
-      const elapsedSec = entry.startMs > 0 ? Math.max(0, (now - entry.startMs) / 1000) : 0;
-      patchText(entry.el, formatElapsedSec(elapsedSec));
-    }
-  }
-
-  function pauseMultiLiveTicker() {
-    if (multiLiveTickTimer) {
-      clearInterval(multiLiveTickTimer);
-      multiLiveTickTimer = null;
-    }
-  }
-
-  function stopMultiLiveTicker() {
-    pauseMultiLiveTicker();
-    multiTimersMap.clear();
-  }
-
-  function ensureMultiLiveTicker() {
-    if (multiTimersMap.size === 0) {
-      stopMultiLiveTicker();
-      return;
-    }
-    if (!multiLiveTickTimer) {
-      multiLiveTickTimer = setInterval(tickMultiElapsedDisplay, 1000);
-    }
   }
 
   function inspectSessionInMonitor(cascadeId) {
@@ -19704,105 +20175,7 @@ function mountWindowOverlay() {
     [hoverUpdateBar, hoverWidgetsContainer]
   );
 
-  // 左侧多会话实时看板浮层（活跃运行会话卡片 + 近期多窗口会话速览，全槽位预占、就地补丁更新）
-  function createMultiLiveSubRow() {
-    const subBadge = h('span', {
-      className: 'agent-badge badge-sub-1',
-      text: t('fmt.subBadge', { index: 1 }),
-    });
-    const subRole = h('span', { className: 'live-sub-role', text: t('fmt.subAgent') });
-    const subSummary = h('span', { className: 'live-sub-summary', text: '' });
-    const subElapsed = h('span', { className: 'live-sub-elapsed text-mono', text: '0s' });
-    const rowEl = h('div', { className: 'live-sub-row' }, [
-      h('div', { className: 'live-sub-left' }, [subBadge, subRole, subSummary]),
-      subElapsed,
-    ]);
-    return {
-      el: rowEl,
-      refs: { rowEl, subBadge, subRole, subSummary, subElapsed },
-    };
-  }
-
-  function createMultiLiveTaskCard() {
-    const dotIcon = createSvgIcon('dot', { size: 11 });
-    patchClasses(dotIcon, { 'is-pulsing': true });
-    const dotWrap = h('span', { className: 'live-activity-dot' }, [dotIcon]);
-    const titleEl = h('strong', { className: 'live-task-title', text: t('live.currentSession') });
-    const hereTagEl = h('span', {
-      className: 'wm-session-tag is-here',
-      hidden: true,
-      text: t('multi.hereTag'),
-    });
-    const metricsEl = h('span', {
-      className: 'wm-task-metrics text-mono',
-      hidden: true,
-      text: '',
-    });
-    const subToggleBtn = h('button', {
-      type: 'button',
-      className: 'live-sub-toggle',
-      hidden: true,
-      text: t('live.subToggleIdle', { total: 0, arrow: '▸' }),
-    });
-    const elapsedEl = h('span', {
-      className: 'live-activity-elapsed text-mono',
-      text: '0s',
-    });
-
-    const headerEl = h('div', { className: 'live-task-header' }, [
-      h('div', { className: 'live-task-title-wrap' }, [dotWrap, titleEl, hereTagEl]),
-      h('div', { className: 'live-task-header-right' }, [metricsEl, subToggleBtn, elapsedEl]),
-    ]);
-
-    const mainBadge = h('span', {
-      className: 'agent-badge badge-main',
-      hidden: true,
-      text: t('fmt.mainBadge'),
-    });
-    const mainPhase = h('strong', { className: 'live-activity-phase', text: t('live.thinking') });
-    const mainProgress = h('span', {
-      className: 'live-activity-progress text-mono',
-      hidden: true,
-      text: '',
-    });
-    const mainSep = h('span', { className: 'live-activity-sep', hidden: true, text: '·' });
-    const mainDetail = h('span', {
-      className: 'live-activity-detail',
-      hidden: true,
-      text: '',
-    });
-
-    const mainRowEl = h('div', { className: 'live-task-main-row' }, [
-      mainBadge,
-      mainPhase,
-      mainProgress,
-      mainSep,
-      mainDetail,
-    ]);
-
-    const subListEl = h('div', { className: 'live-sub-list', hidden: true });
-    const cardEl = h('div', { className: 'live-task-card' }, [headerEl, mainRowEl, subListEl]);
-
-    return {
-      el: cardEl,
-      refs: {
-        cardEl,
-        dotIcon,
-        titleEl,
-        hereTagEl,
-        metricsEl,
-        subToggleBtn,
-        elapsedEl,
-        mainBadge,
-        mainPhase,
-        mainProgress,
-        mainSep,
-        mainDetail,
-        subListEl,
-      },
-    };
-  }
-
+  // 左侧多会话实时看板浮层（受控复用 LiveActivityWidget，保持零硬编码与同一套计时器状态机）
   const multiPinBadge = h('span', {
     className: 'wm-pin-badge',
     hidden: true,
@@ -19819,10 +20192,16 @@ function mountWindowOverlay() {
       multiEmptyTextEl,
     ]),
   ]);
-  const multiRunningListEl = h('div', {
-    className: 'live-activity-list',
-    hidden: true,
-    'aria-live': 'polite',
+  const multiRunningWidget = LiveActivityWidget({
+    defaultExpandRunningSubs: true,
+    showSessionExtras: true,
+    isVisibleFn: () => Boolean(multiOpen && !document.hidden && !disposed),
+    onSelectSession: inspectSessionInMonitor,
+    onLayoutChange: () => {
+      if (multiOpen) {
+        positionFloatingElements();
+      }
+    },
   });
 
   const multiTitleTextEl = h('span', { text: t('multi.title') });
@@ -19856,7 +20235,7 @@ function mountWindowOverlay() {
         }
       },
     },
-    [multiHeaderEl, multiEmptyEl, multiRunningListEl]
+    [multiHeaderEl, multiEmptyEl, multiRunningWidget.el]
   );
 
   // 完整四标签悬浮容器
@@ -20640,12 +21019,13 @@ function mountWindowOverlay() {
     patchAttr(multiPanelEl, 'hidden', !multiOpen);
     if (multiOpen) {
       renderCapsuleTelemetry();
+      multiRunningWidget.refs.resumeTicker();
       positionFloatingElements();
       if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => positionFloatingElements());
       }
     } else {
-      pauseMultiLiveTicker();
+      multiRunningWidget.refs.pauseTicker();
     }
   }
 
@@ -20720,18 +21100,10 @@ function mountWindowOverlay() {
   }
 
   function renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, hostRouteConversationId) {
-    if (manualSubExpandMap.size > 0) {
-      const runningIds = new Set(rawRunningList.map((item) => item.cascadeId));
-      for (const id of manualSubExpandMap.keys()) {
-        if (!runningIds.has(id)) manualSubExpandMap.delete(id);
-      }
+    if (!multiOpen || document.hidden) {
+      multiRunningWidget.refs.pauseTicker();
+      return;
     }
-    if (!multiOpen || document.hidden) return;
-    const localeKey = getEffectiveLocale();
-    const hostRouteLower = String(
-      hostRouteConversationId || extractHostRouteCascadeId() || ''
-    ).toLowerCase();
-
     patchText(
       multiRunningMetaEl,
       runningCount > 0
@@ -20741,201 +21113,10 @@ function mountWindowOverlay() {
         : t('multi.allIdle')
     );
     patchAttr(multiEmptyEl, 'hidden', runningCount > 0);
-    patchAttr(multiRunningListEl, 'hidden', runningCount === 0);
-
-    if (runningCount === 0) {
-      stopMultiLiveTicker();
-      patchKeyedList(multiRunningListEl, [], {});
-    } else {
-      const activeTimerKeys = new Set();
-      for (const item of rawRunningList) {
-        activeTimerKeys.add(`main:${item.cascadeId}`);
-        const subCount = Number(item.subagentCount || item.subagents?.length || 0);
-        const runSubs = Number(item.runningSubagentCount || 0);
-        const isExp = manualSubExpandMap.has(item.cascadeId)
-          ? manualSubExpandMap.get(item.cascadeId)
-          : runSubs > 0;
-        if (subCount > 0 && isExp) {
-          for (const sub of item.subagents || []) {
-            if (sub?.isRunning) {
-              activeTimerKeys.add(`sub:${sub.cascadeId}`);
-            }
-          }
-        }
-      }
-
-      patchKeyedList(multiRunningListEl, rawRunningList, {
-        keyFn: (item) => item.cascadeId,
-        sigFn: (item) => {
-          const runSubs = Number(item.runningSubagentCount || 0);
-          const isExp = manualSubExpandMap.has(item.cascadeId)
-            ? manualSubExpandMap.get(item.cascadeId)
-            : runSubs > 0;
-          const isHere =
-            Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
-          const subSig = (item.subagents || [])
-            .map(
-              (s) =>
-                `${s.cascadeId}:${s.isRunning}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
-            )
-            .join('|');
-          return `${localeKey}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${runSubs}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
-        },
-        createRow: createMultiLiveTaskCard,
-        updateRow: (refs, item) => {
-          const act = item.mainActivity || {
-            phase: 'thinking',
-            label: t('live.thinking'),
-            detail: '',
-            stepProgress: '',
-            startedAtMs: item.lastModifiedMs || 0,
-            signature: `fallback:${item.lastModifiedMs || 0}`,
-          };
-          const isWaiting = act.phase === 'waiting';
-          const isCompacting = act.phase === 'compacting';
-          patchClasses(refs.cardEl, {
-            'is-waiting': isWaiting,
-            'is-compacting': isCompacting,
-          });
-          patchClasses(refs.dotIcon, { 'is-pulsing': true });
-
-          const convTitle =
-            item.title || item.cascadeId?.slice(0, 8) || t('live.currentSession');
-          patchText(refs.titleEl, convTitle);
-          patchAttr(refs.titleEl, 'title', t('multi.inspectSessionTitle', { title: convTitle }));
-          refs.titleEl.onclick = (e) => {
-            e.stopPropagation();
-            inspectSessionInMonitor(item.cascadeId);
-          };
-
-          const isHere =
-            Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
-          patchText(refs.hereTagEl, t('multi.hereTag'));
-          patchAttr(refs.hereTagEl, 'hidden', !isHere);
-
-          const metricParts = [];
-          if (Number.isFinite(item.latestTokPerSec) && item.latestTokPerSec > 0) {
-            metricParts.push(
-              `${item.latestTokPerSec >= 100 ? Math.round(item.latestTokPerSec) : item.latestTokPerSec.toFixed(1)} t/s`
-            );
-          }
-          if (item.contextUsedPct != null && Number.isFinite(Number(item.contextUsedPct))) {
-            metricParts.push(`${Math.round(Number(item.contextUsedPct))}%`);
-          }
-          const metricsStr = metricParts.join(' · ');
-          patchAttr(refs.metricsEl, 'hidden', !metricsStr);
-          if (metricsStr) {
-            patchText(refs.metricsEl, metricsStr);
-          }
-
-          const subCount = Number(item.subagentCount || item.subagents?.length || 0);
-          const runSubCount = Number(item.runningSubagentCount || 0);
-          const isExpanded = manualSubExpandMap.has(item.cascadeId)
-            ? manualSubExpandMap.get(item.cascadeId)
-            : runSubCount > 0;
-          patchText(refs.mainBadge, t('fmt.mainBadge'));
-          patchAttr(refs.mainBadge, 'hidden', subCount === 0);
-          patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
-          if (subCount > 0) {
-            const arrow = isExpanded ? '▾' : '▸';
-            const toggleText =
-              runSubCount > 0
-                ? t('live.subToggleRunning', { run: runSubCount, total: subCount, arrow })
-                : t('live.subToggleIdle', { total: subCount, arrow });
-            patchText(refs.subToggleBtn, toggleText);
-            patchClasses(refs.subToggleBtn, { 'is-expanded': isExpanded });
-            refs.subToggleBtn.onclick = (e) => {
-              e.stopPropagation();
-              manualSubExpandMap.set(item.cascadeId, !isExpanded);
-              renderCapsuleTelemetry();
-              if (multiOpen) {
-                positionFloatingElements();
-              }
-            };
-          }
-
-          const mainTimerKey = `main:${item.cascadeId}`;
-          activeTimerKeys.add(mainTimerKey);
-          bindMultiElapsedTimer(
-            mainTimerKey,
-            `${item.cascadeId}:${act.signature || act.label}`,
-            act.startedAtMs,
-            refs.elapsedEl
-          );
-
-          patchText(refs.mainPhase, act.label || t('live.thinking'));
-          const progText = act.stepProgress ? `[${act.stepProgress}]` : '';
-          patchAttr(refs.mainProgress, 'hidden', !progText);
-          if (progText) {
-            patchText(refs.mainProgress, progText);
-          }
-
-          const detailStr = act.detail || '';
-          patchAttr(refs.mainSep, 'hidden', !detailStr);
-          patchAttr(refs.mainDetail, 'hidden', !detailStr);
-          patchText(refs.mainDetail, detailStr);
-
-          const showSubs = subCount > 0 && isExpanded;
-          patchAttr(refs.subListEl, 'hidden', !showSubs);
-          if (showSubs) {
-            const subItems = item.subagents || [];
-            patchKeyedList(refs.subListEl, subItems, {
-              keyFn: (sub) => sub.cascadeId,
-              sigFn: (sub) =>
-                `${localeKey}:${sub.cascadeId}:${sub.role}:${sub.isRunning}:${sub.stepCount}:${sub.liveActivity?.signature || ''}:${sub.isRunning ? multiTimersMap.has(`sub:${sub.cascadeId}`) : true}`,
-              createRow: createMultiLiveSubRow,
-              updateRow: (subRefs, sub) => {
-                const subAct = sub.liveActivity || {
-                  phase: sub.isRunning ? 'thinking' : 'done',
-                  label: sub.isRunning ? t('live.thinking') : t('live.done'),
-                  detail: '',
-                  stepProgress: '',
-                  startedAtMs: sub.lastModifiedMs || 0,
-                };
-                patchClasses(subRefs.rowEl, { 'is-done': !sub.isRunning });
-                const subBadgeCls = getAgentBadgeClass(sub.index || 1, false);
-                patchAttr(subRefs.subBadge, 'class', `agent-badge ${subBadgeCls}`);
-                patchText(subRefs.subBadge, formatAgentBadgeText(sub));
-                patchText(subRefs.subRole, sub.role || sub.shortLabel || t('fmt.subAgent'));
-
-                const subProg = subAct.stepProgress ? ` [${subAct.stepProgress}]` : '';
-                const summaryText = sub.isRunning
-                  ? `${subAct.label || t('live.running')}${subProg}${subAct.detail ? ` · ${subAct.detail}` : ''}`
-                  : t('live.doneWithSteps', { steps: sub.stepCount || 0 });
-                patchText(subRefs.subSummary, summaryText);
-
-                const subTimerKey = `sub:${sub.cascadeId}`;
-                if (sub.isRunning) {
-                  activeTimerKeys.add(subTimerKey);
-                  bindMultiElapsedTimer(
-                    subTimerKey,
-                    `${sub.cascadeId}:${subAct.signature || subAct.label}`,
-                    subAct.startedAtMs || sub.lastModifiedMs,
-                    subRefs.subElapsed
-                  );
-                } else {
-                  multiTimersMap.delete(subTimerKey);
-                  patchText(
-                    subRefs.subElapsed,
-                    t('header.convMetaSteps', { count: sub.stepCount || 0 })
-                  );
-                }
-              },
-            });
-          }
-        },
-      });
-
-      for (const k of [...multiTimersMap.keys()]) {
-        if (!activeTimerKeys.has(k)) {
-          multiTimersMap.delete(k);
-        }
-      }
-      ensureMultiLiveTicker();
-      tickMultiElapsedDisplay();
-    }
+    multiRunningWidget.refs.update({
+      items: rawRunningList,
+      hostRouteConversationId,
+    });
   }
 
   function renderHoverWidgets() {
@@ -20978,7 +21159,7 @@ function mountWindowOverlay() {
       patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
       patchText(multiLabel, t('capsule.multiZero'));
       patchText(multiRunningMetaEl, t('multi.loading'));
-      stopMultiLiveTicker();
+      multiRunningWidget.refs.stopLiveTicker();
 
       applyCapsuleSlots(slotKeys, { hasTelemetry: false });
       return;
@@ -20991,138 +21172,36 @@ function mountWindowOverlay() {
       uiSt.selectedAgentScope,
       uiSt.ctxInspectorAgentId
     );
-    const activeConv = telemetry.activeConversation || {};
-    const overviewActive = overviewScopedConv || activeConv;
-    const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
-    const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
-    const totalTokens = Number(ctx.totalTokens || 0);
-    const usedPct =
-      limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
-    const dashOffset = +(
-      RING_CIRCUMFERENCE *
-      (1 - Math.max(0, Math.min(100, usedPct)) / 100)
-    ).toFixed(2);
-    // --- 4a. 同步左侧多会话实时状态胶囊与浮层看板 ---
-    const rawRunningList =
-      Array.isArray(telemetry.runningConversations) && telemetry.runningConversations.length > 0
-        ? telemetry.runningConversations
-        : activeConv.isRunning || aggregated?.isRunning
-          ? [
-              {
-                cascadeId: activeConv.cascadeId || 'current',
-                title: activeConv.title || t('live.currentSession'),
-                isCurrentSelected: true,
-                isMainRunning: Boolean(activeConv.isRunning),
-                isRunning: true,
-                mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
-                subagentCount: Math.max(0, (agents?.length || 1) - 1),
-                runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
-                latestTokPerSec: overviewActive.latestTokPerSec ?? null,
-                contextUsedPct: usedPct,
-                subagents: (agents || [])
-                  .filter((a) => !a.isMain)
-                  .map((s, idx) => ({
-                    cascadeId: s.cascadeId || s.agentId,
-                    index: s.index || idx + 1,
-                    badgeText: s.badgeText || t('fmt.subBadge', { index: idx + 1 }),
-                    shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-                    role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
-                    isRunning: Boolean(s.isRunning),
-                    stepCount: Number(s.stepCount || 0),
-                    lastModifiedMs: s.lastModifiedMs || 0,
-                    liveActivity: s.liveActivity || {
-                      phase: s.isRunning ? 'thinking' : 'done',
-                      label: s.isRunning ? t('live.thinking') : t('live.done'),
-                      detail: '',
-                      stepProgress: '',
-                      startedAtMs: s.lastModifiedMs || 0,
-                      signature: `${s.agentId}:${s.stepCount || 0}`,
-                    },
-                  })),
-              },
-            ]
-          : [];
-
-    const runningCount = rawRunningList.length;
-    const runningSubCount = rawRunningList.reduce(
-      (acc, item) => acc + Number(item.runningSubagentCount || 0),
-      0
-    );
-    const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+    const overviewActive = overviewScopedConv || telemetry.activeConversation || {};
+    const slotCtx = buildCapsuleSlotContext(telemetry, {
+      scopedConv: capsuleScopedConv,
+      overviewConv: overviewActive,
+      ctxAgent,
+      aggregated,
+    });
+    const { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText } =
+      resolveMultiSessionCapsuleState(telemetry, {
+        agents,
+        aggregated,
+        latestTokPerSec: overviewActive.latestTokPerSec ?? null,
+        contextUsedPct: slotCtx.usedPct,
+      });
 
     patchClasses(multiBtn, {
       'is-running': runningCount > 0 && !hasWaiting,
       'is-waiting': runningCount > 0 && hasWaiting,
     });
-    const multiBtnText =
-      runningCount > 0
-        ? runningSubCount > 0
-          ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
-          : t('capsule.multiRunning', { count: runningCount })
-        : t('capsule.multiZero');
     patchText(multiLabel, multiBtnText);
 
-    renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, telSt.hostRouteConversationId);
+    renderMultiRunningPanel(
+      rawRunningList,
+      runningCount,
+      runningSubCount,
+      telSt.hostRouteConversationId
+    );
 
-    // --- 4b. 同步右侧 1..5 动态槽位胶囊与组件化悬停浮层 ---
-    const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
-    const capActive = capsuleScopedConv || aggregated || activeConv || {};
-    const tps =
-      capsuleScopedConv?.latestTokPerSec ??
-      aggregated?.latestTokPerSec ??
-      activeConv.latestTokPerSec ??
-      null;
-    const avgTps =
-      capsuleScopedConv?.avgTokPerSec ??
-      aggregated?.avgTokPerSec ??
-      activeConv.avgTokPerSec ??
-      null;
-    const ttft =
-      capsuleScopedConv?.latestTtftSec ??
-      aggregated?.latestTtftSec ??
-      activeConv.latestTtftSec ??
-      null;
-    const capsuleStepCost =
-      capsuleScopedConv?.latestStepCostUsd ??
-      aggregated?.latestStepCostUsd ??
-      activeConv.latestStepCostUsd ??
-      null;
-    const sessionCost =
-      capsuleScopedConv?.sessionCostUsd ??
-      aggregated?.sessionCostUsd ??
-      activeConv.sessionCostUsd ??
-      null;
-    const cacheHitPct =
-      Number(capActive.stepCount || 0) > 0
-        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
-        : null;
-    const latestPromptTokens = capActive.latestPromptTokens ?? null;
-    const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
-    const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
-    const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
-    const sessionTokens =
-      Number(capActive.stepCount || 0) > 0 ||
-      capActive.totalTokens != null ||
-      capInTok + capCacheTok + capOutTok > 0
-        ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
-        : null;
-
-    patchClasses(capsuleBtn, { 'is-running': isRunning });
-    applyCapsuleSlots(slotKeys, {
-      hasTelemetry: true,
-      usedPct,
-      dashOffset,
-      isRunning,
-      tps,
-      avgTps,
-      ttft,
-      stepCost: capsuleStepCost,
-      sessionCost,
-      cacheHitPct,
-      latestPromptTokens,
-      sessionTokens,
-      quotas: telemetry.quotas,
-    });
+    patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
+    applyCapsuleSlots(slotKeys, slotCtx);
 
     const updateMode = normalizeClientUpdateMode(
       telemetry.settings?.pluginUpdateMode,
@@ -21299,7 +21378,7 @@ function mountWindowOverlay() {
   const onVisibilityChange = () => {
     if (document.hidden) {
       uiStore.setState({ monitorVisible: false });
-      pauseMultiLiveTicker();
+      multiRunningWidget.refs.pauseTicker();
       hasPointerCoords = false;
       if (tooltipOpen) {
         setTooltipOpen(false);
@@ -21492,7 +21571,7 @@ function mountWindowOverlay() {
         clearTimeout(multiLeaveTimer);
         multiLeaveTimer = null;
       }
-      stopMultiLiveTicker();
+      multiRunningWidget.refs.stopLiveTicker();
       if (dockRafId && typeof cancelAnimationFrame === 'function') {
         cancelAnimationFrame(dockRafId);
         dockRafId = 0;

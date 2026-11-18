@@ -6,6 +6,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import { MockMutationObserver, createMockDom } from './mock-dom.mjs';
 import {
   associateIdeIframeRoutes,
   createWindowBridgeController,
@@ -554,197 +555,6 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
   const appJs = fs.readFileSync(appJsPath, 'utf8');
   const stylesCss = fs.readFileSync(stylesCssPath, 'utf8');
 
-  // Minimal DOM mock supporting ShadowRoot, querySelector, attributes, classes, and composedPath
-  class MockNode {
-    constructor(tag = 'div') {
-      this.tagName = String(tag).toUpperCase();
-      this.id = '';
-      this.className = '';
-      this.textContent = '';
-      this.style = {
-        _vars: new Map(),
-        setProperty(k, v) { this._vars.set(k, String(v)); },
-        getPropertyValue(k) { return this._vars.get(k) || ''; },
-        removeProperty(k) { this._vars.delete(k); },
-      };
-      this.dataset = {};
-      this.attributes = new Map();
-      this.children = [];
-      this.parentNode = null;
-      this.shadowRoot = null;
-      this._listeners = new Map();
-      const self = this;
-      this.classList = {
-        _set() {
-          return new Set(String(self.className || '').split(/\s+/).filter(Boolean));
-        },
-        add(...tokens) {
-          const s = this._set();
-          for (const t of tokens) if (t) s.add(t);
-          self.className = Array.from(s).join(' ');
-        },
-        contains(tok) {
-          return this._set().has(tok);
-        },
-        toggle(tok, force) {
-          const s = this._set();
-          const should = force === undefined ? !s.has(tok) : Boolean(force);
-          if (should) s.add(tok);
-          else s.delete(tok);
-          self.className = Array.from(s).join(' ');
-        },
-      };
-    }
-    get parentElement() { return this.parentNode; }
-    get firstChild() { return this.children[0] || null; }
-    get firstElementChild() { return this.children[0] || null; }
-    get lastElementChild() { return this.children[this.children.length - 1] || null; }
-    get nextSibling() {
-      if (!this.parentNode) return null;
-      const idx = this.parentNode.children.indexOf(this);
-      return idx >= 0 ? this.parentNode.children[idx + 1] || null : null;
-    }
-    get isConnected() {
-      let cur = this;
-      while (cur) {
-        if (cur.isDocumentRoot) return true;
-        cur = cur.parentNode || cur.host || null;
-      }
-      return false;
-    }
-    setAttribute(k, v) {
-      const s = String(v);
-      this.attributes.set(k, s);
-      if (k === 'id') this.id = s;
-      if (k === 'class') this.className = s;
-    }
-    getAttribute(k) { return this.attributes.has(k) ? this.attributes.get(k) : null; }
-    hasAttribute(k) { return this.attributes.has(k); }
-    removeAttribute(k) { this.attributes.delete(k); }
-    appendChild(child) {
-      if (child.parentNode) child.parentNode.removeChild(child);
-      child.parentNode = this;
-      this.children.push(child);
-      return child;
-    }
-    insertBefore(node, refNode) {
-      if (!refNode) return this.appendChild(node);
-      if (node.parentNode) node.parentNode.removeChild(node);
-      const idx = this.children.indexOf(refNode);
-      node.parentNode = this;
-      if (idx < 0) this.children.push(node);
-      else this.children.splice(idx, 0, node);
-      return node;
-    }
-    removeChild(child) {
-      const idx = this.children.indexOf(child);
-      if (idx >= 0) {
-        this.children.splice(idx, 1);
-        child.parentNode = null;
-      }
-      return child;
-    }
-    remove() {
-      if (this.parentNode) this.parentNode.removeChild(this);
-    }
-    attachShadow() {
-      const sr = new MockNode('#shadow-root');
-      sr.host = this;
-      this.shadowRoot = sr;
-      return sr;
-    }
-    contains(other) {
-      let cur = other;
-      while (cur) {
-        if (cur === this) return true;
-        cur = cur.parentNode;
-      }
-      return false;
-    }
-    addEventListener(type, fn) {
-      if (!this._listeners.has(type)) this._listeners.set(type, []);
-      this._listeners.get(type).push(fn);
-    }
-    removeEventListener(type, fn) {
-      const arr = this._listeners.get(type);
-      if (!arr) return;
-      const idx = arr.indexOf(fn);
-      if (idx >= 0) arr.splice(idx, 1);
-    }
-    dispatchEvent(ev) {
-      for (const fn of [...(this._listeners.get(ev.type) || [])]) fn(ev);
-    }
-    getBoundingClientRect() {
-      return { left: 900, right: 1080, top: 6, bottom: 32, width: 180, height: 26 };
-    }
-    querySelector(sel) {
-      if (sel === ':scope > div.shrink-0') {
-        return this.children.find((c) => c.classList.contains('shrink-0')) || null;
-      }
-      return this._find((n) => {
-        if (sel === '[class*="@container/titlebar"]') {
-          return String(n.className || '').includes('@container/titlebar');
-        }
-        if (sel.startsWith('.')) {
-          return n.classList.contains(sel.slice(1));
-        }
-        return false;
-      });
-    }
-    querySelectorAll(sel) {
-      const s = String(sel || '').trim();
-      if (!s || s.includes(',')) return [];
-      if (s.includes(' ')) {
-        const [first, ...rest] = s.split(/\s+/);
-        const roots = this.querySelectorAll(first);
-        const out = [];
-        for (const r of roots) {
-          for (const item of r.querySelectorAll(rest.join(' '))) {
-            if (!out.includes(item)) out.push(item);
-          }
-        }
-        return out;
-      }
-      if (!s.startsWith('.')) return [];
-      const cls = s.slice(1);
-      const out = [];
-      const walk = (node) => {
-        for (const c of node.children) {
-          if (c.classList.contains(cls)) out.push(c);
-          walk(c);
-        }
-      };
-      walk(this);
-      return out;
-    }
-    _find(pred) {
-      for (const c of this.children) {
-        if (pred(c)) return c;
-        const hit = c._find(pred);
-        if (hit) return hit;
-      }
-      return null;
-    }
-  }
-
-  const docRoot = new MockNode('html');
-  docRoot.isDocumentRoot = true;
-  const body = new MockNode('body');
-  docRoot.appendChild(body);
-
-  // Build simulated Antigravity titlebar
-  const titlebar = new MockNode('div');
-  titlebar.className = 'flex items-center @container/titlebar';
-  const titleLeft = new MockNode('div');
-  titleLeft.textContent = 'Chat Title';
-  const titleRight = new MockNode('div');
-  titleRight.className = 'shrink-0 flex items-center';
-  const nativeBtn = new MockNode('button');
-  titleRight.appendChild(nativeBtn);
-  titlebar.appendChild(titleLeft);
-  titlebar.appendChild(titleRight);
-  body.appendChild(titlebar);
-
   let reloadCalled = false;
   let currentBundleVer = 'ver-100';
   let currentAccountEmail = 'test@example.com';
@@ -752,43 +562,33 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
   const fetchedUrls = [];
   const fetchedHeaders = [];
   const createdForms = [];
-
-  const docListeners = new Map();
   const winListeners = new Map();
 
-  const mockDocument = {
-    readyState: 'complete',
-    hidden: false,
-    documentElement: docRoot,
+  const {
+    docRoot,
     body,
-    createElement: (tag) => {
-      const node = new MockNode(tag);
+    document: mockDocument,
+    docListeners,
+    makeElement,
+  } = createMockDom({
+    defaultRect: { left: 900, right: 1080, top: 6, bottom: 32, width: 180, height: 26 },
+    onCreateElement: (node, tag) => {
       if (tag === 'form') createdForms.push(node);
-      return node;
     },
-    createElementNS: (_ns, tag) => new MockNode(tag),
-    createTextNode: (txt) => {
-      const t = new MockNode('#text');
-      t.textContent = String(txt);
-      return t;
-    },
-    getElementById: (id) => docRoot._find((n) => n.id === id),
-    querySelector: (sel) => docRoot.querySelector(sel),
-    querySelectorAll: () => [],
-    addEventListener(type, fn) {
-      if (!docListeners.has(type)) docListeners.set(type, []);
-      docListeners.get(type).push(fn);
-    },
-    removeEventListener(type, fn) {
-      const arr = docListeners.get(type);
-      if (!arr) return;
-      const i = arr.indexOf(fn);
-      if (i >= 0) arr.splice(i, 1);
-    },
-    dispatchEvent(ev) {
-      for (const fn of [...(docListeners.get(ev.type) || [])]) fn(ev);
-    },
-  };
+  });
+
+  // Build simulated Antigravity titlebar
+  const titlebar = makeElement('div');
+  titlebar.className = 'flex items-center @container/titlebar';
+  const titleLeft = makeElement('div');
+  titleLeft.textContent = 'Chat Title';
+  const titleRight = makeElement('div');
+  titleRight.className = 'shrink-0 flex items-center';
+  const nativeBtn = makeElement('button');
+  titleRight.appendChild(nativeBtn);
+  titlebar.appendChild(titleLeft);
+  titlebar.appendChild(titleRight);
+  body.appendChild(titlebar);
 
   const mockLocation = {
     pathname: '/c/aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb',
@@ -3101,245 +2901,37 @@ test('Compiled app.js in Antigravity IDE workbench.html docks into .part.titleba
   const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 
-  class IdeMockNode {
-    constructor(tag = 'div') {
-      this.tagName = String(tag).toUpperCase();
-      this.id = '';
-      this.className = '';
-      this.textContent = '';
-      this._rect = { left: 0, right: 1440, top: 0, bottom: 35, width: 1440, height: 35 };
-      this.dataset = {};
-      const vars = new Map();
-      this.style = {
-        marginLeft: '',
-        top: '',
-        right: '',
-        left: '',
-        maxHeight: '',
-        _vars: vars,
-        setProperty(k, v) {
-          vars.set(k, String(v));
-        },
-        removeProperty(k) {
-          vars.delete(k);
-        },
-        getPropertyValue(k) {
-          return vars.get(k) || '';
-        },
-      };
-      this.attributes = new Map();
-      this.children = [];
-      this.parentNode = null;
-      this.shadowRoot = null;
-      this._listeners = new Map();
-      const self = this;
-      this.classList = {
-        _set() {
-          return new Set(String(self.className || '').split(/\s+/).filter(Boolean));
-        },
-        add(...tokens) {
-          const s = this._set();
-          for (const t of tokens) if (t) s.add(t);
-          self.className = Array.from(s).join(' ');
-        },
-        contains(tok) {
-          return this._set().has(tok);
-        },
-        toggle(tok, force) {
-          const s = this._set();
-          const should = force === undefined ? !s.has(tok) : Boolean(force);
-          if (should) s.add(tok);
-          else s.delete(tok);
-          self.className = Array.from(s).join(' ');
-        },
-      };
-    }
-    get parentElement() {
-      return this.parentNode;
-    }
-    get firstChild() {
-      return this.children[0] || null;
-    }
-    get firstElementChild() {
-      return this.children[0] || null;
-    }
-    get lastElementChild() {
-      return this.children[this.children.length - 1] || null;
-    }
-    get isConnected() {
-      let cur = this;
-      while (cur) {
-        if (cur.isDocumentRoot) return true;
-        cur = cur.parentNode || cur.host || null;
-      }
-      return false;
-    }
-    setAttribute(k, v) {
-      const s = String(v);
-      this.attributes.set(k, s);
-      if (k === 'id') this.id = s;
-      if (k === 'class') this.className = s;
-    }
-    getAttribute(k) {
-      return this.attributes.has(k) ? this.attributes.get(k) : null;
-    }
-    hasAttribute(k) {
-      return this.attributes.has(k);
-    }
-    removeAttribute(k) {
-      this.attributes.delete(k);
-    }
-    appendChild(child) {
-      if (child.parentNode) child.parentNode.removeChild(child);
-      child.parentNode = this;
-      this.children.push(child);
-      return child;
-    }
-    insertBefore(node, refNode) {
-      if (!refNode) return this.appendChild(node);
-      if (node.parentNode) node.parentNode.removeChild(node);
-      const idx = this.children.indexOf(refNode);
-      node.parentNode = this;
-      if (idx < 0) this.children.push(node);
-      else this.children.splice(idx, 0, node);
-      return node;
-    }
-    removeChild(child) {
-      const idx = this.children.indexOf(child);
-      if (idx >= 0) {
-        this.children.splice(idx, 1);
-        child.parentNode = null;
-      }
-      return child;
-    }
-    remove() {
-      if (this.parentNode) this.parentNode.removeChild(this);
-    }
-    attachShadow() {
-      const sr = new IdeMockNode('#shadow-root');
-      sr.host = this;
-      this.shadowRoot = sr;
-      return sr;
-    }
-    contains(other) {
-      let cur = other;
-      while (cur) {
-        if (cur === this) return true;
-        cur = cur.parentNode;
-      }
-      return false;
-    }
-    addEventListener(type, fn) {
-      if (!this._listeners.has(type)) this._listeners.set(type, []);
-      this._listeners.get(type).push(fn);
-    }
-    removeEventListener(type, fn) {
-      const arr = this._listeners.get(type);
-      if (!arr) return;
-      const idx = arr.indexOf(fn);
-      if (idx >= 0) arr.splice(idx, 1);
-    }
-    dispatchEvent(ev) {
-      for (const fn of [...(this._listeners.get(ev.type) || [])]) fn(ev);
-    }
-    getBoundingClientRect() {
-      if (this._rect) return this._rect;
-      if (this._ownRect) return this._ownRect;
-      let cur = this.parentNode || this.host || null;
-      while (cur) {
-        if (cur._rect) return cur._rect;
-        if (cur._ownRect) return cur._ownRect;
-        cur = cur.parentNode || cur.host || null;
-      }
-      return { left: 820, right: 946, top: 810, bottom: 836, width: 126, height: 26 };
-    }
-    matchesNode(sel) {
-      if (sel === '[class*="@container/titlebar"]') {
-        return String(this.className || '').includes('@container/titlebar');
-      }
-      if (sel === '[data-testid="conversation-view"][data-cascade-id]') {
-        return (
-          this.getAttribute('data-testid') === 'conversation-view' &&
-          this.hasAttribute('data-cascade-id')
-        );
-      }
-      if (sel === '[data-testid^="conversation-row-"][data-selected="true"][data-cascade-id]') {
-        return (
-          String(this.getAttribute('data-testid') || '').startsWith('conversation-row-') &&
-          this.getAttribute('data-selected') === 'true' &&
-          this.hasAttribute('data-cascade-id')
-        );
-      }
-      if (sel.startsWith('.')) {
-        const classes = sel.slice(1).split('.').filter(Boolean);
-        return classes.every((c) => this.classList.contains(c));
-      }
-      return false;
-    }
-    querySelector(sel) {
-      if (sel.startsWith(':scope > ')) {
-        const rest = sel.slice(':scope > '.length).trim();
-        if (rest === 'div.shrink-0') {
-          return this.children.find((c) => c.classList.contains('shrink-0')) || null;
-        }
-        return this.children.find((c) => c.matchesNode(rest)) || null;
-      }
-      return this._find((n) => n.matchesNode(sel));
-    }
-    querySelectorAll(sel) {
-      const out = [];
-      const walk = (node) => {
-        for (const c of node.children) {
-          if (c.matchesNode(sel)) out.push(c);
-          walk(c);
-        }
-      };
-      walk(this);
-      return out;
-    }
-    _find(pred) {
-      for (const c of this.children) {
-        if (pred(c)) return c;
-        const hit = c._find(pred);
-        if (hit) return hit;
-      }
-      return null;
-    }
-  }
-
-  const docRoot = new IdeMockNode('html');
-  docRoot.isDocumentRoot = true;
-  const head = new IdeMockNode('head');
-  const body = new IdeMockNode('body');
-  docRoot.appendChild(head);
-  docRoot.appendChild(body);
+  const {
+    docRoot,
+    body,
+    document: mockDocument,
+    makeElement: makeIdeNode,
+  } = createMockDom({
+    defaultRect: { left: 0, right: 1440, top: 0, bottom: 35, width: 1440, height: 35 },
+    inheritAncestorRect: true,
+  });
 
   // Build Antigravity IDE .monaco-workbench with BOTH top window .part.titlebar AND inner chat @container/titlebar
-  const workbench = new IdeMockNode('div');
+  const workbench = makeIdeNode('div');
   workbench.className = 'monaco-workbench vs-dark';
 
-  const partTitlebar = new IdeMockNode('div');
+  const partTitlebar = makeIdeNode('div');
   partTitlebar.className = 'part titlebar';
-  const tbContainer = new IdeMockNode('div');
+  const tbContainer = makeIdeNode('div');
   tbContainer.className = 'titlebar-container has-center';
-  const tbLeft = new IdeMockNode('div');
+  const tbLeft = makeIdeNode('div', { left: 0, right: 60, top: 0, bottom: 35, width: 60, height: 35 });
   tbLeft.className = 'titlebar-left';
-  tbLeft._rect = { left: 0, right: 60, top: 0, bottom: 35, width: 60, height: 35 };
-  const tbCenter = new IdeMockNode('div');
+  const tbCenter = makeIdeNode('div', { left: 540, right: 900, top: 0, bottom: 35, width: 360, height: 35 });
   tbCenter.className = 'titlebar-center';
-  tbCenter._rect = { left: 540, right: 900, top: 0, bottom: 35, width: 360, height: 35 };
-  const tbRight = new IdeMockNode('div');
+  const tbRight = makeIdeNode('div', { left: 900, right: 1440, top: 0, bottom: 35, width: 540, height: 35 });
   tbRight.className = 'titlebar-right';
-  tbRight._rect = { left: 900, right: 1440, top: 0, bottom: 35, width: 540, height: 35 };
 
-  const actionToolbar = new IdeMockNode('div');
+  const actionToolbar = makeIdeNode('div', { left: 1170, right: 1300, top: 0, bottom: 35, width: 130, height: 35 });
   actionToolbar.className = 'action-toolbar-container';
   actionToolbar.style.marginLeft = 'auto';
-  actionToolbar._rect = { left: 1170, right: 1300, top: 0, bottom: 35, width: 130, height: 35 };
 
-  const winControls = new IdeMockNode('div');
+  const winControls = makeIdeNode('div', { left: 1300, right: 1440, top: 0, bottom: 35, width: 140, height: 35 });
   winControls.className = 'window-controls-container';
-  winControls._rect = { left: 1300, right: 1440, top: 0, bottom: 35, width: 140, height: 35 };
 
   tbRight.appendChild(actionToolbar);
   tbRight.appendChild(winControls);
@@ -3350,15 +2942,15 @@ test('Compiled app.js in Antigravity IDE workbench.html docks into .part.titleba
   workbench.appendChild(partTitlebar);
 
   // Inner chat pane header + conversation view
-  const innerChatHeader = new IdeMockNode('div');
+  const innerChatHeader = makeIdeNode('div');
   innerChatHeader.className = 'flex items-center @container/titlebar';
-  const innerChatRight = new IdeMockNode('div');
+  const innerChatRight = makeIdeNode('div');
   innerChatRight.className = 'shrink-0 flex items-center';
-  innerChatHeader.appendChild(new IdeMockNode('div'));
+  innerChatHeader.appendChild(makeIdeNode('div'));
   innerChatHeader.appendChild(innerChatRight);
   workbench.appendChild(innerChatHeader);
 
-  const convView = new IdeMockNode('div');
+  const convView = makeIdeNode('div');
   convView.setAttribute('data-testid', 'conversation-view');
   convView.setAttribute('data-cascade-id', '12345678-aaaa-bbbb-cccc-1234567890ab');
   workbench.appendChild(convView);
@@ -3376,41 +2968,12 @@ test('Compiled app.js in Antigravity IDE workbench.html docks into .part.titleba
   ]);
 
   const mutationObservers = [];
-  class MockMutationObserver {
+  class IdeMutationObserver extends MockMutationObserver {
     constructor(cb) {
-      this.cb = cb;
-      this.targets = [];
-      mutationObservers.push(this);
-    }
-    observe(target, options) {
-      this.targets.push({ target, options });
-    }
-    disconnect() {
-      this.targets = [];
+      super(cb, mutationObservers);
     }
   }
-
   const fetchedUrls = [];
-  const mockDocument = {
-    readyState: 'complete',
-    hidden: false,
-    activeElement: null,
-    documentElement: docRoot,
-    head,
-    body,
-    createElement: (tag) => new IdeMockNode(tag),
-    createElementNS: (_ns, tag) => new IdeMockNode(tag),
-    createTextNode: (txt) => {
-      const t = new IdeMockNode('#text');
-      t.textContent = String(txt);
-      return t;
-    },
-    getElementById: (id) => docRoot._find((n) => n.id === id),
-    querySelector: (sel) => docRoot.querySelector(sel),
-    querySelectorAll: (sel) => docRoot.querySelectorAll(sel),
-    addEventListener() {},
-    removeEventListener() {},
-  };
 
   const mockWindow = {
     innerWidth: 1440,
@@ -3479,7 +3042,7 @@ test('Compiled app.js in Antigravity IDE workbench.html docks into .part.titleba
     document: mockDocument,
     location: mockWindow.location,
     navigator: {},
-    MutationObserver: MockMutationObserver,
+    MutationObserver: IdeMutationObserver,
     URLSearchParams,
     AbortController,
     setTimeout,
@@ -3776,261 +3339,65 @@ test('Composer mount mode (输入框挂载) docks capsule immediately left of Au
   const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 
-  class ComposerMockNode {
-    constructor(tag, rect = null) {
-      this.tagName = String(tag || 'div').toUpperCase();
-      this.nodeName = this.tagName;
-      this.id = '';
-      this.className = '';
-      this._text = '';
-      this._ownRect = rect || null;
-      this.style = {
-        marginLeft: '',
-        top: '',
-        left: '',
-        right: '',
-        height: '',
-        maxHeight: '',
-        _vars: new Map(),
-        setProperty(k, v) {
-          this._vars.set(k, String(v));
-        },
-        getPropertyValue(k) {
-          return this._vars.get(k) || '';
-        },
-      };
-      this.dataset = {};
-      this.attributes = new Map();
-      this.children = [];
-      this.parentNode = null;
-      this.shadowRoot = null;
-      this._listeners = new Map();
-      const self = this;
-      this.classList = {
-        _set() {
-          return new Set(String(self.className || '').split(/\s+/).filter(Boolean));
-        },
-        add(...tokens) {
-          const s = this._set();
-          for (const t of tokens) if (t) s.add(t);
-          self.className = Array.from(s).join(' ');
-        },
-        contains(tok) {
-          return this._set().has(tok);
-        },
-        toggle(tok, force) {
-          const s = this._set();
-          const should = force === undefined ? !s.has(tok) : Boolean(force);
-          if (should) s.add(tok);
-          else s.delete(tok);
-          self.className = Array.from(s).join(' ');
-        },
-      };
-    }
-    get textContent() {
-      if (this.children.length === 0) return this._text;
-      return this._text + this.children.map((c) => c.textContent).join('');
-    }
-    set textContent(v) {
-      this._text = String(v ?? '');
-      this.children = [];
-    }
-    get parentElement() {
-      return this.parentNode;
-    }
-    get firstChild() {
-      return this.children[0] || null;
-    }
-    get firstElementChild() {
-      return this.children[0] || null;
-    }
-    get lastElementChild() {
-      return this.children[this.children.length - 1] || null;
-    }
-    get nextElementSibling() {
-      if (!this.parentNode) return null;
-      const idx = this.parentNode.children.indexOf(this);
-      return idx >= 0 ? this.parentNode.children[idx + 1] || null : null;
-    }
-    get isConnected() {
-      let cur = this;
-      while (cur) {
-        if (cur.isDocumentRoot) return true;
-        cur = cur.parentNode || cur.host || null;
-      }
-      return false;
-    }
-    setAttribute(k, v) {
-      const s = String(v);
-      this.attributes.set(k, s);
-      if (k === 'id') this.id = s;
-      if (k === 'class') this.className = s;
-    }
-    getAttribute(k) {
-      return this.attributes.has(k) ? this.attributes.get(k) : null;
-    }
-    hasAttribute(k) {
-      return this.attributes.has(k);
-    }
-    removeAttribute(k) {
-      this.attributes.delete(k);
-    }
-    appendChild(child) {
-      if (child.parentNode) child.parentNode.removeChild(child);
-      child.parentNode = this;
-      this.children.push(child);
-      return child;
-    }
-    insertBefore(node, refNode) {
-      if (!refNode) return this.appendChild(node);
-      if (node.parentNode) node.parentNode.removeChild(node);
-      const idx = this.children.indexOf(refNode);
-      node.parentNode = this;
-      if (idx < 0) this.children.push(node);
-      else this.children.splice(idx, 0, node);
-      return node;
-    }
-    removeChild(child) {
-      const idx = this.children.indexOf(child);
-      if (idx >= 0) {
-        this.children.splice(idx, 1);
-        child.parentNode = null;
-      }
-      return child;
-    }
-    remove() {
-      if (this.parentNode) this.parentNode.removeChild(this);
-    }
-    attachShadow() {
-      const sr = new ComposerMockNode('#shadow-root');
-      sr.host = this;
-      this.shadowRoot = sr;
-      return sr;
-    }
-    contains(other) {
-      let cur = other;
-      while (cur) {
-        if (cur === this) return true;
-        cur = cur.parentNode;
-      }
-      return false;
-    }
-    addEventListener(type, fn) {
-      if (!this._listeners.has(type)) this._listeners.set(type, []);
-      this._listeners.get(type).push(fn);
-    }
-    removeEventListener(type, fn) {
-      const arr = this._listeners.get(type);
-      if (!arr) return;
-      const i = arr.indexOf(fn);
-      if (i >= 0) arr.splice(i, 1);
-    }
-    dispatchEvent(ev) {
-      for (const fn of [...(this._listeners.get(ev.type) || [])]) fn(ev);
-    }
-    getBoundingClientRect() {
-      if (this._rect) return this._rect;
-      if (this._ownRect) return this._ownRect;
-      let cur = this.parentNode || this.host || null;
-      while (cur) {
-        if (cur._rect) return cur._rect;
-        if (cur._ownRect) return cur._ownRect;
-        cur = cur.parentNode || cur.host || null;
-      }
-      return { left: 820, right: 946, top: 810, bottom: 836, width: 126, height: 26 };
-    }
-    _matchesSingle(sel) {
-      const s = String(sel || '').trim();
-      if (!s) return false;
-      if (s === '[class*="@container/titlebar"]') {
-        return String(this.className || '').includes('@container/titlebar');
-      }
-      if (s.startsWith('.')) return this.classList.contains(s.slice(1));
-      if (s.startsWith('[') && s.endsWith(']')) {
-        const inner = s.slice(1, -1);
-        const eqIdx = inner.indexOf('=');
-        if (eqIdx < 0) return this.hasAttribute(inner);
-        const attr = inner.slice(0, eqIdx).trim();
-        const val = inner.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
-        return this.getAttribute(attr) === val;
-      }
-      return this.tagName.toLowerCase() === s.toLowerCase();
-    }
-    querySelector(sel) {
-      if (sel === ':scope > div.shrink-0') {
-        return this.children.find((c) => c.classList.contains('shrink-0')) || null;
-      }
-      return this.querySelectorAll(sel)[0] || null;
-    }
-    querySelectorAll(sel) {
-      const s = String(sel || '').trim();
-      if (!s) return [];
-      const out = [];
-      const walk = (node) => {
-        for (const c of node.children) {
-          if (c._matchesSingle(s)) out.push(c);
-          walk(c);
-        }
-      };
-      walk(this);
-      return out;
-    }
-  }
-
-  const docRoot = new ComposerMockNode('html', { left: 0, right: 1440, top: 0, bottom: 900, width: 1440, height: 900 });
-  docRoot.isDocumentRoot = true;
-  const body = new ComposerMockNode('body', { left: 0, right: 1440, top: 0, bottom: 900, width: 1440, height: 900 });
-  docRoot.appendChild(body);
+  const {
+    body,
+    document: mockDocument,
+    makeElement: makeCompNode,
+  } = createMockDom({
+    rootRect: { left: 0, right: 1440, top: 0, bottom: 900, width: 1440, height: 900 },
+    defaultRect: { left: 820, right: 946, top: 810, bottom: 836, width: 126, height: 26 },
+    inheritAncestorRect: true,
+  });
 
   // 1. Topbar
-  const titlebar = new ComposerMockNode('div', { left: 0, right: 1440, top: 0, bottom: 38, width: 1440, height: 38 });
+  const titlebar = makeCompNode('div', { left: 0, right: 1440, top: 0, bottom: 38, width: 1440, height: 38 });
   titlebar.className = 'flex items-center @container/titlebar';
-  const titleLeft = new ComposerMockNode('div', { left: 16, right: 220, top: 6, bottom: 32, width: 204, height: 26 });
+  const titleLeft = makeCompNode('div', { left: 16, right: 220, top: 6, bottom: 32, width: 204, height: 26 });
   titleLeft.textContent = 'Chat Title';
-  const titleRight = new ComposerMockNode('div', { left: 1200, right: 1420, top: 6, bottom: 32, width: 220, height: 26 });
+  const titleRight = makeCompNode('div', { left: 1200, right: 1420, top: 6, bottom: 32, width: 220, height: 26 });
   titleRight.className = 'shrink-0 flex items-center';
-  titleRight.appendChild(new ComposerMockNode('button', { left: 1380, right: 1412, top: 6, bottom: 32, width: 32, height: 26 }));
+  titleRight.appendChild(makeCompNode('button', { left: 1380, right: 1412, top: 6, bottom: 32, width: 32, height: 26 }));
   titlebar.appendChild(titleLeft);
   titlebar.appendChild(titleRight);
   body.appendChild(titlebar);
 
   // 2. Chat composer card at bottom: [+] [Gemini 4 Carbon High ^]  ...  [🛡️ Auto ^] [🎤] [→]
-  const composerCard = new ComposerMockNode('div', { left: 220, right: 1120, top: 700, bottom: 848, width: 900, height: 148 });
+  const composerCard = makeCompNode('div', { left: 220, right: 1120, top: 700, bottom: 848, width: 900, height: 148 });
   composerCard.className = 'rounded-2xl border p-3';
-  const editorEl = new ComposerMockNode('textarea', { left: 236, right: 1104, top: 712, bottom: 796, width: 868, height: 84 });
+  const editorEl = makeCompNode('textarea', { left: 236, right: 1104, top: 712, bottom: 796, width: 868, height: 84 });
   editorEl.setAttribute('role', 'textbox');
-  const toolbarRow = new ComposerMockNode('div', { left: 236, right: 1104, top: 808, bottom: 838, width: 868, height: 30 });
+  const toolbarRow = makeCompNode('div', { left: 236, right: 1104, top: 808, bottom: 838, width: 868, height: 30 });
   toolbarRow.className = 'flex items-center justify-between';
 
-  const leftCluster = new ComposerMockNode('div', { left: 236, right: 446, top: 808, bottom: 838, width: 210, height: 30 });
+  const leftCluster = makeCompNode('div', { left: 236, right: 446, top: 808, bottom: 838, width: 210, height: 30 });
   leftCluster.className = 'flex items-center gap-1';
-  const plusBtn = new ComposerMockNode('button', { left: 236, right: 264, top: 810, bottom: 836, width: 28, height: 26 });
+  const plusBtn = makeCompNode('button', { left: 236, right: 264, top: 810, bottom: 836, width: 28, height: 26 });
   plusBtn.textContent = '+';
-  const modelBtn = new ComposerMockNode('button', { left: 270, right: 446, top: 810, bottom: 836, width: 176, height: 26 });
+  const modelBtn = makeCompNode('button', { left: 270, right: 446, top: 810, bottom: 836, width: 176, height: 26 });
   modelBtn.textContent = 'Gemini 4 Carbon High ^';
   leftCluster.appendChild(plusBtn);
   leftCluster.appendChild(modelBtn);
 
-  const rightCluster = new ComposerMockNode('div', { left: 950, right: 1104, top: 808, bottom: 838, width: 154, height: 30 });
+  const rightCluster = makeCompNode('div', { left: 950, right: 1104, top: 808, bottom: 838, width: 154, height: 30 });
   rightCluster.className = 'flex items-center gap-1.5';
-  const autoWrap = new ComposerMockNode('div', { left: 950, right: 1028, top: 810, bottom: 836, width: 78, height: 26 });
+  const autoWrap = makeCompNode('div', { left: 950, right: 1028, top: 810, bottom: 836, width: 78, height: 26 });
   autoWrap.className = 'relative';
-  const autoBtn = new ComposerMockNode('button', { left: 950, right: 1028, top: 810, bottom: 836, width: 78, height: 26 });
-  const shieldSvg = new ComposerMockNode('svg');
-  const shieldTitle = new ComposerMockNode('title');
+  const autoBtn = makeCompNode('button', { left: 950, right: 1028, top: 810, bottom: 836, width: 78, height: 26 });
+  const shieldSvg = makeCompNode('svg');
+  const shieldTitle = makeCompNode('title');
   shieldTitle.textContent = 'Shield Icon';
   shieldSvg.appendChild(shieldTitle);
-  const autoLabel = new ComposerMockNode('span');
+  const autoLabel = makeCompNode('span');
   autoLabel.textContent = 'Auto';
-  const chevronSvg = new ComposerMockNode('svg');
+  const chevronSvg = makeCompNode('svg');
   autoBtn.appendChild(shieldSvg);
   autoBtn.appendChild(autoLabel);
   autoBtn.appendChild(chevronSvg);
   autoWrap.appendChild(autoBtn);
 
-  const micBtn = new ComposerMockNode('button', { left: 1034, right: 1062, top: 810, bottom: 836, width: 28, height: 26 });
+  const micBtn = makeCompNode('button', { left: 1034, right: 1062, top: 810, bottom: 836, width: 28, height: 26 });
   micBtn.setAttribute('aria-label', 'Voice input');
-  const sendBtn = new ComposerMockNode('button', { left: 1068, right: 1100, top: 808, bottom: 838, width: 32, height: 30 });
+  const sendBtn = makeCompNode('button', { left: 1068, right: 1100, top: 808, bottom: 838, width: 32, height: 30 });
   sendBtn.setAttribute('aria-label', 'Send message');
 
   rightCluster.appendChild(autoWrap);
@@ -4054,35 +3421,6 @@ test('Composer mount mode (输入框挂载) docks capsule immediately left of Au
     enableWindowOverlay: true,
     showTopbarMultiSession: true,
     topbarCapsuleSlots: ['context', 'tps', 'quota_auto'],
-  };
-
-  const mockDocument = {
-    readyState: 'complete',
-    hidden: false,
-    documentElement: docRoot,
-    body,
-    createElement: (tag) => new ComposerMockNode(tag),
-    createElementNS: (_ns, tag) => new ComposerMockNode(tag),
-    createTextNode: (txt) => {
-      const t = new ComposerMockNode('#text');
-      t.textContent = String(txt);
-      return t;
-    },
-    getElementById: (id) => {
-      const walk = (n) => {
-        if (n.id === id) return n;
-        for (const c of n.children) {
-          const hit = walk(c);
-          if (hit) return hit;
-        }
-        return null;
-      };
-      return walk(docRoot);
-    },
-    querySelector: (sel) => docRoot.querySelector(sel),
-    querySelectorAll: (sel) => docRoot.querySelectorAll(sel),
-    addEventListener() {},
-    removeEventListener() {},
   };
 
   const mockWindow = {
@@ -4274,233 +3612,45 @@ test('Antigravity IDE composer mount mode (输入框挂载) docks inside extensi
   const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const stylesCss = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
 
-  class IdeChatMockNode {
-    constructor(tag = 'div', rect = null) {
-      this.tagName = String(tag).toUpperCase();
-      this.id = '';
-      this.className = '';
-      this._text = '';
-      this._rect = rect || { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
-      this.dataset = {};
-      const vars = new Map();
-      this.style = {
-        display: '',
-        visibility: '',
-        opacity: '',
-        marginLeft: '',
-        top: '',
-        right: '',
-        left: '',
-        height: '',
-        maxHeight: '',
-        setProperty(k, v) {
-          vars.set(k, String(v));
-        },
-        removeProperty(k) {
-          vars.delete(k);
-        },
-        getPropertyValue(k) {
-          return vars.get(k) || '';
-        },
-      };
-      this.attributes = new Map();
-      this.children = [];
-      this.parentNode = null;
-      this.shadowRoot = null;
-      this._listeners = new Map();
-      const self = this;
-      this.classList = {
-        _set() {
-          return new Set(String(self.className || '').split(/\s+/).filter(Boolean));
-        },
-        add(...tokens) {
-          const s = this._set();
-          for (const t of tokens) if (t) s.add(t);
-          self.className = Array.from(s).join(' ');
-        },
-        contains(tok) {
-          return this._set().has(tok);
-        },
-        toggle(tok, force) {
-          const s = this._set();
-          const should = force === undefined ? !s.has(tok) : Boolean(force);
-          if (should) s.add(tok);
-          else s.delete(tok);
-          self.className = Array.from(s).join(' ');
-        },
-      };
-    }
-    get textContent() {
-      if (this.children.length === 0) return this._text;
-      return this._text + this.children.map((c) => c.textContent).join('');
-    }
-    set textContent(v) {
-      this._text = String(v ?? '');
-      this.children = [];
-    }
-    get parentElement() {
-      return this.parentNode;
-    }
-    get firstChild() {
-      return this.children[0] || null;
-    }
-    get firstElementChild() {
-      return this.children[0] || null;
-    }
-    get lastChild() {
-      return this.children[this.children.length - 1] || null;
-    }
-    get lastElementChild() {
-      return this.children[this.children.length - 1] || null;
-    }
-    get nextElementSibling() {
-      if (!this.parentNode) return null;
-      const idx = this.parentNode.children.indexOf(this);
-      return idx >= 0 ? this.parentNode.children[idx + 1] || null : null;
-    }
-    get isConnected() {
-      let cur = this;
-      while (cur) {
-        if (cur.isDocumentRoot) return true;
-        cur = cur.parentNode || cur.host || null;
-      }
-      return false;
-    }
-    setAttribute(k, v) {
-      const s = String(v);
-      this.attributes.set(k, s);
-      if (k === 'id') this.id = s;
-      if (k === 'class') this.className = s;
-    }
-    getAttribute(k) {
-      return this.attributes.has(k) ? this.attributes.get(k) : null;
-    }
-    hasAttribute(k) {
-      return this.attributes.has(k);
-    }
-    removeAttribute(k) {
-      this.attributes.delete(k);
-    }
-    appendChild(child) {
-      if (child.parentNode) child.parentNode.removeChild(child);
-      child.parentNode = this;
-      this.children.push(child);
-      return child;
-    }
-    insertBefore(node, refNode) {
-      if (!refNode) return this.appendChild(node);
-      if (node.parentNode) node.parentNode.removeChild(node);
-      const idx = this.children.indexOf(refNode);
-      node.parentNode = this;
-      if (idx < 0) this.children.push(node);
-      else this.children.splice(idx, 0, node);
-      return node;
-    }
-    removeChild(child) {
-      const idx = this.children.indexOf(child);
-      if (idx >= 0) {
-        this.children.splice(idx, 1);
-        child.parentNode = null;
-      }
-      return child;
-    }
-    remove() {
-      if (this.parentNode) this.parentNode.removeChild(this);
-    }
-    attachShadow() {
-      const sr = new IdeChatMockNode('#shadow-root');
-      sr.host = this;
-      this.shadowRoot = sr;
-      return sr;
-    }
-    contains(other) {
-      let cur = other;
-      while (cur) {
-        if (cur === this) return true;
-        cur = cur.parentNode;
-      }
-      return false;
-    }
-    addEventListener(type, fn) {
-      if (!this._listeners.has(type)) this._listeners.set(type, []);
-      this._listeners.get(type).push(fn);
-    }
-    removeEventListener(type, fn) {
-      const arr = this._listeners.get(type);
-      if (!arr) return;
-      const i = arr.indexOf(fn);
-      if (i >= 0) arr.splice(i, 1);
-    }
-    dispatchEvent(ev) {
-      for (const fn of [...(this._listeners.get(ev.type) || [])]) fn(ev);
-    }
-    getBoundingClientRect() {
-      if (this.id === 'ag-usage-monitor-capsule' || this.classList.contains('wm-capsule-btn')) {
-        return { left: 680, right: 830, top: 824, bottom: 850, width: 150, height: 26 };
-      }
-      return this._rect;
-    }
-    matches(sel) {
-      if (sel === 'button') return this.tagName === 'BUTTON';
-      if (sel === 'textarea') return this.tagName === 'TEXTAREA';
-      if (sel === '[contenteditable]') return this.hasAttribute('contenteditable');
-      if (sel === '[role="button"]') return this.getAttribute('role') === 'button';
-      if (sel === '[role="textbox"]') return this.getAttribute('role') === 'textbox';
-      if (sel === '[aria-haspopup]') return this.hasAttribute('aria-haspopup');
-      if (sel === '[data-lexical-editor]') return this.hasAttribute('data-lexical-editor');
-      if (sel.startsWith('.')) return this.classList.contains(sel.slice(1));
-      return false;
-    }
-    querySelectorAll(sel) {
-      const parts = sel.split(',').map((s) => s.trim()).filter(Boolean);
-      const out = [];
-      const walk = (n) => {
-        for (const c of n.children) {
-          if (parts.some((p) => c.matches(p))) out.push(c);
-          walk(c);
-        }
-      };
-      walk(this);
-      return out;
-    }
-    querySelector(sel) {
-      return this.querySelectorAll(sel)[0] || null;
-    }
-  }
-
-  const docRoot = new IdeChatMockNode('html', { left: 0, right: 980, top: 0, bottom: 900, width: 980, height: 900 });
-  docRoot.isDocumentRoot = true;
-  const head = new IdeChatMockNode('head');
-  const body = new IdeChatMockNode('body', { left: 0, right: 980, top: 0, bottom: 900, width: 980, height: 900 });
-  docRoot.appendChild(head);
-  docRoot.appendChild(body);
+  const {
+    body,
+    document: mockDoc,
+    makeElement: makeChatNode,
+  } = createMockDom({
+    rootRect: { left: 0, right: 980, top: 0, bottom: 900, width: 980, height: 900 },
+    defaultRect: { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 },
+    resolveRect: (node) =>
+      node.id === 'ag-usage-monitor-capsule' || node.classList.contains('wm-capsule-btn')
+        ? { left: 680, right: 830, top: 824, bottom: 850, width: 150, height: 26 }
+        : null,
+  });
 
   // Header inside IDE chat pane (must NEVER be docked into inside extensionView iframe!)
-  const paneHeader = new IdeChatMockNode('header', { left: 0, right: 980, top: 0, bottom: 36, width: 980, height: 36 });
+  const paneHeader = makeChatNode('header', { left: 0, right: 980, top: 0, bottom: 36, width: 980, height: 36 });
   paneHeader.className = '@container/titlebar flex h-9 w-full items-center justify-between';
   body.appendChild(paneHeader);
 
   // Antigravity IDE Composer Card: outer role="button" focus wrapper + Lexical/Monaco editor + [+] [Gemini 4 Carbon High ^] ... [->]
-  const outerFocusCard = new IdeChatMockNode('div', { left: 130, right: 882, top: 770, bottom: 862, width: 752, height: 92 });
+  const outerFocusCard = makeChatNode('div', { left: 130, right: 882, top: 770, bottom: 862, width: 752, height: 92 });
   outerFocusCard.setAttribute('role', 'button');
-  const editorEl = new IdeChatMockNode('div', { left: 146, right: 866, top: 782, bottom: 816, width: 720, height: 34 });
+  const editorEl = makeChatNode('div', { left: 146, right: 866, top: 782, bottom: 816, width: 720, height: 34 });
   editorEl.setAttribute('contenteditable', 'true');
   editorEl.setAttribute('data-lexical-editor', 'true');
 
-  const toolbarRow = new IdeChatMockNode('div', { left: 146, right: 866, top: 822, bottom: 852, width: 720, height: 30 });
+  const toolbarRow = makeChatNode('div', { left: 146, right: 866, top: 822, bottom: 852, width: 720, height: 30 });
   toolbarRow.className = 'flex items-center justify-between';
-  const leftCluster = new IdeChatMockNode('div', { left: 146, right: 340, top: 822, bottom: 852, width: 194, height: 30 });
-  const plusBtn = new IdeChatMockNode('button', { left: 146, right: 172, top: 824, bottom: 850, width: 26, height: 26 });
+  const leftCluster = makeChatNode('div', { left: 146, right: 340, top: 822, bottom: 852, width: 194, height: 30 });
+  const plusBtn = makeChatNode('button', { left: 146, right: 172, top: 824, bottom: 850, width: 26, height: 26 });
   plusBtn.textContent = '+';
-  const modelBtn = new IdeChatMockNode('div', { left: 178, right: 336, top: 824, bottom: 850, width: 158, height: 26 });
+  const modelBtn = makeChatNode('div', { left: 178, right: 336, top: 824, bottom: 850, width: 158, height: 26 });
   modelBtn.setAttribute('aria-haspopup', 'menu');
   modelBtn.textContent = 'Gemini 4 Carbon High';
   leftCluster.appendChild(plusBtn);
   leftCluster.appendChild(modelBtn);
 
-  const rightCluster = new IdeChatMockNode('div', { left: 836, right: 866, top: 822, bottom: 852, width: 30, height: 30 });
-  const sendBtn = new IdeChatMockNode('button', { left: 838, right: 866, top: 823, bottom: 851, width: 28, height: 28 });
-  const arrowIcon = new IdeChatMockNode('span');
+  const rightCluster = makeChatNode('div', { left: 836, right: 866, top: 822, bottom: 852, width: 30, height: 30 });
+  const sendBtn = makeChatNode('button', { left: 838, right: 866, top: 823, bottom: 851, width: 28, height: 28 });
+  const arrowIcon = makeChatNode('span');
   arrowIcon.className = 'codicon codicon-arrow-right';
   arrowIcon.textContent = 'arrow_forward';
   sendBtn.appendChild(arrowIcon);
@@ -4517,36 +3667,6 @@ test('Antigravity IDE composer mount mode (输入框挂载) docks inside extensi
     enableWindowOverlay: true,
     showTopbarMultiSession: true,
     topbarCapsuleSlots: ['context', 'tps', 'quota_auto'],
-  };
-
-  const mockDoc = {
-    readyState: 'complete',
-    hidden: false,
-    documentElement: docRoot,
-    head,
-    body,
-    createElement: (tag) => new IdeChatMockNode(tag),
-    createElementNS: (_ns, tag) => new IdeChatMockNode(tag),
-    createTextNode: (txt) => {
-      const t = new IdeChatMockNode('#text');
-      t.textContent = String(txt);
-      return t;
-    },
-    getElementById: (id) => {
-      const walk = (n) => {
-        if (n.id === id) return n;
-        for (const c of n.children) {
-          const hit = walk(c);
-          if (hit) return hit;
-        }
-        return null;
-      };
-      return walk(docRoot);
-    },
-    querySelector: (sel) => docRoot.querySelector(sel),
-    querySelectorAll: (sel) => docRoot.querySelectorAll(sel),
-    addEventListener() {},
-    removeEventListener() {},
   };
 
   const chatConvId = 'a4206937-54dd-4d4e-a161-813719bf7107';
@@ -5449,163 +4569,15 @@ test('v1.5 feedback E2E: sticky bridge port/token across hot-reloads, CDP->HTTP 
     modelBreakdown: [],
   });
 
-  function makeLiteElem(tag) {
-    const attrs = new Map();
-    const classes = new Set();
-    const styleProps = new Map();
-    const listeners = new Map();
-    let ownText = '';
-    const el = {
-      tagName: String(tag || 'div').toUpperCase(),
-      nodeType: 1,
-      id: '',
-      value: '',
-      dataset: {},
-      children: [],
-      parentNode: null,
-      parentElement: null,
-      shadowRoot: null,
-      clientWidth: 0,
-      offsetWidth: 0,
-      scrollWidth: 0,
-      get firstChild() { return el.children[0] || null; },
-      get lastChild() { return el.children[el.children.length - 1] || null; },
-      get textContent() {
-        if (el.children.length === 0) return ownText;
-        return el.children.map((c) => c.textContent ?? '').join('');
-      },
-      set textContent(v) {
-        el.children = [];
-        ownText = String(v ?? '');
-      },
-      style: {
-        width: '',
-        height: '',
-        maxHeight: '',
-        top: '',
-        left: '',
-        right: '',
-        display: '',
-        setProperty(k, v) { styleProps.set(k, String(v)); },
-        getPropertyValue(k) { return styleProps.get(k) || ''; },
-        removeProperty(k) { styleProps.delete(k); },
-      },
-      classList: {
-        add(...names) { for (const n of names) if (n) classes.add(n); },
-        remove(...names) { for (const n of names) classes.delete(n); },
-        toggle(n, force) {
-          const add = force === undefined ? !classes.has(n) : Boolean(force);
-          if (add) classes.add(n); else classes.delete(n);
-          return add;
-        },
-        contains(n) { return classes.has(n); },
-      },
-      get className() { return [...classes].join(' '); },
-      set className(v) {
-        classes.clear();
-        for (const p of String(v || '').split(/\s+/)) if (p) classes.add(p);
-      },
-      setAttribute(k, v) {
-        attrs.set(k, String(v));
-        if (k === 'id') el.id = String(v);
-        if (k === 'class') el.className = String(v);
-      },
-      getAttribute(k) { return attrs.has(k) ? attrs.get(k) : null; },
-      removeAttribute(k) { attrs.delete(k); },
-      hasAttribute(k) { return attrs.has(k); },
-      appendChild(child) {
-        if (!child) return child;
-        if (child.parentNode?.removeChild) child.parentNode.removeChild(child);
-        child.parentNode = el;
-        child.parentElement = el;
-        el.children.push(child);
-        return child;
-      },
-      insertBefore(child, ref) {
-        if (!ref) return el.appendChild(child);
-        if (child.parentNode?.removeChild) child.parentNode.removeChild(child);
-        const idx = el.children.indexOf(ref);
-        child.parentNode = el;
-        child.parentElement = el;
-        if (idx >= 0) el.children.splice(idx, 0, child);
-        else el.children.push(child);
-        return child;
-      },
-      removeChild(child) {
-        const idx = el.children.indexOf(child);
-        if (idx >= 0) {
-          el.children.splice(idx, 1);
-          child.parentNode = null;
-          child.parentElement = null;
-        }
-        return child;
-      },
-      remove() {
-        if (el.parentNode?.removeChild) el.parentNode.removeChild(el);
-      },
-      contains(target) {
-        let cur = target;
-        while (cur) {
-          if (cur === el) return true;
-          cur = cur.parentNode;
-        }
-        return false;
-      },
-      attachShadow() {
-        const sr = makeLiteElem('shadow-root');
-        el.shadowRoot = sr;
-        return sr;
-      },
-      addEventListener(type, fn) {
-        if (!listeners.has(type)) listeners.set(type, []);
-        listeners.get(type).push(fn);
-      },
-      removeEventListener() {},
-      dispatchEvent(ev) {
-        for (const fn of listeners.get(ev.type) || []) fn(ev);
-      },
-      getBoundingClientRect() {
-        const w = Number.parseFloat(el.style.width) || el.offsetWidth || 120;
-        return { left: 900, right: 900 + w, top: 8, bottom: 36, width: w, height: 28 };
-      },
-      querySelectorAll(sel) {
-        const out = [];
-        const parts = String(sel).trim().split(/\s+/);
-        const matchesSimple = (node, s) => {
-          if (s.startsWith('#')) return node.id === s.slice(1);
-          if (s.startsWith('.')) {
-            return s.slice(1).split('.').filter(Boolean).every((c) => node.classList.contains(c));
-          }
-          return node.tagName.toLowerCase() === s.toLowerCase();
-        };
-        const matchesChain = (node, idx) => {
-          if (!matchesSimple(node, parts[idx])) return false;
-          if (idx === 0) return true;
-          let p = node.parentElement;
-          while (p) {
-            if (matchesChain(p, idx - 1)) return true;
-            p = p.parentElement;
-          }
-          return false;
-        };
-        const walk = (root) => {
-          for (const ch of root.children || []) {
-            if (matchesChain(ch, parts.length - 1)) out.push(ch);
-            walk(ch);
-          }
-        };
-        walk(el);
-        return out;
-      },
-      querySelector(sel) {
-        return el.querySelectorAll(sel)[0] || null;
-      },
-    };
-    return el;
-  }
-
-  const body = makeLiteElem('body');
-  const head = makeLiteElem('head');
+  const {
+    body,
+    document: mockDoc,
+  } = createMockDom({
+    resolveRect: (el) => {
+      const w = Number.parseFloat(el.style.width) || el.offsetWidth || 120;
+      return { left: 900, right: 900 + w, top: 8, bottom: 36, width: w, height: 28 };
+    },
+  });
   let failHttpOnce = false;
   const mockWin = {
     innerWidth: 1280,
@@ -5631,21 +4603,6 @@ test('v1.5 feedback E2E: sticky bridge port/token across hot-reloads, CDP->HTTP 
       }
       return { ok: true, status: 200, json: async () => buildMockPayload() };
     },
-  };
-  const mockDoc = {
-    hidden: false,
-    body,
-    head,
-    documentElement: makeLiteElem('html'),
-    activeElement: null,
-    createElement: (t) => makeLiteElem(t),
-    createElementNS: (_ns, t) => makeLiteElem(t),
-    createTextNode: (txt) => ({ nodeType: 3, textContent: String(txt ?? ''), parentNode: null }),
-    getElementById: (id) => body.children.find((c) => c.id === id) || null,
-    querySelector: (s) => body.querySelector(s),
-    querySelectorAll: (s) => body.querySelectorAll(s),
-    addEventListener() {},
-    removeEventListener() {},
   };
 
   const sandbox = {
@@ -5758,134 +4715,13 @@ test('WindowOverlayShell macOS (darwin) adaptation: sets data-os="mac", uses 12p
   assert.match(stylesCss, /:host\(\.wm-capsule-host\[data-dock="fixed"\]\[data-os="mac"\]\)\s*\{\s*right:\s*12px;/);
 
   function runOverlayForPlatform(platformKey, { withTitlebar = false, auxLeft = 0, winWidth = 1280 } = {}) {
-    function makeNode(tag) {
-      const attrs = new Map();
-      const clsSet = new Set();
-      const listeners = new Map();
-      let rectOverride = null;
-      const el = {
-        tagName: String(tag || 'DIV').toUpperCase(),
-        id: '',
-        textContent: '',
-        dataset: {},
-        offsetWidth: 0,
-        offsetHeight: 0,
-        clientWidth: 0,
-        scrollWidth: 0,
-        parentNode: null,
-        parentElement: null,
-        shadowRoot: null,
-        children: [],
-        style: {
-          setProperty(k, v) { this[k] = String(v); },
-          removeProperty(k) { delete this[k]; },
-          getPropertyValue(k) { return this[k] || ''; },
-        },
-        get isConnected() {
-          let cur = el;
-          while (cur) {
-            if (cur === body || cur === docEl) return true;
-            cur = cur.parentNode;
-          }
-          return false;
-        },
-        get firstChild() { return el.children[0] || null; },
-        get firstElementChild() { return el.children[0] || null; },
-        get lastElementChild() { return el.children[el.children.length - 1] || null; },
-        get className() { return [...clsSet].join(' '); },
-        set className(v) {
-          clsSet.clear();
-          for (const c of String(v || '').split(/\s+/).filter(Boolean)) clsSet.add(c);
-          attrs.set('class', [...clsSet].join(' '));
-        },
-        classList: {
-          add: (...cs) => cs.forEach((c) => c && clsSet.add(c)),
-          remove: (...cs) => cs.forEach((c) => clsSet.delete(c)),
-          contains: (c) => clsSet.has(c),
-          toggle(c, force) {
-            const on = force !== undefined ? Boolean(force) : !clsSet.has(c);
-            if (on) clsSet.add(c);
-            else clsSet.delete(c);
-            return on;
-          },
-        },
-        setAttribute(k, v) {
-          if (k === 'class') { el.className = v; return; }
-          attrs.set(k, String(v));
-          if (k === 'id') el.id = String(v);
-        },
-        getAttribute: (k) => (k === 'class' ? el.className : attrs.has(k) ? attrs.get(k) : null),
-        hasAttribute: (k) => attrs.has(k),
-        removeAttribute: (k) => attrs.delete(k),
-        appendChild(ch) {
-          if (!ch) return ch;
-          if (ch.parentNode?.removeChild) ch.parentNode.removeChild(ch);
-          ch.parentNode = el;
-          ch.parentElement = el;
-          el.children.push(ch);
-          return ch;
-        },
-        insertBefore(ch, ref) {
-          if (!ref) return el.appendChild(ch);
-          if (ch.parentNode?.removeChild) ch.parentNode.removeChild(ch);
-          ch.parentNode = el;
-          ch.parentElement = el;
-          const i = el.children.indexOf(ref);
-          if (i < 0) el.children.push(ch);
-          else el.children.splice(i, 0, ch);
-          return ch;
-        },
-        removeChild(ch) {
-          const i = el.children.indexOf(ch);
-          if (i >= 0) {
-            el.children.splice(i, 1);
-            ch.parentNode = null;
-            ch.parentElement = null;
-          }
-          return ch;
-        },
-        remove() { if (el.parentNode?.removeChild) el.parentNode.removeChild(el); },
-        closest: () => null,
-        contains(t) {
-          let cur = t;
-          while (cur) { if (cur === el) return true; cur = cur.parentNode; }
-          return false;
-        },
-        attachShadow() {
-          const sr = makeNode('shadow-root');
-          el.shadowRoot = sr;
-          return sr;
-        },
-        addEventListener(type, fn) {
-          if (!listeners.has(type)) listeners.set(type, []);
-          listeners.get(type).push(fn);
-        },
-        removeEventListener() {},
-        setRect(r) { rectOverride = r; },
-        getBoundingClientRect() {
-          return rectOverride || { left: 0, right: 64, top: 6, bottom: 34, width: 64, height: 28 };
-        },
-        querySelectorAll(sel) {
-          const out = [];
-          const walk = (n) => {
-            for (const c of n.children || []) {
-              if (sel === '[class*="@container/titlebar"]' && c.className.includes('@container/titlebar')) out.push(c);
-              else if (sel === '[data-testid="toggle-aux-sidebar"]' && c.getAttribute('data-testid') === 'toggle-aux-sidebar') out.push(c);
-              else if (sel === ':scope > div.shrink-0' && n === el && c.classList.contains('shrink-0')) out.push(c);
-              walk(c);
-            }
-          };
-          walk(el);
-          return out;
-        },
-        querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
-      };
-      return el;
-    }
-
-    const docEl = makeNode('html');
-    const body = makeNode('body');
-    docEl.appendChild(body);
+    const {
+      body,
+      document: mockDoc,
+      makeElement: makeNode,
+    } = createMockDom({
+      defaultRect: { left: 0, right: 64, top: 6, bottom: 34, width: 64, height: 28 },
+    });
 
     if (withTitlebar) {
       const tb = makeNode('div');
@@ -5935,20 +4771,6 @@ test('WindowOverlayShell macOS (darwin) adaptation: sets data-os="mac", uses 12p
       removeEventListener() {},
       getComputedStyle: () => ({ paddingRight: '8px', getPropertyValue: () => '' }),
       fetch: async () => ({ ok: true, status: 200, json: async () => payload }),
-    };
-    const mockDoc = {
-      hidden: false,
-      body,
-      head: makeNode('head'),
-      documentElement: docEl,
-      createElement: makeNode,
-      createElementNS: (_ns, t) => makeNode(t),
-      createTextNode: (txt) => ({ nodeType: 3, textContent: String(txt ?? ''), parentNode: null }),
-      getElementById: (id) => body.children.find((c) => c.id === id) || null,
-      querySelector: (s) => body.querySelector(s),
-      querySelectorAll: (s) => body.querySelectorAll(s),
-      addEventListener() {},
-      removeEventListener() {},
     };
     const sb = {
       window: mockWin,

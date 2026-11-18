@@ -14,9 +14,95 @@ import {
   normalizeClientWindowMountMode,
   resolveScopedConversation,
 } from '../../store/telemetryStore.js';
+import { buildFallbackRunningConversations } from './LiveActivityWidget.js';
 
 export const RING_RADIUS = 5.2;
 export const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
+
+/**
+ * Compute shared context ring + 1..5 capsule slot metric payload from telemetry & scoped conversation.
+ */
+export function buildCapsuleSlotContext(
+  data,
+  { scopedConv = null, overviewConv = null, ctxAgent = null, aggregated = null } = {}
+) {
+  if (!data) return { hasTelemetry: false };
+  const activeConv = data.activeConversation || {};
+  const overviewActive = overviewConv || scopedConv || aggregated || activeConv;
+  const capActive = scopedConv || aggregated || activeConv || {};
+  const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
+  const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
+  const totalTokens = Number(ctx.totalTokens || 0);
+  const usedPct =
+    limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
+  const dashOffset = +(
+    RING_CIRCUMFERENCE *
+    (1 - Math.max(0, Math.min(100, usedPct)) / 100)
+  ).toFixed(2);
+
+  const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
+  const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
+  const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
+  const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
+  const sessionTokens =
+    Number(capActive.stepCount || 0) > 0 ||
+    capActive.totalTokens != null ||
+    capInTok + capCacheTok + capOutTok > 0
+      ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
+      : null;
+
+  return {
+    hasTelemetry: true,
+    usedPct,
+    dashOffset,
+    isRunning,
+    tps: scopedConv?.latestTokPerSec ?? aggregated?.latestTokPerSec ?? activeConv.latestTokPerSec ?? null,
+    avgTps: scopedConv?.avgTokPerSec ?? aggregated?.avgTokPerSec ?? activeConv.avgTokPerSec ?? null,
+    ttft: scopedConv?.latestTtftSec ?? aggregated?.latestTtftSec ?? activeConv.latestTtftSec ?? null,
+    stepCost:
+      scopedConv?.latestStepCostUsd ??
+      aggregated?.latestStepCostUsd ??
+      activeConv.latestStepCostUsd ??
+      null,
+    sessionCost:
+      scopedConv?.sessionCostUsd ?? aggregated?.sessionCostUsd ?? activeConv.sessionCostUsd ?? null,
+    cacheHitPct:
+      Number(capActive.stepCount || 0) > 0
+        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
+        : null,
+    latestPromptTokens: capActive.latestPromptTokens ?? null,
+    sessionTokens,
+    quotas: data.quotas,
+  };
+}
+
+/**
+ * Compute multi-session button state & normalized running conversation list.
+ */
+export function resolveMultiSessionCapsuleState(
+  data,
+  { agents = [], aggregated = null, latestTokPerSec = undefined, contextUsedPct = undefined } = {}
+) {
+  const rawRunningList = buildFallbackRunningConversations(data, {
+    agents,
+    aggregated,
+    latestTokPerSec,
+    contextUsedPct,
+  });
+  const runningCount = rawRunningList.length;
+  const runningSubCount = rawRunningList.reduce(
+    (acc, item) => acc + Number(item.runningSubagentCount || 0),
+    0
+  );
+  const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+  const multiBtnText =
+    runningCount > 0
+      ? runningSubCount > 0
+        ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+        : t('capsule.multiRunning', { count: runningCount })
+      : t('capsule.multiZero');
+  return { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText };
+}
 
 /**
  * Create a single reusable capsule metric slot node (`0..4`) with an optional SVG context ring.
@@ -274,75 +360,26 @@ export const CapsuleBarWidget = defineComponent({
         return;
       }
 
-      const { scopedConv, ctxAgent, aggregated } = resolveScopedConversation(
+      const { agents, scopedConv, ctxAgent, aggregated } = resolveScopedConversation(
         data,
         'all',
         'auto'
       );
-      const activeConv = data.activeConversation || {};
-      const capActive = scopedConv || aggregated || activeConv;
-      const ctx = ctxAgent?.context || capActive.context || activeConv.context || {};
-      const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
-      const totalTokens = Number(ctx.totalTokens || 0);
-      const usedPct =
-        limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
-      const dashOffset = +(
-        RING_CIRCUMFERENCE *
-        (1 - Math.max(0, Math.min(100, usedPct)) / 100)
-      ).toFixed(2);
-
-      const rawRunningList = Array.isArray(data.runningConversations)
-        ? data.runningConversations
-        : [];
-      const runningCount = rawRunningList.length;
-      const runningSubCount = rawRunningList.reduce(
-        (acc, item) => acc + Number(item.runningSubagentCount || 0),
-        0
-      );
-      const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+      const slotCtx = buildCapsuleSlotContext(data, { scopedConv, ctxAgent, aggregated });
+      const { runningCount, hasWaiting, multiBtnText } = resolveMultiSessionCapsuleState(data, {
+        agents,
+        aggregated,
+        contextUsedPct: slotCtx.usedPct,
+      });
 
       patchClasses(multiBtn, {
         'is-running': runningCount > 0 && !hasWaiting,
         'is-waiting': runningCount > 0 && hasWaiting,
       });
-      const multiBtnText =
-        runningCount > 0
-          ? runningSubCount > 0
-            ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
-            : t('capsule.multiRunning', { count: runningCount })
-          : t('capsule.multiZero');
       patchText(multiLabel, multiBtnText);
 
-      const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
-      const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
-      const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
-      const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
-      const sessionTokens =
-        Number(capActive.stepCount || 0) > 0 ||
-        capActive.totalTokens != null ||
-        capInTok + capCacheTok + capOutTok > 0
-          ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
-          : null;
-
-      patchClasses(capsuleBtn, { 'is-running': isRunning });
-      syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, {
-        hasTelemetry: true,
-        usedPct,
-        dashOffset,
-        isRunning,
-        tps: capActive.latestTokPerSec ?? null,
-        avgTps: capActive.avgTokPerSec ?? null,
-        ttft: capActive.latestTtftSec ?? null,
-        stepCost: capActive.latestStepCostUsd ?? null,
-        sessionCost: capActive.sessionCostUsd ?? null,
-        cacheHitPct:
-          Number(capActive.stepCount || 0) > 0
-            ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
-            : null,
-        latestPromptTokens: capActive.latestPromptTokens ?? null,
-        sessionTokens,
-        quotas: data.quotas,
-      });
+      patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
+      syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
     }
 
     return {

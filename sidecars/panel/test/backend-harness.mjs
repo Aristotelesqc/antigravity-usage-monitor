@@ -26,6 +26,8 @@ const BACKEND_MODULE_FILES = [
   '../backend/http-helpers.mjs',
   '../backend/settings-schema.mjs',
   '../backend/config.mjs',
+  '../backend/sqlite-client.mjs',
+  '../backend/proto-wire.mjs',
   '../backend/cli-sqlite-reader.mjs',
   '../backend/cli-statusline-config.mjs',
   '../backend/ls-discovery.mjs',

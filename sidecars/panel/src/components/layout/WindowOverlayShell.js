@@ -25,25 +25,23 @@ import {
   isEventInside,
   patchAttr,
   patchClasses,
-  patchKeyedList,
   patchText,
 } from '../../core/domPatch.js';
-import { formatElapsedSec } from '../../core/formatters.js';
 import { deliverCdpBridgeResponses, getWindowBridgeConfig } from '../../core/httpClient.js';
-import { getEffectiveLocale, i18nStore, setI18nLanguage, t } from '../../i18n/index.js';
+import { i18nStore, setI18nLanguage, t } from '../../i18n/index.js';
 import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 import {
-  RING_CIRCUMFERENCE,
+  buildCapsuleSlotContext,
   createCapsuleSlotNode,
+  resolveMultiSessionCapsuleState,
   syncCapsuleSlotNodes,
 } from '../widgets/CapsuleBarWidget.js';
+import { LiveActivityWidget } from '../widgets/LiveActivityWidget.js';
 import { createDynamicWidgetHost } from '../../registries/widgetRegistry.js';
 import {
   DEFAULT_CLIENT_HOVER_MODULES,
   extractHostRouteCascadeId,
   fetchTelemetry,
-  formatAgentBadgeText,
-  getAgentBadgeClass,
   isMacHostPlatform,
   normalizeClientHoverModules,
   normalizeClientPopoverWidth,
@@ -982,9 +980,6 @@ export function mountWindowOverlay() {
   let multiPinned = false;
   let hoverLeaveTimer = null;
   let multiLeaveTimer = null;
-  const manualSubExpandMap = new Map();
-  const multiTimersMap = new Map();
-  let multiLiveTickTimer = null;
   let hasPointerCoords = Boolean(
     carryOverPointer &&
       Number.isFinite(carryOverPointer.x) &&
@@ -1080,52 +1075,6 @@ export function mountWindowOverlay() {
       }
       setMultiOpen(false);
     }, 90);
-  }
-
-  function bindMultiElapsedTimer(timerKey, sig, rawStartMs, targetEl) {
-    const now = Date.now();
-    const prev = multiTimersMap.get(timerKey);
-    let startMs = prev?.startMs || 0;
-    if (!prev || prev.sig !== sig) {
-      const validRaw = Number(rawStartMs || 0);
-      startMs = validRaw > 0 && validRaw <= now + 2000 ? validRaw : now;
-    } else if (startMs <= 0 && Number(rawStartMs) > 0 && Number(rawStartMs) <= now + 2000) {
-      startMs = Number(rawStartMs);
-    }
-    multiTimersMap.set(timerKey, { sig, startMs, el: targetEl });
-    const elapsedSec = Math.max(0, (now - startMs) / 1000);
-    patchText(targetEl, formatElapsedSec(elapsedSec));
-  }
-
-  function tickMultiElapsedDisplay() {
-    const now = Date.now();
-    for (const entry of multiTimersMap.values()) {
-      if (!entry?.el) continue;
-      const elapsedSec = entry.startMs > 0 ? Math.max(0, (now - entry.startMs) / 1000) : 0;
-      patchText(entry.el, formatElapsedSec(elapsedSec));
-    }
-  }
-
-  function pauseMultiLiveTicker() {
-    if (multiLiveTickTimer) {
-      clearInterval(multiLiveTickTimer);
-      multiLiveTickTimer = null;
-    }
-  }
-
-  function stopMultiLiveTicker() {
-    pauseMultiLiveTicker();
-    multiTimersMap.clear();
-  }
-
-  function ensureMultiLiveTicker() {
-    if (multiTimersMap.size === 0) {
-      stopMultiLiveTicker();
-      return;
-    }
-    if (!multiLiveTickTimer) {
-      multiLiveTickTimer = setInterval(tickMultiElapsedDisplay, 1000);
-    }
   }
 
   function inspectSessionInMonitor(cascadeId) {
@@ -1424,105 +1373,7 @@ export function mountWindowOverlay() {
     [hoverUpdateBar, hoverWidgetsContainer]
   );
 
-  // 左侧多会话实时看板浮层（活跃运行会话卡片 + 近期多窗口会话速览，全槽位预占、就地补丁更新）
-  function createMultiLiveSubRow() {
-    const subBadge = h('span', {
-      className: 'agent-badge badge-sub-1',
-      text: t('fmt.subBadge', { index: 1 }),
-    });
-    const subRole = h('span', { className: 'live-sub-role', text: t('fmt.subAgent') });
-    const subSummary = h('span', { className: 'live-sub-summary', text: '' });
-    const subElapsed = h('span', { className: 'live-sub-elapsed text-mono', text: '0s' });
-    const rowEl = h('div', { className: 'live-sub-row' }, [
-      h('div', { className: 'live-sub-left' }, [subBadge, subRole, subSummary]),
-      subElapsed,
-    ]);
-    return {
-      el: rowEl,
-      refs: { rowEl, subBadge, subRole, subSummary, subElapsed },
-    };
-  }
-
-  function createMultiLiveTaskCard() {
-    const dotIcon = createSvgIcon('dot', { size: 11 });
-    patchClasses(dotIcon, { 'is-pulsing': true });
-    const dotWrap = h('span', { className: 'live-activity-dot' }, [dotIcon]);
-    const titleEl = h('strong', { className: 'live-task-title', text: t('live.currentSession') });
-    const hereTagEl = h('span', {
-      className: 'wm-session-tag is-here',
-      hidden: true,
-      text: t('multi.hereTag'),
-    });
-    const metricsEl = h('span', {
-      className: 'wm-task-metrics text-mono',
-      hidden: true,
-      text: '',
-    });
-    const subToggleBtn = h('button', {
-      type: 'button',
-      className: 'live-sub-toggle',
-      hidden: true,
-      text: t('live.subToggleIdle', { total: 0, arrow: '▸' }),
-    });
-    const elapsedEl = h('span', {
-      className: 'live-activity-elapsed text-mono',
-      text: '0s',
-    });
-
-    const headerEl = h('div', { className: 'live-task-header' }, [
-      h('div', { className: 'live-task-title-wrap' }, [dotWrap, titleEl, hereTagEl]),
-      h('div', { className: 'live-task-header-right' }, [metricsEl, subToggleBtn, elapsedEl]),
-    ]);
-
-    const mainBadge = h('span', {
-      className: 'agent-badge badge-main',
-      hidden: true,
-      text: t('fmt.mainBadge'),
-    });
-    const mainPhase = h('strong', { className: 'live-activity-phase', text: t('live.thinking') });
-    const mainProgress = h('span', {
-      className: 'live-activity-progress text-mono',
-      hidden: true,
-      text: '',
-    });
-    const mainSep = h('span', { className: 'live-activity-sep', hidden: true, text: '·' });
-    const mainDetail = h('span', {
-      className: 'live-activity-detail',
-      hidden: true,
-      text: '',
-    });
-
-    const mainRowEl = h('div', { className: 'live-task-main-row' }, [
-      mainBadge,
-      mainPhase,
-      mainProgress,
-      mainSep,
-      mainDetail,
-    ]);
-
-    const subListEl = h('div', { className: 'live-sub-list', hidden: true });
-    const cardEl = h('div', { className: 'live-task-card' }, [headerEl, mainRowEl, subListEl]);
-
-    return {
-      el: cardEl,
-      refs: {
-        cardEl,
-        dotIcon,
-        titleEl,
-        hereTagEl,
-        metricsEl,
-        subToggleBtn,
-        elapsedEl,
-        mainBadge,
-        mainPhase,
-        mainProgress,
-        mainSep,
-        mainDetail,
-        subListEl,
-      },
-    };
-  }
-
+  // 左侧多会话实时看板浮层（受控复用 LiveActivityWidget，保持零硬编码与同一套计时器状态机）
   const multiPinBadge = h('span', {
     className: 'wm-pin-badge',
     hidden: true,
@@ -1539,10 +1390,16 @@ export function mountWindowOverlay() {
       multiEmptyTextEl,
     ]),
   ]);
-  const multiRunningListEl = h('div', {
-    className: 'live-activity-list',
-    hidden: true,
-    'aria-live': 'polite',
+  const multiRunningWidget = LiveActivityWidget({
+    defaultExpandRunningSubs: true,
+    showSessionExtras: true,
+    isVisibleFn: () => Boolean(multiOpen && !document.hidden && !disposed),
+    onSelectSession: inspectSessionInMonitor,
+    onLayoutChange: () => {
+      if (multiOpen) {
+        positionFloatingElements();
+      }
+    },
   });
 
   const multiTitleTextEl = h('span', { text: t('multi.title') });
@@ -1576,7 +1433,7 @@ export function mountWindowOverlay() {
         }
       },
     },
-    [multiHeaderEl, multiEmptyEl, multiRunningListEl]
+    [multiHeaderEl, multiEmptyEl, multiRunningWidget.el]
   );
 
   // 完整四标签悬浮容器
@@ -2360,12 +2217,13 @@ export function mountWindowOverlay() {
     patchAttr(multiPanelEl, 'hidden', !multiOpen);
     if (multiOpen) {
       renderCapsuleTelemetry();
+      multiRunningWidget.refs.resumeTicker();
       positionFloatingElements();
       if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => positionFloatingElements());
       }
     } else {
-      pauseMultiLiveTicker();
+      multiRunningWidget.refs.pauseTicker();
     }
   }
 
@@ -2440,18 +2298,10 @@ export function mountWindowOverlay() {
   }
 
   function renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, hostRouteConversationId) {
-    if (manualSubExpandMap.size > 0) {
-      const runningIds = new Set(rawRunningList.map((item) => item.cascadeId));
-      for (const id of manualSubExpandMap.keys()) {
-        if (!runningIds.has(id)) manualSubExpandMap.delete(id);
-      }
+    if (!multiOpen || document.hidden) {
+      multiRunningWidget.refs.pauseTicker();
+      return;
     }
-    if (!multiOpen || document.hidden) return;
-    const localeKey = getEffectiveLocale();
-    const hostRouteLower = String(
-      hostRouteConversationId || extractHostRouteCascadeId() || ''
-    ).toLowerCase();
-
     patchText(
       multiRunningMetaEl,
       runningCount > 0
@@ -2461,201 +2311,10 @@ export function mountWindowOverlay() {
         : t('multi.allIdle')
     );
     patchAttr(multiEmptyEl, 'hidden', runningCount > 0);
-    patchAttr(multiRunningListEl, 'hidden', runningCount === 0);
-
-    if (runningCount === 0) {
-      stopMultiLiveTicker();
-      patchKeyedList(multiRunningListEl, [], {});
-    } else {
-      const activeTimerKeys = new Set();
-      for (const item of rawRunningList) {
-        activeTimerKeys.add(`main:${item.cascadeId}`);
-        const subCount = Number(item.subagentCount || item.subagents?.length || 0);
-        const runSubs = Number(item.runningSubagentCount || 0);
-        const isExp = manualSubExpandMap.has(item.cascadeId)
-          ? manualSubExpandMap.get(item.cascadeId)
-          : runSubs > 0;
-        if (subCount > 0 && isExp) {
-          for (const sub of item.subagents || []) {
-            if (sub?.isRunning) {
-              activeTimerKeys.add(`sub:${sub.cascadeId}`);
-            }
-          }
-        }
-      }
-
-      patchKeyedList(multiRunningListEl, rawRunningList, {
-        keyFn: (item) => item.cascadeId,
-        sigFn: (item) => {
-          const runSubs = Number(item.runningSubagentCount || 0);
-          const isExp = manualSubExpandMap.has(item.cascadeId)
-            ? manualSubExpandMap.get(item.cascadeId)
-            : runSubs > 0;
-          const isHere =
-            Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
-          const subSig = (item.subagents || [])
-            .map(
-              (s) =>
-                `${s.cascadeId}:${s.isRunning}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
-            )
-            .join('|');
-          return `${localeKey}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${runSubs}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
-        },
-        createRow: createMultiLiveTaskCard,
-        updateRow: (refs, item) => {
-          const act = item.mainActivity || {
-            phase: 'thinking',
-            label: t('live.thinking'),
-            detail: '',
-            stepProgress: '',
-            startedAtMs: item.lastModifiedMs || 0,
-            signature: `fallback:${item.lastModifiedMs || 0}`,
-          };
-          const isWaiting = act.phase === 'waiting';
-          const isCompacting = act.phase === 'compacting';
-          patchClasses(refs.cardEl, {
-            'is-waiting': isWaiting,
-            'is-compacting': isCompacting,
-          });
-          patchClasses(refs.dotIcon, { 'is-pulsing': true });
-
-          const convTitle =
-            item.title || item.cascadeId?.slice(0, 8) || t('live.currentSession');
-          patchText(refs.titleEl, convTitle);
-          patchAttr(refs.titleEl, 'title', t('multi.inspectSessionTitle', { title: convTitle }));
-          refs.titleEl.onclick = (e) => {
-            e.stopPropagation();
-            inspectSessionInMonitor(item.cascadeId);
-          };
-
-          const isHere =
-            Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
-          patchText(refs.hereTagEl, t('multi.hereTag'));
-          patchAttr(refs.hereTagEl, 'hidden', !isHere);
-
-          const metricParts = [];
-          if (Number.isFinite(item.latestTokPerSec) && item.latestTokPerSec > 0) {
-            metricParts.push(
-              `${item.latestTokPerSec >= 100 ? Math.round(item.latestTokPerSec) : item.latestTokPerSec.toFixed(1)} t/s`
-            );
-          }
-          if (item.contextUsedPct != null && Number.isFinite(Number(item.contextUsedPct))) {
-            metricParts.push(`${Math.round(Number(item.contextUsedPct))}%`);
-          }
-          const metricsStr = metricParts.join(' · ');
-          patchAttr(refs.metricsEl, 'hidden', !metricsStr);
-          if (metricsStr) {
-            patchText(refs.metricsEl, metricsStr);
-          }
-
-          const subCount = Number(item.subagentCount || item.subagents?.length || 0);
-          const runSubCount = Number(item.runningSubagentCount || 0);
-          const isExpanded = manualSubExpandMap.has(item.cascadeId)
-            ? manualSubExpandMap.get(item.cascadeId)
-            : runSubCount > 0;
-          patchText(refs.mainBadge, t('fmt.mainBadge'));
-          patchAttr(refs.mainBadge, 'hidden', subCount === 0);
-          patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
-          if (subCount > 0) {
-            const arrow = isExpanded ? '▾' : '▸';
-            const toggleText =
-              runSubCount > 0
-                ? t('live.subToggleRunning', { run: runSubCount, total: subCount, arrow })
-                : t('live.subToggleIdle', { total: subCount, arrow });
-            patchText(refs.subToggleBtn, toggleText);
-            patchClasses(refs.subToggleBtn, { 'is-expanded': isExpanded });
-            refs.subToggleBtn.onclick = (e) => {
-              e.stopPropagation();
-              manualSubExpandMap.set(item.cascadeId, !isExpanded);
-              renderCapsuleTelemetry();
-              if (multiOpen) {
-                positionFloatingElements();
-              }
-            };
-          }
-
-          const mainTimerKey = `main:${item.cascadeId}`;
-          activeTimerKeys.add(mainTimerKey);
-          bindMultiElapsedTimer(
-            mainTimerKey,
-            `${item.cascadeId}:${act.signature || act.label}`,
-            act.startedAtMs,
-            refs.elapsedEl
-          );
-
-          patchText(refs.mainPhase, act.label || t('live.thinking'));
-          const progText = act.stepProgress ? `[${act.stepProgress}]` : '';
-          patchAttr(refs.mainProgress, 'hidden', !progText);
-          if (progText) {
-            patchText(refs.mainProgress, progText);
-          }
-
-          const detailStr = act.detail || '';
-          patchAttr(refs.mainSep, 'hidden', !detailStr);
-          patchAttr(refs.mainDetail, 'hidden', !detailStr);
-          patchText(refs.mainDetail, detailStr);
-
-          const showSubs = subCount > 0 && isExpanded;
-          patchAttr(refs.subListEl, 'hidden', !showSubs);
-          if (showSubs) {
-            const subItems = item.subagents || [];
-            patchKeyedList(refs.subListEl, subItems, {
-              keyFn: (sub) => sub.cascadeId,
-              sigFn: (sub) =>
-                `${localeKey}:${sub.cascadeId}:${sub.role}:${sub.isRunning}:${sub.stepCount}:${sub.liveActivity?.signature || ''}:${sub.isRunning ? multiTimersMap.has(`sub:${sub.cascadeId}`) : true}`,
-              createRow: createMultiLiveSubRow,
-              updateRow: (subRefs, sub) => {
-                const subAct = sub.liveActivity || {
-                  phase: sub.isRunning ? 'thinking' : 'done',
-                  label: sub.isRunning ? t('live.thinking') : t('live.done'),
-                  detail: '',
-                  stepProgress: '',
-                  startedAtMs: sub.lastModifiedMs || 0,
-                };
-                patchClasses(subRefs.rowEl, { 'is-done': !sub.isRunning });
-                const subBadgeCls = getAgentBadgeClass(sub.index || 1, false);
-                patchAttr(subRefs.subBadge, 'class', `agent-badge ${subBadgeCls}`);
-                patchText(subRefs.subBadge, formatAgentBadgeText(sub));
-                patchText(subRefs.subRole, sub.role || sub.shortLabel || t('fmt.subAgent'));
-
-                const subProg = subAct.stepProgress ? ` [${subAct.stepProgress}]` : '';
-                const summaryText = sub.isRunning
-                  ? `${subAct.label || t('live.running')}${subProg}${subAct.detail ? ` · ${subAct.detail}` : ''}`
-                  : t('live.doneWithSteps', { steps: sub.stepCount || 0 });
-                patchText(subRefs.subSummary, summaryText);
-
-                const subTimerKey = `sub:${sub.cascadeId}`;
-                if (sub.isRunning) {
-                  activeTimerKeys.add(subTimerKey);
-                  bindMultiElapsedTimer(
-                    subTimerKey,
-                    `${sub.cascadeId}:${subAct.signature || subAct.label}`,
-                    subAct.startedAtMs || sub.lastModifiedMs,
-                    subRefs.subElapsed
-                  );
-                } else {
-                  multiTimersMap.delete(subTimerKey);
-                  patchText(
-                    subRefs.subElapsed,
-                    t('header.convMetaSteps', { count: sub.stepCount || 0 })
-                  );
-                }
-              },
-            });
-          }
-        },
-      });
-
-      for (const k of [...multiTimersMap.keys()]) {
-        if (!activeTimerKeys.has(k)) {
-          multiTimersMap.delete(k);
-        }
-      }
-      ensureMultiLiveTicker();
-      tickMultiElapsedDisplay();
-    }
+    multiRunningWidget.refs.update({
+      items: rawRunningList,
+      hostRouteConversationId,
+    });
   }
 
   function renderHoverWidgets() {
@@ -2698,7 +2357,7 @@ export function mountWindowOverlay() {
       patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
       patchText(multiLabel, t('capsule.multiZero'));
       patchText(multiRunningMetaEl, t('multi.loading'));
-      stopMultiLiveTicker();
+      multiRunningWidget.refs.stopLiveTicker();
 
       applyCapsuleSlots(slotKeys, { hasTelemetry: false });
       return;
@@ -2711,138 +2370,36 @@ export function mountWindowOverlay() {
       uiSt.selectedAgentScope,
       uiSt.ctxInspectorAgentId
     );
-    const activeConv = telemetry.activeConversation || {};
-    const overviewActive = overviewScopedConv || activeConv;
-    const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
-    const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
-    const totalTokens = Number(ctx.totalTokens || 0);
-    const usedPct =
-      limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
-    const dashOffset = +(
-      RING_CIRCUMFERENCE *
-      (1 - Math.max(0, Math.min(100, usedPct)) / 100)
-    ).toFixed(2);
-    // --- 4a. 同步左侧多会话实时状态胶囊与浮层看板 ---
-    const rawRunningList =
-      Array.isArray(telemetry.runningConversations) && telemetry.runningConversations.length > 0
-        ? telemetry.runningConversations
-        : activeConv.isRunning || aggregated?.isRunning
-          ? [
-              {
-                cascadeId: activeConv.cascadeId || 'current',
-                title: activeConv.title || t('live.currentSession'),
-                isCurrentSelected: true,
-                isMainRunning: Boolean(activeConv.isRunning),
-                isRunning: true,
-                mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
-                subagentCount: Math.max(0, (agents?.length || 1) - 1),
-                runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
-                latestTokPerSec: overviewActive.latestTokPerSec ?? null,
-                contextUsedPct: usedPct,
-                subagents: (agents || [])
-                  .filter((a) => !a.isMain)
-                  .map((s, idx) => ({
-                    cascadeId: s.cascadeId || s.agentId,
-                    index: s.index || idx + 1,
-                    badgeText: s.badgeText || t('fmt.subBadge', { index: idx + 1 }),
-                    shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-                    role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
-                    isRunning: Boolean(s.isRunning),
-                    stepCount: Number(s.stepCount || 0),
-                    lastModifiedMs: s.lastModifiedMs || 0,
-                    liveActivity: s.liveActivity || {
-                      phase: s.isRunning ? 'thinking' : 'done',
-                      label: s.isRunning ? t('live.thinking') : t('live.done'),
-                      detail: '',
-                      stepProgress: '',
-                      startedAtMs: s.lastModifiedMs || 0,
-                      signature: `${s.agentId}:${s.stepCount || 0}`,
-                    },
-                  })),
-              },
-            ]
-          : [];
-
-    const runningCount = rawRunningList.length;
-    const runningSubCount = rawRunningList.reduce(
-      (acc, item) => acc + Number(item.runningSubagentCount || 0),
-      0
-    );
-    const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+    const overviewActive = overviewScopedConv || telemetry.activeConversation || {};
+    const slotCtx = buildCapsuleSlotContext(telemetry, {
+      scopedConv: capsuleScopedConv,
+      overviewConv: overviewActive,
+      ctxAgent,
+      aggregated,
+    });
+    const { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText } =
+      resolveMultiSessionCapsuleState(telemetry, {
+        agents,
+        aggregated,
+        latestTokPerSec: overviewActive.latestTokPerSec ?? null,
+        contextUsedPct: slotCtx.usedPct,
+      });
 
     patchClasses(multiBtn, {
       'is-running': runningCount > 0 && !hasWaiting,
       'is-waiting': runningCount > 0 && hasWaiting,
     });
-    const multiBtnText =
-      runningCount > 0
-        ? runningSubCount > 0
-          ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
-          : t('capsule.multiRunning', { count: runningCount })
-        : t('capsule.multiZero');
     patchText(multiLabel, multiBtnText);
 
-    renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, telSt.hostRouteConversationId);
+    renderMultiRunningPanel(
+      rawRunningList,
+      runningCount,
+      runningSubCount,
+      telSt.hostRouteConversationId
+    );
 
-    // --- 4b. 同步右侧 1..5 动态槽位胶囊与组件化悬停浮层 ---
-    const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
-    const capActive = capsuleScopedConv || aggregated || activeConv || {};
-    const tps =
-      capsuleScopedConv?.latestTokPerSec ??
-      aggregated?.latestTokPerSec ??
-      activeConv.latestTokPerSec ??
-      null;
-    const avgTps =
-      capsuleScopedConv?.avgTokPerSec ??
-      aggregated?.avgTokPerSec ??
-      activeConv.avgTokPerSec ??
-      null;
-    const ttft =
-      capsuleScopedConv?.latestTtftSec ??
-      aggregated?.latestTtftSec ??
-      activeConv.latestTtftSec ??
-      null;
-    const capsuleStepCost =
-      capsuleScopedConv?.latestStepCostUsd ??
-      aggregated?.latestStepCostUsd ??
-      activeConv.latestStepCostUsd ??
-      null;
-    const sessionCost =
-      capsuleScopedConv?.sessionCostUsd ??
-      aggregated?.sessionCostUsd ??
-      activeConv.sessionCostUsd ??
-      null;
-    const cacheHitPct =
-      Number(capActive.stepCount || 0) > 0
-        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
-        : null;
-    const latestPromptTokens = capActive.latestPromptTokens ?? null;
-    const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
-    const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
-    const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
-    const sessionTokens =
-      Number(capActive.stepCount || 0) > 0 ||
-      capActive.totalTokens != null ||
-      capInTok + capCacheTok + capOutTok > 0
-        ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
-        : null;
-
-    patchClasses(capsuleBtn, { 'is-running': isRunning });
-    applyCapsuleSlots(slotKeys, {
-      hasTelemetry: true,
-      usedPct,
-      dashOffset,
-      isRunning,
-      tps,
-      avgTps,
-      ttft,
-      stepCost: capsuleStepCost,
-      sessionCost,
-      cacheHitPct,
-      latestPromptTokens,
-      sessionTokens,
-      quotas: telemetry.quotas,
-    });
+    patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
+    applyCapsuleSlots(slotKeys, slotCtx);
 
     const updateMode = normalizeClientUpdateMode(
       telemetry.settings?.pluginUpdateMode,
@@ -3019,7 +2576,7 @@ export function mountWindowOverlay() {
   const onVisibilityChange = () => {
     if (document.hidden) {
       uiStore.setState({ monitorVisible: false });
-      pauseMultiLiveTicker();
+      multiRunningWidget.refs.pauseTicker();
       hasPointerCoords = false;
       if (tooltipOpen) {
         setTooltipOpen(false);
@@ -3212,7 +2769,7 @@ export function mountWindowOverlay() {
         clearTimeout(multiLeaveTimer);
         multiLeaveTimer = null;
       }
-      stopMultiLiveTicker();
+      multiRunningWidget.refs.stopLiveTicker();
       if (dockRafId && typeof cancelAnimationFrame === 'function') {
         cancelAnimationFrame(dockRafId);
         dockRafId = 0;

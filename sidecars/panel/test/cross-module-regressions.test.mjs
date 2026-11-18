@@ -1183,3 +1183,195 @@ test('P1 audit fixes: shared third-party pool & route single-source, pure frozen
   assert.equal(appJs.includes('SettingsAccountTab.js'), false);
   assert.equal(appJs.includes('function renderQuotaRows('), false);
 });
+
+test('P2 audit fixes: standalone sqlite/proto-wire primitives, structured liveActivity/agent/media i18n, full en-US SVG charts, controlled LiveActivityWidget reuse, and shared Mock DOM', async () => {
+  // 1. Standalone sqlite-client & proto-wire primitives (zero config/metrics imports)
+  const sqliteClientSrc = fs.readFileSync(
+    new URL('../backend/sqlite-client.mjs', import.meta.url),
+    'utf8'
+  );
+  const protoWireSrc = fs.readFileSync(
+    new URL('../backend/proto-wire.mjs', import.meta.url),
+    'utf8'
+  );
+  assert.doesNotMatch(sqliteClientSrc, /config\.mjs|trajectory-metrics\.mjs/);
+  assert.doesNotMatch(protoWireSrc, /config\.mjs|trajectory-metrics\.mjs/);
+
+  const protoWire = await import('../backend/proto-wire.mjs');
+  assert.equal(protoWire.unescapePbtxtString('\\344\\275\\240\\345\\245\\275'), '你好');
+  const varState = { off: 0 };
+  assert.equal(protoWire.readProtoVarint(new Uint8Array([0xac, 0x02]), varState), 300n);
+
+  // 2. Bilingual dictionary 100% key parity
+  const { I18N_MESSAGES_ZH_CN } = await import('../src/i18n/zh-CN.js');
+  const { I18N_MESSAGES_EN_US } = await import('../src/i18n/en-US.js');
+  const zhKeys = Object.keys(I18N_MESSAGES_ZH_CN).sort();
+  const enKeys = Object.keys(I18N_MESSAGES_EN_US).sort();
+  assert.deepEqual(enKeys, zhKeys);
+
+  // 3. Structured liveActivity, agent badges/labels, turn media, and en-US SVG charts (zero Chinese leakage)
+  const { createMockDom } = await import('./mock-dom.mjs');
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { document: mockDoc } = createMockDom();
+  globalThis.document = mockDoc;
+  globalThis.window = {
+    innerWidth: 1280,
+    innerHeight: 800,
+    devicePixelRatio: 1,
+    document: mockDoc,
+    addEventListener() {},
+    removeEventListener() {},
+    getComputedStyle: () => ({ getPropertyValue: () => '' }),
+  };
+
+  try {
+    const { setI18nLanguage } = await import('../src/i18n/index.js');
+    const {
+      formatAgentBadgeText,
+      formatAgentLabel,
+      formatLiveActivityDetail,
+      formatLiveActivityLabel,
+    } = await import('../src/core/formatters.js');
+    const { formatTurnPromptText } = await import('../src/components/widgets/StepTableWidget.js');
+    const { LiveActivityWidget } = await import('../src/components/widgets/LiveActivityWidget.js');
+    const { buildCapsuleSlotContext } = await import('../src/components/widgets/CapsuleBarWidget.js');
+    const { createModelFitChart, createSessionLineChart } = await import(
+      '../src/components/charts/SessionStepCharts.js'
+    );
+    const { createTrendAreaChart } = await import('../src/components/charts/TrendAreaChart.js');
+
+    const waitCmdAct = extractLiveActivity(
+      [
+        {
+          type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+          status: 'CORTEX_STEP_STATUS_DONE',
+          plannerResponse: {
+            toolCalls: [{ name: 'run_command', argumentsJson: '{"CommandLine":"npm test"}' }],
+          },
+        },
+        { type: 'CORTEX_STEP_TYPE_RUN_COMMAND', status: 'CORTEX_STEP_STATUS_WAITING' },
+      ],
+      true
+    );
+    assert.equal(waitCmdAct?.actionKey, 'run_command');
+    assert.equal(waitCmdAct?.waitingApproval, true);
+
+    setI18nLanguage('en-US');
+    assert.equal(formatLiveActivityLabel(waitCmdAct), 'Awaiting Approval · Run Command');
+    assert.equal(
+      formatLiveActivityDetail({ detailKey: 'compaction_resuming' }),
+      'Compaction finished, resuming reasoning'
+    );
+    assert.equal(
+      formatAgentBadgeText({ agentKind: 'side_question', agentOrdinal: 2 }),
+      'Q2'
+    );
+    assert.equal(
+      formatAgentLabel({ agentKind: 'subagent', agentOrdinal: 1, customRole: 'Auditor' }),
+      'Subagent #1 · Auditor'
+    );
+    assert.equal(
+      formatTurnPromptText('Check image', { hasMedia: true, mediaOnly: false }),
+      'Check image [Media]'
+    );
+    assert.equal(formatTurnPromptText('', { hasMedia: true, mediaOnly: true }), '[Media Attachment]');
+
+    // Controlled LiveActivityWidget auto-expands running subagents and renders session extras
+    let selectedCid = '';
+    const controlledLive = LiveActivityWidget({
+      defaultExpandRunningSubs: true,
+      showSessionExtras: true,
+      onSelectSession: (cid) => {
+        selectedCid = cid;
+      },
+    });
+    controlledLive.refs.update({
+      hostRouteConversationId: 'conv-en-ctrl',
+      items: [
+        {
+          cascadeId: 'conv-en-ctrl',
+          title: 'Controlled Multi Panel',
+          isMainRunning: true,
+          isRunning: true,
+          latestTokPerSec: 82.4,
+          contextUsedPct: 44,
+          mainActivity: waitCmdAct,
+          subagentCount: 1,
+          runningSubagentCount: 1,
+          subagents: [
+            {
+              cascadeId: 'sub-ctrl-1',
+              index: 1,
+              agentKind: 'subagent',
+              agentOrdinal: 1,
+              customRole: 'Verifier',
+              isRunning: true,
+              stepCount: 2,
+              liveActivity: {
+                phase: 'compacting',
+                actionKey: 'compacting',
+                detailKey: 'compaction_resuming',
+                signature: 'cp:1',
+              },
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(controlledLive.el.querySelector('.live-sub-list').hasAttribute('hidden'), false);
+    assert.equal(controlledLive.el.querySelector('.wm-session-tag.is-here').hasAttribute('hidden'), false);
+    assert.equal(controlledLive.el.querySelector('.wm-task-metrics').textContent, '82.4 t/s · 44%');
+    assert.equal(/[\u4e00-\u9fff]/.test(controlledLive.el.textContent), false);
+    controlledLive.el.querySelector('.live-task-title').onclick({});
+    assert.equal(selectedCid, 'conv-en-ctrl');
+    controlledLive.refs.stopLiveTicker();
+
+    // SVG charts in en-US emit zero Chinese characters
+    const sampleSteps = Array.from({ length: 6 }, (_, i) => ({
+      stepIndex: i + 1,
+      baseModelLabel: 'Gemini 4 Carbon',
+      baseModelShort: 'carbon-4',
+      tokPerSec: 70 + i * 4,
+      ttftSec: 1.1,
+      cacheHitPct: 88,
+      inputTokens: 1000,
+      cacheReadTokens: 8000,
+      outputTokens: 300,
+      contextTokens: 12000,
+      costUsd: 0.01,
+    }));
+    const lineChart = createSessionLineChart();
+    const lineRes = lineChart.update({ steps: sampleSteps, metric: 'tps' });
+    assert.equal(/[\u4e00-\u9fff]/.test(lineRes.summaryBadge), false);
+    assert.equal(/[\u4e00-\u9fff]/.test(lineChart.el.textContent), false);
+    lineChart.destroy();
+
+    const fitChart = createModelFitChart();
+    const fitRes = fitChart.update({ steps: sampleSteps, metric: 'tps' });
+    assert.equal(/[\u4e00-\u9fff]/.test(fitRes.summaryBadge), false);
+    assert.equal(/[\u4e00-\u9fff]/.test(fitChart.el.textContent), false);
+    fitChart.destroy();
+
+    const trendChart = createTrendAreaChart();
+    const hmSlots = Array.from({ length: 95 }, (_, i) => {
+      const iso = new Date(Date.UTC(2026, 6, 1 + i)).toISOString().slice(0, 10);
+      return { dateKey: iso, label: iso.slice(5), fullLabel: iso, tokens: (i + 1) * 500, calls: 2, costUsd: 0.02 };
+    });
+    trendChart.update(hmSlots);
+    assert.equal(/[\u4e00-\u9fff]/.test(trendChart.el.textContent), false);
+    trendChart.destroy();
+
+    const slotCtx = buildCapsuleSlotContext(
+      { activeConversation: { isRunning: true, stepCount: 2, latestTokPerSec: 64.5, context: { totalTokens: 64000, limitTokens: 256000 } } },
+      {}
+    );
+    assert.equal(slotCtx.usedPct, 25);
+    assert.equal(slotCtx.tps, 64.5);
+
+    setI18nLanguage('zh-CN');
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});

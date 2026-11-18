@@ -667,6 +667,7 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
   let turnCounter = 0;
   let activeTurnIndex = null;
   let pendingTurnPrompts = [];
+  let pendingTurnHasMedia = false;
   let hasUnconsumedTurn = false;
 
   const isUserTurnBoundary = (step) => {
@@ -678,7 +679,7 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
     return Boolean(step.userInput && typeof step.userInput === 'object');
   };
 
-  const extractUserTurnPrompt = (step) => {
+  const extractUserTurnInfo = (step) => {
     const ui = step?.userInput;
     let raw = '';
     if (typeof ui?.userResponse === 'string' && ui.userResponse.trim()) {
@@ -709,24 +710,35 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
         ? step.media
         : [];
     const hasMedia = mediaArr.length > 0;
-    if (!cleaned) {
-      return hasMedia ? '[图片/附件提问]' : '';
-    }
-    const withMedia = hasMedia ? `${cleaned} [附图]` : cleaned;
-    return withMedia.length > 180 ? `${withMedia.slice(0, 179)}…` : withMedia;
+    const cleanText = cleaned.length > 180 ? `${cleaned.slice(0, 179)}…` : cleaned;
+    const legacyRaw = !cleaned ? (hasMedia ? '[图片/附件提问]' : '') : hasMedia ? `${cleaned} [附图]` : cleaned;
+    const legacyPrompt = legacyRaw.length > 180 ? `${legacyRaw.slice(0, 179)}…` : legacyRaw;
+    return { cleanText, legacyPrompt, hasMedia };
   };
 
+  let pendingTurnCleanPrompts = [];
   rawSteps.forEach((s, index) => {
     if (isUserTurnBoundary(s)) {
-      const promptText = extractUserTurnPrompt(s);
+      const { cleanText, legacyPrompt, hasMedia } = extractUserTurnInfo(s);
       if (!hasUnconsumedTurn) {
         hasUnconsumedTurn = true;
-        pendingTurnPrompts = promptText ? [promptText] : [];
-      } else if (
-        promptText &&
-        pendingTurnPrompts[pendingTurnPrompts.length - 1] !== promptText
-      ) {
-        pendingTurnPrompts.push(promptText);
+        pendingTurnPrompts = legacyPrompt ? [legacyPrompt] : [];
+        pendingTurnCleanPrompts = cleanText ? [cleanText] : [];
+        pendingTurnHasMedia = hasMedia;
+      } else {
+        if (
+          legacyPrompt &&
+          pendingTurnPrompts[pendingTurnPrompts.length - 1] !== legacyPrompt
+        ) {
+          pendingTurnPrompts.push(legacyPrompt);
+        }
+        if (
+          cleanText &&
+          pendingTurnCleanPrompts[pendingTurnCleanPrompts.length - 1] !== cleanText
+        ) {
+          pendingTurnCleanPrompts.push(cleanText);
+        }
+        if (hasMedia) pendingTurnHasMedia = true;
       }
     }
 
@@ -738,15 +750,25 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
 
     let stepIsTurnStart = false;
     let stepTurnPrompt = '';
+    let stepTurnPromptClean = '';
+    let stepTurnHasMedia = false;
+    let stepTurnMediaOnly = false;
     if (hasUnconsumedTurn) {
       turnCounter += 1;
       activeTurnIndex = turnCounter;
       stepIsTurnStart = true;
       const joinedPrompt = pendingTurnPrompts.join('\n').trim();
+      const joinedClean = pendingTurnCleanPrompts.join('\n').trim();
       stepTurnPrompt =
         joinedPrompt.length > 180 ? `${joinedPrompt.slice(0, 179)}…` : joinedPrompt;
+      stepTurnPromptClean =
+        joinedClean.length > 180 ? `${joinedClean.slice(0, 179)}…` : joinedClean;
+      stepTurnHasMedia = pendingTurnHasMedia;
+      stepTurnMediaOnly = Boolean(pendingTurnHasMedia && !stepTurnPromptClean);
       hasUnconsumedTurn = false;
       pendingTurnPrompts = [];
+      pendingTurnCleanPrompts = [];
+      pendingTurnHasMedia = false;
     }
 
     const stepIndex = m.sourceTrajectoryStepInfo?.stepIndex ?? index;
@@ -917,6 +939,8 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
       turnIndex: activeTurnIndex,
       isTurnStart: stepIsTurnStart,
       ...(stepIsTurnStart && stepTurnPrompt ? { turnPrompt: stepTurnPrompt } : {}),
+      ...(stepIsTurnStart && stepTurnPromptClean ? { turnPromptClean: stepTurnPromptClean } : {}),
+      ...(stepIsTurnStart ? { turnHasMedia: stepTurnHasMedia, turnMediaOnly: stepTurnMediaOnly } : {}),
     });
   });
 
@@ -1678,6 +1702,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
         : summary || cmdSnippet || '';
     return {
       toolName: nameLower,
+      actionKey: 'run_command',
       isAskUser: false,
       label: '执行命令',
       detail,
@@ -1704,6 +1729,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
           : '';
     return {
       toolName: nameLower,
+      actionKey: 'read_file',
       isAskUser: false,
       label: '读取文件',
       detail: file ? `${file}${rangeSuffix}` : '',
@@ -1721,6 +1747,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     );
     return {
       toolName: nameLower,
+      actionKey: 'edit_file',
       isAskUser: false,
       label: '修改文件',
       detail: file || '',
@@ -1733,6 +1760,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     );
     return {
       toolName: nameLower,
+      actionKey: 'write_file',
       isAskUser: false,
       label: '写入文件',
       detail: file || '',
@@ -1748,6 +1776,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
         : cleanSingleLineSnippet(query, 48) || searchPath || '';
     return {
       toolName: nameLower,
+      actionKey: 'grep_search',
       isAskUser: false,
       label: '搜索代码',
       detail,
@@ -1759,6 +1788,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const dir = shortBasename(pickField(['SearchDirectory', 'DirectoryPath', 'Path']));
     return {
       toolName: nameLower,
+      actionKey: 'find_file',
       isAskUser: false,
       label: '查找文件',
       detail: pattern && dir ? `${pattern} (${dir})` : pattern || dir || '',
@@ -1770,6 +1800,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const target = pickField(['query', 'Query', 'Url', 'url']);
     return {
       toolName: nameLower,
+      actionKey: isUrl ? 'read_url' : 'search_web',
       isAskUser: false,
       label: isUrl ? '读取网页' : '网页搜索',
       detail: cleanSingleLineSnippet(target, 52) || '',
@@ -1785,6 +1816,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
       String(subSpec.typeName || '').trim();
     return {
       toolName: nameLower,
+      actionKey: 'invoke_subagent',
       isAskUser: false,
       label: '调用子代理',
       detail: role || '',
@@ -1795,6 +1827,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const recipient = pickField(['Recipient', 'recipient']);
     return {
       toolName: nameLower,
+      actionKey: 'send_message',
       isAskUser: false,
       label: '通信子代理',
       detail: recipient ? recipient.slice(0, 8) : '',
@@ -1805,6 +1838,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const subName = pickField(['Name', 'Action', 'action']);
     return {
       toolName: nameLower,
+      actionKey: 'manage_subagents',
       isAskUser: false,
       label: '管理子代理',
       detail: subName || '',
@@ -1816,6 +1850,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const taskId = pickField(['TaskId', 'taskId']);
     return {
       toolName: nameLower,
+      actionKey: 'manage_task',
       isAskUser: false,
       label: '后台任务',
       detail: taskId ? `${action || 'status'} (${taskId})` : action || '',
@@ -1827,6 +1862,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const cron = pickField(['CronExpression']);
     return {
       toolName: nameLower,
+      actionKey: 'schedule',
       isAskUser: false,
       label: '定时任务',
       detail: dur ? `${dur}s` : cron || '',
@@ -1843,6 +1879,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
       );
     return {
       toolName: nameLower,
+      actionKey: 'ask_question',
       isAskUser: true,
       label: '等待用户选择',
       detail: cleanSingleLineSnippet(qText, 50) || '',
@@ -1854,6 +1891,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const q = Array.isArray(rawQueries) ? rawQueries.join(', ') : '';
     return {
       toolName: nameLower,
+      actionKey: 'search_marketplace',
       isAskUser: false,
       label: '查询插件',
       detail: cleanSingleLineSnippet(q, 48) || '',
@@ -1864,6 +1902,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     const mcpClean = nameLower.replace(/^mcp[_-]/i, '').replace(/_/g, ' · ');
     return {
       toolName: nameLower,
+      actionKey: 'mcp_tool',
       isAskUser: false,
       label: '调用 MCP',
       detail: mcpClean || '',
@@ -1872,6 +1911,7 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
 
   return {
     toolName: nameLower || 'tool',
+    actionKey: 'tool_call',
     isAskUser: false,
     label: '调用工具',
     detail: nameLower || '',
@@ -1919,6 +1959,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
     const startMs = Math.floor(fallbackStartMs || 0);
     return {
       phase: 'thinking',
+      actionKey: 'thinking',
+      waitingApproval: false,
+      detailKey: '',
       label: '推理中',
       detail: '',
       stepProgress: '',
@@ -1968,6 +2011,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
     if (isCheckpointStep(lastStep)) {
       return {
         phase: 'compacting',
+        actionKey: 'compacting',
+        waitingApproval: false,
+        detailKey: '',
         label: '上下文压缩',
         detail: '',
         stepProgress: '',
@@ -1989,11 +2035,15 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         const phase = info.isAskUser ? 'waiting' : 'tool';
         return {
           phase,
+          toolName: info.toolName,
+          actionKey: info.actionKey,
+          waitingApproval: false,
+          detailKey: '',
           label: info.label,
           detail: info.detail,
           stepProgress,
           startedAtMs: startMs,
-          signature: `planner-tool:${lastStepId}:${tools.length}:${info.label}:${info.detail}`,
+          signature: `planner-tool:${lastStepId}:${tools.length}:${info.actionKey}:${info.detail}`,
         };
       }
 
@@ -2001,6 +2051,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         const snippet = cleanSingleLineSnippet(respText, 52, true);
         return {
           phase: 'responding',
+          actionKey: 'responding',
+          waitingApproval: false,
+          detailKey: '',
           label: '正在输出回复',
           detail: snippet,
           stepProgress: '',
@@ -2013,6 +2066,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         const snippet = cleanSingleLineSnippet(thinkText, 52, true);
         return {
           phase: 'thinking',
+          actionKey: 'thinking',
+          waitingApproval: false,
+          detailKey: '',
           label: '推理中',
           detail: snippet,
           stepProgress: '',
@@ -2023,6 +2079,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
 
       return {
         phase: 'thinking',
+        actionKey: 'thinking',
+        waitingApproval: false,
+        detailKey: '',
         label: '推理中',
         detail: '',
         stepProgress: '',
@@ -2057,16 +2116,21 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
       stepProgress = '';
     }
     const waiting = isWaitingStepStatus(lastStep?.status) || info.isAskUser;
+    const waitingApproval = Boolean(waiting && !info.isAskUser);
     const resolvedStartMs = startMs || prevStepEndMs || 0;
-    const label = waiting && !info.isAskUser ? `等待确认 · ${info.label}` : info.label;
+    const label = waitingApproval ? `等待确认 · ${info.label}` : info.label;
 
     return {
       phase: waiting ? 'waiting' : 'tool',
+      toolName: info.toolName,
+      actionKey: info.actionKey,
+      waitingApproval,
+      detailKey: '',
       label,
       detail: info.detail,
       stepProgress,
       startedAtMs: resolvedStartMs,
-      signature: `step-run:${lastStepId}:${waiting}:${label}:${stepProgress}:${info.detail}`,
+      signature: `step-run:${lastStepId}:${waiting}:${info.actionKey}:${stepProgress}:${info.detail}`,
     };
   }
 
@@ -2102,6 +2166,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         Math.floor(fallbackStartMs || 0);
       return {
         phase: 'compacting',
+        actionKey: 'compacting',
+        waitingApproval: false,
+        detailKey: cpFinishMs > 0 ? 'compaction_resuming' : '',
         label: '上下文压缩',
         detail: cpFinishMs > 0 ? '已完成压缩，正在恢复推理' : '',
         stepProgress: '',
@@ -2144,11 +2211,15 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
 
       return {
         phase,
+        toolName: info.toolName,
+        actionKey: info.actionKey,
+        waitingApproval: false,
+        detailKey: '',
         label: info.label,
         detail: info.detail,
         stepProgress,
         startedAtMs: startMs,
-        signature: `pending-tool:${plannerStepId}:${completedAfterPlanner}:${info.label}:${stepProgress}:${info.detail}`,
+        signature: `pending-tool:${plannerStepId}:${completedAfterPlanner}:${info.actionKey}:${stepProgress}:${info.detail}`,
       };
     }
 
@@ -2158,7 +2229,7 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         summarizeToolCall(t, toolStepsAfterPlanner[idx] || lastStep)
       );
       const lastToolInfo = infos[infos.length - 1];
-      const allSameLabel = infos.every((x) => x.label === lastToolInfo.label);
+      const allSameLabel = infos.every((x) => x.actionKey === lastToolInfo.actionKey);
       const detailsList = infos.map((x) => x.detail).filter(Boolean);
       const combinedDetail =
         infos.length > 1 && allSameLabel
@@ -2171,11 +2242,15 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
       const startMs = getRawStepFinishMs(lastStep) || getRawStepEndMs(lastStep) || 0;
       return {
         phase: 'thinking',
+        toolName: lastToolInfo.toolName,
+        actionKey: lastToolInfo.actionKey,
+        waitingApproval: false,
+        detailKey: '',
         label: lastToolInfo.label,
         detail: combinedDetail,
         stepProgress,
         startedAtMs: startMs,
-        signature: `post-tool-think:${lastStepId}:${lastToolInfo.label}:${combinedDetail}`,
+        signature: `post-tool-think:${lastStepId}:${lastToolInfo.actionKey}:${combinedDetail}`,
       };
     }
 
@@ -2188,11 +2263,15 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
           const startMs = getRawStepFinishMs(lastStep) || getRawStepEndMs(lastStep) || 0;
           return {
             phase: 'thinking',
+            toolName: lastInfo.toolName,
+            actionKey: lastInfo.actionKey,
+            waitingApproval: false,
+            detailKey: '',
             label: lastInfo.label,
             detail: lastInfo.detail,
             stepProgress: '',
             startedAtMs: startMs,
-            signature: `post-step-tool:${lastStepId}:${lastInfo.label}:${lastInfo.detail}`,
+            signature: `post-step-tool:${lastStepId}:${lastInfo.actionKey}:${lastInfo.detail}`,
           };
         }
       }
@@ -2208,6 +2287,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         if (snippet) {
           return {
             phase: 'responding',
+            actionKey: 'responding',
+            waitingApproval: false,
+            detailKey: '',
             label: '正在输出回复',
             detail: snippet,
             stepProgress: '',
@@ -2221,6 +2303,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         if (snippet) {
           return {
             phase: 'thinking',
+            actionKey: 'thinking',
+            waitingApproval: false,
+            detailKey: '',
             label: '推理中',
             detail: snippet,
             stepProgress: '',
@@ -2236,6 +2321,9 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
   const startMs = getRawStepFinishMs(lastStep) || getRawStepStartMs(lastStep) || 0;
   return {
     phase: 'thinking',
+    actionKey: 'thinking',
+    waitingApproval: false,
+    detailKey: '',
     label: '推理中',
     detail: '',
     stepProgress: '',

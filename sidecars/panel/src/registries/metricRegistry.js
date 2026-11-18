@@ -6,6 +6,7 @@
  */
 
 import {
+  formatAgentBadgeText,
   formatCachePct,
   formatMetric,
   formatTokens,
@@ -345,15 +346,16 @@ export function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumf
   };
 }
 
-function translateRawAgentBadge(rawBadge) {
-  if (!rawBadge) return '';
-  if (!isEnglishLocale()) return String(rawBadge);
-  const str = String(rawBadge).trim();
-  if (str === '主') return t('fmt.mainBadge');
-  const m = str.match(/^子(\d+)$/);
-  if (m) return t('fmt.subBadge', { index: m[1] });
-  if (str === '子') return t('fmt.subBadgeShort');
-  return str;
+function resolveActiveBadgeText(active) {
+  if (!active?.activeAgentBadge && !active?.activeAgentKind) return '';
+  return formatAgentBadgeText({
+    agentKind:
+      active.activeAgentKind ||
+      (!active.activeAgentId || active.activeAgentId === 'main' ? 'main' : 'subagent'),
+    agentOrdinal: Number(active.activeAgentOrdinal || 0),
+    isMain: !active.activeAgentId || active.activeAgentId === 'main',
+    badgeText: active.activeAgentBadge,
+  });
 }
 
 /**
@@ -375,7 +377,7 @@ export function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
       fallback: t('fmt.unknownModel'),
     }).text;
     const reason = speedReasonText(active.latestSpeedReason);
-    const badgeStr = translateRawAgentBadge(active.activeAgentBadge);
+    const badgeStr = resolveActiveBadgeText(active);
     const modelAndAgent =
       hasSubagents && badgeStr ? `[${badgeStr}] ${activeModelDisplay}` : activeModelDisplay;
     const hasSpeed = Number.isFinite(active.latestTokPerSec) && Number(active.latestTokPerSec) > 0;

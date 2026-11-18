@@ -309,14 +309,16 @@ export const ContextWindowWidget = defineComponent({
       if (interactiveInspector) {
         patchAttr(ctxInspectorBar, 'hidden', !hasSubagents);
         if (hasSubagents && ctxAgent) {
-          const rawActiveBadge = aggregated?.activeAgentBadge || '主';
-          const activeBadgeText = isEnglishLocale()
-            ? rawActiveBadge === '主'
-              ? t('fmt.mainBadge')
-              : rawActiveBadge
-                  .replace(/^子(\d+)$/, (_, n) => t('fmt.subBadge', { index: n }))
-                  .replace(/^旁(\d+)$/, (_, n) => t('fmt.sideBadge', { index: n }))
-            : rawActiveBadge;
+          const activeBadgeText = formatAgentBadgeText({
+            agentKind:
+              aggregated?.activeAgentKind ||
+              (!aggregated?.activeAgentId || aggregated.activeAgentId === 'main'
+                ? 'main'
+                : 'subagent'),
+            agentOrdinal: Number(aggregated?.activeAgentOrdinal || 0),
+            isMain: !aggregated?.activeAgentId || aggregated.activeAgentId === 'main',
+            badgeText: aggregated?.activeAgentBadge,
+          });
 
           const pillItems = [
             {

@@ -5,7 +5,14 @@
 
 import { createReactiveStore } from '../core/reactive.js';
 import { callSidecarApi, getWindowBridgeConfig, isWindowOverlayMode } from '../core/httpClient.js';
-import { isEnglishLocale, normalizeI18nLanguage, t } from '../i18n/index.js';
+import {
+  formatAgentBadgeText,
+  formatAgentLabel,
+  formatLiveActivityDetail,
+  formatLiveActivityLabel,
+  getAgentBadgeClass,
+} from '../core/formatters.js';
+import { normalizeI18nLanguage, t } from '../i18n/index.js';
 import { normalizeClientFontScale, normalizeClientThemeAccent } from '../core/appearance.js';
 import {
   DEFAULT_HOVER_MODULES,
@@ -1053,101 +1060,13 @@ export function stopAsyncTelemetryLoop() {
   }
 }
 
-/**
- * 根据代理索引返回对应的微边框语义徽章样式类名。
- *
- * @param {number} [index=0]
- * @param {boolean} [isMain=false]
- * @returns {string}
- */
-export function getAgentBadgeClass(index = 0, isMain = false) {
-  if (isMain || index <= 0) return 'badge-main';
-  const slot = ((index - 1) % 3) + 1;
-  return `badge-sub-${slot}`;
-}
-
-/**
- * 格式化主/子代理的紧凑短徽章文本（中文如 `主` / `子1`，英文如 `Main` / `S1`）。
- *
- * @param {object|null|undefined} agent
- * @returns {string}
- */
-export function formatAgentBadgeText(agent) {
-  const isSideQ = Boolean(
-    agent?.isSideQuestion ||
-      agent?.typeName === 'side_question' ||
-      /^旁\d*$/.test(String(agent?.badgeText || ''))
-  );
-  if (!isEnglishLocale()) {
-    if (!agent || agent.isMain) return agent?.badgeText || '主';
-    if (isSideQ) {
-      const sIdx = Number(agent.sideIndex || 0);
-      return agent.badgeText || (sIdx > 0 ? `旁${sIdx}` : '旁');
-    }
-    return agent.badgeText || `子${agent.index || ''}`;
-  }
-  if (!agent || agent.isMain) return t('fmt.mainBadge');
-  if (isSideQ) {
-    const m = String(agent.badgeText || '').match(/^旁(\d+)$/);
-    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
-    return sIdx > 0 ? t('fmt.sideBadge', { index: sIdx }) : t('fmt.sideBadgeShort');
-  }
-  const subMatch = String(agent.badgeText || '').match(/^子(\d+)$/);
-  const subOrd = Number(subMatch ? subMatch[1] : agent.index || 0);
-  return subOrd > 0 ? t('fmt.subBadge', { index: subOrd }) : t('fmt.subBadgeShort');
-}
-
-/**
- * 格式化主/子代理或旁路提问的完整显示名称（如 `子代理 #1 · Codebase Researcher` / `旁路提问 #1 · ...`）。
- *
- * @param {object|null|undefined} agent
- * @returns {string}
- */
-export function formatAgentLabel(agent) {
-  const isSideQ = Boolean(
-    agent?.isSideQuestion ||
-      agent?.typeName === 'side_question' ||
-      /^旁/.test(String(agent?.badgeText || agent?.shortLabel || ''))
-  );
-  if (!isEnglishLocale()) {
-    if (!agent) return '主代理';
-    if (agent.isMain) return agent.shortLabel || '主代理';
-    if (isSideQ) {
-      const sIdx = Number(agent.sideIndex || 0);
-      const fallbackShort = sIdx > 0 ? `旁路提问 #${sIdx}` : '旁路提问';
-      const rolePart =
-        agent.role &&
-        agent.role !== '旁路提问' &&
-        agent.role !== 'Side Question' &&
-        agent.role !== agent.shortLabel
-          ? ` · ${agent.role}`
-          : '';
-      return `${agent.shortLabel || fallbackShort}${rolePart}`;
-    }
-    const rolePart = agent.role && agent.role !== '子代理' ? ` · ${agent.role}` : '';
-    return `${agent.shortLabel || '子代理'}${rolePart}`;
-  }
-  if (!agent || agent.isMain) return t('fmt.mainAgent');
-  if (isSideQ) {
-    const m = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
-    const sIdx = Number(agent.sideIndex || (m ? m[1] : 0));
-    const baseLabel = sIdx > 0 ? `${t('fmt.sideQuestion')} #${sIdx}` : t('fmt.sideQuestion');
-    const rolePart =
-      agent.role &&
-      agent.role !== '旁路提问' &&
-      agent.role !== 'Side Question' &&
-      agent.role !== agent.shortLabel
-        ? ` · ${agent.role}`
-        : '';
-    return `${baseLabel}${rolePart}`;
-  }
-  const subMatch = String(agent.shortLabel || agent.badgeText || '').match(/(\d+)/);
-  const idx = Number(subMatch ? subMatch[1] : agent.index || 0);
-  const baseLabel = idx > 0 ? `${t('fmt.subAgent')} #${idx}` : t('fmt.subAgent');
-  const rolePart =
-    agent.role && agent.role !== '子代理' && agent.role !== 'Subagent' ? ` · ${agent.role}` : '';
-  return `${baseLabel}${rolePart}`;
-}
+export {
+  formatAgentBadgeText,
+  formatAgentLabel,
+  formatLiveActivityDetail,
+  formatLiveActivityLabel,
+  getAgentBadgeClass,
+};
 
 /**
  * 解析当前选中的主/子代理作用域视图数据与独立上下文窗口检视目标。

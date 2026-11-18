@@ -10,6 +10,7 @@
 
 import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
 import {
+  formatAgentBadgeText,
   formatTokens,
   formatTokensPrecise,
   formatUsd,
@@ -17,6 +18,7 @@ import {
   speedReasonText,
 } from '../../core/formatters.js';
 import { SVG_NS } from '../../icons/SvgIcon.js';
+import { getEffectiveLocale, t } from '../../i18n/index.js';
 
 let sessionChartUid = 0;
 
@@ -38,16 +40,16 @@ export const MODEL_COLOR_VARS = Object.freeze([
  * @returns {string}
  */
 export function getStepModelGroupKey(step) {
-  if (!step || typeof step !== 'object') return '模型未知';
-  const rawLabel = String(step.modelLabel || step.label || '')
+  if (!step || typeof step !== 'object') return t('fmt.unknownModel');
+  const rawLabel = String(step.baseModelLabel || step.modelLabel || step.label || '')
     .replace(/\s*\[自动压缩\]\s*$/u, '')
     .replace(/\s*\((?:Max|XHigh|High|Medium|Low|Thinking|Extra Low|Tiered)\)\s*$/i, '')
     .trim();
   if (rawLabel) return rawLabel;
-  const rawShort = String(step.modelShort || step.shortName || '')
-    .replace(/·压缩\s*$/u, '')
+  const rawShort = String(step.baseModelShort || step.modelShort || step.shortName || '')
+    .replace(/·(?:压缩|Compact)\s*$/iu, '')
     .trim();
-  return rawShort || '模型未知';
+  return rawShort || t('fmt.unknownModel');
 }
 
 /**
@@ -574,7 +576,17 @@ function computeStepTickIndices(count) {
 function formatStepAxisTag(st, showAgentPrefix) {
   const num = `#${Number(st?.stepIndex ?? 0)}`;
   if (!showAgentPrefix) return num;
-  const badge = st?.agentBadge || (st?.isSubagent ? '子' : '主');
+  const badge = formatAgentBadgeText({
+    agentKind:
+      st?.agentKind || (!st?.isSubagent ? 'main' : st?.isSideQuestion ? 'side_question' : 'subagent'),
+    agentOrdinal:
+      st?.agentOrdinal || (st?.isSideQuestion ? st?.sideIndex || 0 : st?.agentIndex || 0),
+    isMain: !st?.isSubagent,
+    isSideQuestion: Boolean(st?.isSideQuestion),
+    sideIndex: st?.sideIndex || 0,
+    index: st?.agentIndex || 0,
+    badgeText: st?.agentBadge,
+  });
   return `${badge}${num}`;
 }
 
@@ -709,7 +721,7 @@ export function createSessionLineChart() {
 
   const emptyHintEl = h('div', {
     className: 'sstep-empty-hint text-muted',
-    text: '当前范围暂无可绘制的调用步骤',
+    text: t('chart.step.empty'),
     hidden: true,
   });
 
@@ -787,7 +799,10 @@ export function createSessionLineChart() {
 
     patchText(tipHeadLeft, pt.stepTag);
     patchText(tipHeadRight, pt.modelText);
-    patchText(tipMainLeft, pt.valid ? formatChartMetricValue(currentMetric, pt.value) : '未纳入');
+    patchText(
+      tipMainLeft,
+      pt.valid ? formatChartMetricValue(currentMetric, pt.value) : t('chart.step.excluded')
+    );
     patchText(tipMainRight, pt.secondaryRight || '');
     patchAttr(tipSub, 'hidden', !pt.subDetail);
     if (pt.subDetail) {
@@ -914,6 +929,7 @@ export function createSessionLineChart() {
       ? steps
       : steps.filter((st) => st && targetKeySet.has(getStepModelGroupKey(st)));
 
+    patchText(emptyHintEl, t('chart.step.empty'));
     if (!matchedSteps.length) {
       currentPoints = [];
       lastSig = 'empty';
@@ -927,7 +943,7 @@ export function createSessionLineChart() {
       patchAttr(peakPill, 'hidden', true);
       patchAttr(emptyHintEl, 'hidden', false);
       clearHover();
-      return { summaryBadge: '0 步' };
+      return { summaryBadge: t('chart.step.zeroSteps') };
     }
 
     const modelColorMap = new Map();
@@ -941,7 +957,7 @@ export function createSessionLineChart() {
         const disp = resolveModelDisplayInfo({ modelLabel: gk, label: gk }, displaySettings, {
           fallback: gk,
         });
-        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+        modelLabelByGroup.set(gk, disp.baseText || disp.text || gk);
       }
     }
     for (const st of matchedSteps) {
@@ -954,7 +970,7 @@ export function createSessionLineChart() {
       }
       if (!modelLabelByGroup.has(gk)) {
         const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
-        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+        modelLabelByGroup.set(gk, disp.baseText || disp.text || gk);
       }
     }
 
@@ -1014,41 +1030,62 @@ export function createSessionLineChart() {
 
       if (metric === 'totalTokens') {
         value = isMultiCompare ? modelCumTok : runningTokens;
-        secondaryRight = `本步 +${formatTokens(stepTotalTok)}`;
-        subDetail = `入 ${formatTokens(inTok)} · 缓 ${formatTokens(cacheTok)} · 出 ${formatTokens(outTok)}`;
+        secondaryRight = t('chart.step.stepAdd', { tokens: formatTokens(stepTotalTok) });
+        subDetail = t('chart.step.ioSplit', {
+          inTok: formatTokens(inTok),
+          cacheTok: formatTokens(cacheTok),
+          outTok: formatTokens(outTok),
+        });
       } else if (metric === 'context') {
         value = ctxTok;
         if (hasPrevCtx) {
           const sign = ctxDelta >= 0 ? '+' : '-';
           secondaryRight = `${sign}${formatTokens(Math.abs(ctxDelta))}`;
         } else {
-          secondaryRight = `缓存 ${Number(st.cacheHitPct ?? 0)}%`;
+          secondaryRight = t('chart.step.cacheShort', { pct: Number(st.cacheHitPct ?? 0) });
         }
         subDetail = st.isCompactionStep
-          ? '上下文自动压缩检查点'
-          : `缓存命中 ${Number(st.cacheHitPct ?? 0)}% · 输出 +${formatTokens(outTok)}`;
+          ? t('chart.step.compactionCheckpoint')
+          : t('chart.step.cacheHitOut', {
+              pct: Number(st.cacheHitPct ?? 0),
+              outTok: formatTokens(outTok),
+            });
       } else if (metric === 'tps') {
         valid = !st.isCompactionStep && Number.isFinite(st.tokPerSec) && st.tokPerSec > 0;
         value = valid ? Number(st.tokPerSec) : 0;
-        secondaryRight = Number.isFinite(st.ttftSec) ? `首字 ${st.ttftSec.toFixed(1)}s` : '';
+        secondaryRight = Number.isFinite(st.ttftSec)
+          ? t('chart.step.ttftShort', { sec: st.ttftSec.toFixed(1) })
+          : '';
         subDetail = valid
-          ? `输出 ${formatTokens(outTok)} · 上下文 ${formatTokens(ctxTok)}`
-          : speedReasonText(st.selectedSpeedReason) || (st.isCompactionStep ? '上下文压缩步' : '无测速样本');
+          ? t('chart.step.outAndCtx', {
+              outTok: formatTokens(outTok),
+              ctxTok: formatTokens(ctxTok),
+            })
+          : speedReasonText(st.selectedSpeedReason) ||
+            (st.isCompactionStep ? t('chart.step.compactionStep') : t('chart.step.noSpeedSample'));
       } else if (metric === 'ttft') {
         valid = !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0;
         value = valid ? Number(st.ttftSec) : 0;
         secondaryRight = Number.isFinite(st.tokPerSec) ? `${st.tokPerSec.toFixed(1)} tok/s` : '';
         subDetail = valid
-          ? `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(st.cacheHitPct ?? 0)}%`
+          ? t('chart.step.ctxAndCache', {
+              ctxTok: formatTokens(ctxTok),
+              pct: Number(st.cacheHitPct ?? 0),
+            })
           : st.isCompactionStep
-            ? '上下文压缩步'
-            : '无首字计时样本';
+            ? t('chart.step.compactionStep')
+            : t('chart.step.noTtftSample');
       } else if (metric === 'cost') {
         valid = stepCost !== null;
         value = valid ? stepCost : 0;
         const shownCumCost = isMultiCompare ? modelCumCost : runningCost;
-        secondaryRight = `累计 ${formatUsd(shownCumCost, { precise: shownCumCost > 0 && shownCumCost < 0.1 })}`;
-        subDetail = `缓存 ${Number(st.cacheHitPct ?? 0)}% · 本步 ${formatTokens(stepTotalTok)}`;
+        secondaryRight = t('chart.step.cumCost', {
+          cost: formatUsd(shownCumCost, { precise: shownCumCost > 0 && shownCumCost < 0.1 }),
+        });
+        subDetail = t('chart.step.cacheAndStepTok', {
+          pct: Number(st.cacheHitPct ?? 0),
+          tokens: formatTokens(stepTotalTok),
+        });
       }
 
       if (valid) {
@@ -1108,11 +1145,12 @@ export function createSessionLineChart() {
     const validPoints = points.filter((p) => p.valid);
     patchAttr(emptyHintEl, 'hidden', validPoints.length > 0);
 
+    const locale = getEffectiveLocale();
     const colorSig = Array.from(modelColorMap.entries())
       .map(([k, v]) => `${k}=${v}`)
       .join(',');
     const sig =
-      `${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
+      `${locale}|${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
       points
         .map((p) => `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}`)
         .join('|');
@@ -1247,12 +1285,12 @@ export function createSessionLineChart() {
           patchStyleVar(swatch, '--swatch-bg', colorVar);
           const stStat = perModelStats.get(gk);
           const baseLabel = modelLabelByGroup.get(gk) || gk;
-          let summarySuffix = '无样本';
+          let summarySuffix = t('chart.step.noSamples');
           if (stStat && stStat.count > 0) {
             if (metric === 'totalTokens') {
               summarySuffix = formatTokens(stStat.cumTok);
             } else if (metric === 'context') {
-              summarySuffix = `峰 ${formatTokens(stStat.max)}`;
+              summarySuffix = t('chart.step.peakShort', { val: formatTokens(stStat.max) });
             } else if (metric === 'tps' || metric === 'ttft') {
               summarySuffix = formatChartMetricCompact(metric, stStat.sum / stStat.count);
             } else if (metric === 'cost') {
@@ -1290,7 +1328,10 @@ export function createSessionLineChart() {
       const peakPt = points[peakIdx];
       patchText(
         peakPill,
-        `峰值 ${peakPt.stepTag} · ${formatChartMetricCompact(metric, peakPt.value)}`
+        t('chart.step.peakPill', {
+          tag: peakPt.stepTag,
+          val: formatChartMetricCompact(metric, peakPt.value),
+        })
       );
       patchStyleVar(peakPill, '--sstep-accent', isMultiCompare ? peakPt.dotColor : accentColor);
       const pctLeft = Math.max(14, Math.min(86, (peakPt.x / viewW) * 100));
@@ -1306,28 +1347,42 @@ export function createSessionLineChart() {
       showHoverAt(hoveredIdx);
     }
 
-    let summaryBadge = `${matchedSteps.length}步`;
+    let summaryBadge = t('chart.step.stepsCount', { count: matchedSteps.length });
     const activeCompareCount = isMultiCompare ? targetKeys.length : 1;
-    const multiPrefix = isMultiCompare ? `${activeCompareCount} 模型 · ` : '';
+    const multiPrefix = isMultiCompare
+      ? t('chart.step.multiPrefix', { count: activeCompareCount })
+      : '';
     if (metric === 'totalTokens') {
-      summaryBadge = `${multiPrefix}累计 ${formatTokens(runningTokens)}`;
+      summaryBadge = t('chart.step.sumTokens', {
+        prefix: multiPrefix,
+        tokens: formatTokens(runningTokens),
+      });
     } else if (metric === 'context') {
       const lastCtx = points[points.length - 1]?.value || 0;
       summaryBadge = isMultiCompare
-        ? `${multiPrefix}峰值 ${formatTokens(maxVal)}`
-        : `当前 ${formatTokens(lastCtx)}`;
+        ? t('chart.step.peakTokens', { prefix: multiPrefix, tokens: formatTokens(maxVal) })
+        : t('chart.step.currentCtx', { tokens: formatTokens(lastCtx) });
     } else if (metric === 'tps') {
       summaryBadge =
         validCount > 0
-          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)} tok/s`
-          : '暂无有效样本';
+          ? t('chart.step.meanTps', {
+              prefix: multiPrefix,
+              val: (validSum / validCount).toFixed(1),
+            })
+          : t('chart.step.noValidSamples');
     } else if (metric === 'ttft') {
       summaryBadge =
         validCount > 0
-          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)}s`
-          : '暂无有效样本';
+          ? t('chart.step.meanSec', {
+              prefix: multiPrefix,
+              val: (validSum / validCount).toFixed(1),
+            })
+          : t('chart.step.noValidSamples');
     } else if (metric === 'cost') {
-      summaryBadge = `${multiPrefix}累计 ${formatUsd(runningCost, { precise: runningCost > 0 && runningCost < 0.1 })}`;
+      summaryBadge = t('chart.step.sumCost', {
+        prefix: multiPrefix,
+        cost: formatUsd(runningCost, { precise: runningCost > 0 && runningCost < 0.1 }),
+      });
     }
 
     return { summaryBadge };
@@ -1418,7 +1473,7 @@ export function createModelFitChart() {
 
   const emptyHintEl = h('div', {
     className: 'sstep-empty-hint text-muted',
-    text: '该模型暂无有效拟合样本',
+    text: t('chart.fit.empty'),
     hidden: true,
   });
 
@@ -1433,14 +1488,16 @@ export function createModelFitChart() {
     tipSub,
   ]);
 
-  const fitMethodLabelEl = h('span', { text: 'LOESS 拟合' });
+  const fitMethodLabelEl = h('span', { text: t('chart.fit.loess') });
+  const olsLegendTextEl = h('span', { text: t('chart.fit.olsLinear') });
   const olsLegendWrapEl = h('span', { className: 'sstep-fit-legend-ols' }, [
     h('span', { className: 'sstep-fit-swatch is-ols' }),
-    h('span', { text: 'OLS 线性' }),
+    olsLegendTextEl,
   ]);
+  const obsLegendTextEl = h('span', { text: t('chart.fit.observed') });
   const singleLegendEl = h('span', { className: 'sstep-fit-legend' }, [
     h('span', { className: 'sstep-fit-swatch is-scatter' }),
-    h('span', { text: '观测值' }),
+    obsLegendTextEl,
     h('span', { className: 'sstep-fit-swatch is-curve' }),
     fitMethodLabelEl,
     h('span', { className: 'sstep-fit-swatch is-ci' }),
@@ -1523,8 +1580,14 @@ export function createModelFitChart() {
     patchAttr(tooltipEl, 'hidden', false);
     patchText(tipHeadLeft, sp.stepTag);
     patchText(tipHeadRight, sp.modelText);
-    patchText(tipMainLeft, `拟合 ${formatChartMetricValue(currentMetric, sp.fitVal)}`);
-    patchText(tipMainRight, `观测 ${formatChartMetricValue(currentMetric, sp.rawVal)}`);
+    patchText(
+      tipMainLeft,
+      t('chart.fit.tipFit', { val: formatChartMetricValue(currentMetric, sp.fitVal) })
+    );
+    patchText(
+      tipMainRight,
+      t('chart.fit.tipObs', { val: formatChartMetricValue(currentMetric, sp.rawVal) })
+    );
 
     patchAttr(tipSub, 'hidden', false);
     if (sp.compareHint) {
@@ -1538,7 +1601,10 @@ export function createModelFitChart() {
       const ctxTok = Math.max(0, Number(sp.st?.contextTokens || 0));
       patchText(
         tipSub,
-        `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(sp.st?.cacheHitPct ?? 0)}%`
+        t('chart.step.ctxAndCache', {
+          ctxTok: formatTokens(ctxTok),
+          pct: Number(sp.st?.cacheHitPct ?? 0),
+        })
       );
     }
 
@@ -1804,10 +1870,15 @@ export function createModelFitChart() {
           xVal: globalX,
           rawVal,
           stepTag: formatStepAxisTag(st, showAgentPrefix),
-          modelText: disp.text.replace(/·压缩\s*$/u, '').trim() || disp.text,
+          modelText: disp.baseText || disp.text,
         });
       }
     }
+
+    const locale = getEffectiveLocale();
+    patchText(emptyHintEl, t('chart.fit.empty'));
+    patchText(obsLegendTextEl, t('chart.fit.observed'));
+    patchText(olsLegendTextEl, t('chart.fit.olsLinear'));
 
     if (fitCacheMetric !== metric) {
       fitCache.clear();
@@ -1832,9 +1903,10 @@ export function createModelFitChart() {
       patchAttr(singleLegendEl, 'hidden', false);
       patchAttr(multiLegendEl, 'hidden', true);
       patchAttr(emptyHintEl, 'hidden', false);
+      patchText(fitMethodLabelEl, t('chart.fit.loess'));
       patchText(fitStatsEl, 'n = 0');
       clearHover();
-      return { sampleCount: 0, summaryBadge: '0 样本' };
+      return { sampleCount: 0, summaryBadge: t('chart.fit.zeroSamples') };
     }
 
     patchAttr(emptyHintEl, 'hidden', true);
@@ -1916,7 +1988,12 @@ export function createModelFitChart() {
             if (interp !== null) {
               peerParts.push(`${other.label} ${formatChartMetricCompact(metric, interp)}`);
             } else {
-              peerParts.push(`${other.label} 均 ${formatChartMetricCompact(metric, other.pubFit.mean)}`);
+              peerParts.push(
+                t('chart.fit.peerMean', {
+                  label: other.label,
+                  val: formatChartMetricCompact(metric, other.pubFit.mean),
+                })
+              );
             }
           }
           return {
@@ -1929,7 +2006,10 @@ export function createModelFitChart() {
             ciHigh: s.pubFit.sampleCiHigh[i],
             ciHalf: s.pubFit.sampleCiHalf[i],
             seriesColor: s.colorVar,
-            compareHint: peerParts.length > 0 ? `同图对比：${peerParts.join(' · ')}` : '',
+            compareHint:
+              peerParts.length > 0
+                ? t('chart.fit.peerCompare', { peers: peerParts.join(' · ') })
+                : '',
           };
         });
         s.samples = sSamples;
@@ -1939,7 +2019,7 @@ export function createModelFitChart() {
       currentSamples = combinedSamples;
 
       const sig =
-        `multi|${viewW}|${targetKeys.join(',')}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+        `multi|${locale}|${viewW}|${targetKeys.join(',')}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
         seriesList
           .map(
             (s) =>
@@ -2053,7 +2133,7 @@ export function createModelFitChart() {
         fitStatsEl,
         seriesList.length <= 2
           ? seriesList.map((s) => `R²=${s.pubFit.r2.toFixed(2)}`).join(' · ')
-          : `${seriesList.length} 条拟合线`
+          : t('chart.fit.curvesCount', { count: seriesList.length })
       );
       patchAttr(fitStatsEl, 'title', r2SummaryTitle);
 
@@ -2065,7 +2145,10 @@ export function createModelFitChart() {
 
       return {
         sampleCount: combinedSamples.length,
-        summaryBadge: `${combinedSamples.length}步 · ${seriesList.length} 模型对比`,
+        summaryBadge: t('chart.fit.multiBadge', {
+          steps: combinedSamples.length,
+          models: seriesList.length,
+        }),
       };
     }
 
@@ -2080,7 +2163,10 @@ export function createModelFitChart() {
     const rawYs = filtered.map((d) => d.rawVal);
     const pubFit = reusePublicationFit(null, xs, rawYs, maxBound, false);
 
-    patchText(fitMethodLabelEl, pubFit.method === 'LOESS' ? 'LOESS 拟合' : 'OLS 回归');
+    patchText(
+      fitMethodLabelEl,
+      pubFit.method === 'LOESS' ? t('chart.fit.loess') : t('chart.fit.olsReg')
+    );
     patchAttr(olsLegendWrapEl, 'hidden', filtered.length < 6);
 
     let dataMin = Infinity;
@@ -2133,7 +2219,7 @@ export function createModelFitChart() {
     currentSamples = samples;
 
     const sig =
-      `single|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+      `single|${locale}|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
       samples.map((s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}`).join('|');
 
     if (sig !== lastSig) {
@@ -2209,7 +2295,10 @@ export function createModelFitChart() {
       }
     }
 
-    const summaryBadge = `${samples.length}步 · 均 ${formatChartMetricCompact(metric, pubFit.mean)}`;
+    const summaryBadge = t('chart.fit.singleBadge', {
+      steps: samples.length,
+      mean: formatChartMetricCompact(metric, pubFit.mean),
+    });
     if (samples.length >= 2) {
       const rSign = pubFit.r >= 0 ? '+' : '';
       const slopeSign = pubFit.slope >= 0 ? '+' : '';
@@ -2217,7 +2306,11 @@ export function createModelFitChart() {
       patchAttr(
         fitStatsEl,
         'title',
-        `OLS: y = ${slopeSign}${pubFit.slope.toFixed(3)}x + ${pubFit.intercept.toFixed(2)} · 样本标准差 SD = ±${pubFit.sd.toFixed(2)}`
+        t('chart.fit.olsTitle', {
+          slope: `${slopeSign}${pubFit.slope.toFixed(3)}`,
+          intercept: pubFit.intercept.toFixed(2),
+          sd: pubFit.sd.toFixed(2),
+        })
       );
     } else {
       patchText(fitStatsEl, `n = ${samples.length}`);

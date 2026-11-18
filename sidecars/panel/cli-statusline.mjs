@@ -27,8 +27,8 @@ import {
 import {
   readLocalSqliteTrajectory,
   readLocalSummaryIndex,
-  withReadOnlySqliteDb,
 } from './backend/cli-sqlite-reader.mjs';
+import { withReadOnlySqliteDb } from './backend/sqlite-client.mjs';
 import {
   ensureCliStatusLineConfigured,
   formatCliStatusLineCapsule,

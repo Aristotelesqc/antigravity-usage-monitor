@@ -10,194 +10,38 @@
  *    及运行态末尾步骤，O(1) 跳过大体积工具输出页），完整保留耗时、TTFT、轮次导轨与 10 通道上下文构成。
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parseIsoMs } from '../trajectory-metrics.mjs';
 import { ANNOTATION_DIRS, PRODUCT_DATA_ROOTS, localSummaryMemo } from './config.mjs';
+import {
+  SQLITE_IN_CHUNK_SIZE,
+  computeSqliteWalSig,
+  getNodeSqliteDatabaseSync,
+  hasBuiltinNodeSqlite,
+  normalizeSqliteIsoTime,
+  withReadOnlySqliteDb,
+} from './sqlite-client.mjs';
+import {
+  decodeProtoDurationSlice,
+  decodeProtoMapStringEntry,
+  decodeProtoTimestampSlice,
+  readProtoString,
+  readProtoVarint,
+  readSubEnd,
+  skipProtoField,
+  toUint8Array,
+  unescapePbtxtString,
+} from './proto-wire.mjs';
+
+export {
+  computeSqliteWalSig,
+  getNodeSqliteDatabaseSync,
+  hasBuiltinNodeSqlite,
+  withReadOnlySqliteDb,
+};
 
 const UUID_FILE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SQLITE_IN_CHUNK_SIZE = 400;
-const utf8Decoder = typeof TextDecoder === 'function' ? new TextDecoder('utf-8') : null;
-
-let sqliteResolved = false;
-let sqliteDatabaseSyncCtor = null;
-
-/**
- * 惰性获取 Node 内置 `node:sqlite` 的 `DatabaseSync` 构造器（兼容测试沙箱注入的 `globalThis.DatabaseSync`）。
- * 首次加载时静默过滤 Node 22 的实验特性告警；当前运行时不支持时返回 `null`。
- *
- * @returns {Function | null}
- */
-export function getNodeSqliteDatabaseSync() {
-  if (typeof globalThis.DatabaseSync === 'function') {
-    return globalThis.DatabaseSync;
-  }
-  if (sqliteResolved) return sqliteDatabaseSyncCtor;
-  sqliteResolved = true;
-  if (typeof process === 'undefined' || typeof process.getBuiltinModule !== 'function') {
-    return null;
-  }
-  const origEmitWarning = process.emitWarning;
-  try {
-    if (typeof origEmitWarning === 'function') {
-      process.emitWarning = function filteredSqliteWarning(warning, ...rest) {
-        const msg = typeof warning === 'string' ? warning : String(warning?.message || '');
-        if (/SQLite is an experimental feature/i.test(msg)) return;
-        return origEmitWarning.call(this, warning, ...rest);
-      };
-    }
-    const mod = process.getBuiltinModule('node:sqlite');
-    sqliteDatabaseSyncCtor = typeof mod?.DatabaseSync === 'function' ? mod.DatabaseSync : null;
-  } catch {
-    sqliteDatabaseSyncCtor = null;
-  } finally {
-    if (typeof origEmitWarning === 'function') {
-      process.emitWarning = origEmitWarning;
-    }
-  }
-  return sqliteDatabaseSyncCtor;
-}
-
-/**
- * 当前运行时是否具备内置 `node:sqlite` 读取能力。
- *
- * @returns {boolean}
- */
-export function hasBuiltinNodeSqlite() {
-  return Boolean(getNodeSqliteDatabaseSync());
-}
-
-/**
- * 计算 SQLite 主库与 `.db-wal` 预写日志的复合签名（忽略易抖动的 `-shm` 共享内存头），精准感知未 checkpoint 的实时写入。
- *
- * @param {string} dbPath
- * @returns {{ exists: boolean, mtimeMs: number, sig: string }}
- */
-export function computeSqliteWalSig(dbPath) {
-  if (!dbPath || typeof dbPath !== 'string' || !existsSync(dbPath)) {
-    return { exists: false, mtimeMs: 0, sig: '' };
-  }
-  let dbStat = null;
-  try {
-    dbStat = statSync(dbPath);
-  } catch {
-    return { exists: false, mtimeMs: 0, sig: '' };
-  }
-  if (!dbStat) return { exists: false, mtimeMs: 0, sig: '' };
-
-  let walStat = null;
-  const walPath = `${dbPath}-wal`;
-  if (existsSync(walPath)) {
-    try {
-      walStat = statSync(walPath);
-    } catch {
-      walStat = null;
-    }
-  }
-  const dbMtimeMs = Number(dbStat.mtimeMs || 0);
-  const dbSize = Number(dbStat.size || 0);
-  const walMtimeMs = Number(walStat?.mtimeMs || 0);
-  const walSize = Number(walStat?.size || 0);
-  return {
-    exists: true,
-    mtimeMs: Math.max(dbMtimeMs, walMtimeMs),
-    sig: `${Math.floor(dbMtimeMs)}:${dbSize}|${Math.floor(walMtimeMs)}:${walSize}`,
-  };
-}
-
-function isSqliteBusyError(err) {
-  const msg = String(err?.message || err?.code || '');
-  return /SQLITE_BUSY|database is locked/i.test(msg);
-}
-
-/**
- * 以只读模式打开 SQLite 数据库执行查询并在 `finally` 中立即关闭连接，避免长连接阻塞宿主 WAL checkpoint。
- * 遇到瞬时锁竞争（`SQLITE_BUSY`）时自动重试 1 次。
- */
-export function withReadOnlySqliteDb(dbPath, queryFn) {
-  const DatabaseSync = getNodeSqliteDatabaseSync();
-  if (!DatabaseSync) return null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let db = null;
-    try {
-      db = new DatabaseSync(dbPath, { readOnly: true });
-      try {
-        db.exec('PRAGMA busy_timeout = 1000;');
-      } catch {
-        // 兼容最小测试桩
-      }
-      return queryFn(db);
-    } catch (err) {
-      if (attempt === 0 && isSqliteBusyError(err)) {
-        continue;
-      }
-      throw err;
-    } finally {
-      if (db) {
-        try {
-          db.close();
-        } catch {
-          // 忽略关闭异常
-        }
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * 解码 Protobuf Text Format (`prototext`) 字符串字面量，兼容 UTF-8 原文与 `\ddd` / `\xHH` 字节转义。
- *
- * @param {string} raw
- * @returns {string}
- */
-function unescapePbtxtString(raw) {
-  if (typeof raw !== 'string' || !raw) return '';
-  if (!raw.includes('\\')) return raw;
-  const bytes = [];
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i];
-    if (ch !== '\\' || i + 1 >= raw.length) {
-      const encoded = Buffer.from(ch, 'utf8');
-      for (let b = 0; b < encoded.length; b++) bytes.push(encoded[b]);
-      continue;
-    }
-    const next = raw[++i];
-    if (next >= '0' && next <= '7') {
-      let oct = next;
-      if (i + 1 < raw.length && raw[i + 1] >= '0' && raw[i + 1] <= '7') oct += raw[++i];
-      if (i + 1 < raw.length && raw[i + 1] >= '0' && raw[i + 1] <= '7') oct += raw[++i];
-      bytes.push(parseInt(oct, 8) & 0xff);
-    } else if ((next === 'x' || next === 'X') && i + 2 < raw.length) {
-      const hex = raw.slice(i + 1, i + 3);
-      if (/^[0-9a-fA-F]{2}$/.test(hex)) {
-        bytes.push(parseInt(hex, 16));
-        i += 2;
-      } else {
-        bytes.push(next.charCodeAt(0));
-      }
-    } else if (next === 'u' && i + 4 < raw.length) {
-      const uHex = raw.slice(i + 1, i + 5);
-      if (/^[0-9a-fA-F]{4}$/.test(uHex)) {
-        const encoded = Buffer.from(String.fromCharCode(parseInt(uHex, 16)), 'utf8');
-        for (let b = 0; b < encoded.length; b++) bytes.push(encoded[b]);
-        i += 4;
-      } else {
-        bytes.push(next.charCodeAt(0));
-      }
-    } else if (next === 'n') {
-      bytes.push(0x0a);
-    } else if (next === 'r') {
-      bytes.push(0x0d);
-    } else if (next === 't') {
-      bytes.push(0x09);
-    } else {
-      const encoded = Buffer.from(next, 'utf8');
-      for (let b = 0; b < encoded.length; b++) bytes.push(encoded[b]);
-    }
-  }
-  return Buffer.from(bytes).toString('utf8');
-}
 
 /**
  * 从 `annotations/<cascadeId>.pbtxt` 文本内容中提取顶层 `title` 字段。
@@ -241,12 +85,6 @@ export function readAnnotationTitleForCascade(cascadeId, annotationDirs = ANNOTA
     }
   }
   return '';
-}
-
-function normalizeSqliteIsoTime(value) {
-  const raw = String(value || '').trim();
-  if (!raw || raw.startsWith('0001-01-01') || raw.startsWith('1970-01-01 00:00:00')) return '';
-  return raw.replace(/^(\d{4}-\d{2}-\d{2})\s+/, '$1T').replace(/\+00:00$/, 'Z');
 }
 
 // ---------------------------------------------------------------------------
@@ -372,133 +210,6 @@ const PROTO_CHAT_MSG_SOURCES = Object.freeze({
   6: 'CHAT_MESSAGE_SOURCE_CONTEXT',
 });
 
-function toUint8Array(raw) {
-  if (!raw) return null;
-  if (raw instanceof Uint8Array) return raw;
-  if (ArrayBuffer.isView(raw)) {
-    return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
-  }
-  if (raw instanceof ArrayBuffer) {
-    return new Uint8Array(raw);
-  }
-  return null;
-}
-
-function decodeUtf8Slice(buf, start, end) {
-  if (start >= end) return '';
-  if (utf8Decoder) {
-    return utf8Decoder.decode(buf.subarray(start, end));
-  }
-  return Buffer.from(buf.buffer, buf.byteOffset + start, end - start).toString('utf8');
-}
-
-function readProtoVarint(buf, state, limit = buf.length) {
-  if (state.off >= limit) return 0n;
-  const b0 = buf[state.off];
-  if (b0 < 0x80) {
-    state.off += 1;
-    return BigInt(b0);
-  }
-  let result = 0n;
-  let shift = 0n;
-  for (let i = 0; i < 10 && state.off < limit; i++) {
-    const byte = buf[state.off++];
-    result |= BigInt(byte & 0x7f) << shift;
-    if ((byte & 0x80) === 0) {
-      return BigInt.asUintN(64, result);
-    }
-    shift += 7n;
-  }
-  while (state.off < limit && (buf[state.off++] & 0x80) !== 0) {
-    // 安全排空超长 varint 延续字节
-  }
-  return BigInt.asUintN(64, result);
-}
-
-function readSubEnd(buf, state, limit = buf.length) {
-  const len = Number(BigInt.asUintN(32, readProtoVarint(buf, state, limit)));
-  return Math.min(limit, state.off + len);
-}
-
-function readProtoString(buf, state, limit = buf.length) {
-  const end = readSubEnd(buf, state, limit);
-  const str = decodeUtf8Slice(buf, state.off, end);
-  state.off = end;
-  return str;
-}
-
-function skipProtoField(buf, state, wireType, limit = buf.length) {
-  if (wireType === 0) {
-    readProtoVarint(buf, state, limit);
-  } else if (wireType === 1) {
-    state.off = Math.min(limit, state.off + 8);
-  } else if (wireType === 2) {
-    state.off = readSubEnd(buf, state, limit);
-  } else if (wireType === 5) {
-    state.off = Math.min(limit, state.off + 4);
-  } else if (wireType === 3) {
-    while (state.off < limit) {
-      const innerTag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, limit)));
-      const innerWt = innerTag & 7;
-      if (innerWt === 4) break;
-      skipProtoField(buf, state, innerWt, limit);
-    }
-  } else if (wireType !== 4) {
-    state.off = limit;
-  }
-}
-
-function decodeProtoTimestampSlice(buf, state, end) {
-  let seconds = 0n;
-  let nanos = 0n;
-  while (state.off < end) {
-    const tag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
-    const fn = tag >>> 3;
-    const wt = tag & 7;
-    if (fn === 1 && wt === 0) {
-      seconds = BigInt.asIntN(64, readProtoVarint(buf, state, end));
-    } else if (fn === 2 && wt === 0) {
-      nanos = BigInt.asIntN(32, readProtoVarint(buf, state, end));
-    } else {
-      skipProtoField(buf, state, wt, end);
-    }
-  }
-  state.off = end;
-  if (seconds <= 0n || seconds > 253402300799n) return '';
-  const baseIso = new Date(Number(seconds) * 1000).toISOString().slice(0, 19);
-  if (nanos > 0n && nanos < 1_000_000_000n) {
-    const frac = String(nanos).padStart(9, '0').replace(/0+$/, '');
-    return frac ? `${baseIso}.${frac}Z` : `${baseIso}Z`;
-  }
-  return `${baseIso}Z`;
-}
-
-function decodeProtoDurationSlice(buf, state, end) {
-  let seconds = 0n;
-  let nanos = 0n;
-  while (state.off < end) {
-    const tag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
-    const fn = tag >>> 3;
-    const wt = tag & 7;
-    if (fn === 1 && wt === 0) {
-      seconds = BigInt.asIntN(64, readProtoVarint(buf, state, end));
-    } else if (fn === 2 && wt === 0) {
-      nanos = BigInt.asIntN(32, readProtoVarint(buf, state, end));
-    } else {
-      skipProtoField(buf, state, wt, end);
-    }
-  }
-  state.off = end;
-  const totalNs = seconds * 1_000_000_000n + nanos;
-  if (totalNs < 0n) return '';
-  if (totalNs === 0n) return '0s';
-  const wholeSec = totalNs / 1_000_000_000n;
-  const remNs = Number(totalNs % 1_000_000_000n);
-  if (remNs === 0) return `${wholeSec}s`;
-  const frac = String(remNs).padStart(9, '0').replace(/0+$/, '');
-  return `${wholeSec}.${frac}s`;
-}
-
 function decodeProtoModelEnumInt(val) {
   const n = Math.trunc(Number(val));
   if (!Number.isFinite(n) || n <= 0) return '';
@@ -516,25 +227,6 @@ function decodeProtoStepTypeEnum(val) {
 function decodeProtoStepStatusEnum(val) {
   const n = Math.trunc(Number(val));
   return PROTO_STEP_STATUSES[n] || 'CORTEX_STEP_STATUS_DONE';
-}
-
-function decodeProtoMapStringEntry(buf, state, end) {
-  let key = '';
-  let val = '';
-  while (state.off < end) {
-    const tag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
-    const fn = tag >>> 3;
-    const wt = tag & 7;
-    if (fn === 1 && wt === 2) {
-      key = readProtoString(buf, state, end);
-    } else if (fn === 2 && wt === 2) {
-      val = readProtoString(buf, state, end);
-    } else {
-      skipProtoField(buf, state, wt, end);
-    }
-  }
-  state.off = end;
-  return [key, val];
 }
 
 function decodeProtoSubagentSpecSlice(buf, state, end) {

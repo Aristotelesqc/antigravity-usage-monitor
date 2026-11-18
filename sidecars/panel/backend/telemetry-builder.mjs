@@ -190,6 +190,10 @@ function enrichActiveConversationSteps(
     return {
       ...serializedStep,
       responseModel: st.responseModel || '',
+      hasKnownModel: Boolean(mInfo.modelId && mInfo.modelId !== 'unknown'),
+      baseModelUpstream: annotatedUpstreamModel,
+      baseModelLabel: mInfo.label,
+      baseModelShort: mInfo.shortName,
       modelUpstream,
       modelLabel: st.isCompactionStep ? `${mInfo.label} [自动压缩]` : mInfo.label,
       modelShort: st.isCompactionStep ? `${mInfo.shortName}·压缩` : mInfo.shortName,
@@ -210,12 +214,20 @@ function enrichActiveConversationSteps(
   // 关联每轮用户提问摘要与最新轮次标识，供步骤表极简导轨与气泡展示
   let maxTurnIndex = 0;
   const promptByTurn = new Map();
+  const mediaByTurn = new Map();
   for (const st of enrichedActiveSteps) {
     const tIdx = st.turnIndex;
     if (!Number.isInteger(tIdx) || tIdx <= 0) continue;
     if (tIdx > maxTurnIndex) maxTurnIndex = tIdx;
     if (st.turnPrompt && (st.isTurnStart || !promptByTurn.has(tIdx))) {
       promptByTurn.set(tIdx, st.turnPrompt);
+    }
+    if (st.isTurnStart || !mediaByTurn.has(tIdx)) {
+      mediaByTurn.set(tIdx, {
+        cleanPrompt: st.turnPromptClean ?? '',
+        hasMedia: Boolean(st.turnHasMedia),
+        mediaOnly: Boolean(st.turnMediaOnly),
+      });
     }
   }
   for (const st of enrichedActiveSteps) {
@@ -225,11 +237,18 @@ function enrichActiveConversationSteps(
       st.isTurnStart = false;
       st.isLatestTurn = false;
       st.turnPrompt = '';
+      st.turnPromptClean = '';
+      st.turnHasMedia = false;
+      st.turnMediaOnly = false;
       continue;
     }
+    const turnMedia = mediaByTurn.get(tIdx);
     st.isTurnStart = Boolean(st.isTurnStart);
     st.isLatestTurn = tIdx === maxTurnIndex;
     st.turnPrompt = promptByTurn.get(tIdx) || '';
+    st.turnPromptClean = turnMedia?.cleanPrompt || '';
+    st.turnHasMedia = Boolean(turnMedia?.hasMedia);
+    st.turnMediaOnly = Boolean(turnMedia?.mediaOnly);
   }
 
   const latestEnriched =
@@ -544,12 +563,15 @@ function prepareAgentSteps(rawSteps, resolveStepModel, upstream, agentFields, re
 /**
  * 构建单个代理（主代理或子代理）的标准遥测单元对象。
  */
-function buildAgentUnitTelemetry({
+export function buildAgentUnitTelemetry({
   agentId,
   cascadeId,
   isMain,
   isSideQuestion = false,
   sideIndex = 0,
+  agentKind = isMain ? 'main' : isSideQuestion ? 'side_question' : 'subagent',
+  agentOrdinal = isMain ? 0 : isSideQuestion ? sideIndex : 0,
+  customRole = '',
   index,
   shortLabel,
   badgeText,
@@ -572,6 +594,9 @@ function buildAgentUnitTelemetry({
     {
       agentId,
       agentCascadeId: cascadeId,
+      agentKind,
+      agentOrdinal,
+      agentCustomRole: customRole,
       agentLabel,
       agentBadge: badgeText,
       agentRole: role,
@@ -599,6 +624,9 @@ function buildAgentUnitTelemetry({
       agentId,
       cascadeId,
       isMain,
+      agentKind,
+      agentOrdinal,
+      customRole,
       ...(isSideQuestion ? { isSideQuestion: true, sideIndex } : {}),
       index,
       shortLabel,
@@ -631,6 +659,9 @@ function buildAgentUnitTelemetry({
         : 0,
       latestCacheHitPct: ctxRes.latestCacheHitPct,
       sessionCacheHitPct: ctxRes.sessionCacheHitPct,
+      hasKnownModel: Boolean(enrichedRes.latestEnriched?.hasKnownModel),
+      activeBaseModelShort: enrichedRes.latestEnriched?.baseModelShort || '',
+      activeBaseModelLabel: enrichedRes.latestEnriched?.baseModelLabel || '',
       activeModelShort: enrichedRes.latestEnriched?.modelShort || '模型未知',
       activeModelLabel: enrichedRes.latestEnriched?.modelLabel || '模型未知',
       activeModelUpstream:
@@ -814,6 +845,9 @@ export async function buildTelemetryPayloadInternal(
       subSpec?.role || subSum.agentScriptName || subEntry?.agentScriptName || subSpec?.typeName || '';
     const subIndex = idx + 1;
     let sideIndex = 0;
+    let agentKind = 'subagent';
+    let agentOrdinal = 0;
+    let customRole = '';
     let shortLabel = '';
     let badgeText = '';
     let roleLabel = '';
@@ -821,6 +855,8 @@ export async function buildTelemetryPayloadInternal(
     let agentLabel = '';
     if (isSideQ) {
       sideIndex = ++sideQuestionCount;
+      agentKind = 'side_question';
+      agentOrdinal = sideIndex;
       shortLabel = `旁路提问 #${sideIndex}`;
       badgeText = `旁${sideIndex}`;
       const cleanSideRole =
@@ -830,11 +866,15 @@ export async function buildTelemetryPayloadInternal(
         rawRole !== 'side_question'
           ? rawRole
           : '';
+      customRole = cleanSideRole;
       roleLabel = cleanSideRole || '旁路提问';
       typeName = 'side_question';
       agentLabel = cleanSideRole ? `${shortLabel} · ${cleanSideRole}` : shortLabel;
     } else {
       const subOrd = ++normalSubCount;
+      agentKind = 'subagent';
+      agentOrdinal = subOrd;
+      customRole = rawRole && rawRole !== '子代理' && rawRole !== 'Subagent' ? rawRole : '';
       shortLabel = `子代理 #${subOrd}`;
       badgeText = `子${subOrd}`;
       roleLabel = rawRole || '子代理';
@@ -848,6 +888,9 @@ export async function buildTelemetryPayloadInternal(
       isMain: false,
       isSideQuestion: isSideQ,
       sideIndex,
+      agentKind,
+      agentOrdinal,
+      customRole,
       index: subIndex,
       shortLabel,
       badgeText,
@@ -897,6 +940,9 @@ export async function buildTelemetryPayloadInternal(
           turnIndex: tIdx,
           startMs: mSt.createdAtMs || 0,
           prompt: mSt.turnPrompt || '',
+          cleanPrompt: mSt.turnPromptClean ?? '',
+          hasMedia: Boolean(mSt.turnHasMedia),
+          mediaOnly: Boolean(mSt.turnMediaOnly),
         });
       }
     }
@@ -923,6 +969,9 @@ export async function buildTelemetryPayloadInternal(
           st.rootTurnIndex = matched.turnIndex;
           st.isRootLatestTurn = matched.turnIndex === maxRootTurn;
           st.rootTurnPrompt = matched.prompt || '';
+          st.rootTurnPromptClean = matched.cleanPrompt ?? '';
+          st.rootTurnHasMedia = Boolean(matched.hasMedia);
+          st.rootTurnMediaOnly = Boolean(matched.mediaOnly);
           if (!seenRootStarts.has(matched.turnIndex)) {
             seenRootStarts.add(matched.turnIndex);
             st.isRootTurnStart = true;
@@ -1004,6 +1053,8 @@ export async function buildTelemetryPayloadInternal(
       ? {
           ...activeActivityAgent.liveActivity,
           agentId: activeActivityAgent.agentId,
+          agentKind: activeActivityAgent.agentKind || (activeActivityAgent.isMain ? 'main' : activeActivityAgent.isSideQuestion ? 'side_question' : 'subagent'),
+          agentOrdinal: activeActivityAgent.agentOrdinal || 0,
           agentBadge: activeActivityAgent.badgeText,
           agentShortLabel: activeActivityAgent.shortLabel,
           agentRole: activeActivityAgent.role,
@@ -1020,12 +1071,16 @@ export async function buildTelemetryPayloadInternal(
       agentId: 'all',
       cascadeId: activeCascadeId,
       isMain: false,
+      agentKind: 'all',
+      agentOrdinal: 0,
       index: -1,
       shortLabel: '全部汇总',
       badgeText: '全部',
       role: aggregatedRoleLabel,
       typeName: 'all',
       activeAgentId: activeMainlineAgent.agentId,
+      activeAgentKind: activeMainlineAgent.agentKind || (activeMainlineAgent.isMain ? 'main' : activeMainlineAgent.isSideQuestion ? 'side_question' : 'subagent'),
+      activeAgentOrdinal: activeMainlineAgent.agentOrdinal || 0,
       activeAgentShortLabel: activeMainlineAgent.shortLabel,
       activeAgentBadge: activeMainlineAgent.badgeText,
       activeAgentRole: activeMainlineAgent.role,
@@ -1049,6 +1104,9 @@ export async function buildTelemetryPayloadInternal(
       latestPromptTokens: latestMetricAgent.latestPromptTokens ?? 0,
       latestCacheHitPct: latestMetricAgent.latestCacheHitPct,
       sessionCacheHitPct: combinedSessionCacheHitPct,
+      hasKnownModel: Boolean(latestMetricAgent.hasKnownModel),
+      activeBaseModelShort: latestMetricAgent.activeBaseModelShort || '',
+      activeBaseModelLabel: latestMetricAgent.activeBaseModelLabel || '',
       activeModelShort: latestMetricAgent.activeModelShort,
       activeModelLabel: latestMetricAgent.activeModelLabel,
       activeModelUpstream: latestMetricAgent.activeModelUpstream,
@@ -1369,11 +1427,16 @@ export async function buildTelemetryPayloadInternal(
         '';
       const subIndex = idx + 1;
       let sideIndex = 0;
+      let agentKind = 'subagent';
+      let agentOrdinal = 0;
+      let customRole = '';
       let badgeText = '';
       let shortLabel = '';
       let role = '';
       if (isSideQ) {
         sideIndex = ++runSideIdx;
+        agentKind = 'side_question';
+        agentOrdinal = sideIndex;
         badgeText = `旁${sideIndex}`;
         shortLabel = `旁路提问 #${sideIndex}`;
         const cleanSide =
@@ -1383,9 +1446,13 @@ export async function buildTelemetryPayloadInternal(
           rawRole !== 'side_question'
             ? rawRole
             : '';
+        customRole = cleanSide;
         role = cleanSide || shortLabel;
       } else {
         const nOrd = ++runNormalSubIdx;
+        agentKind = 'subagent';
+        agentOrdinal = nOrd;
+        customRole = rawRole && rawRole !== '子代理' && rawRole !== 'Subagent' ? rawRole : '';
         badgeText = `子${nOrd}`;
         shortLabel = `子代理 #${nOrd}`;
         role = rawRole || shortLabel;
@@ -1397,6 +1464,9 @@ export async function buildTelemetryPayloadInternal(
         ? subSum.liveActivity || extractLiveActivity([], true, subModMs)
         : {
             phase: 'done',
+            actionKey: 'done',
+            waitingApproval: false,
+            detailKey: '',
             label: '已完成',
             detail: '',
             stepProgress: '',
@@ -1406,6 +1476,9 @@ export async function buildTelemetryPayloadInternal(
       return {
         cascadeId: subCid,
         index: subIndex,
+        agentKind,
+        agentOrdinal,
+        customRole,
         ...(isSideQ ? { isSideQuestion: true, sideIndex } : {}),
         badgeText,
         shortLabel,
@@ -1426,14 +1499,18 @@ export async function buildTelemetryPayloadInternal(
     const runningSubCount = subItems.filter((s) => s.isRunning).length;
     if (
       isMainRunning &&
-      (mainLiveAct?.toolName === 'invoke_subagent' || mainLiveAct?.label === '调用子代理') &&
+      (mainLiveAct?.toolName === 'invoke_subagent' || mainLiveAct?.actionKey === 'invoke_subagent') &&
       runningSubCount === 0
     ) {
       const pendingIndex = subItems.length + 1;
-      const pendingRole = mainLiveAct.detail || '子代理';
+      const pendingCustomRole = mainLiveAct.detail || '';
+      const pendingRole = pendingCustomRole || '子代理';
       subItems.push({
         cascadeId: `${rootConv.cascadeId}:pending-sub-${pendingIndex}`,
         index: pendingIndex,
+        agentKind: 'subagent',
+        agentOrdinal: pendingIndex,
+        customRole: pendingCustomRole,
         badgeText: `子${pendingIndex}`,
         shortLabel: `子代理 #${pendingIndex}`,
         role: pendingRole,
@@ -1444,6 +1521,9 @@ export async function buildTelemetryPayloadInternal(
         lastModifiedMs: rootFallbackMs,
         liveActivity: {
           phase: 'thinking',
+          actionKey: 'starting',
+          waitingApproval: false,
+          detailKey: '',
           label: '启动中',
           detail: '',
           stepProgress: '',
@@ -1459,8 +1539,11 @@ export async function buildTelemetryPayloadInternal(
       (runningSubList.length > 0
         ? {
             phase: 'waiting',
+            actionKey: 'waiting_subagent',
+            waitingApproval: false,
+            detailKey: '',
             label: '等待子代理',
-            detail: runningSubList.map((s) => s.role).join(', '),
+            detail: runningSubList.map((s) => s.customRole || s.role).join(', '),
             stepProgress: '',
             startedAtMs: runningSubList[0]?.liveActivity?.startedAtMs || rootFallbackMs,
             signature: `wait-subs:${runningSubList.length}:${runningSubList[0]?.cascadeId || ''}`,
@@ -1570,6 +1653,9 @@ export async function buildTelemetryPayloadInternal(
         : 0,
       latestCacheHitPct,
       sessionCacheHitPct,
+      hasKnownModel: Boolean(latestEnriched?.hasKnownModel),
+      activeBaseModelShort: latestEnriched?.baseModelShort || '',
+      activeBaseModelLabel: latestEnriched?.baseModelLabel || '',
       activeModelShort: latestEnriched?.modelShort || '模型未知',
       activeModelLabel: latestEnriched?.modelLabel || '模型未知',
       activeModelUpstream:
