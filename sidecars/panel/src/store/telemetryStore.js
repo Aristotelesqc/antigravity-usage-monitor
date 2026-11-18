@@ -1031,12 +1031,6 @@ async function requestTelemetry(params, force) {
     consecutivePollFailures = 0;
 
     const latestSt = telemetryStore.getState();
-    const previousAccount = latestSt.telemetry?.account;
-    const nextAccount = payload?.account;
-    const accountChanged = previousAccount?.status === 'signedIn' &&
-      (nextAccount?.status === 'signedOut' || (nextAccount?.status === 'signedIn' &&
-        (previousAccount.email || previousAccount.name) !== (nextAccount.email || nextAccount.name)));
-    const accountPatch = accountChanged ? { selectedConversationId: '' } : {};
     if (force) {
       const elapsed = Date.now() - startMs;
       if (elapsed < 220) {
@@ -1047,7 +1041,6 @@ async function requestTelemetry(params, force) {
       }
       if (feedbackTimer) clearTimeout(feedbackTimer);
       telemetryStore.setState({
-        ...accountPatch,
         telemetry: payload,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: 'synced',
@@ -1060,7 +1053,6 @@ async function requestTelemetry(params, force) {
       const isSame = isEquivalentTelemetry(latestSt.telemetry, payload);
       const nextTelemetry = isSame ? latestSt.telemetry : payload;
       telemetryStore.setState({
-        ...accountPatch,
         telemetry: nextTelemetry,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',

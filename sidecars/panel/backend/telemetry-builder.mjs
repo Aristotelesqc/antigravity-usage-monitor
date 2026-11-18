@@ -98,13 +98,13 @@ function readTrajectoryModelFacts(steps) {
 }
 
 /** 合并各会话的上游模型与上下文上限，步骤数组更新后重新提取对应会话的数据。 */
-function buildKnownUpstreamModelMap(contextLimits, currentAccountName) {
+function buildKnownUpstreamModelMap(contextLimits) {
   const knownUpstreamByModelKey = new Map();
   for (const [, entry] of listCachedTrajectoryEntries()) {
     if (!entry?.steps?.length) continue;
     const facts = readTrajectoryModelFacts(entry.steps);
     for (const [key, model] of facts.upstream) knownUpstreamByModelKey.set(key, model);
-    if (entry.subagentSpec || (entry.accountName && entry.accountName !== currentAccountName)) continue;
+    if (entry.subagentSpec) continue;
     if (facts.limits) {
       for (const [key, limit] of facts.limits) {
         const previous = contextLimits.get(key);
@@ -785,7 +785,7 @@ export async function buildTelemetryPayloadInternal(
 
   // 3. 计算当前活跃根会话及其子代理的步骤指标、10 通道上下文拆解与按模型汇总
   const reportedContextLimits = new Map();
-  const knownUpstreamByModelKey = buildKnownUpstreamModelMap(reportedContextLimits, currentAccountName);
+  const knownUpstreamByModelKey = buildKnownUpstreamModelMap(reportedContextLimits);
   const activeEntry = findTrajectoryCacheEntry(activeCascadeId);
   const activeSteps = activeEntry?.steps || [];
   const subagentSummaries = activeConvSummary?.subagents || [];
@@ -1188,6 +1188,7 @@ export async function buildTelemetryPayloadInternal(
     currentYear,
     monthlySeries,
     weekBucket,
+    quotaWeekBucket,
     modelBreakdown,
     poolCycleStats,
     poolsWeeklySummary,
@@ -1536,6 +1537,7 @@ export async function buildTelemetryPayloadInternal(
     });
   }
 
+  const officialFallbackWeekBucket = quotaWeekBucket || weekBucket;
   const finalPayload = {
     timestamp: new Date().toISOString(),
     hostPlatform: process.platform || 'unknown',
@@ -1657,19 +1659,26 @@ export async function buildTelemetryPayloadInternal(
         title: isCustomWeeklyMode
           ? '每周限额 (自定义本机)'
           : `每周限额 (${activePoolLabel && activePoolLabel !== 'Unknown' ? activePoolLabel : '当前'})`,
-        calls: !isCustomWeeklyMode && poolsWeeklySummary ? poolsWeeklySummary.calls : weekBucket.calls,
-        tokens:
-          !isCustomWeeklyMode && poolsWeeklySummary
+        calls: isCustomWeeklyMode
+          ? weekBucket.calls
+          : poolsWeeklySummary
+            ? poolsWeeklySummary.calls
+            : officialFallbackWeekBucket.calls,
+        tokens: isCustomWeeklyMode
+          ? weekBucket.totalTokens
+          : poolsWeeklySummary
             ? poolsWeeklySummary.tokens
-            : weekBucket.totalTokens,
-        costUsd:
-          !isCustomWeeklyMode && poolsWeeklySummary
+            : officialFallbackWeekBucket.totalTokens,
+        costUsd: isCustomWeeklyMode
+          ? weekBucket.costUsd
+          : poolsWeeklySummary
             ? poolsWeeklySummary.costUsd
-            : weekBucket.costUsd,
-        unpricedCalls:
-          !isCustomWeeklyMode && poolsWeeklySummary
+            : officialFallbackWeekBucket.costUsd,
+        unpricedCalls: isCustomWeeklyMode
+          ? weekBucket.unpricedCalls
+          : poolsWeeklySummary
             ? poolsWeeklySummary.unpricedCalls
-            : weekBucket.unpricedCalls,
+            : officialFallbackWeekBucket.unpricedCalls,
         usedPct: weeklyUsedPct,
         remainingPct: weeklyRemainingPct,
         remainingIntPct: weeklyRemainingIntPct,

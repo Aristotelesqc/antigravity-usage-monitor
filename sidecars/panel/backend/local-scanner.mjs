@@ -282,6 +282,68 @@ export function loadExternalDeepStatsCache() {
 const MAX_CONCURRENT_RPC = 4;
 const LEGACY_MIGRATION_BATCH_SIZE = 8;
 const stepFieldChecks = new WeakMap();
+
+function normalizeOwnerAccount(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+/**
+ * 为会话步骤维护细粒度账号归属：
+ * - 已存在于旧缓存中的历史步骤保留原归属账号（兼容跨账号续聊同一会话）；
+ * - 切换账号后在该会话中新产生的步骤写入当前活跃账号 `step.accountName`，仅供「可用额度」按账号隔离统计。
+ */
+function attachStepAccountOwners(steps, prev, currentAccountName, entryAccountName) {
+  if (!Array.isArray(steps) || steps.length === 0) return steps;
+  const activeOwner = normalizeOwnerAccount(currentAccountName);
+  const entryOwner = normalizeOwnerAccount(entryAccountName);
+  const prevOwner = normalizeOwnerAccount(prev?.accountName);
+  const prevSteps = Array.isArray(prev?.steps) ? prev.steps : [];
+
+  if (prevSteps.length === 0) {
+    const initialOwner = prevOwner || activeOwner || entryOwner;
+    if (!initialOwner || initialOwner === entryOwner) return steps;
+    return steps.map((s) => ({ ...s, accountName: initialOwner }));
+  }
+
+  const prevByIndex = new Map();
+  let maxPrevStepIndex = -1;
+  let maxPrevCreatedAtMs = 0;
+  for (const ps of prevSteps) {
+    if (!ps || typeof ps !== 'object') continue;
+    const idx = Number(ps.stepIndex);
+    if (Number.isFinite(idx)) {
+      prevByIndex.set(idx, ps);
+      if (idx > maxPrevStepIndex) maxPrevStepIndex = idx;
+    }
+    const cMs = Number(ps.createdAtMs || 0);
+    if (cMs > maxPrevCreatedAtMs) maxPrevCreatedAtMs = cMs;
+  }
+
+  let mutated = false;
+  const out = steps.map((s) => {
+    const idx = Number(s?.stepIndex);
+    const matchedPrev = Number.isFinite(idx) ? prevByIndex.get(idx) : null;
+    let stepOwner = '';
+    if (matchedPrev) {
+      stepOwner = normalizeOwnerAccount(matchedPrev.accountName) || prevOwner;
+    } else {
+      const cMs = Number(s?.createdAtMs || 0);
+      const isHistoricalBackfill =
+        (Number.isFinite(idx) && maxPrevStepIndex >= 0 && idx <= maxPrevStepIndex) ||
+        (cMs > 0 && maxPrevCreatedAtMs > 0 && cMs <= maxPrevCreatedAtMs);
+      stepOwner = isHistoricalBackfill ? prevOwner || activeOwner : activeOwner || prevOwner;
+    }
+    const storedAccount = stepOwner && stepOwner !== entryOwner ? stepOwner : undefined;
+    if (s?.accountName === storedAccount) return s;
+    mutated = true;
+    if (storedAccount) {
+      return { ...s, accountName: storedAccount };
+    }
+    const { accountName: _removed, ...rest } = s;
+    return rest;
+  });
+  return mutated ? out : steps;
+}
 const MAX_SUBAGENT_RECONCILE_DEPTH = 4;
 const FAILED_RPC_COOLDOWN_MS = 60_000;
 const ACTIVE_FAILED_RPC_COOLDOWN_MS = 15_000;
@@ -1227,15 +1289,8 @@ export async function enumerateAndSyncConversations({
     }
   }
 
-  // 仅从归属于当前账号的缓存会话收集 subagentRefs，防止跨账号切换时将其他账号的子代理复活进当前会话列表
+  // 从所有本地缓存会话收集 subagentRefs，确保跨账号切换时历史会话与派生子代理均不丢失
   for (const [, entry] of listCachedTrajectoryEntries()) {
-    if (
-      entry?.accountName &&
-      currentAccountName !== '' &&
-      entry.accountName !== currentAccountName
-    ) {
-      continue;
-    }
     for (const ref of entry?.subagentRefs || []) {
       const refCid = String(ref?.cascadeId || '').trim().toLowerCase();
       if (refCid && !canonicalIdByLower.has(refCid)) {
@@ -1253,13 +1308,6 @@ export async function enumerateAndSyncConversations({
     const item = summariesByLower.get(cidLower);
     const localSum = item ? null : localSummaryByLower.get(cidLower) || null;
     const cached = getCachedTrajectory(cascadeId);
-    if (
-      cached?.accountName &&
-      currentAccountName !== '' &&
-      cached.accountName !== currentAccountName
-    ) {
-      continue;
-    }
     const diskFiles = diskConvMap.get(cidLower) || [];
     const sqliteDbInfo = sqliteAvailable ? resolveBestSqliteDbInfo(diskFiles) : null;
     const dbPath = sqliteDbInfo?.dbPath || '';
@@ -1296,6 +1344,7 @@ export async function enumerateAndSyncConversations({
         localSum?.parentConversationId ||
         localSum?.forkParentConversationId ||
         cached?.parentConversationId ||
+        cached?.parentCascadeId ||
         ''
     ).toLowerCase();
     const rawRootCid = String(
@@ -1332,6 +1381,7 @@ export async function enumerateAndSyncConversations({
     const subagentRefs = Array.isArray(cached?.subagentRefs) ? cached.subagentRefs : null;
     const isSubagent =
       isSideQuestion ||
+      Boolean(cached?.isSubagent) ||
       Boolean(parentConversationId) ||
       Boolean(rootConversationId && rootConversationId !== cidLower);
     const latestLocalTouchMs = Math.max(diskMtimeMs || 0, localSum?.lastModifiedMs || 0);
@@ -1676,20 +1726,27 @@ export async function enumerateAndSyncConversations({
               liveActivityMemo.delete(cidLower);
             }
 
+            const entryAccountName = prev ? prev.accountName || '' : currentAccountName || '';
+            const stepsWithOwners = attachStepAccountOwners(
+              steps,
+              prev,
+              currentAccountName,
+              entryAccountName
+            );
             const cacheEntry = {
               signature: finalSig,
-              accountName: prev?.accountName || currentAccountName || '',
+              accountName: entryAccountName,
               title: conv.title,
               lastModifiedMs: resolvedLastModMs,
               diskMtimeMs:
                 conv.diskMtimeMs ?? readConversationMtime(diskConvMap.get(cidLower)),
-              rawStepCount: conv.rawStepCount ?? steps.length,
+              rawStepCount: conv.rawStepCount ?? stepsWithOwners.length,
               wasRunning: isRunning,
               contextLimitTelemetry: true,
               speedClearedTelemetry: true,
               turnRailTelemetry: true,
               contextGroupsTelemetry: 2,
-              steps,
+              steps: stepsWithOwners,
               subagentRefs,
             };
             if (conv.diskFileSig) cacheEntry.diskFileSig = conv.diskFileSig;
@@ -1723,7 +1780,7 @@ export async function enumerateAndSyncConversations({
               !prev.turnRailTelemetry ||
               !prev.contextGroupsTelemetry ||
               metaChanged ||
-              !isDeepStrictEqual(prev.steps, steps);
+              !isDeepStrictEqual(prev.steps, stepsWithOwners);
 
             if (!stepsChanged) cacheEntry.steps = prev.steps;
             setCachedTrajectory(conv.cascadeId, cacheEntry);
@@ -1738,13 +1795,6 @@ export async function enumerateAndSyncConversations({
                 for (const ext of loadExternalDeepStatsCache().values()) {
                   const extCid = String(ext?.cascadeId || '').toLowerCase();
                   if (!extCid) continue;
-                  if (
-                    ext.accountName &&
-                    currentAccountName !== '' &&
-                    ext.accountName !== currentAccountName
-                  ) {
-                    continue;
-                  }
                   const existingExt = lazyExternalByLower.get(extCid);
                   if (!existingExt || (ext.steps?.length || 0) > (existingExt.steps?.length || 0)) {
                     lazyExternalByLower.set(extCid, ext);
@@ -1775,10 +1825,18 @@ export async function enumerateAndSyncConversations({
                   Boolean(conv.parentConversationId) ||
                   Boolean(conv.rootConversationId && conv.rootConversationId !== cidLower);
                 const resolvedDiskMtime = conv.diskMtimeMs ?? readConversationMtime(diskFiles);
+                const offlineAccountName = prev
+                  ? prev.accountName || offlineFallback.accountName || ''
+                  : offlineFallback.accountName || currentAccountName || '';
+                const offlineStepsWithOwners = attachStepAccountOwners(
+                  offlineFallback.steps,
+                  prev,
+                  offlineFallback.accountName || currentAccountName,
+                  offlineAccountName
+                );
                 const offlineEntry = {
                   signature: sig,
-                  accountName:
-                    prev?.accountName || offlineFallback.accountName || currentAccountName || '',
+                  accountName: offlineAccountName,
                   title: offlineFallback.title,
                   ...(offlineFallback.appSource ? { appSource: offlineFallback.appSource } : {}),
                   lastModifiedMs: offlineFallback.lastModifiedMs,
@@ -1790,7 +1848,7 @@ export async function enumerateAndSyncConversations({
                   speedClearedTelemetry: true,
                   turnRailTelemetry: true,
                   contextGroupsTelemetry: 2,
-                  steps: offlineFallback.steps,
+                  steps: offlineStepsWithOwners,
                   subagentRefs: offlineFallback.subagentRefs,
                 };
                 if (conv.isSubagent) {
@@ -2296,9 +2354,8 @@ export async function enumerateAndSyncConversations({
         ))) ||
     conversations[0] ||
     null;
-  const requestedOwner = getCachedTrajectory(canonicalIdByLower.get(reqLower))?.accountName;
-  const safeReqId = requestedConvId && !/[\\/]|\.\./.test(String(requestedConvId)) &&
-    (!requestedOwner || currentAccountName === '' || requestedOwner === currentAccountName) ? requestedConvId : null;
+  const safeReqId =
+    requestedConvId && !/[\\/]|\.\./.test(String(requestedConvId)) ? requestedConvId : null;
   const activeCascadeId = activeConvSummary?.cascadeId || safeReqId || null;
 
   return {

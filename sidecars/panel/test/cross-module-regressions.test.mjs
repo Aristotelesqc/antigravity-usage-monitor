@@ -130,7 +130,9 @@ test('BUG-01 & INCON-01: Google-proxied Claude/GPT/o-series never misclassify as
   assert.equal(quotaPoolsMap.get('Gemini')?.isAvailable, true);
 });
 
-test('BUG-02 & BUG-11: ide:<uuid> external sessions do not double-count live conversations, cross-account entries are isolated, and orphan subagents never leak to top-level list', async () => {
+test('BUG-02 & BUG-11: ide:<uuid> external sessions do not double-count live conversations, only quota pools isolate cross-account entries, and orphan subagents never leak to top-level list', async () => {
+  const reset5hIso = new Date(Date.now() + 4 * 3600_000).toISOString();
+  const resetWkIso = new Date(Date.now() + 6 * 24 * 3600_000).toISOString();
   const stepObj = {
     status: 'CORTEX_STEP_STATUS_DONE',
     metadata: {
@@ -147,6 +149,17 @@ test('BUG-02 & BUG-11: ide:<uuid> external sessions do not double-count live con
   };
   const h = backendHarness({
     userStatus: { email: 'alice@example.com' },
+    quotaSummary: {
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [
+            { bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.9, resetTime: reset5hIso },
+            { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 0.95, resetTime: resetWkIso },
+          ],
+        },
+      ],
+    },
     deepStats: {
       accountName: 'alice@example.com',
       perConvo: {
@@ -159,7 +172,7 @@ test('BUG-02 & BUG-11: ide:<uuid> external sessions do not double-count live con
             { ts: doneIso, model: 'MODEL_PLACEHOLDER_M318', inp: 10000, cache: 20000, out: 5000, reasoning: 0 },
           ],
         },
-        // Different account -> must be excluded when logged in as alice@example.com!
+        // Different account -> retained in global consumption, isolated out of Alice's quota pools!
         'ide:bob-conv': {
           accountName: 'bob@example.com',
           appSource: 'ide',
@@ -187,15 +200,147 @@ test('BUG-02 & BUG-11: ide:<uuid> external sessions do not double-count live con
   });
 
   const p = await h.buildTelemetryPayloadInternal('abcd-1234', false, { range: 'all' });
-  // ide:AbCd-1234 has 2 entries vs live abcd-1234's 1 step -> deduplicated (no 1 + 2 = 3 double counting!), bob excluded!
-  assert.equal(p.consumption.account.conversationsCount, 1);
-  assert.equal(p.consumption.account.calls, 2);
-  assert.equal(p.consumption.account.totalTokens, 70_000);
+  // ide:AbCd-1234 (70k) deduplicates live abcd-1234 (35k); global consumption retains ide:bob-conv (100k) + orphan-sub (35k)
+  assert.equal(p.consumption.account.conversationsCount, 3);
+  assert.equal(p.consumption.account.calls, 4);
+  assert.equal(p.consumption.account.totalTokens, 205_000);
+  // Quota pools & weekly cycle strictly isolate to alice@example.com (2 calls = 70,000 tokens)
+  const geminiPool = p.quotas.pools.find((pool) => pool.poolKey === 'Gemini');
+  assert.equal(geminiPool.cycle5h.calls, 2);
+  assert.equal(geminiPool.cycle5h.tokens, 70_000);
+  assert.equal(geminiPool.cycleWeekly.calls, 2);
+  assert.equal(geminiPool.cycleWeekly.tokens, 70_000);
+  assert.equal(p.quotas.weekly.calls, 2);
+  assert.equal(p.quotas.weekly.tokens, 70_000);
   assert.equal(
     p.conversations.some((c) => c.cascadeId === 'orphan-sub'),
     false,
     'orphan subagent must not appear in top-level conversation dropdown'
   );
+});
+
+test('account switch preserves conversation list, locked session steps, and consumption history while isolating quota pools per step across mid-conversation switches', async () => {
+  const baseMs = Date.now() - 60_000;
+  const reset5hIso = new Date(baseMs + 4 * 3600_000).toISOString();
+  const resetWkIso = new Date(baseMs + 6 * 24 * 3600_000).toISOString();
+  const makeStepAt = (idx, inTok, outTok, offsetMs) => ({
+    type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+    status: 'CORTEX_STEP_STATUS_DONE',
+    metadata: {
+      sourceTrajectoryStepInfo: { stepIndex: idx },
+      createdAt: new Date(baseMs + offsetMs).toISOString(),
+      completedAt: new Date(baseMs + offsetMs + 1000).toISOString(),
+      modelUsage: {
+        model: 'MODEL_PLACEHOLDER_M318',
+        inputTokens: String(inTok),
+        cacheReadTokens: '0',
+        outputTokens: String(outTok),
+      },
+    },
+  });
+  const makeQuota = (rem5h, remWk) => ({
+    groups: [
+      {
+        displayName: 'Gemini Models',
+        buckets: [
+          { bucketId: 'gemini-5h', window: '5h', remainingFraction: rem5h, resetTime: reset5hIso },
+          { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: remWk, resetTime: resetWkIso },
+        ],
+      },
+    ],
+  });
+
+  const sharedStep1 = makeStepAt(1, 25_000, 5_000, 1_000); // 30,000
+  const sharedStep2 = makeStepAt(2, 25_000, 5_000, 3_000); // 30,000
+  const aliceOldStep = makeStepAt(1, 35_000, 5_000, 5_000); // 40,000
+
+  const h = backendHarness({
+    userStatus: { email: 'alice@example.com', userTier: { name: 'Google AI Ultra' } },
+    quotaSummary: makeQuota(0.8, 0.9),
+    summaries: {
+      'conv-shared': {
+        stepCount: 2,
+        lastModifiedTime: new Date(baseMs + 4_000).toISOString(),
+        status: 'IDLE',
+        annotations: { title: 'Greeting and Hello' },
+      },
+      'conv-alice-old': {
+        stepCount: 1,
+        lastModifiedTime: new Date(baseMs + 6_000).toISOString(),
+        status: 'IDLE',
+        annotations: { title: 'Earlier Alice Session' },
+      },
+    },
+    trajectories: {
+      'conv-shared': { trajectory: { steps: [sharedStep1, sharedStep2] } },
+      'conv-alice-old': { trajectory: { steps: [aliceOldStep] } },
+    },
+  });
+
+  // 1. Initial state under Alice: 3 calls = 100,000 tokens in both consumption and Alice's quota pools
+  const pAlice = await h.buildTelemetryPayloadInternal('conv-shared', false, { range: 'all' });
+  assert.equal(pAlice.conversations.length, 2);
+  assert.equal(pAlice.activeConversation.cascadeId, 'conv-shared');
+  assert.equal(pAlice.activeConversation.stepCount, 2);
+  assert.equal(pAlice.consumption.account.calls, 3);
+  assert.equal(pAlice.consumption.account.totalTokens, 100_000);
+  assert.equal(pAlice.quotas.weekly.calls, 3);
+  assert.equal(pAlice.quotas.weekly.tokens, 100_000);
+
+  // 2. Switch to Bob and create 1 new step (15,900 tokens) in conv-bob while keeping conv-shared locked
+  const bobStep1 = makeStepAt(1, 15_552, 348, 10_000); // 15,900
+  h.state.userStatus = { email: 'bob@example.com', userTier: { name: 'Google AI Ultra' } };
+  h.state.quotaSummary = makeQuota(0.977, 0.994);
+  h.state.summaries['conv-bob'] = {
+    stepCount: 1,
+    lastModifiedTime: new Date(baseMs + 11_000).toISOString(),
+    status: 'IDLE',
+    annotations: { title: 'New Bob Session' },
+  };
+  h.state.trajectories['conv-bob'] = { trajectory: { steps: [bobStep1] } };
+
+  const pBob = await h.buildTelemetryPayloadInternal('conv-shared', false, { range: 'all' });
+  assert.equal(pBob.conversations.length, 3, 'All historical conversations remain visible after account switch');
+  assert.equal(pBob.activeConversation.cascadeId, 'conv-shared', 'Locked conversation stays selected');
+  assert.equal(pBob.activeConversation.stepCount, 2, 'Step details of locked conversation are preserved');
+  assert.equal(pBob.consumption.account.calls, 4, 'Global consumption retains all 4 calls across accounts');
+  assert.equal(pBob.consumption.account.totalTokens, 115_900);
+  const bobGemini = pBob.quotas.pools.find((pool) => pool.poolKey === 'Gemini');
+  assert.equal(bobGemini.cycle5h.calls, 1, 'Quota 5h isolates strictly to Bob');
+  assert.equal(bobGemini.cycle5h.tokens, 15_900);
+  assert.equal(bobGemini.cycleWeekly.tokens, 15_900);
+  assert.equal(pBob.quotas.weekly.calls, 1);
+  assert.equal(pBob.quotas.weekly.tokens, 15_900);
+
+  // 3. Continue chatting inside conv-shared while logged in as Bob (step #3 = 25,000 tokens)
+  const sharedStep3ByBob = makeStepAt(3, 24_000, 1_000, 20_000); // 25,000
+  h.state.summaries['conv-shared'] = {
+    ...h.state.summaries['conv-shared'],
+    stepCount: 3,
+    lastModifiedTime: new Date(baseMs + 21_000).toISOString(),
+  };
+  h.state.trajectories['conv-shared'] = {
+    trajectory: { steps: [sharedStep1, sharedStep2, sharedStep3ByBob] },
+  };
+
+  const pBobContinued = await h.buildTelemetryPayloadInternal('conv-shared', false, { range: 'all' });
+  assert.equal(pBobContinued.activeConversation.stepCount, 3);
+  assert.equal(pBobContinued.consumption.account.calls, 5);
+  assert.equal(pBobContinued.consumption.account.totalTokens, 140_900);
+  const bobGeminiAfter = pBobContinued.quotas.pools.find((pool) => pool.poolKey === 'Gemini');
+  assert.equal(bobGeminiAfter.cycle5h.calls, 2, 'Bob quota includes conv-bob + his new step #3 in conv-shared');
+  assert.equal(bobGeminiAfter.cycle5h.tokens, 40_900);
+  assert.equal(pBobContinued.quotas.weekly.calls, 2);
+  assert.equal(pBobContinued.quotas.weekly.tokens, 40_900);
+
+  // 4. Switch back to Alice -> Alice quota remains strictly her 3 calls (100,000 tokens)
+  h.state.userStatus = { email: 'alice@example.com', userTier: { name: 'Google AI Ultra' } };
+  h.state.quotaSummary = makeQuota(0.8, 0.9);
+  const pAliceBack = await h.buildTelemetryPayloadInternal('conv-shared', false, { range: 'all' });
+  assert.equal(pAliceBack.consumption.account.calls, 5);
+  assert.equal(pAliceBack.consumption.account.totalTokens, 140_900);
+  assert.equal(pAliceBack.quotas.weekly.calls, 3);
+  assert.equal(pAliceBack.quotas.weekly.tokens, 100_000);
 });
 
 test('BUG-03, BUG-12 & BUG-16: negative/NaN token sanitization, deferred costUsd rounding, and dynamicModelMap default', async () => {
