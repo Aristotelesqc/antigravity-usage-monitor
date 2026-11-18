@@ -25,9 +25,13 @@ import {
   buildWindowsRelaunchInnerScript,
   ensureDesktopLaunchEntriesConfigured,
   ensureRemoteDebugFlagInArgs,
+  inspectWindowsLnkBuffer,
   patchLinuxDesktopEntryText,
   patchWindowsRunRegistryCommand,
+  patchWindowsShellOpenCommand,
+  probeWindowsShortcutsFast,
   resolveDesktopHostExecutable,
+  resolveWindowsPowerShellExecutable,
   triggerDesktopHostRelaunch,
 } from '../backend/desktop-launcher-config.mjs';
 import {
@@ -4909,6 +4913,107 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
   );
   assert.equal(winRunIdeIgnored.matched, false);
 
+  // System32 PowerShell resolution & HKCU\Software\Classes shell\open\command patching
+  assert.equal(
+    resolveWindowsPowerShellExecutable(
+      { SystemRoot: 'D:\\WinSys' },
+      (p) => p === 'D:\\WinSys\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+    ),
+    'D:\\WinSys\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  );
+  assert.equal(
+    resolveWindowsPowerShellExecutable({ SystemRoot: 'D:\\Missing' }, () => false),
+    'powershell.exe'
+  );
+
+  const shellOpenPatched = patchWindowsShellOpenCommand(
+    '"C:\\Users\\Dev\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe" -- "%1"',
+    { enabled: true }
+  );
+  assert.equal(shellOpenPatched.matched, true);
+  assert.equal(shellOpenPatched.changed, true);
+  assert.equal(
+    shellOpenPatched.value,
+    '"C:\\Users\\Dev\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe" --remote-debugging-port=0 -- "%1"',
+    'Inserts flag before -- "%1" so Chromium parses it as a switch'
+  );
+  const shellOpenRollback = patchWindowsShellOpenCommand(shellOpenPatched.value, { enabled: false });
+  assert.equal(shellOpenRollback.changed, true);
+  assert.equal(
+    shellOpenRollback.value,
+    '"C:\\Users\\Dev\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe" -- "%1"'
+  );
+  assert.equal(
+    patchWindowsShellOpenCommand(
+      '"C:\\Users\\Dev\\AppData\\Local\\Programs\\Antigravity IDE\\Antigravity IDE.exe" "--open-url" "--" "%1"',
+      { enabled: true }
+    ).matched,
+    false
+  );
+
+  // Zero-subprocess binary .lnk inspection & non-recursive folder boundary verification
+  const makeFakeLnkBuf = (targetPath, argsStr = '') =>
+    Buffer.concat([
+      Buffer.alloc(76, 0x4c),
+      Buffer.from(`${targetPath}\0${argsStr}\0`, 'utf16le'),
+    ]);
+  assert.deepEqual(
+    inspectWindowsLnkBuffer(
+      makeFakeLnkBuf('C:\\App\\Antigravity.exe', '--remote-debugging-port=0')
+    ),
+    { matched: true, hasDebugPort: true }
+  );
+  assert.deepEqual(
+    inspectWindowsLnkBuffer(makeFakeLnkBuf('C:\\App\\Antigravity IDE.exe', '')),
+    { matched: false, hasDebugPort: false }
+  );
+
+  const visitedDirs = [];
+  const fakeDesktopDir = 'C:\\Users\\Dev\\Desktop';
+  const fakeProgramsDir = 'C:\\Users\\Dev\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs';
+  const fakeAgySubDir = `${fakeProgramsDir}\\Antigravity`;
+  const fastProbeRes = probeWindowsShortcutsFast({
+    env: {
+      USERPROFILE: 'C:\\Users\\Dev',
+      APPDATA: 'C:\\Users\\Dev\\AppData\\Roaming',
+      PUBLIC: 'C:\\Users\\Public',
+      ProgramData: 'C:\\ProgramData',
+    },
+    homeDir: 'C:\\Users\\Dev',
+    fsOps: {
+      readdirFn: (dir) => {
+        visitedDirs.push(dir);
+        if (dir === fakeDesktopDir) {
+          return [
+            { name: 'Antigravity.lnk', isFile: () => true, isDirectory: () => false },
+            { name: 'huge-repo-with-node_modules', isFile: () => false, isDirectory: () => true },
+          ];
+        }
+        if (dir === fakeProgramsDir) {
+          return [
+            { name: 'Visual Studio 2022', isFile: () => false, isDirectory: () => true },
+            { name: 'Antigravity', isFile: () => false, isDirectory: () => true },
+          ];
+        }
+        if (dir === fakeAgySubDir) {
+          return [{ name: 'Antigravity IDE.lnk', isFile: () => true, isDirectory: () => false }];
+        }
+        return [];
+      },
+      statFn: () => ({ size: 512 }),
+      readFn: (p) =>
+        p.endsWith('Antigravity IDE.lnk')
+          ? makeFakeLnkBuf('C:\\App\\Antigravity IDE.exe', '')
+          : makeFakeLnkBuf('C:\\App\\Antigravity.exe', '--remote-debugging-port=0'),
+    },
+  });
+  assert.equal(fastProbeRes.allConfigured, true);
+  assert.equal(
+    visitedDirs.some((d) => d.includes('huge-repo') || d.includes('Visual Studio')),
+    false,
+    'Never recurses into Desktop subfolders or unrelated Start Menu vendor folders'
+  );
+
   const linuxDesktopRaw = [
     '[Desktop Entry]',
     'Name=Antigravity',
@@ -4923,6 +5028,43 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
   const linuxReverted = patchLinuxDesktopEntryText(linuxPatched.text, { enabled: false });
   assert.equal(linuxReverted.changed, true);
   assert.equal(linuxReverted.text, linuxDesktopRaw);
+
+  const linuxAppImageRaw = [
+    '[Desktop Entry]',
+    'Name=Antigravity',
+    'Exec=env DESKTOPINTEGRATION=false "/home/alice/Apps/Antigravity-2.33.0-x86_64.AppImage" %U',
+    'Type=Application',
+    '',
+  ].join('\n');
+  const linuxAppImagePatched = patchLinuxDesktopEntryText(linuxAppImageRaw, { enabled: true });
+  assert.equal(linuxAppImagePatched.matched, true);
+  assert.equal(linuxAppImagePatched.changed, true);
+  assert.match(
+    linuxAppImagePatched.text,
+    /Exec=env DESKTOPINTEGRATION=false "\/home\/alice\/Apps\/Antigravity-2\.33\.0-x86_64\.AppImage" --remote-debugging-port=0 %U/
+  );
+  assert.equal(
+    patchLinuxDesktopEntryText(linuxAppImagePatched.text, { enabled: false }).text,
+    linuxAppImageRaw
+  );
+  assert.equal(
+    patchLinuxDesktopEntryText('Exec=env FOO=1 /opt/antigravity-ide/antigravity-ide %F', {
+      enabled: true,
+    }).matched,
+    false
+  );
+
+  const resolvedLinuxAppImage = resolveDesktopHostExecutable({
+    env: {
+      APPIMAGE: '/home/alice/Apps/Antigravity-2.33.0.AppImage',
+      ANTIGRAVITY_AGENTAPI_EXE: '/tmp/.mount_Antigr123/resources/bin/language_server_linux_x64',
+    },
+    platform: 'linux',
+    homeDir: '/home/alice',
+    existsFn: (p) => p === '/home/alice/Apps/Antigravity-2.33.0.AppImage',
+  });
+  assert.equal(resolvedLinuxAppImage.found, true);
+  assert.equal(resolvedLinuxAppImage.executablePath, '/home/alice/Apps/Antigravity-2.33.0.AppImage');
 
   // 3. Host executable resolution from ANTIGRAVITY_AGENTAPI_EXE & clean relaunch env sanitization
   const resolvedWinHost = resolveDesktopHostExecutable({
@@ -5038,8 +5180,9 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
       /--remote-debugging-port=0 %U/
     );
 
-    // Verify Windows shortcut auto-provisioning + stale port (`cdp_unreachable`) status reporting + clean rollback on disable
+    // Verify Windows shortcut auto-provisioning + read-only public shortcut tracking + periodic recheck + clean rollback
     const winPsCalls = [];
+    let simulateReadOnlyPublicDesktop = false;
     const mockWinExec = async (file, args, opts) => {
       winPsCalls.push({ file, args, env: opts?.env });
       const enabledFlag = opts?.env?.AGY_LAUNCH_ENABLED === '1';
@@ -5051,6 +5194,10 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
         configuredPaths: enabledFlag
           ? ['C:\\Users\\Admin\\Desktop\\Antigravity.lnk', 'C:\\TaskBar\\Antigravity.lnk']
           : [],
+        readOnlyPaths:
+          enabledFlag && simulateReadOnlyPublicDesktop
+            ? ['C:\\Users\\Public\\Desktop\\Antigravity.lnk']
+            : [],
       });
     };
 
@@ -5069,6 +5216,7 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
       homeDir,
       leaseFilePath: leaseFile,
       autoConfigureIdeArgv: true,
+      launcherRecheckIntervalMs: 25,
       launcherExecFileFn: mockWinExec,
       allowDesktopLauncherInTest: true,
     });
@@ -5079,9 +5227,17 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     assert.equal(stWin.state, 'cdp_unreachable');
     assert.equal(stWin.argvUpdatedThisBoot, true);
     assert.equal(stWin.launcherConfigured, true);
+    assert.equal(stWin.hasReadOnlyShortcuts, false);
     assert.equal(stWin.canRelaunch, true);
     assert.equal(winPsCalls.length, 1);
     assert.equal(winPsCalls[0].env.AGY_LAUNCH_ENABLED, '1');
+
+    // Periodic re-check after cooldown detects NSIS installer-wiped or read-only public shortcuts
+    simulateReadOnlyPublicDesktop = true;
+    await new Promise((r) => setTimeout(r, 35));
+    await ctrlWin.syncAllWindows();
+    assert.equal(winPsCalls.length, 2, 'Re-provisions automatically once cooldown interval elapses');
+    assert.equal(ctrlWin.getBridgeStatus().hasReadOnlyShortcuts, true);
 
     // Disabling overlay (Sidebar Only) cleanly triggers shortcut flag rollback
     currentMountSettings = {
@@ -5091,8 +5247,9 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     };
     await ctrlWin.notifySettingChanged(false);
     await new Promise((r) => setTimeout(r, 10));
-    assert.equal(winPsCalls.length, 2);
-    assert.equal(winPsCalls[1].env.AGY_LAUNCH_ENABLED, '0');
+    assert.equal(winPsCalls.length, 3);
+    assert.equal(winPsCalls[2].env.AGY_LAUNCH_ENABLED, '0');
+    assert.equal(ctrlWin.getBridgeStatus().hasReadOnlyShortcuts, false);
     await ctrlWin.stop();
 
     // Verify Windows out-of-job Shell.Application relaunch payload (.ps1 file with UTF-8 BOM) & macOS open -a relaunch
@@ -5159,10 +5316,35 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     assert.equal(macSpawnArgs.env.AGY_RELAUNCH_APP, '/Applications/Antigravity.app');
     assert.match(macSpawnArgs.args[1], /open -a "\$AGY_RELAUNCH_APP" --args --remote-debugging-port=0/);
 
-    // Explicit ANTIGRAVITY_DEVTOOLS_PORT fallback still works seamlessly
-    const innerScriptCheck = buildWindowsRelaunchInnerScript(fakeExe, [stalePortFile], 'desktop');
+    // Verify Linux /proc dynamic AppImage discovery & multi-comm pkill handling
+    let linuxSpawnArgs = null;
+    const relaunchLinuxRes = await triggerDesktopHostRelaunch({
+      env: { PATH: '/usr/bin:/bin' },
+      platform: 'linux',
+      homeDir: '/home/alice',
+      stalePortFiles: ['/home/alice/.config/Antigravity/DevToolsActivePort'],
+      allowInTest: true,
+      existsFn: () => false,
+      execFileFn: async () => '/home/alice/Apps/Antigravity-2.33.0.AppImage\n',
+      spawnFn: async (file, args, opts) => {
+        linuxSpawnArgs = { file, args, env: opts?.env };
+        return { pid: 5678 };
+      },
+    });
+    assert.equal(relaunchLinuxRes.ok, true);
+    assert.equal(linuxSpawnArgs.env.AGY_RELAUNCH_EXE, '/home/alice/Apps/Antigravity-2.33.0.AppImage');
+    assert.match(linuxSpawnArgs.args[1], /for pn in "\$AGY_PROC_NAME" antigravity Antigravity/);
+
+    // Explicit ANTIGRAVITY_DEVTOOLS_PORT fallback & UAC read-only shortcut + de-elevation script generation
+    const innerScriptCheck = buildWindowsRelaunchInnerScript(fakeExe, [stalePortFile], 'desktop', {
+      readOnlyShortcutPaths: ['C:\\Users\\Public\\Desktop\\Antigravity.lnk'],
+      psExePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    });
     assert.match(innerScriptCheck, /CloseMainWindow/);
     assert.match(innerScriptCheck, /Stop-Process/);
+    assert.match(innerScriptCheck, /-Verb RunAs/);
+    assert.match(innerScriptCheck, /C:\\Users\\Public\\Desktop\\Antigravity\.lnk/);
+    assert.match(innerScriptCheck, /\$isSelfElevated -and -not \$wasHostElevated/);
   } finally {
     fs.rmSync(simTmp, { recursive: true, force: true });
   }
@@ -5251,7 +5433,23 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     );
     assert.match(strTab.refs.mountBridgeNotice.refs.relaunchBtnEl.textContent, /正在重启客户端/);
 
-    // macOS unconfigured state -> `.is-warn` with 1-click relaunch + copy button
+    // All-Users read-only Public Desktop shortcut -> `.is-warn` + UAC authorization button copy
+    strTab.refs.renderSettings(
+      { windowMountMode: 'dual', enableWindowOverlay: true },
+      {
+        state: 'no_devtools_port',
+        argvUpdatedThisBoot: true,
+        argvConfigured: true,
+        launcherConfigured: true,
+        hasReadOnlyShortcuts: true,
+        canRelaunch: true,
+      },
+      'win32'
+    );
+    assert.equal(noticeEl.classList.contains('is-warn'), true);
+    assert.match(noticeEl.textContent, /公共桌面快捷方式受权限保护/);
+
+    // macOS Desktop -> honest code-signing notice with `.is-restart` + 1-click relaunch + copy button
     strTab.refs.renderSettings(
       { windowMountMode: 'dual', enableWindowOverlay: true },
       {
@@ -5259,12 +5457,13 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
         argvUpdatedThisBoot: false,
         argvConfigured: false,
         launcherConfigured: false,
+        hasReadOnlyShortcuts: false,
         canRelaunch: true,
       },
       'darwin'
     );
-    assert.equal(noticeEl.classList.contains('is-warn'), true);
-    assert.match(noticeEl.textContent, /open -a "Antigravity" --args --remote-debugging-port=0/);
+    assert.equal(noticeEl.classList.contains('is-restart'), true);
+    assert.match(noticeEl.textContent, /macOS 应用签名限制/);
 
     strTab.refs.mountBridgeNotice.refs.copyBtnEl.dispatchEvent({ type: 'click' });
     await new Promise((r) => setTimeout(r, 0));
@@ -5275,10 +5474,16 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     const globalBanner = BridgeStatusNotice({ dismissible: true });
     globalBanner.refs.update({
       visible: true,
-      windowBridge: { state: 'no_devtools_port', launcherConfigured: true, canRelaunch: true },
+      windowBridge: {
+        state: 'no_devtools_port',
+        launcherConfigured: true,
+        hasReadOnlyShortcuts: true,
+        canRelaunch: true,
+      },
       hostPlatform: 'win32',
     });
     assert.equal(globalBanner.el.hasAttribute('hidden'), false);
+    assert.match(globalBanner.refs.relaunchBtnEl.textContent, /授权修补并立即重启/);
     globalBanner.refs.dismissBtnEl.dispatchEvent({ type: 'click' });
     assert.equal(globalBanner.el.hasAttribute('hidden'), true);
     globalBanner.refs.update({
@@ -5293,10 +5498,21 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     });
     assert.equal(globalBanner.el.hasAttribute('hidden'), false, 'Re-armed after active cycle');
 
-    // English localization check
+    // English localization check across macOS & read-only shortcut states
     setI18nLanguage('en-US');
     strTab.refs.refreshLabels();
-    assert.match(noticeEl.textContent, /Local Debug Port Missing/);
+    assert.match(noticeEl.textContent, /Due to macOS app code signing/);
+    globalBanner.refs.update({
+      visible: true,
+      windowBridge: {
+        state: 'no_devtools_port',
+        launcherConfigured: true,
+        hasReadOnlyShortcuts: true,
+        canRelaunch: true,
+      },
+      hostPlatform: 'win32',
+    });
+    assert.match(globalBanner.refs.relaunchBtnEl.textContent, /Authorize & Relaunch/);
 
     // Switching to Sidebar Only hides notice immediately
     strTab.refs.renderSettings(

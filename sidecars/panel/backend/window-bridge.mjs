@@ -714,6 +714,7 @@ export function createWindowBridgeController(options) {
     onVersionDrift = null,
     leaseFilePath = '',
     autoConfigureIdeArgv = options?.env === undefined && options?.homeDir === undefined,
+    launcherRecheckIntervalMs = 15 * 60 * 1000,
     launcherExecFileFn = null,
     launcherFsOps = null,
     allowDesktopLauncherInTest = false,
@@ -743,21 +744,23 @@ export function createWindowBridgeController(options) {
   let hadInjectedTargets = false;
   let hadInjectedChatFrames = false;
   let cdpFallbackActive = false;
-  let ideArgvProvisioned = false;
+  let lastLauncherProvisionAtMs = 0;
   let hostLauncherPromise = null;
   let argvUpdatedThisBoot = false;
   let argvConfigured = false;
   let launcherConfigured = false;
+  let hasReadOnlyShortcuts = false;
   const hostExecInfo = resolveDesktopHostExecutable({
     env,
     platform,
     homeDir,
     existsFn: existsHostFn,
   });
-  // Windows / macOS 支持从运行中宿主进程动态反查任意盘符路径，因此桌面端环境下即使自定义安装路径不在默认盘符也可一键重拉
+  // Windows / macOS / Linux 均支持从运行中宿主进程动态反查路径（含自定义盘符与 AppImage），自定义安装路径亦可一键重拉
   const canRelaunch = Boolean(
     hostExecInfo.found ||
-      ((platform === 'win32' || platform === 'darwin') && options?.existsHostFn === undefined)
+      ((platform === 'win32' || platform === 'darwin' || platform === 'linux') &&
+        options?.existsHostFn === undefined)
   );
   let lastPersistedLeaseSig = '';
   let lastBridgeStatus = {
@@ -768,6 +771,7 @@ export function createWindowBridgeController(options) {
     argvUpdatedThisBoot: false,
     argvConfigured: false,
     launcherConfigured: false,
+    hasReadOnlyShortcuts: false,
     canRelaunch,
     updatedAtMs: 0,
   };
@@ -1209,11 +1213,12 @@ export function createWindowBridgeController(options) {
       argvUpdatedThisBoot: Boolean(argvUpdatedThisBoot),
       argvConfigured: Boolean(argvConfigured || launcherConfigured),
       launcherConfigured: Boolean(launcherConfigured || argvConfigured),
+      hasReadOnlyShortcuts: Boolean(hasReadOnlyShortcuts),
       canRelaunch: Boolean(canRelaunch),
       updatedAtMs: Date.now(),
     };
     if (leasedBySelf && leaseFilePath) {
-      const sig = `${nextState}:${lastBridgeStatus.aliveCount}:${lastBridgeStatus.targets}:${lastBridgeStatus.argvUpdatedThisBoot ? 1 : 0}:${lastBridgeStatus.launcherConfigured ? 1 : 0}:${lastBridgeStatus.canRelaunch ? 1 : 0}`;
+      const sig = `${nextState}:${lastBridgeStatus.aliveCount}:${lastBridgeStatus.targets}:${lastBridgeStatus.argvUpdatedThisBoot ? 1 : 0}:${lastBridgeStatus.launcherConfigured ? 1 : 0}:${lastBridgeStatus.hasReadOnlyShortcuts ? 1 : 0}:${lastBridgeStatus.canRelaunch ? 1 : 0}`;
       if (sig !== lastPersistedLeaseSig) {
         lastPersistedLeaseSig = sig;
         saveJson(leaseFilePath, {
@@ -1227,6 +1232,7 @@ export function createWindowBridgeController(options) {
           argvUpdatedThisBoot: lastBridgeStatus.argvUpdatedThisBoot,
           argvConfigured: lastBridgeStatus.argvConfigured,
           launcherConfigured: lastBridgeStatus.launcherConfigured,
+          hasReadOnlyShortcuts: lastBridgeStatus.hasReadOnlyShortcuts,
           canRelaunch: lastBridgeStatus.canRelaunch,
           updatedAtMs: Date.now(),
         });
@@ -1234,13 +1240,13 @@ export function createWindowBridgeController(options) {
     }
   }
 
-  function provisionHostLaunchersOnce() {
-    if (ideArgvProvisioned) return Promise.resolve();
+  function provisionHostLaunchersOnce({ fastCheckIfActive = false } = {}) {
     if (hostLauncherPromise) return hostLauncherPromise;
     hostLauncherPromise = (async () => {
       const ideRes = ensureIdeRemoteDebuggingArgv({ env, homeDir, enabled: true });
       const desktopRes = await ensureDesktopLaunchEntriesConfigured({
         enabled: true,
+        fastCheckIfActive,
         env,
         platform,
         homeDir,
@@ -1254,10 +1260,13 @@ export function createWindowBridgeController(options) {
       if (ideRes.updated || ideRes.alreadyConfigured) {
         argvConfigured = true;
       }
-      if (desktopRes.updated || desktopRes.alreadyConfigured || desktopRes.configured) {
-        launcherConfigured = true;
+      launcherConfigured = Boolean(
+        desktopRes.updated || desktopRes.alreadyConfigured || desktopRes.configured
+      );
+      if (!desktopRes.fastPath) {
+        hasReadOnlyShortcuts = Boolean(desktopRes.hasReadOnlyShortcuts);
       }
-      ideArgvProvisioned = true;
+      lastLauncherProvisionAtMs = Date.now();
     })().finally(() => {
       hostLauncherPromise = null;
     });
@@ -1280,10 +1289,6 @@ export function createWindowBridgeController(options) {
     const enabled = Boolean(curSettings.enableWindowOverlay !== false && mountMode !== 'sidebar');
     const contextWindows = curSettings.modelContextWindows || {};
     const hasContextWindows = Object.keys(contextWindows).length > 0;
-    const provPending =
-      (enabled || hasContextWindows) && autoConfigureIdeArgv && !ideArgvProvisioned
-        ? provisionHostLaunchersOnce()
-        : hostLauncherPromise;
 
     let leasedBySelf = false;
     let currentLease = null;
@@ -1311,6 +1316,7 @@ export function createWindowBridgeController(options) {
             argvUpdatedThisBoot: Boolean(lease?.argvUpdatedThisBoot || argvUpdatedThisBoot),
             argvConfigured: mergedConfigured,
             launcherConfigured: mergedConfigured,
+            hasReadOnlyShortcuts: Boolean(lease?.hasReadOnlyShortcuts || hasReadOnlyShortcuts),
             canRelaunch: Boolean(lease?.canRelaunch ?? canRelaunch),
             updatedAtMs: Date.now(),
           };
@@ -1330,13 +1336,24 @@ export function createWindowBridgeController(options) {
         argvUpdatedThisBoot: Boolean(argvUpdatedThisBoot),
         argvConfigured: Boolean(argvConfigured || launcherConfigured),
         launcherConfigured: Boolean(launcherConfigured || argvConfigured),
+        hasReadOnlyShortcuts: Boolean(hasReadOnlyShortcuts),
         canRelaunch: Boolean(canRelaunch),
         updatedAtMs: Date.now(),
       });
     }
 
+    const shouldCheckLaunchers =
+      (enabled || hasContextWindows) &&
+      autoConfigureIdeArgv &&
+      (lastLauncherProvisionAtMs === 0 ||
+        Date.now() - lastLauncherProvisionAtMs >= launcherRecheckIntervalMs);
+    const isInitialLauncherPass = lastLauncherProvisionAtMs === 0;
+
     const cdpPorts = findActiveDevToolsPorts();
     if (!cdpPorts.length) {
+      const provPending = shouldCheckLaunchers
+        ? provisionHostLaunchersOnce({ fastCheckIfActive: !isInitialLauncherPass })
+        : hostLauncherPromise;
       if (provPending) {
         await provPending.catch(() => {});
       }
@@ -1351,6 +1368,9 @@ export function createWindowBridgeController(options) {
 
     const { reachableCount, targets } = await collectAllMainWindowTargets(cdpPorts);
     if (reachableCount === 0) {
+      const provPending = shouldCheckLaunchers
+        ? provisionHostLaunchersOnce({ fastCheckIfActive: !isInitialLauncherPass })
+        : hostLauncherPromise;
       if (provPending) {
         await provPending.catch(() => {});
       }
@@ -1361,6 +1381,11 @@ export function createWindowBridgeController(options) {
         prevLease: currentLease,
       });
       return { ok: false, enabled, reason: 'cdp_unreachable', injected: 0 };
+    }
+
+    if (shouldCheckLaunchers) {
+      // 调试端口已正常连通时走纯 Node.js 零子进程快检（<2ms），仅在发现未配参快捷方式时才拉起 PowerShell
+      void provisionHostLaunchersOnce({ fastCheckIfActive: true }).catch(() => {});
     }
     if (!targets.length) {
       updateBridgeStatus(enabled ? 'no_targets' : 'disabled', {
@@ -1842,6 +1867,8 @@ export function createWindowBridgeController(options) {
       const hasCtx = Object.keys(cur.modelContextWindows || {}).length > 0;
       if (!hasCtx && autoConfigureIdeArgv) {
         launcherConfigured = false;
+        hasReadOnlyShortcuts = false;
+        lastLauncherProvisionAtMs = 0;
         void ensureDesktopLaunchEntriesConfigured({
           enabled: false,
           env,
@@ -1853,7 +1880,7 @@ export function createWindowBridgeController(options) {
         }).catch(() => {});
       }
     } else {
-      ideArgvProvisioned = false;
+      lastLauncherProvisionAtMs = 0;
       hadInjectedChatFrames = true;
     }
     return syncAllWindows({ forceReinject: false }).catch(() => ({ ok: false }));
@@ -1865,9 +1892,11 @@ export function createWindowBridgeController(options) {
     const overlayOn = Boolean(cur.enableWindowOverlay !== false && mountMode !== 'sidebar');
     const hasCtx = Object.keys(cur.modelContextWindows || {}).length > 0;
     if (hasCtx) {
-      ideArgvProvisioned = false;
+      lastLauncherProvisionAtMs = 0;
     } else if (!overlayOn && autoConfigureIdeArgv) {
       launcherConfigured = false;
+      hasReadOnlyShortcuts = false;
+      lastLauncherProvisionAtMs = 0;
       void ensureDesktopLaunchEntriesConfigured({
         enabled: false,
         env,
@@ -1908,6 +1937,7 @@ export function getDefaultWindowBridgeStatus() {
       argvUpdatedThisBoot: false,
       argvConfigured: false,
       launcherConfigured: false,
+      hasReadOnlyShortcuts: false,
       canRelaunch: false,
       updatedAtMs: 0,
     };

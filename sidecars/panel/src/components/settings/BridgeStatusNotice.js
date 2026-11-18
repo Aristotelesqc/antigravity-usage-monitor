@@ -186,6 +186,7 @@ export const BridgeStatusNotice = defineComponent({
 
     function syncActionButtons() {
       const canRelaunch = lastPayload.windowBridge?.canRelaunch !== false;
+      const needsAuth = Boolean(lastPayload.windowBridge?.hasReadOnlyShortcuts);
       patchAttr(relaunchBtnEl, 'hidden', !canRelaunch);
       patchAttr(relaunchBtnEl, 'disabled', relaunchState === 'relaunching');
       patchText(
@@ -194,7 +195,9 @@ export const BridgeStatusNotice = defineComponent({
           ? t('settings.bridge.relaunchingBtn')
           : relaunchState === 'failed'
             ? t('settings.bridge.relaunchFailed')
-            : t('settings.bridge.relaunchBtn')
+            : needsAuth
+              ? t('settings.bridge.relaunchAuthBtn')
+              : t('settings.bridge.relaunchBtn')
       );
 
       patchSvgIcon(copyBtnIconEl, copied ? 'check' : 'copy');
@@ -227,38 +230,44 @@ export const BridgeStatusNotice = defineComponent({
       patchAttr(rootEl, 'hidden', !shouldShow);
       if (!shouldShow) return;
 
+      const plat = String(lastPayload.hostPlatform || '').trim().toLowerCase();
+      const hasReadOnlyShortcuts = Boolean(wb?.hasReadOnlyShortcuts);
+      const isMacDesktop = plat === 'darwin' && !wb?.argvConfigured;
       const isAutoConfigured = Boolean(
         wb?.launcherConfigured || wb?.argvUpdatedThisBoot || wb?.argvConfigured
       );
+      const useRestartTheme = !hasReadOnlyShortcuts && (isAutoConfigured || isMacDesktop);
+
       patchClasses(rootEl, {
-        'is-restart': isAutoConfigured,
-        'is-warn': !isAutoConfigured,
+        'is-restart': useRestartTheme,
+        'is-warn': !useRestartTheme,
       });
-      patchSvgIcon(headIconEl, isAutoConfigured ? 'refresh' : 'warning');
+      patchSvgIcon(headIconEl, useRestartTheme ? 'refresh' : 'warning');
 
       let titleText = '';
-      if (isAutoConfigured) {
+      let bodyText = '';
+      if (hasReadOnlyShortcuts) {
+        titleText = contextMode
+          ? t('settings.bridge.ctxReadOnlyTitle')
+          : t('settings.bridge.readOnlyTitle');
+        bodyText = t('settings.bridge.readOnlyBody');
+      } else if (isMacDesktop) {
+        titleText = contextMode
+          ? t('settings.bridge.ctxMacTitle')
+          : t('settings.bridge.macTitle');
+        bodyText = t('settings.bridge.guideMac');
+      } else if (isAutoConfigured) {
         titleText = contextMode
           ? t('settings.bridge.ctxRestartTitle')
           : t('settings.bridge.restartTitle');
-      } else if (contextMode) {
-        titleText = t('settings.bridge.ctxTitle');
-      } else if (state === 'cdp_unreachable') {
-        titleText = t('settings.bridge.unreachableTitle');
-      } else {
-        titleText = t('settings.bridge.noPortTitle');
-      }
-
-      const plat = String(lastPayload.hostPlatform || '').trim().toLowerCase();
-      let bodyText = '';
-      if (isAutoConfigured) {
         bodyText = t('settings.bridge.restartBody');
-      } else if (plat === 'darwin') {
-        bodyText = t('settings.bridge.guideMac');
-      } else if (plat === 'linux') {
-        bodyText = t('settings.bridge.guideLinux');
       } else {
-        bodyText = t('settings.bridge.guideWin');
+        titleText = contextMode
+          ? t('settings.bridge.ctxTitle')
+          : state === 'cdp_unreachable'
+            ? t('settings.bridge.unreachableTitle')
+            : t('settings.bridge.noPortTitle');
+        bodyText = plat === 'linux' ? t('settings.bridge.guideLinux') : t('settings.bridge.guideWin');
       }
 
       patchText(titleEl, titleText);

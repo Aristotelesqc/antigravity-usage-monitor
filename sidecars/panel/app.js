@@ -1463,14 +1463,20 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.mountSidebar': '仅侧边栏',
   'settings.bridge.restartTitle': '已自动补齐启动参数，重启一次即可启用悬浮胶囊',
   'settings.bridge.ctxRestartTitle': '已自动补齐启动参数，重启一次即可激活上下文覆写',
-  'settings.bridge.restartBody': '已自动为桌面 / 开始菜单 / 任务栏快捷方式及自启项写入 --remote-debugging-port=0（后续每次正常打开均 100% 全自动挂载）。点击下方按钮即可退出托盘后台并立即生效。',
+  'settings.bridge.restartBody': '已自动为快捷方式、自启项及协议关联写入 --remote-debugging-port=0（后续通过常规快捷方式打开均自动生效）。点击下方按钮即可退出后台进程并立即生效。',
+  'settings.bridge.readOnlyTitle': '公共桌面快捷方式受权限保护，授权重启即可生效',
+  'settings.bridge.ctxReadOnlyTitle': '公共桌面快捷方式受权限保护，授权重启即可激活上下文覆写',
+  'settings.bridge.readOnlyBody': '个人启动项已配好，但公共桌面或开始菜单快捷方式需管理员权限修改。点击下方按钮并在系统弹窗中确认授权，即可一次性修补公共图标并带参重开（后续日常打开均自动生效）。',
+  'settings.bridge.macTitle': '当前会话未开启调试端口，一键重开即可启用挂载',
+  'settings.bridge.ctxMacTitle': '当前会话未开启调试端口，一键重开即可激活上下文覆写',
   'settings.bridge.noPortTitle': '未检测到本地调试端口，主窗口挂载暂未生效',
   'settings.bridge.unreachableTitle': '本地调试端口未就绪，主窗口挂载暂未生效',
   'settings.bridge.ctxTitle': '未连通本地调试通道，上下文窗口覆写暂未注入',
   'settings.bridge.guideWin': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动补齐快捷方式参数、退出托盘后台并带参重启生效。',
-  'settings.bridge.guideMac': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可一键带参重开客户端生效，也可复制参数通过 open -a "Antigravity" --args --remote-debugging-port=0 启动。',
+  'settings.bridge.guideMac': '受 macOS 应用签名限制，从 Dock 直接冷启动默认不带调试端口参数。点击下方按钮即可一键带参重开恢复（日常仅关窗不完全退出 Cmd+Q 则持续有效）。',
   'settings.bridge.guideLinux': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动写入 .desktop 启动器并重启生效。',
   'settings.bridge.relaunchBtn': '立即重启并启用挂载',
+  'settings.bridge.relaunchAuthBtn': '授权修补并立即重启',
   'settings.bridge.relaunchingBtn': '正在重启客户端...',
   'settings.bridge.relaunchFailed': '自动重启失败，请从托盘退出后重试',
   'settings.bridge.dismissAria': '暂时关闭提示',
@@ -2093,14 +2099,20 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.mountSidebar': 'Sidebar Only',
   'settings.bridge.restartTitle': 'Launch Flag Auto-Configured — Restart Once to Activate',
   'settings.bridge.ctxRestartTitle': 'Launch Flag Auto-Configured — Restart Once for Context Override',
-  'settings.bridge.restartBody': 'Automatically added --remote-debugging-port=0 to your shortcuts and startup entries (future launches mount 100% automatically). Click below to close tray processes and relaunch now.',
+  'settings.bridge.restartBody': 'Automatically added --remote-debugging-port=0 to your shortcuts, startup entries, and protocol handlers (subsequent shortcut launches mount automatically). Click below to close background processes and relaunch now.',
+  'settings.bridge.readOnlyTitle': 'Public Shortcut Protected — Authorize & Relaunch to Activate',
+  'settings.bridge.ctxReadOnlyTitle': 'Public Shortcut Protected — Authorize & Relaunch for Context Override',
+  'settings.bridge.readOnlyBody': 'Personal launch entries are configured, but public shortcuts require administrator permission. Click below and approve the system prompt to patch public shortcuts once and relaunch.',
+  'settings.bridge.macTitle': 'Debug Port Inactive — One-Click Relaunch to Enable Mount',
+  'settings.bridge.ctxMacTitle': 'Debug Port Inactive — One-Click Relaunch for Context Override',
   'settings.bridge.noPortTitle': 'Local Debug Port Missing — Window Mount Inactive',
   'settings.bridge.unreachableTitle': 'Local Debug Port Not Ready — Window Mount Inactive',
   'settings.bridge.ctxTitle': 'Local Debug Port Inactive — Context Override Pending',
   'settings.bridge.guideWin': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to auto-configure shortcuts, close tray background processes, and relaunch.',
-  'settings.bridge.guideMac': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to relaunch with the flag in one click, or run open -a "Antigravity" --args --remote-debugging-port=0.',
+  'settings.bridge.guideMac': 'Due to macOS app code signing, cold launches from Dock omit the debug port flag. Click below to relaunch with the flag in one click (stays active until you fully Quit via Cmd+Q).',
   'settings.bridge.guideLinux': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to update your .desktop launcher and relaunch.',
   'settings.bridge.relaunchBtn': 'Relaunch & Enable Mount',
+  'settings.bridge.relaunchAuthBtn': 'Authorize & Relaunch',
   'settings.bridge.relaunchingBtn': 'Relaunching Host...',
   'settings.bridge.relaunchFailed': 'Auto-relaunch failed — quit from tray and retry',
   'settings.bridge.dismissAria': 'Dismiss notice for now',
@@ -14257,6 +14269,7 @@ const BridgeStatusNotice = defineComponent({
 
     function syncActionButtons() {
       const canRelaunch = lastPayload.windowBridge?.canRelaunch !== false;
+      const needsAuth = Boolean(lastPayload.windowBridge?.hasReadOnlyShortcuts);
       patchAttr(relaunchBtnEl, 'hidden', !canRelaunch);
       patchAttr(relaunchBtnEl, 'disabled', relaunchState === 'relaunching');
       patchText(
@@ -14265,7 +14278,9 @@ const BridgeStatusNotice = defineComponent({
           ? t('settings.bridge.relaunchingBtn')
           : relaunchState === 'failed'
             ? t('settings.bridge.relaunchFailed')
-            : t('settings.bridge.relaunchBtn')
+            : needsAuth
+              ? t('settings.bridge.relaunchAuthBtn')
+              : t('settings.bridge.relaunchBtn')
       );
 
       patchSvgIcon(copyBtnIconEl, copied ? 'check' : 'copy');
@@ -14298,38 +14313,44 @@ const BridgeStatusNotice = defineComponent({
       patchAttr(rootEl, 'hidden', !shouldShow);
       if (!shouldShow) return;
 
+      const plat = String(lastPayload.hostPlatform || '').trim().toLowerCase();
+      const hasReadOnlyShortcuts = Boolean(wb?.hasReadOnlyShortcuts);
+      const isMacDesktop = plat === 'darwin' && !wb?.argvConfigured;
       const isAutoConfigured = Boolean(
         wb?.launcherConfigured || wb?.argvUpdatedThisBoot || wb?.argvConfigured
       );
+      const useRestartTheme = !hasReadOnlyShortcuts && (isAutoConfigured || isMacDesktop);
+
       patchClasses(rootEl, {
-        'is-restart': isAutoConfigured,
-        'is-warn': !isAutoConfigured,
+        'is-restart': useRestartTheme,
+        'is-warn': !useRestartTheme,
       });
-      patchSvgIcon(headIconEl, isAutoConfigured ? 'refresh' : 'warning');
+      patchSvgIcon(headIconEl, useRestartTheme ? 'refresh' : 'warning');
 
       let titleText = '';
-      if (isAutoConfigured) {
+      let bodyText = '';
+      if (hasReadOnlyShortcuts) {
+        titleText = contextMode
+          ? t('settings.bridge.ctxReadOnlyTitle')
+          : t('settings.bridge.readOnlyTitle');
+        bodyText = t('settings.bridge.readOnlyBody');
+      } else if (isMacDesktop) {
+        titleText = contextMode
+          ? t('settings.bridge.ctxMacTitle')
+          : t('settings.bridge.macTitle');
+        bodyText = t('settings.bridge.guideMac');
+      } else if (isAutoConfigured) {
         titleText = contextMode
           ? t('settings.bridge.ctxRestartTitle')
           : t('settings.bridge.restartTitle');
-      } else if (contextMode) {
-        titleText = t('settings.bridge.ctxTitle');
-      } else if (state === 'cdp_unreachable') {
-        titleText = t('settings.bridge.unreachableTitle');
-      } else {
-        titleText = t('settings.bridge.noPortTitle');
-      }
-
-      const plat = String(lastPayload.hostPlatform || '').trim().toLowerCase();
-      let bodyText = '';
-      if (isAutoConfigured) {
         bodyText = t('settings.bridge.restartBody');
-      } else if (plat === 'darwin') {
-        bodyText = t('settings.bridge.guideMac');
-      } else if (plat === 'linux') {
-        bodyText = t('settings.bridge.guideLinux');
       } else {
-        bodyText = t('settings.bridge.guideWin');
+        titleText = contextMode
+          ? t('settings.bridge.ctxTitle')
+          : state === 'cdp_unreachable'
+            ? t('settings.bridge.unreachableTitle')
+            : t('settings.bridge.noPortTitle');
+        bodyText = plat === 'linux' ? t('settings.bridge.guideLinux') : t('settings.bridge.guideWin');
       }
 
       patchText(titleEl, titleText);

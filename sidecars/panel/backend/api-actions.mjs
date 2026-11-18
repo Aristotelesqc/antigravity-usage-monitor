@@ -460,9 +460,12 @@ export async function executeAccountCredentialAction(data) {
 
 export async function executeBridgeRelaunchAction() {
   ensureIdeRemoteDebuggingArgv({ enabled: true });
-  await ensureDesktopLaunchEntriesConfigured({ enabled: true }).catch(() => {});
+  const launchConfig = await ensureDesktopLaunchEntriesConfigured({ enabled: true }).catch(
+    () => null
+  );
   const result = await triggerDesktopHostRelaunch({
     stalePortFiles: resolveDevToolsPortCandidates(),
+    readOnlyShortcutPaths: launchConfig?.readOnlyPaths || [],
   });
   return {
     status: result.ok ? 200 : Number(result.status || 500),
