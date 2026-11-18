@@ -23,12 +23,12 @@ import {
   speedMetric,
   summarizeSpeed,
   summarizeTtft,
-} from './speed-metrics.mjs';
+} from './trajectory-metrics.mjs';
 import {
-  getNodeSqliteDatabaseSync,
   readLocalSqliteTrajectory,
   readLocalSummaryIndex,
 } from './backend/cli-sqlite-reader.mjs';
+import { withReadOnlySqliteDb } from './backend/sqlite-client.mjs';
 import {
   ensureCliStatusLineConfigured,
   formatCliStatusLineCapsule,
@@ -39,6 +39,7 @@ import {
   loadSettings,
 } from './backend/config.mjs';
 import { computeStepCost, createStepModelResolver } from './backend/model-pricing.mjs';
+import { isThirdPartyPoolText } from './shared/telemetry-display-rules.mjs';
 
 const CLI_RUNNING_STALE_MS = 10 * 60 * 1000;
 const SNAPSHOT_LIVE_RUNNING_TTL_MS = 20 * 1000;
@@ -145,43 +146,35 @@ function findConversationIdByWorkspaceFts(cliRoot, cwd) {
   if (!cwd) return '';
   const summariesDbPath = join(cliRoot, 'conversation_summaries.db');
   if (!existsSync(summariesDbPath)) return '';
-  const DatabaseSync = getNodeSqliteDatabaseSync();
-  if (!DatabaseSync) return '';
 
   const normCwd = normalizePathForMatch(cwd);
   if (!normCwd) return '';
 
-  let db = null;
   try {
-    db = new DatabaseSync(summariesDbPath, { readOnly: true });
-    const rows = db
-      .prepare(
-        `SELECT conversation_id, workspace, last_modified_time
-           FROM conversations_fts
-          WHERE chunk_index = -1
-          ORDER BY last_modified_time DESC
-          LIMIT 40`
-      )
-      .all();
-    for (const row of rows || []) {
-      const ws = normalizePathForMatch(row?.workspace);
-      const cid = String(row?.conversation_id || '').trim().toLowerCase();
-      if (cid && ws && ws === normCwd) {
-        return cid;
+    const matched = withReadOnlySqliteDb(summariesDbPath, (db) => {
+      const rows = db
+        .prepare(
+          `SELECT conversation_id, workspace, last_modified_time
+             FROM conversations_fts
+            WHERE chunk_index = -1
+            ORDER BY last_modified_time DESC
+            LIMIT 40`
+        )
+        .all();
+      for (const row of rows || []) {
+        const ws = normalizePathForMatch(row?.workspace);
+        const cid = String(row?.conversation_id || '').trim().toLowerCase();
+        if (cid && ws && ws === normCwd) {
+          return cid;
+        }
       }
-    }
+      return '';
+    });
+    return matched || '';
   } catch {
     // 忽略不存在 conversations_fts 表或读取失败
-  } finally {
-    if (db) {
-      try {
-        db.close();
-      } catch {
-        // 忽略关闭异常
-      }
-    }
+    return '';
   }
-  return '';
 }
 
 /**
@@ -394,7 +387,7 @@ function buildStdinFallbackQuotas(stdinData) {
     const frac = Number(bucket.remaining_fraction);
     if (!Number.isFinite(frac)) continue;
     const remainingPct = Math.max(0, Math.min(100, Math.round(frac * 100)));
-    const isThirdParty = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i.test(key);
+    const isThirdParty = isThirdPartyPoolText(key);
     pools.push({
       poolKey: isThirdParty ? 'Claude & GPT' : 'Gemini',
       poolLabel: key,
@@ -404,7 +397,7 @@ function buildStdinFallbackQuotas(stdinData) {
   }
   if (pools.length === 0) return null;
   const modelStr = String(stdinData?.model?.id || stdinData?.model?.display_name || '');
-  const activeIsThirdParty = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i.test(modelStr);
+  const activeIsThirdParty = isThirdPartyPoolText(modelStr);
   const matchingPools = pools.filter((p) =>
     activeIsThirdParty ? p.poolKey === 'Claude & GPT' : p.poolKey === 'Gemini'
   );

@@ -11,12 +11,8 @@
 
 import { Worker } from 'node:worker_threads';
 import { Response, SidecarApp } from 'sidecar_sdk';
-import {
-  bootWindowBridgeRuntime,
-  dispatchBridgeApiRequest,
-  isLocalHostRequest,
-  readLocalAsync,
-} from './backend/api-actions.mjs';
+import { BRIDGE_API_ROUTE_DEFS } from './shared/window-bridge-protocol.mjs';
+import { isLocalHostRequest, readLocalAsync } from './backend/http-helpers.mjs';
 
 const app = new SidecarApp();
 
@@ -144,9 +140,20 @@ async function ensureActiveWorker() {
   return activeWorker;
 }
 
+let testHarnessApiModulePromise = null;
+
+function getTestHarnessApiModule() {
+  testHarnessApiModulePromise ||= import('./backend/api-actions.mjs');
+  return testHarnessApiModulePromise;
+}
+
 async function forwardApiCall(pathname, method, data) {
   if (isTestHarnessEnv) {
-    return dispatchBridgeApiRequest(pathname, method, data);
+    if (typeof dispatchBridgeApiRequest === 'function') {
+      return dispatchBridgeApiRequest(pathname, method, data);
+    }
+    const mod = await getTestHarnessApiModule();
+    return mod.dispatchBridgeApiRequest(pathname, method, data);
   }
   const upperMethod = String(method || 'GET').toUpperCase();
   try {
@@ -208,22 +215,32 @@ app.page(
 );
 
 // ---------------------------------------------------------------------------
-// 业务数据与控制 API 路由
+// 业务数据与控制 API 路由（统一源自 shared/window-bridge-protocol.mjs）
 // ---------------------------------------------------------------------------
 
-app.api('/api/telemetry', (data, req) => handleProtectedApi('/api/telemetry', 'GET', data, req), 'GET');
-app.api('/api/settings', (data, req) => handleProtectedApi('/api/settings', 'POST', data, req));
-app.api('/api/accounts', (_data, req) => handleProtectedApi('/api/accounts', 'GET', undefined, req), 'GET');
-app.api('/api/accounts/update', (data, req) => handleProtectedApi('/api/accounts/update', 'POST', data, req), 'POST');
-app.api('/api/context-window', (data, req) => handleProtectedApi('/api/context-window', 'POST', data, req));
-app.api('/api/settings/reset', (_data, req) => handleProtectedApi('/api/settings/reset', 'POST', undefined, req));
-app.api('/api/cache/rebuild', (_data, req) => handleProtectedApi('/api/cache/rebuild', 'POST', undefined, req));
-app.api('/api/cloud-sync', (_data, req) => handleProtectedApi('/api/cloud-sync', 'POST', undefined, req));
-app.api('/api/plugin-update', (_data, req) => handleProtectedApi('/api/plugin-update', 'POST', undefined, req));
+for (const route of BRIDGE_API_ROUTE_DEFS) {
+  app.api(
+    route.path,
+    (data, req) =>
+      handleProtectedApi(
+        route.path,
+        route.method,
+        route.method === 'GET' && route.action !== 'telemetry' ? undefined : data,
+        req
+      ),
+    route.method
+  );
+}
 
 app.run();
 if (isTestHarnessEnv) {
-  bootWindowBridgeRuntime({ allowDynamicLs: false });
+  if (typeof bootWindowBridgeRuntime === 'function') {
+    bootWindowBridgeRuntime({ allowDynamicLs: false });
+  } else {
+    void getTestHarnessApiModule().then((mod) =>
+      mod.bootWindowBridgeRuntime({ allowDynamicLs: false })
+    );
+  }
 } else {
   void ensureActiveWorker();
 }

@@ -11,23 +11,18 @@
 
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  bootBundleVersion,
-  bootWindowBridgeRuntime,
-  setStandalonePortListener,
-} from './backend/api-actions.mjs';
-import {
-  computeRuntimeCodeVersion,
-  loadSettings,
-  normalizeStandalonePort,
-} from './backend/config.mjs';
-import {
-  createStandaloneWebServer,
-  parseStandaloneCliArgs,
-} from './backend/standalone-server.mjs';
-import { runStandaloneCli } from './standalone.mjs';
 
-export function startBridgeDaemon() {
+export async function startBridgeDaemon() {
+  const [
+    { bootBundleVersion, bootWindowBridgeRuntime, setStandalonePortListener },
+    { computeRuntimeCodeVersion, loadSettings, normalizeStandalonePort },
+    { createStandaloneWebServer, parseStandaloneCliArgs },
+  ] = await Promise.all([
+    import('./backend/api-actions.mjs'),
+    import('./backend/config.mjs'),
+    import('./backend/standalone-server.mjs'),
+  ]);
+
   let shuttingDown = false;
   let sawShutdownDispose = false;
   let stdinBuf = '';
@@ -171,8 +166,8 @@ const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';
 if (invokedPath && invokedPath === fileURLToPath(import.meta.url)) {
   const cliArgs = process.argv.slice(2);
   if (cliArgs.includes('--standalone') || cliArgs.includes('--help') || cliArgs.includes('-h')) {
-    void runStandaloneCli(cliArgs);
+    void import('./standalone.mjs').then(({ runStandaloneCli }) => runStandaloneCli(cliArgs));
   } else {
-    startBridgeDaemon();
+    void startBridgeDaemon();
   }
 }

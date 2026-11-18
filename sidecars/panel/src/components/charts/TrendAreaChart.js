@@ -9,6 +9,7 @@
 import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
 import { formatTokensPrecise, formatUsd } from '../../core/formatters.js';
 import { SVG_NS } from '../../icons/SvgIcon.js';
+import { getEffectiveLocale, t } from '../../i18n/index.js';
 
 /** 超过该自然日天数（> 90 天）时，趋势图切换为类 GitHub 每日小格子热力图 */
 export const HEATMAP_DAYS_THRESHOLD = 90;
@@ -176,7 +177,9 @@ function buildHeatmapMonthTicks(slots, firstDow, totalWeeks) {
     if (totalWeeks > 16 && c.col >= totalWeeks - 1) continue;
     if (ticks.length > 0 && c.col < nextAllowedCol) continue;
     const showYear = crossYear && (c.month === 1 || ticks.length === 0);
-    const text = showYear ? `${String(c.year).slice(-2)}年${c.month}月` : `${c.month}月`;
+    const text = showYear
+      ? t('chart.trend.hmMonthYear', { yy: String(c.year).slice(-2), month: c.month })
+      : t('chart.trend.hmMonthOnly', { month: c.month });
     ticks.push({ col: c.col, text });
     nextAllowedCol = c.col + (showYear ? baseMinGap + 1 : baseMinGap);
   }
@@ -311,26 +314,41 @@ export function createTrendAreaChart() {
   const plotStage = h('div', { className: 'trend-plot-stage' }, [peakPill, svg]);
 
   // 类 GitHub 每日小格子热力图容器（> 90 天模式）
-  const weekdayLabels = ['一', '', '三', '', '五', '', '日'];
+  const wdayMonEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayMon') });
+  const wdayWedEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayWed') });
+  const wdayFriEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayFri') });
+  const wdaySunEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdaySun') });
   const hmWeekdaysEl = h('div', { className: 'trend-hm-weekdays', 'aria-hidden': 'true' }, [
     h('span', { className: 'trend-hm-month-spacer' }),
-    ...weekdayLabels.map((txt) => h('span', { className: 'trend-hm-wday', text: txt })),
+    wdayMonEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdayWedEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdayFriEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdaySunEl,
   ]);
   const hmMonthsEl = h('div', { className: 'trend-hm-months' });
-  const hmGridEl = h('div', { className: 'trend-hm-grid', role: 'grid', 'aria-label': '每日用量热力格子图' });
+  const hmGridEl = h('div', {
+    className: 'trend-hm-grid',
+    role: 'grid',
+    'aria-label': t('chart.trend.hmAria'),
+  });
   const hmTrackEl = h('div', { className: 'trend-hm-track' }, [hmMonthsEl, hmGridEl]);
   const hmScrollEl = h('div', { className: 'trend-hm-scroll' }, [hmTrackEl]);
   const hmBodyEl = h('div', { className: 'trend-heatmap-body' }, [hmWeekdaysEl, hmScrollEl]);
 
   const hmSummaryEl = h('span', { className: 'trend-hm-summary text-mono', text: '' });
+  const hmLessEl = h('span', { text: t('chart.trend.hmLess') });
+  const hmMoreEl = h('span', { text: t('chart.trend.hmMore') });
   const hmLegendEl = h('span', { className: 'trend-hm-legend', 'aria-hidden': 'true' }, [
-    h('span', { text: '少' }),
+    hmLessEl,
     h('span', { className: 'trend-hm-swatch lv-0' }),
     h('span', { className: 'trend-hm-swatch lv-1' }),
     h('span', { className: 'trend-hm-swatch lv-2' }),
     h('span', { className: 'trend-hm-swatch lv-3' }),
     h('span', { className: 'trend-hm-swatch lv-4' }),
-    h('span', { text: '多' }),
+    hmMoreEl,
   ]);
   const hmFooterEl = h('div', { className: 'trend-hm-footer' }, [hmSummaryEl, hmLegendEl]);
   const heatmapStage = h('div', { className: 'trend-heatmap-stage', hidden: true }, [
@@ -349,6 +367,8 @@ export function createTrendAreaChart() {
   let currentPts = [];
   let currentIsHeatmap = false;
   let currentHeatmapWeeks = 0;
+  let currentHeatmapFirstDow = 0;
+  let currentHeatmapGapPx = 2;
   let currentCellEls = [];
   let tickElsByIdx = new Map();
   let hoveredIdx = -1;
@@ -357,7 +377,10 @@ export function createTrendAreaChart() {
 
   function populateTooltipContent(slot) {
     patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
-    patchText(tipCallsEl, `${Math.max(0, Math.floor(Number(slot.calls) || 0))} 次`);
+    patchText(
+      tipCallsEl,
+      t('cons.callsCount', { calls: Math.max(0, Math.floor(Number(slot.calls) || 0)) })
+    );
     const slotTok = safeSlotTokens(slot.tokens);
     patchText(tipTokensEl, `${formatTokensPrecise(slotTok)} tok`);
     const slotCost = Number.isFinite(Number(slot.costUsd)) ? Math.max(0, Number(slot.costUsd)) : 0;
@@ -377,7 +400,11 @@ export function createTrendAreaChart() {
     if (hasSubBreakdown) {
       patchText(
         tipSubEl,
-        `入 ${formatTokensPrecise(safeSlotTokens(slot.inputTokens))} · 缓 ${formatTokensPrecise(safeSlotTokens(slot.cacheReadTokens))} · 出 ${formatTokensPrecise(safeSlotTokens(slot.outputTokens))}`
+        t('chart.step.ioSplit', {
+          inTok: formatTokensPrecise(safeSlotTokens(slot.inputTokens)),
+          cacheTok: formatTokensPrecise(safeSlotTokens(slot.cacheReadTokens)),
+          outTok: formatTokensPrecise(safeSlotTokens(slot.outputTokens)),
+        })
       );
     }
   }
@@ -513,21 +540,117 @@ export function createTrendAreaChart() {
     showLineHoverAtIndex(idx);
   }
 
-  function findHeatmapCellFromEvent(e) {
+  function findDirectHeatmapCell(e) {
     let cur = e?.target || null;
     while (cur && cur !== hmGridEl) {
       const idxAttr = cur.getAttribute?.('data-slot-idx');
       if (idxAttr !== null && idxAttr !== undefined && idxAttr !== '') {
-        return { idx: Number(idxAttr), cellEl: cur };
+        const idx = Number(idxAttr);
+        if (Number.isFinite(idx) && idx >= 0 && idx < currentSlots.length) {
+          return { idx, cellEl: cur };
+        }
       }
       cur = cur.parentNode || null;
     }
     return null;
   }
 
+  function resolveHeatmapCellFromPointer(e) {
+    const directHit = findDirectHeatmapCell(e);
+    if (directHit) return directHit;
+
+    const clientX = Number(e?.clientX);
+    const clientY = Number(e?.clientY);
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+      if (hoveredIdx >= 0 && hoveredIdx < currentSlots.length && currentCellEls[hoveredIdx]) {
+        return { idx: hoveredIdx, cellEl: currentCellEls[hoveredIdx] };
+      }
+      return null;
+    }
+
+    const rect = hmGridEl.getBoundingClientRect?.();
+    if (!rect || !(rect.width > 0) || !(rect.height > 0) || currentHeatmapWeeks <= 0) {
+      if (hoveredIdx >= 0 && hoveredIdx < currentSlots.length && currentCellEls[hoveredIdx]) {
+        return { idx: hoveredIdx, cellEl: currentCellEls[hoveredIdx] };
+      }
+      return null;
+    }
+
+    const W = currentHeatmapWeeks;
+    const G = currentHeatmapGapPx;
+    const relX = clientX - rect.left;
+    const relY = clientY - rect.top;
+    if (
+      relX < -(G + 1) ||
+      relX > rect.width + G + 1 ||
+      relY < -(G + 1) ||
+      relY > rect.height + G + 1
+    ) {
+      return null;
+    }
+
+    const pitchX = (rect.width + G) / W;
+    const pitchY = (rect.height + G) / 7;
+    const cellW = Math.max(1, pitchX - G);
+    const cellH = Math.max(1, pitchY - G);
+
+    function distanceToCell(c, r) {
+      const x0 = c * pitchX;
+      const y0 = r * pitchY;
+      const dx = relX < x0 ? x0 - relX : relX > x0 + cellW ? relX - (x0 + cellW) : 0;
+      const dy = relY < y0 ? y0 - relY : relY > y0 + cellH ? relY - (y0 + cellH) : 0;
+      return { chebyshev: Math.max(dx, dy), distSq: dx * dx + dy * dy };
+    }
+
+    // 指针滑入当前悬停格四周的空隙（gap）时保持原高亮，彻底消除跨格空隙闪烁与边缘微抖
+    if (hoveredIdx >= 0 && hoveredIdx < currentSlots.length && currentCellEls[hoveredIdx]) {
+      const curGridPos = currentHeatmapFirstDow + hoveredIdx;
+      const curCol = Math.floor(curGridPos / 7);
+      const curRow = curGridPos % 7;
+      if (distanceToCell(curCol, curRow).chebyshev <= G + 0.75) {
+        return { idx: hoveredIdx, cellEl: currentCellEls[hoveredIdx] };
+      }
+    }
+
+    // 快速扫过或初始落入格子间隙时，按网格步距吸附到最近的有效日期格
+    const approxCol = Math.max(0, Math.min(W - 1, Math.floor((relX + G * 0.5) / pitchX)));
+    const approxRow = Math.max(0, Math.min(6, Math.floor((relY + G * 0.5) / pitchY)));
+    const directSlotIdx = approxCol * 7 + approxRow - currentHeatmapFirstDow;
+    if (
+      directSlotIdx >= 0 &&
+      directSlotIdx < currentSlots.length &&
+      currentCellEls[directSlotIdx]
+    ) {
+      return { idx: directSlotIdx, cellEl: currentCellEls[directSlotIdx] };
+    }
+
+    // 首周补位或末周未来空白边缘：仅当仍在相邻有效格的间隙光晕内才吸附，深入纯空白角则清空
+    let bestIdx = -1;
+    let bestDistSq = Infinity;
+    for (let dc = -1; dc <= 1; dc++) {
+      const c = approxCol + dc;
+      if (c < 0 || c >= W) continue;
+      for (let dr = -1; dr <= 1; dr++) {
+        const r = approxRow + dr;
+        if (r < 0 || r > 6) continue;
+        const sIdx = c * 7 + r - currentHeatmapFirstDow;
+        if (sIdx < 0 || sIdx >= currentSlots.length || !currentCellEls[sIdx]) continue;
+        const d = distanceToCell(c, r);
+        if (d.chebyshev <= G + 1.5 && d.distSq < bestDistSq) {
+          bestDistSq = d.distSq;
+          bestIdx = sIdx;
+        }
+      }
+    }
+    if (bestIdx >= 0) {
+      return { idx: bestIdx, cellEl: currentCellEls[bestIdx] };
+    }
+    return null;
+  }
+
   function handleHeatmapPointer(e) {
     if (!currentIsHeatmap || !currentSlots.length) return;
-    const hit = findHeatmapCellFromEvent(e);
+    const hit = resolveHeatmapCellFromPointer(e);
     if (!hit || !Number.isFinite(hit.idx)) {
       clearHover();
       return;
@@ -630,19 +753,28 @@ export function createTrendAreaChart() {
     const nonZeroVals = [];
 
     for (let i = 0; i < slots.length; i++) {
-      const t = safeSlotTokens(slots[i]?.tokens);
-      if (t > 0) {
+      const tokVal = safeSlotTokens(slots[i]?.tokens);
+      if (tokVal > 0) {
         activeDays++;
-        nonZeroVals.push(t);
+        nonZeroVals.push(tokVal);
       }
-      if (t >= maxTokens) {
-        maxTokens = t;
+      if (tokVal >= maxTokens) {
+        maxTokens = tokVal;
         peakIdx = i;
       }
     }
 
+    const locale = getEffectiveLocale();
+    patchText(wdayMonEl, t('chart.trend.wdayMon'));
+    patchText(wdayWedEl, t('chart.trend.wdayWed'));
+    patchText(wdayFriEl, t('chart.trend.wdayFri'));
+    patchText(wdaySunEl, t('chart.trend.wdaySun'));
+    patchAttr(hmGridEl, 'aria-label', t('chart.trend.hmAria'));
+    patchText(hmLessEl, t('chart.trend.hmLess'));
+    patchText(hmMoreEl, t('chart.trend.hmMore'));
+
     const sig =
-      `${useHeatmap ? 'hm' : `line:${viewW}`}|` +
+      `${locale}|${useHeatmap ? 'hm' : `line:${viewW}`}|` +
       slots
         .map(
           (s) =>
@@ -664,10 +796,13 @@ export function createTrendAreaChart() {
             : 0;
         const totalCells = firstDow + slots.length;
         const totalWeeks = Math.max(1, Math.ceil(totalCells / 7));
+        const gapPx = totalWeeks > 42 ? 1.5 : 2;
         currentHeatmapWeeks = totalWeeks;
+        currentHeatmapFirstDow = firstDow;
+        currentHeatmapGapPx = gapPx;
 
         patchStyleVar(hmBodyEl, '--hm-weeks', String(totalWeeks));
-        patchStyleVar(hmBodyEl, '--hm-gap', totalWeeks > 42 ? '1.5px' : '2px');
+        patchStyleVar(hmBodyEl, '--hm-gap', `${gapPx}px`);
 
         // 重建顶部对齐月份标签
         while (hmMonthsEl.firstChild) hmMonthsEl.removeChild(hmMonthsEl.firstChild);
@@ -719,8 +854,13 @@ export function createTrendAreaChart() {
       const peakSlot = slots[peakIdx];
       const summaryText =
         maxTokens > 0 && peakSlot?.label
-          ? `活跃 ${activeDays}/${slots.length} 天 · 峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
-          : `活跃 0/${slots.length} 天`;
+          ? t('chart.trend.hmActivePeak', {
+              active: activeDays,
+              total: slots.length,
+              label: peakSlot.label,
+              tokens: formatTokensPrecise(maxTokens),
+            })
+          : t('chart.trend.hmActiveZero', { total: slots.length });
       patchText(hmSummaryEl, summaryText);
 
       if (hoveredIdx >= slots.length) {
@@ -819,7 +959,10 @@ export function createTrendAreaChart() {
     const peakSlot = slots[peakIdx];
     const peakText =
       maxTokens > 0 && peakSlot?.label
-        ? `峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
+        ? t('chart.trend.peakPill', {
+            label: peakSlot.label,
+            tokens: formatTokensPrecise(maxTokens),
+          })
         : formatTokensPrecise(maxTokens);
     patchText(peakPill, peakText);
     const pctLeft = Math.max(12, Math.min(88, (peakPt.x / viewW) * 100));

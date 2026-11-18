@@ -10,24 +10,27 @@
  */
 
 import { isDeepStrictEqual } from 'node:util';
+import { scaleBucketsExact } from '../shared/telemetry-display-rules.mjs';
 import {
   extractLiveActivity,
   parseIsoMs,
   speedMetric,
   summarizeSpeed,
   summarizeTtft,
-} from '../speed-metrics.mjs';
+} from '../trajectory-metrics.mjs';
 import {
   CLI_STATUS_SNAPSHOT_FILE,
   computeRuntimeCodeVersion,
+  getCachedTrajectory,
   inFlightRequests,
+  listCachedTrajectoryEntries,
   loadSettings,
   lsRuntimeEndpoint,
   roundMetric,
   saveJson,
-  trajectoryCache,
 } from './config.mjs';
 import { getContextWindowGroups, getContextWindowModels } from './context-windows.mjs';
+import { readLocalSummarySnapshot } from './cli-sqlite-reader.mjs';
 import { enumerateAndSyncConversations } from './local-scanner.mjs';
 import { ensureLsEndpointDiscovered } from './ls-discovery.mjs';
 import { callLsRpc, getContextModelCatalog, getOfficialQuotaSummary } from './ls-rpc.mjs';
@@ -38,8 +41,9 @@ import {
   isArgonModelIdentifier,
   isCarbonModelIdentifier,
 } from './model-pricing.mjs';
-import { getCloudStatus, pricingCatalogRevision } from './pricing-catalog.mjs';
+import { getCloudStatus, getPricingPhaseEpoch, pricingCatalogRevision } from './pricing-catalog.mjs';
 import { buildOfficialQuotaPools } from './quota-pools.mjs';
+import { getDefaultWindowBridgeStatus } from './window-bridge.mjs';
 import {
   aggregateMultiWindowUsage,
   buildScopedModelBreakdown,
@@ -59,9 +63,10 @@ function roundSessionCost(val) {
 
 function findTrajectoryCacheEntry(cascadeId) {
   if (!cascadeId) return null;
-  if (trajectoryCache[cascadeId]) return trajectoryCache[cascadeId];
+  const entry = getCachedTrajectory(cascadeId);
+  if (entry) return entry;
   const targetLower = String(cascadeId).toLowerCase();
-  for (const [k, v] of Object.entries(trajectoryCache)) {
+  for (const [k, v] of listCachedTrajectoryEntries()) {
     if (k.toLowerCase() === targetLower) return v;
   }
   return null;
@@ -95,13 +100,13 @@ function readTrajectoryModelFacts(steps) {
 }
 
 /** 合并各会话的上游模型与上下文上限，步骤数组更新后重新提取对应会话的数据。 */
-function buildKnownUpstreamModelMap(contextLimits, currentAccountName) {
+function buildKnownUpstreamModelMap(contextLimits) {
   const knownUpstreamByModelKey = new Map();
-  for (const entry of Object.values(trajectoryCache)) {
+  for (const [, entry] of listCachedTrajectoryEntries()) {
     if (!entry?.steps?.length) continue;
     const facts = readTrajectoryModelFacts(entry.steps);
     for (const [key, model] of facts.upstream) knownUpstreamByModelKey.set(key, model);
-    if (entry.subagentSpec || (entry.accountName && entry.accountName !== currentAccountName)) continue;
+    if (entry.subagentSpec) continue;
     if (facts.limits) {
       for (const [key, limit] of facts.limits) {
         const previous = contextLimits.get(key);
@@ -186,6 +191,10 @@ function enrichActiveConversationSteps(
     return {
       ...serializedStep,
       responseModel: st.responseModel || '',
+      hasKnownModel: Boolean(mInfo.modelId && mInfo.modelId !== 'unknown'),
+      baseModelUpstream: annotatedUpstreamModel,
+      baseModelLabel: mInfo.label,
+      baseModelShort: mInfo.shortName,
       modelUpstream,
       modelLabel: st.isCompactionStep ? `${mInfo.label} [自动压缩]` : mInfo.label,
       modelShort: st.isCompactionStep ? `${mInfo.shortName}·压缩` : mInfo.shortName,
@@ -206,12 +215,20 @@ function enrichActiveConversationSteps(
   // 关联每轮用户提问摘要与最新轮次标识，供步骤表极简导轨与气泡展示
   let maxTurnIndex = 0;
   const promptByTurn = new Map();
+  const mediaByTurn = new Map();
   for (const st of enrichedActiveSteps) {
     const tIdx = st.turnIndex;
     if (!Number.isInteger(tIdx) || tIdx <= 0) continue;
     if (tIdx > maxTurnIndex) maxTurnIndex = tIdx;
     if (st.turnPrompt && (st.isTurnStart || !promptByTurn.has(tIdx))) {
       promptByTurn.set(tIdx, st.turnPrompt);
+    }
+    if (st.isTurnStart || !mediaByTurn.has(tIdx)) {
+      mediaByTurn.set(tIdx, {
+        cleanPrompt: st.turnPromptClean ?? '',
+        hasMedia: Boolean(st.turnHasMedia),
+        mediaOnly: Boolean(st.turnMediaOnly),
+      });
     }
   }
   for (const st of enrichedActiveSteps) {
@@ -221,11 +238,18 @@ function enrichActiveConversationSteps(
       st.isTurnStart = false;
       st.isLatestTurn = false;
       st.turnPrompt = '';
+      st.turnPromptClean = '';
+      st.turnHasMedia = false;
+      st.turnMediaOnly = false;
       continue;
     }
+    const turnMedia = mediaByTurn.get(tIdx);
     st.isTurnStart = Boolean(st.isTurnStart);
     st.isLatestTurn = tIdx === maxTurnIndex;
     st.turnPrompt = promptByTurn.get(tIdx) || '';
+    st.turnPromptClean = turnMedia?.cleanPrompt || '';
+    st.turnHasMedia = Boolean(turnMedia?.hasMedia);
+    st.turnMediaOnly = Boolean(turnMedia?.mediaOnly);
   }
 
   const latestEnriched =
@@ -265,49 +289,41 @@ function resolveStepOutputTokens(st) {
   return Number(st?.thinkingTokens || 0) + Number(st?.responseTokens || 0);
 }
 
-/**
- * 使用最大余数法（Hamilton 方法）将各非零上下文分桶等比缩放至目标整数总和，
- * 保证 0 值通道绝不被凭空分配 Token，且缩放后各分桶之和精确等于 `targetTotal`。
- */
-function scaleBucketsExact(buckets, keys, targetTotal) {
-  const safeTarget = Math.max(0, Math.round(Number(targetTotal || 0)));
-  const out = {};
-  let currentSum = 0;
-  for (const k of keys) {
-    const val = Math.max(0, Number(buckets[k] || 0));
-    out[k] = val;
-    currentSum += val;
+function extractRawBreakdownChannels(breakdown) {
+  const rawMessages = Number(breakdown?.messagesTokens || 0);
+  const hasGranularMsgBreakdown =
+    Boolean(breakdown) &&
+    Object.prototype.hasOwnProperty.call(breakdown, 'toolResultsTokens');
+  const channels = {
+    userInput: hasGranularMsgBreakdown
+      ? Number(breakdown?.userInputTokens || 0)
+      : rawMessages,
+    assistant: Number(breakdown?.assistantTokens || 0),
+    toolResults: Number(breakdown?.toolResultsTokens || 0),
+    subagent: Number(breakdown?.subagentTokens || 0),
+    checkpoint: Number(breakdown?.checkpointTokens || 0),
+    systemTools: Number(breakdown?.systemToolsTokens || 0),
+    mcpTools: Number(breakdown?.mcpToolsTokens || 0),
+    skills: Number(breakdown?.skillsTokens || 0),
+    systemPrompt: Number(breakdown?.systemPromptTokens || 0),
+    userRules: Number(breakdown?.userRulesTokens || 0),
+  };
+  const msgSubtotal =
+    channels.userInput +
+    channels.assistant +
+    channels.toolResults +
+    channels.subagent +
+    channels.checkpoint;
+  if (rawMessages > msgSubtotal) {
+    channels.userInput += rawMessages - msgSubtotal;
   }
-  if (safeTarget === 0 || currentSum <= 0) {
-    for (const k of keys) out[k] = 0;
-    return out;
-  }
-  if (currentSum === safeTarget) {
-    for (const k of keys) out[k] = Math.round(out[k]);
-    return out;
-  }
-  const remainders = [];
-  let assigned = 0;
-  for (const k of keys) {
-    const rawVal = out[k];
-    if (rawVal <= 0) {
-      out[k] = 0;
-      continue;
-    }
-    const exact = (rawVal * safeTarget) / currentSum;
-    const floored = Math.floor(exact);
-    out[k] = floored;
-    assigned += floored;
-    remainders.push({ key: k, rem: exact - floored, orig: rawVal });
-  }
-  let diff = safeTarget - assigned;
-  if (diff > 0 && remainders.length > 0) {
-    remainders.sort((a, b) => b.rem - a.rem || b.orig - a.orig);
-    for (let i = 0; i < diff; i++) {
-      out[remainders[i % remainders.length].key] += 1;
-    }
-  }
-  return out;
+  return channels;
+}
+
+function resolveCompactionSummaryTokens(compactionStep) {
+  const respTok = Number(compactionStep?.responseTokens || 0);
+  if (respTok > 0) return respTok;
+  return resolveStepOutputTokens(compactionStep);
 }
 
 /**
@@ -316,7 +332,10 @@ function scaleBucketsExact(buckets, keys, targetTotal) {
  * `chatStartMetadata.contextWindowMetadata` 记录在步骤请求发送前且基于宿主离线估算器：
  * 1. 先按该步模型 API 真实计费输入（`inputTokens + cacheReadTokens`）对请求前 10 通道做等比整数对齐，消除离线估算偏差；
  * 2. 再将该步自身新生成的输出（`outputTokens`）补入 `assistantTokens`，并滚动推进后续无独立拆解的步骤，
- *    使上下文窗口总占用与调用明细表的单步 `contextTokens` 严格一致。
+ *    使上下文窗口总占用与调用明细表的单步 `contextTokens` 严格一致；
+ * 3. 当末尾或最近边界为上下文压缩步骤（`isCompactionStep`）且压缩后尚未产生新的 `contextBreakdown` 时，
+ *    继承压缩前最近一次拆解中的 5 个会话静态通道（`systemPrompt` / `systemTools` / `mcpTools` / `skills` / `userRules`），
+ *    清空已被折叠的历史对话通道，并将压缩步生成的摘要正文计入 `checkpointTokens`，避免误把压缩前全量输入当作压缩后水位。
  *
  * @param {object[]} enrichedActiveSteps
  * @param {object|null} latestEnriched
@@ -329,85 +348,113 @@ function extractActiveContextTelemetry(
   sessionInputTokens,
   sessionCacheReadTokens
 ) {
-  let latestBreakdown = latestEnriched?.contextBreakdown || null;
-  let breakdownIdx = latestBreakdown ? enrichedActiveSteps.length - 1 : -1;
-  if (!latestBreakdown && !latestEnriched?.isCompactionStep) {
-    for (let i = enrichedActiveSteps.length - 1; i >= 0; i--) {
-      if (enrichedActiveSteps[i]?.isCompactionStep) {
-        break;
+  let lastCompactionIdx = -1;
+  for (let i = enrichedActiveSteps.length - 1; i >= 0; i--) {
+    if (enrichedActiveSteps[i]?.isCompactionStep) {
+      lastCompactionIdx = i;
+      break;
+    }
+  }
+
+  let latestBreakdown = null;
+  let breakdownIdx = -1;
+  for (let i = enrichedActiveSteps.length - 1; i > lastCompactionIdx; i--) {
+    if (enrichedActiveSteps[i]?.contextBreakdown) {
+      latestBreakdown = enrichedActiveSteps[i].contextBreakdown;
+      breakdownIdx = i;
+      break;
+    }
+  }
+
+  let channels = extractRawBreakdownChannels(latestBreakdown);
+  let fallbackPreCompactionLimit = 0;
+
+  if (latestBreakdown && breakdownIdx > lastCompactionIdx) {
+    const rawBreakdownTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + channels[k], 0);
+    if (rawBreakdownTotal > 0) {
+      const bdStep = enrichedActiveSteps[breakdownIdx];
+      const bdPromptTokens =
+        Number(bdStep?.inputTokens || 0) + Number(bdStep?.cacheReadTokens || 0);
+      const bdOutTokens = resolveStepOutputTokens(bdStep);
+      // 仅当模型 API 返回了完整的请求级输入（排除省略 cacheReadTokens 的残缺网关或极小合成桩数据）时对齐至真实分词口径
+      if (bdPromptTokens >= rawBreakdownTotal * 0.5) {
+        channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, bdPromptTokens);
+        channels.assistant += bdOutTokens;
+        let runningTotal = bdPromptTokens + bdOutTokens;
+
+        for (let m = breakdownIdx + 1; m < enrichedActiveSteps.length; m++) {
+          const stepM = enrichedActiveSteps[m];
+          if (!stepM || stepM.isCompactionStep) break;
+          const mPrompt =
+            Number(stepM.inputTokens || 0) + Number(stepM.cacheReadTokens || 0);
+          const mOut = resolveStepOutputTokens(stepM);
+          if (mPrompt >= runningTotal * 0.5) {
+            if (mPrompt > runningTotal) {
+              const delta = mPrompt - runningTotal;
+              if (enrichedActiveSteps[m - 1]?.hasToolCalls) {
+                channels.toolResults += delta;
+              } else {
+                channels.userInput += delta;
+              }
+            } else if (mPrompt < runningTotal) {
+              channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, mPrompt);
+            }
+            channels.assistant += mOut;
+            runningTotal = mPrompt + mOut;
+          }
+        }
       }
+    }
+  } else if (lastCompactionIdx >= 0) {
+    const compactionStep = enrichedActiveSteps[lastCompactionIdx];
+    let preStep = null;
+    for (let i = lastCompactionIdx - 1; i >= 0; i--) {
       if (enrichedActiveSteps[i]?.contextBreakdown) {
-        latestBreakdown = enrichedActiveSteps[i].contextBreakdown;
-        breakdownIdx = i;
+        preStep = enrichedActiveSteps[i];
         break;
       }
     }
-  }
-  const rawMessages = Number(latestBreakdown?.messagesTokens || 0);
-  const hasGranularMsgBreakdown =
-    Boolean(latestBreakdown) &&
-    Object.prototype.hasOwnProperty.call(latestBreakdown, 'toolResultsTokens');
-  let channels = {
-    userInput: hasGranularMsgBreakdown
-      ? Number(latestBreakdown?.userInputTokens || 0)
-      : rawMessages,
-    assistant: Number(latestBreakdown?.assistantTokens || 0),
-    toolResults: Number(latestBreakdown?.toolResultsTokens || 0),
-    subagent: Number(latestBreakdown?.subagentTokens || 0),
-    checkpoint: Number(latestBreakdown?.checkpointTokens || 0),
-    systemTools: Number(latestBreakdown?.systemToolsTokens || 0),
-    mcpTools: Number(latestBreakdown?.mcpToolsTokens || 0),
-    skills: Number(latestBreakdown?.skillsTokens || 0),
-    systemPrompt: Number(latestBreakdown?.systemPromptTokens || 0),
-    userRules: Number(latestBreakdown?.userRulesTokens || 0),
-  };
-  const msgSubtotal =
-    channels.userInput +
-    channels.assistant +
-    channels.toolResults +
-    channels.subagent +
-    channels.checkpoint;
-  if (rawMessages > msgSubtotal) {
-    channels.userInput += rawMessages - msgSubtotal;
-  }
-  const rawBreakdownTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + channels[k], 0);
+    if (preStep) {
+      fallbackPreCompactionLimit = Number(preStep.maxContextBudgetTokens || 0);
+      let preChannels = extractRawBreakdownChannels(preStep.contextBreakdown);
+      const preRawTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + preChannels[k], 0);
+      const prePromptTokens =
+        Number(preStep.inputTokens || 0) + Number(preStep.cacheReadTokens || 0);
+      if (preRawTotal > 0 && prePromptTokens >= preRawTotal * 0.5) {
+        preChannels = scaleBucketsExact(preChannels, CONTEXT_CHANNEL_KEYS, prePromptTokens);
+      }
+      channels.systemTools = preChannels.systemTools;
+      channels.mcpTools = preChannels.mcpTools;
+      channels.skills = preChannels.skills;
+      channels.systemPrompt = preChannels.systemPrompt;
+      channels.userRules = preChannels.userRules;
+    }
+    channels.userInput = 0;
+    channels.assistant = 0;
+    channels.toolResults = 0;
+    channels.subagent = 0;
+    channels.checkpoint = resolveCompactionSummaryTokens(compactionStep);
 
-  if (
-    latestBreakdown &&
-    breakdownIdx >= 0 &&
-    !latestEnriched?.isCompactionStep &&
-    rawBreakdownTotal > 0
-  ) {
-    const bdStep = enrichedActiveSteps[breakdownIdx];
-    const bdPromptTokens =
-      Number(bdStep?.inputTokens || 0) + Number(bdStep?.cacheReadTokens || 0);
-    const bdOutTokens = resolveStepOutputTokens(bdStep);
-    // 仅当模型 API 返回了完整的请求级输入（排除省略 cacheReadTokens 的残缺网关或极小合成桩数据）时对齐至真实分词口径
-    if (bdPromptTokens >= rawBreakdownTotal * 0.5) {
-      channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, bdPromptTokens);
-      channels.assistant += bdOutTokens;
-      let runningTotal = bdPromptTokens + bdOutTokens;
-
-      for (let m = breakdownIdx + 1; m < enrichedActiveSteps.length; m++) {
-        const stepM = enrichedActiveSteps[m];
-        if (!stepM || stepM.isCompactionStep) break;
-        const mPrompt =
-          Number(stepM.inputTokens || 0) + Number(stepM.cacheReadTokens || 0);
-        const mOut = resolveStepOutputTokens(stepM);
-        if (mPrompt >= runningTotal * 0.5) {
-          if (mPrompt > runningTotal) {
-            const delta = mPrompt - runningTotal;
-            if (enrichedActiveSteps[m - 1]?.hasToolCalls) {
-              channels.toolResults += delta;
-            } else {
-              channels.userInput += delta;
-            }
-          } else if (mPrompt < runningTotal) {
-            channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, mPrompt);
+    let runningTotal = CONTEXT_CHANNEL_KEYS.reduce((sum, k) => sum + channels[k], 0);
+    for (let m = lastCompactionIdx + 1; m < enrichedActiveSteps.length; m++) {
+      const stepM = enrichedActiveSteps[m];
+      if (!stepM || stepM.isCompactionStep) continue;
+      const mPrompt =
+        Number(stepM.inputTokens || 0) + Number(stepM.cacheReadTokens || 0);
+      const mOut = resolveStepOutputTokens(stepM);
+      if (mPrompt > 0 && (runningTotal === 0 || mPrompt >= runningTotal * 0.35)) {
+        if (mPrompt > runningTotal) {
+          const delta = mPrompt - runningTotal;
+          if (m > lastCompactionIdx + 1 && enrichedActiveSteps[m - 1]?.hasToolCalls) {
+            channels.toolResults += delta;
+          } else {
+            channels.userInput += delta;
           }
-          channels.assistant += mOut;
-          runningTotal = mPrompt + mOut;
+        } else if (mPrompt < runningTotal) {
+          channels = scaleBucketsExact(channels, CONTEXT_CHANNEL_KEYS, mPrompt);
         }
+        channels.assistant += mOut;
+        runningTotal = mPrompt + mOut;
       }
     }
   }
@@ -427,17 +474,25 @@ function extractActiveContextTelemetry(
   const ctxBreakdownTotal =
     ctxMessages + ctxSystemTools + ctxMcpTools + ctxSkills + ctxSystemPrompt + ctxUserRules;
 
+  const isLatestCompaction = Boolean(latestEnriched?.isCompactionStep);
   const ctxCached = latestEnriched?.cacheReadTokens || 0;
   const ctxFreshInput = latestEnriched?.inputTokens || 0;
   const ctxThinking = latestEnriched?.thinkingTokens || 0;
   const ctxResponse = latestEnriched?.responseTokens || 0;
   const ctxOut = resolveStepOutputTokens(latestEnriched);
-  const ctxTotal =
-    ctxBreakdownTotal > 0 ? ctxBreakdownTotal : ctxCached + ctxFreshInput + ctxOut;
-  const compactionLimitTokens = Number(latestEnriched?.maxContextBudgetTokens || 256000);
-  const compactionUsedTokens = Number(
-    ctxTotal || latestEnriched?.estimatedContextTokens || ctxCached + ctxFreshInput
+  const ctxTotal = isLatestCompaction
+    ? ctxBreakdownTotal
+    : ctxBreakdownTotal > 0
+      ? ctxBreakdownTotal
+      : ctxCached + ctxFreshInput + ctxOut;
+  const compactionLimitTokens = Number(
+    (isLatestCompaction && !latestEnriched?.reportedContextLimitTokens && fallbackPreCompactionLimit > 0
+      ? fallbackPreCompactionLimit
+      : latestEnriched?.maxContextBudgetTokens) || 256000
   );
+  const compactionUsedTokens = isLatestCompaction
+    ? Number(ctxTotal)
+    : Number(ctxTotal || latestEnriched?.estimatedContextTokens || ctxCached + ctxFreshInput);
   const compactionUsedPct =
     compactionLimitTokens > 0
       ? Math.min(100, +((compactionUsedTokens / compactionLimitTokens) * 100).toFixed(1))
@@ -509,10 +564,15 @@ function prepareAgentSteps(rawSteps, resolveStepModel, upstream, agentFields, re
 /**
  * 构建单个代理（主代理或子代理）的标准遥测单元对象。
  */
-function buildAgentUnitTelemetry({
+export function buildAgentUnitTelemetry({
   agentId,
   cascadeId,
   isMain,
+  isSideQuestion = false,
+  sideIndex = 0,
+  agentKind = isMain ? 'main' : isSideQuestion ? 'side_question' : 'subagent',
+  agentOrdinal = isMain ? 0 : isSideQuestion ? sideIndex : 0,
+  customRole = '',
   index,
   shortLabel,
   badgeText,
@@ -535,11 +595,15 @@ function buildAgentUnitTelemetry({
     {
       agentId,
       agentCascadeId: cascadeId,
+      agentKind,
+      agentOrdinal,
+      agentCustomRole: customRole,
       agentLabel,
       agentBadge: badgeText,
       agentRole: role,
       agentIndex: index,
       isSubagent: !isMain,
+      ...(isSideQuestion ? { isSideQuestion: true, sideIndex } : {}),
     },
     reuseInputs
   );
@@ -561,6 +625,10 @@ function buildAgentUnitTelemetry({
       agentId,
       cascadeId,
       isMain,
+      agentKind,
+      agentOrdinal,
+      customRole,
+      ...(isSideQuestion ? { isSideQuestion: true, sideIndex } : {}),
       index,
       shortLabel,
       badgeText,
@@ -592,6 +660,9 @@ function buildAgentUnitTelemetry({
         : 0,
       latestCacheHitPct: ctxRes.latestCacheHitPct,
       sessionCacheHitPct: ctxRes.sessionCacheHitPct,
+      hasKnownModel: Boolean(enrichedRes.latestEnriched?.hasKnownModel),
+      activeBaseModelShort: enrichedRes.latestEnriched?.baseModelShort || '',
+      activeBaseModelLabel: enrichedRes.latestEnriched?.baseModelLabel || '',
       activeModelShort: enrichedRes.latestEnriched?.modelShort || '模型未知',
       activeModelLabel: enrichedRes.latestEnriched?.modelLabel || '模型未知',
       activeModelUpstream:
@@ -607,14 +678,20 @@ function buildAgentUnitTelemetry({
 }
 
 async function readTelemetrySources(requestedConvId, forceQuotaRefresh, currentAccountName, accountScope, userStatus) {
+  const localSummaries = readLocalSummarySnapshot(undefined, { forceRefresh: forceQuotaRefresh });
   const [allTrajRes, officialQuotaInfo, contextModelCatalog] = await Promise.all([
-    callLsRpc('GetAllCascadeTrajectories', {}).catch(() => ({})),
+    localSummaries.available
+      ? Promise.resolve(null)
+      : callLsRpc('GetAllCascadeTrajectories', {}).catch(() => ({})),
     userStatus ? getOfficialQuotaSummary(forceQuotaRefresh, currentAccountName) : null,
     getContextModelCatalog(),
   ]);
 
   const sessions = await enumerateAndSyncConversations({
-    summariesObj: allTrajRes?.trajectorySummaries || {},
+    summariesObj: localSummaries.available
+      ? localSummaries.summariesObj
+      : allTrajRes?.trajectorySummaries || {},
+    sideQuestionParents: localSummaries.available ? localSummaries.sideQuestionParents : {},
     currentAccountName: accountScope,
     requestedConvId,
     forceRefresh: forceQuotaRefresh,
@@ -696,12 +773,16 @@ export async function buildTelemetryPayloadInternal(
 
   // 3. 计算当前活跃根会话及其子代理的步骤指标、10 通道上下文拆解与按模型汇总
   const reportedContextLimits = new Map();
-  const knownUpstreamByModelKey = buildKnownUpstreamModelMap(reportedContextLimits, currentAccountName);
+  const knownUpstreamByModelKey = buildKnownUpstreamModelMap(reportedContextLimits);
   const activeEntry = findTrajectoryCacheEntry(activeCascadeId);
   const activeSteps = activeEntry?.steps || [];
   const subagentSummaries = activeConvSummary?.subagents || [];
   if (subagentSummaries.length) lastMainPreparation = null;
-  const modelInputs = { catalogRevision: pricingCatalogRevision, dynamicModelMap };
+  const modelInputs = {
+    catalogRevision: pricingCatalogRevision,
+    phaseEpoch: getPricingPhaseEpoch(),
+    dynamicModelMap,
+  };
   const mainUnit = buildAgentUnitTelemetry({
     agentId: 'main',
     cascadeId: activeCascadeId,
@@ -747,6 +828,8 @@ export async function buildTelemetryPayloadInternal(
   let totalFamilyCacheReadTokens = sessionCacheReadTokens;
   let totalFamilyOutputTokens = sessionOutputTokens;
 
+  let normalSubCount = 0;
+  let sideQuestionCount = 0;
   for (let idx = 0; idx < subagentSummaries.length; idx++) {
     const subSum = subagentSummaries[idx];
     const subCid = subSum.cascadeId;
@@ -756,24 +839,65 @@ export async function buildTelemetryPayloadInternal(
     for (const step of subRawSteps) allCombinedRawSteps.push(step);
 
     const subSpec = subSum.subagentSpec || subEntry?.subagentSpec || null;
+    const isSideQ = Boolean(
+      subSum.isSideQuestion || subEntry?.isSideQuestion || subSpec?.typeName === 'side_question'
+    );
     const rawRole =
       subSpec?.role || subSum.agentScriptName || subEntry?.agentScriptName || subSpec?.typeName || '';
     const subIndex = idx + 1;
-    const shortLabel = `子代理 #${subIndex}`;
-    const badgeText = `子${subIndex}`;
-    const roleLabel = rawRole || '子代理';
-    const typeName = subSpec?.typeName || '';
+    let sideIndex = 0;
+    let agentKind = 'subagent';
+    let agentOrdinal = 0;
+    let customRole = '';
+    let shortLabel = '';
+    let badgeText = '';
+    let roleLabel = '';
+    let typeName = '';
+    let agentLabel = '';
+    if (isSideQ) {
+      sideIndex = ++sideQuestionCount;
+      agentKind = 'side_question';
+      agentOrdinal = sideIndex;
+      shortLabel = `旁路提问 #${sideIndex}`;
+      badgeText = `旁${sideIndex}`;
+      const cleanSideRole =
+        rawRole &&
+        rawRole !== '旁路提问' &&
+        rawRole !== 'Side Question' &&
+        rawRole !== 'side_question'
+          ? rawRole
+          : '';
+      customRole = cleanSideRole;
+      roleLabel = cleanSideRole || '旁路提问';
+      typeName = 'side_question';
+      agentLabel = cleanSideRole ? `${shortLabel} · ${cleanSideRole}` : shortLabel;
+    } else {
+      const subOrd = ++normalSubCount;
+      agentKind = 'subagent';
+      agentOrdinal = subOrd;
+      customRole = rawRole && rawRole !== '子代理' && rawRole !== 'Subagent' ? rawRole : '';
+      shortLabel = `子代理 #${subOrd}`;
+      badgeText = `子${subOrd}`;
+      roleLabel = rawRole || '子代理';
+      typeName = subSpec?.typeName || '';
+      agentLabel = rawRole ? `${shortLabel} · ${rawRole}` : shortLabel;
+    }
 
     const subUnit = buildAgentUnitTelemetry({
       agentId: subCid,
       cascadeId: subCid,
       isMain: false,
+      isSideQuestion: isSideQ,
+      sideIndex,
+      agentKind,
+      agentOrdinal,
+      customRole,
       index: subIndex,
       shortLabel,
       badgeText,
       role: roleLabel,
       typeName,
-      agentLabel: rawRole ? `${shortLabel} · ${rawRole}` : shortLabel,
+      agentLabel,
       status: subSum.status || 'IDLE',
       rawSteps: subRawSteps,
       liveActivity: subSum.liveActivity || null,
@@ -817,6 +941,9 @@ export async function buildTelemetryPayloadInternal(
           turnIndex: tIdx,
           startMs: mSt.createdAtMs || 0,
           prompt: mSt.turnPrompt || '',
+          cleanPrompt: mSt.turnPromptClean ?? '',
+          hasMedia: Boolean(mSt.turnHasMedia),
+          mediaOnly: Boolean(mSt.turnMediaOnly),
         });
       }
     }
@@ -843,6 +970,9 @@ export async function buildTelemetryPayloadInternal(
           st.rootTurnIndex = matched.turnIndex;
           st.isRootLatestTurn = matched.turnIndex === maxRootTurn;
           st.rootTurnPrompt = matched.prompt || '';
+          st.rootTurnPromptClean = matched.cleanPrompt ?? '';
+          st.rootTurnHasMedia = Boolean(matched.hasMedia);
+          st.rootTurnMediaOnly = Boolean(matched.mediaOnly);
           if (!seenRootStarts.has(matched.turnIndex)) {
             seenRootStarts.add(matched.turnIndex);
             st.isRootTurnStart = true;
@@ -878,6 +1008,31 @@ export async function buildTelemetryPayloadInternal(
             .sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0))[0] ||
           latestActiveAgent;
 
+    // 汇总视图与自动跟随上下文始终锁定主线（主代理与常规子代理），防止旁路提问抽屉篡改主会话 10 通道上下文水位
+    const mainlineAgents = allAgents.filter((a) => !a.isSideQuestion);
+    const activeMainlineAgent = !latestActiveAgent.isSideQuestion
+      ? latestActiveAgent
+      : mainlineAgents.find((a) => a.isRunning) ||
+        mainlineAgents
+          .slice()
+          .sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0))[0] ||
+        mainAgentTelemetry;
+    const mainlineWithSteps = mainlineAgents.filter((a) => a.stepCount > 0);
+    const contextMetricAgent = !latestMetricAgent.isSideQuestion
+      ? latestMetricAgent
+      : mainlineWithSteps.find((a) => a.isRunning) ||
+        mainlineWithSteps
+          .slice()
+          .sort((a, b) => (b.lastModifiedMs || 0) - (a.lastModifiedMs || 0))[0] ||
+        mainAgentTelemetry;
+
+    const aggregatedRoleLabel =
+      normalSubCount > 0 && sideQuestionCount > 0
+        ? `主代理 + ${normalSubCount} 子代理 + ${sideQuestionCount} 旁问`
+        : sideQuestionCount > 0
+          ? `主代理 + ${sideQuestionCount} 旁路提问`
+          : `主代理 + ${subAgentTelemetries.length} 子代理`;
+
     const totalCostUsd = roundSessionCost(totalRawSessionCostUsd);
     const totalUnpricedCalls = allAgents.reduce(
       (sum, a) => sum + (a.sessionUnpricedCalls || 0),
@@ -899,11 +1054,16 @@ export async function buildTelemetryPayloadInternal(
       ? {
           ...activeActivityAgent.liveActivity,
           agentId: activeActivityAgent.agentId,
+          agentKind: activeActivityAgent.agentKind || (activeActivityAgent.isMain ? 'main' : activeActivityAgent.isSideQuestion ? 'side_question' : 'subagent'),
+          agentOrdinal: activeActivityAgent.agentOrdinal || 0,
           agentBadge: activeActivityAgent.badgeText,
           agentShortLabel: activeActivityAgent.shortLabel,
           agentRole: activeActivityAgent.role,
           agentIndex: activeActivityAgent.index,
           isMain: Boolean(activeActivityAgent.isMain),
+          ...(activeActivityAgent.isSideQuestion
+            ? { isSideQuestion: true, sideIndex: activeActivityAgent.sideIndex || 0 }
+            : {}),
           parallelCount: runningSubs.length > 1 ? runningSubs.length : 1,
         }
       : null;
@@ -912,15 +1072,19 @@ export async function buildTelemetryPayloadInternal(
       agentId: 'all',
       cascadeId: activeCascadeId,
       isMain: false,
+      agentKind: 'all',
+      agentOrdinal: 0,
       index: -1,
       shortLabel: '全部汇总',
       badgeText: '全部',
-      role: `主代理 + ${subAgentTelemetries.length} 子代理`,
+      role: aggregatedRoleLabel,
       typeName: 'all',
-      activeAgentId: latestActiveAgent.agentId,
-      activeAgentShortLabel: latestActiveAgent.shortLabel,
-      activeAgentBadge: latestActiveAgent.badgeText,
-      activeAgentRole: latestActiveAgent.role,
+      activeAgentId: activeMainlineAgent.agentId,
+      activeAgentKind: activeMainlineAgent.agentKind || (activeMainlineAgent.isMain ? 'main' : activeMainlineAgent.isSideQuestion ? 'side_question' : 'subagent'),
+      activeAgentOrdinal: activeMainlineAgent.agentOrdinal || 0,
+      activeAgentShortLabel: activeMainlineAgent.shortLabel,
+      activeAgentBadge: activeMainlineAgent.badgeText,
+      activeAgentRole: activeMainlineAgent.role,
       isRunning: allAgents.some((a) => a.isRunning),
       status: allAgents.some((a) => a.isRunning) ? 'CASCADE_RUN_STATUS_RUNNING' : 'IDLE',
       liveActivity: aggregatedLiveActivity,
@@ -941,10 +1105,13 @@ export async function buildTelemetryPayloadInternal(
       latestPromptTokens: latestMetricAgent.latestPromptTokens ?? 0,
       latestCacheHitPct: latestMetricAgent.latestCacheHitPct,
       sessionCacheHitPct: combinedSessionCacheHitPct,
+      hasKnownModel: Boolean(latestMetricAgent.hasKnownModel),
+      activeBaseModelShort: latestMetricAgent.activeBaseModelShort || '',
+      activeBaseModelLabel: latestMetricAgent.activeBaseModelLabel || '',
       activeModelShort: latestMetricAgent.activeModelShort,
       activeModelLabel: latestMetricAgent.activeModelLabel,
       activeModelUpstream: latestMetricAgent.activeModelUpstream,
-      context: latestMetricAgent.context,
+      context: contextMetricAgent.context,
       modelBreakdown: combinedModelBreakdown,
       lastModifiedMs: latestActiveAgent.lastModifiedMs,
     };
@@ -1036,6 +1203,7 @@ export async function buildTelemetryPayloadInternal(
     currentYear,
     monthlySeries,
     weekBucket,
+    quotaWeekBucket,
     modelBreakdown,
     poolCycleStats,
     poolsWeeklySummary,
@@ -1192,34 +1360,8 @@ export async function buildTelemetryPayloadInternal(
 
     let contextUsedPct = null;
     if (lastRootStep) {
-      const limitTokens = Number(lastRootStep.maxContextBudgetTokens || 256000);
-      const cb = lastRootStep.contextBreakdown;
-      const cbTotal = cb
-        ? Number(cb.messagesTokens || 0) +
-          Number(cb.systemToolsTokens || 0) +
-          Number(cb.mcpToolsTokens || 0) +
-          Number(cb.skillsTokens || 0) +
-          Number(cb.systemPromptTokens || 0) +
-          Number(cb.userRulesTokens || 0)
-        : 0;
-      const apiPrompt =
-        Number(lastRootStep.inputTokens || 0) + Number(lastRootStep.cacheReadTokens || 0);
-      const apiOut = resolveStepOutputTokens(lastRootStep);
-      const fallbackTotal = apiPrompt + apiOut;
-      const estTotal = Math.max(cbTotal, Number(lastRootStep.estimatedContextTokens || 0));
-      const hasAlignedApiPrompt =
-        !lastRootStep.isCompactionStep &&
-        apiPrompt > 0 &&
-        (estTotal === 0 || apiPrompt >= estTotal * 0.5);
-      const usedTokens = Number(
-        hasAlignedApiPrompt
-          ? fallbackTotal
-          : cbTotal > 0
-            ? cbTotal
-            : lastRootStep.estimatedContextTokens || fallbackTotal
-      );
-      contextUsedPct =
-        limitTokens > 0 ? Math.min(100, +((usedTokens / limitTokens) * 100).toFixed(1)) : 0;
+      contextUsedPct = extractActiveContextTelemetry(rootSteps, lastRootStep, 0, 0).context
+        .compactionUsedPct;
     }
 
     let modelShort = '';
@@ -1269,10 +1411,15 @@ export async function buildTelemetryPayloadInternal(
     const rootFallbackMs =
       rootConv.lastModifiedMs || rootEntry?.lastModifiedMs || rootConv.createdTimeMs || 0;
 
+    let runNormalSubIdx = 0;
+    let runSideIdx = 0;
     const subItems = rawSubs.map((subSum, idx) => {
       const subCid = subSum.cascadeId;
       const subEntry = findTrajectoryCacheEntry(subCid);
       const subSpec = subSum.subagentSpec || subEntry?.subagentSpec || null;
+      const isSideQ = Boolean(
+        subSum.isSideQuestion || subEntry?.isSideQuestion || subSpec?.typeName === 'side_question'
+      );
       const rawRole =
         subSpec?.role ||
         subSum.agentScriptName ||
@@ -1280,9 +1427,37 @@ export async function buildTelemetryPayloadInternal(
         subSpec?.typeName ||
         '';
       const subIndex = idx + 1;
-      const badgeText = `子${subIndex}`;
-      const shortLabel = `子代理 #${subIndex}`;
-      const role = rawRole || shortLabel;
+      let sideIndex = 0;
+      let agentKind = 'subagent';
+      let agentOrdinal = 0;
+      let customRole = '';
+      let badgeText = '';
+      let shortLabel = '';
+      let role = '';
+      if (isSideQ) {
+        sideIndex = ++runSideIdx;
+        agentKind = 'side_question';
+        agentOrdinal = sideIndex;
+        badgeText = `旁${sideIndex}`;
+        shortLabel = `旁路提问 #${sideIndex}`;
+        const cleanSide =
+          rawRole &&
+          rawRole !== '旁路提问' &&
+          rawRole !== 'Side Question' &&
+          rawRole !== 'side_question'
+            ? rawRole
+            : '';
+        customRole = cleanSide;
+        role = cleanSide || shortLabel;
+      } else {
+        const nOrd = ++runNormalSubIdx;
+        agentKind = 'subagent';
+        agentOrdinal = nOrd;
+        customRole = rawRole && rawRole !== '子代理' && rawRole !== 'Subagent' ? rawRole : '';
+        badgeText = `子${nOrd}`;
+        shortLabel = `子代理 #${nOrd}`;
+        role = rawRole || shortLabel;
+      }
       const isSubRunning = subSum.status === 'CASCADE_RUN_STATUS_RUNNING';
       const stepCount = Number(subSum.stepCount ?? subEntry?.steps?.length ?? 0);
       const subModMs = subSum.lastModifiedMs || subEntry?.lastModifiedMs || 0;
@@ -1290,6 +1465,9 @@ export async function buildTelemetryPayloadInternal(
         ? subSum.liveActivity || extractLiveActivity([], true, subModMs)
         : {
             phase: 'done',
+            actionKey: 'done',
+            waitingApproval: false,
+            detailKey: '',
             label: '已完成',
             detail: '',
             stepProgress: '',
@@ -1299,10 +1477,14 @@ export async function buildTelemetryPayloadInternal(
       return {
         cascadeId: subCid,
         index: subIndex,
+        agentKind,
+        agentOrdinal,
+        customRole,
+        ...(isSideQ ? { isSideQuestion: true, sideIndex } : {}),
         badgeText,
         shortLabel,
         role,
-        typeName: subSpec?.typeName || '',
+        typeName: isSideQ ? 'side_question' : subSpec?.typeName || '',
         isRunning: isSubRunning,
         status: subSum.status || 'IDLE',
         stepCount,
@@ -1318,14 +1500,18 @@ export async function buildTelemetryPayloadInternal(
     const runningSubCount = subItems.filter((s) => s.isRunning).length;
     if (
       isMainRunning &&
-      (mainLiveAct?.toolName === 'invoke_subagent' || mainLiveAct?.label === '调用子代理') &&
+      (mainLiveAct?.toolName === 'invoke_subagent' || mainLiveAct?.actionKey === 'invoke_subagent') &&
       runningSubCount === 0
     ) {
       const pendingIndex = subItems.length + 1;
-      const pendingRole = mainLiveAct.detail || '子代理';
+      const pendingCustomRole = mainLiveAct.detail || '';
+      const pendingRole = pendingCustomRole || '子代理';
       subItems.push({
         cascadeId: `${rootConv.cascadeId}:pending-sub-${pendingIndex}`,
         index: pendingIndex,
+        agentKind: 'subagent',
+        agentOrdinal: pendingIndex,
+        customRole: pendingCustomRole,
         badgeText: `子${pendingIndex}`,
         shortLabel: `子代理 #${pendingIndex}`,
         role: pendingRole,
@@ -1336,6 +1522,9 @@ export async function buildTelemetryPayloadInternal(
         lastModifiedMs: rootFallbackMs,
         liveActivity: {
           phase: 'thinking',
+          actionKey: 'starting',
+          waitingApproval: false,
+          detailKey: '',
           label: '启动中',
           detail: '',
           stepProgress: '',
@@ -1351,8 +1540,11 @@ export async function buildTelemetryPayloadInternal(
       (runningSubList.length > 0
         ? {
             phase: 'waiting',
+            actionKey: 'waiting_subagent',
+            waitingApproval: false,
+            detailKey: '',
             label: '等待子代理',
-            detail: runningSubList.map((s) => s.role).join(', '),
+            detail: runningSubList.map((s) => s.customRole || s.role).join(', '),
             stepProgress: '',
             startedAtMs: runningSubList[0]?.liveActivity?.startedAtMs || rootFallbackMs,
             signature: `wait-subs:${runningSubList.length}:${runningSubList[0]?.cascadeId || ''}`,
@@ -1385,9 +1577,12 @@ export async function buildTelemetryPayloadInternal(
     });
   }
 
+  const officialFallbackWeekBucket = quotaWeekBucket || weekBucket;
   const finalPayload = {
     timestamp: new Date().toISOString(),
+    hostPlatform: process.platform || 'unknown',
     uiBundleVersion,
+    windowBridge: getDefaultWindowBridgeStatus(),
     settings,
     contextWindowModels: getContextWindowGroups(getContextWindowModels(clientConfigs, contextModelCatalog)).map((group) => {
       const latest = group.members.reduce((previous, id) => {
@@ -1460,6 +1655,9 @@ export async function buildTelemetryPayloadInternal(
         : 0,
       latestCacheHitPct,
       sessionCacheHitPct,
+      hasKnownModel: Boolean(latestEnriched?.hasKnownModel),
+      activeBaseModelShort: latestEnriched?.baseModelShort || '',
+      activeBaseModelLabel: latestEnriched?.baseModelLabel || '',
       activeModelShort: latestEnriched?.modelShort || '模型未知',
       activeModelLabel: latestEnriched?.modelLabel || '模型未知',
       activeModelUpstream:
@@ -1505,19 +1703,26 @@ export async function buildTelemetryPayloadInternal(
         title: isCustomWeeklyMode
           ? '每周限额 (自定义本机)'
           : `每周限额 (${activePoolLabel && activePoolLabel !== 'Unknown' ? activePoolLabel : '当前'})`,
-        calls: !isCustomWeeklyMode && poolsWeeklySummary ? poolsWeeklySummary.calls : weekBucket.calls,
-        tokens:
-          !isCustomWeeklyMode && poolsWeeklySummary
+        calls: isCustomWeeklyMode
+          ? weekBucket.calls
+          : poolsWeeklySummary
+            ? poolsWeeklySummary.calls
+            : officialFallbackWeekBucket.calls,
+        tokens: isCustomWeeklyMode
+          ? weekBucket.totalTokens
+          : poolsWeeklySummary
             ? poolsWeeklySummary.tokens
-            : weekBucket.totalTokens,
-        costUsd:
-          !isCustomWeeklyMode && poolsWeeklySummary
+            : officialFallbackWeekBucket.totalTokens,
+        costUsd: isCustomWeeklyMode
+          ? weekBucket.costUsd
+          : poolsWeeklySummary
             ? poolsWeeklySummary.costUsd
-            : weekBucket.costUsd,
-        unpricedCalls:
-          !isCustomWeeklyMode && poolsWeeklySummary
+            : officialFallbackWeekBucket.costUsd,
+        unpricedCalls: isCustomWeeklyMode
+          ? weekBucket.unpricedCalls
+          : poolsWeeklySummary
             ? poolsWeeklySummary.unpricedCalls
-            : weekBucket.unpricedCalls,
+            : officialFallbackWeekBucket.unpricedCalls,
         usedPct: weeklyUsedPct,
         remainingPct: weeklyRemainingPct,
         remainingIntPct: weeklyRemainingIntPct,

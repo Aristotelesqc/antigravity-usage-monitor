@@ -10,6 +10,7 @@ import { i18nStore, t } from '../../i18n/index.js';
 import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 import {
   fetchTelemetry,
+  formatAgentBadgeText,
   normalizeClientUpdateMode,
   telemetryStore,
   triggerPluginUpdate,
@@ -106,20 +107,24 @@ export const TopSessionHeader = defineComponent({
 
     let lastActiveCascadeId = '';
 
+    function syncSessionScopeOnCascadeChange(telemetry) {
+      const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
+      if (!currentCascadeId) return;
+      if (lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
+        lastActiveCascadeId = currentCascadeId;
+        const uiSt = uiStore.getState();
+        if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
+          uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
+        }
+      } else {
+        lastActiveCascadeId = currentCascadeId;
+      }
+    }
+
     function renderHeaderState() {
       const telSt = telemetryStore.getState();
       const uiSt = uiStore.getState();
       const telemetry = telSt.telemetry;
-      const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
-      if (currentCascadeId && lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
-        lastActiveCascadeId = currentCascadeId;
-        if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
-          uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-          return;
-        }
-      } else if (currentCascadeId) {
-        lastActiveCascadeId = currentCascadeId;
-      }
       if (!uiSt.monitorVisible) return;
 
       patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
@@ -240,7 +245,7 @@ export const TopSessionHeader = defineComponent({
       } else if (isRunning) {
         const runningAgent = (telemetry?.activeConversation?.agents || []).find((a) => a.isRunning);
         const runSuffix =
-          hasSubagents && runningAgent ? ` · ${runningAgent.badgeText || runningAgent.shortLabel}` : '';
+          hasSubagents && runningAgent ? ` · ${formatAgentBadgeText(runningAgent)}` : '';
         patchSvgIcon(statusIcon, 'bolt');
         patchText(statusText, t('header.statusGenerating', { suffix: runSuffix }));
         patchClasses(statusTag, {
@@ -277,7 +282,10 @@ export const TopSessionHeader = defineComponent({
         syncState: st.syncState,
         telemetry: st.telemetry,
       }),
-      () => renderHeaderState()
+      (slice) => {
+        syncSessionScopeOnCascadeChange(slice.telemetry);
+        renderHeaderState();
+      }
     );
 
     const unsubI18n = i18nStore.subscribe(

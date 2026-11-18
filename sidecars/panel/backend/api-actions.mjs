@@ -6,13 +6,13 @@
  * 2. Antigravity IDE / 2.0 后台守护桥接进程 (`mcp-entry.mjs` -> `bridge-daemon.mjs`)。
  */
 
-import { readFileSync, promises as fsPromises } from 'node:fs';
-import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { BRIDGE_API_ROUTE_DEFS } from '../shared/window-bridge-protocol.mjs';
 import { handleAccountCredentialAction } from './account-switch.mjs';
+import { isLocalHostRequest, readLocalAsync } from './http-helpers.mjs';
+import { clearScannerRuntimeMemos } from './local-scanner.mjs';
 import {
-  HERE,
   SETTINGS_FILE,
   clearRuntimeCaches,
   cloudSyncState,
@@ -45,8 +45,14 @@ import {
 import { getCloudStatus } from './pricing-catalog.mjs';
 import { buildTelemetryPayload } from './telemetry-builder.mjs';
 import {
+  ensureDesktopLaunchEntriesConfigured,
+  triggerDesktopHostRelaunch,
+} from './desktop-launcher-config.mjs';
+import {
+  ensureIdeRemoteDebuggingArgv,
   notifyModelContextWindowsChanged,
   notifyWindowOverlaySetting,
+  resolveDevToolsPortCandidates,
   startDefaultWindowBridge,
 } from './window-bridge.mjs';
 import { ensureCliStatusLineConfigured } from './cli-statusline-config.mjs';
@@ -59,60 +65,7 @@ export function setStandalonePortListener(listener) {
   standalonePortListener = typeof listener === 'function' ? listener : null;
 }
 
-/**
- * 异步读取 `sidecars/panel` 目录下的静态资源文件（兼容单元测试同步沙箱）。
- *
- * @param {string} relPath 相对路径
- * @returns {Promise<string>}
- */
-export const readLocalAsync = async (relPath) => {
-  const fullPath = join(HERE, relPath);
-  if (typeof fsPromises !== 'undefined' && fsPromises?.readFile) {
-    return fsPromises.readFile(fullPath, 'utf8');
-  }
-  return readFileSync(fullPath, 'utf8');
-};
-
-/**
- * 校验请求是否来自本机回环同端口地址 (`127.0.0.1` / `localhost` / `[::1]`) 或受信 Webview Origin，
- * 阻止跨端口本地服务（如本地其他端口的开发服务器）或跨站 DNS Rebinding 访问 API。
- *
- * @param {object} req
- * @returns {boolean}
- */
-export function isLocalHostRequest(req) {
-  if (!req?.headers) return true;
-  const host = String(req.headers.host || '').trim().toLowerCase();
-  const hostMatch = host.match(/^(127\.0\.0\.1|localhost|\[::1\])(?::(\d+))?$/);
-  if (host && !hostMatch) {
-    return false;
-  }
-  const origin = String(req.headers.origin || '').trim().toLowerCase();
-  if (origin && /^vscode-webview:\/\/[a-z0-9._-]+$/.test(origin)) {
-    return true;
-  }
-  const secFetchSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
-  if (secFetchSite === 'cross-site') {
-    return false;
-  }
-  if (origin) {
-    const originMatch = origin.match(
-      /^(https?):\/\/(127\.0\.0\.1|localhost|\[::1\])(?::(\d+))?$/
-    );
-    if (!originMatch) {
-      return false;
-    }
-    if (hostMatch) {
-      const defaultPort = originMatch[1] === 'https' ? '443' : '80';
-      const originPort = originMatch[3] || defaultPort;
-      const hostPort = hostMatch[2] || defaultPort;
-      if (originPort !== hostPort) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
+export { isLocalHostRequest, readLocalAsync };
 
 const MAX_SAFE_DATE_MS = 8_640_000_000_000_000;
 
@@ -142,7 +95,8 @@ function projectDisplayStep(st) {
   };
 }
 
-let lastDisplaySteps = null;
+const MAX_DISPLAY_STEP_CACHE_ENTRIES = 8;
+const displayStepsCache = new Map();
 const displayStepFields = Object.keys(projectDisplayStep({}));
 
 function haveSameDisplaySteps(previous, current) {
@@ -165,23 +119,34 @@ function projectDisplayTelemetry(payload, requestedRevision) {
   let projected;
   let revision;
   if (typeof requestedRevision === 'string') {
+    const cacheKey = active.cascadeId || '__empty__';
     const scope = [
       payload.account?.status,
       payload.account?.email || payload.account?.name || '',
       active.cascadeId,
       ...agents.map((agent) => agent.agentId),
     ];
-    const previous = lastDisplaySteps;
+    const previous = displayStepsCache.get(cacheKey);
     if (previous && isDeepStrictEqual(scope, previous.scope) &&
         sourceSteps.every((steps, index) => (steps && previous.sources[index]?.deref() === steps) ||
           haveSameDisplaySteps(previous.steps[index], steps))) {
       ({ revision, steps: projected } = previous);
       previous.sources = sourceSteps.map((steps) => steps ? new WeakRef(steps) : undefined);
+      displayStepsCache.delete(cacheKey);
+      displayStepsCache.set(cacheKey, previous);
     } else {
       revision = randomUUID();
       projected = sourceSteps.map((steps) => steps?.map(projectDisplayStep));
-      lastDisplaySteps = { scope, steps: projected, revision,
-        sources: sourceSteps.map((steps) => steps ? new WeakRef(steps) : undefined) };
+      if (!displayStepsCache.has(cacheKey) && displayStepsCache.size >= MAX_DISPLAY_STEP_CACHE_ENTRIES) {
+        displayStepsCache.delete(displayStepsCache.keys().next().value);
+      }
+      displayStepsCache.delete(cacheKey);
+      displayStepsCache.set(cacheKey, {
+        scope,
+        steps: projected,
+        revision,
+        sources: sourceSteps.map((steps) => steps ? new WeakRef(steps) : undefined),
+      });
     }
   }
   projected ||= sourceSteps.map((steps) => steps?.map(projectDisplayStep));
@@ -452,6 +417,8 @@ export function executeRebuildCacheAction() {
       body: JSON.stringify({ ok: false, error: 'Failed to clear trajectory cache' }),
     };
   }
+  displayStepsCache.clear();
+  clearScannerRuntimeMemos();
   return {
     ok: true,
     status: 200,
@@ -491,39 +458,57 @@ export async function executeAccountCredentialAction(data) {
   };
 }
 
-export async function dispatchBridgeApiRequest(pathname, method, data, opts = undefined) {
-  if (pathname === '/api/telemetry' && method === 'GET') {
-    return executeTelemetryAction(data, opts);
-  }
-  if (pathname === '/api/settings' && method === 'POST') {
-    return executeSettingsAction(data);
-  }
-  if (pathname === '/api/accounts' && method === 'GET') {
-    return executeAccountCredentialAction();
-  }
-  if (pathname === '/api/accounts/update' && method === 'POST') {
-    return executeAccountCredentialAction(data);
-  }
-  if (pathname === '/api/context-window' && method === 'POST') {
-    return executeModelContextWindowAction(data);
-  }
-  if (pathname === '/api/settings/reset' && method === 'POST') {
-    return executeResetSettingsAction();
-  }
-  if (pathname === '/api/cache/rebuild' && method === 'POST') {
-    return executeRebuildCacheAction();
-  }
-  if (pathname === '/api/cloud-sync' && method === 'POST') {
-    return executeCloudSyncAction();
-  }
-  if (pathname === '/api/plugin-update' && method === 'POST') {
-    return executePluginUpdateAction();
-  }
+export async function executeBridgeRelaunchAction() {
+  ensureIdeRemoteDebuggingArgv({ enabled: true });
+  await ensureDesktopLaunchEntriesConfigured({ enabled: true }).catch(() => {});
+  const result = await triggerDesktopHostRelaunch({
+    stalePortFiles: resolveDevToolsPortCandidates(),
+  });
   return {
-    status: 404,
+    status: result.ok ? 200 : Number(result.status || 500),
     contentType: 'application/json',
-    body: JSON.stringify({ error: 'Not found' }),
+    headers: { 'Cache-Control': 'no-store' },
+    body: JSON.stringify(result),
   };
+}
+
+const BRIDGE_ROUTE_LOOKUP = new Map(
+  BRIDGE_API_ROUTE_DEFS.map((r) => [`${r.method}:${r.path}`, r.action])
+);
+
+export async function dispatchBridgeApiRequest(pathname, method, data, opts = undefined) {
+  const action = BRIDGE_ROUTE_LOOKUP.get(`${String(method || '').toUpperCase()}:${pathname}`);
+  switch (action) {
+    case 'telemetry':
+      return executeTelemetryAction(data, opts);
+    case 'settings':
+      if (isPlainObject(data) && data.__bridgeAction === 'relaunch') {
+        return executeBridgeRelaunchAction();
+      }
+      return executeSettingsAction(data);
+    case 'accounts_get':
+      return executeAccountCredentialAction();
+    case 'accounts_update':
+      return executeAccountCredentialAction(data);
+    case 'context_window':
+      return executeModelContextWindowAction(data);
+    case 'settings_reset':
+      return executeResetSettingsAction();
+    case 'cache_rebuild':
+      return executeRebuildCacheAction();
+    case 'cloud_sync':
+      return executeCloudSyncAction();
+    case 'plugin_update':
+      return executePluginUpdateAction();
+    case 'bridge_relaunch':
+      return executeBridgeRelaunchAction();
+    default:
+      return {
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Not found' }),
+      };
+  }
 }
 
 /**

@@ -4,6 +4,7 @@
  */
 
 import { createReactiveStore } from '../core/reactive.js';
+import { normalizeLanguageSetting } from '../../shared/settings-normalization.mjs';
 import { I18N_MESSAGES_ZH_CN } from './zh-CN.js';
 import { I18N_MESSAGES_EN_US } from './en-US.js';
 
@@ -13,11 +14,7 @@ export const I18N_DICTIONARIES = Object.freeze({
 });
 
 export function normalizeI18nLanguage(raw) {
-  const val = String(raw ?? '').trim();
-  if (val === 'auto') return 'auto';
-  if (/^en(?:-|$)/i.test(val)) return 'en-US';
-  if (/^zh(?:-|$)/i.test(val)) return 'zh-CN';
-  return 'zh-CN';
+  return normalizeLanguageSetting(raw);
 }
 
 export function detectHostSystemLocale() {

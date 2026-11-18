@@ -1,7 +1,748 @@
 (() => {
 'use strict';
 
+// --- shared/settings-normalization.mjs ---
+const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort } = (() => {
+/**
+ * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
+ */
+
+const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'zh-CN', 'en-US']);
+
+const THEME_ACCENT_KEYS = Object.freeze([
+  'host',
+  'blue',
+  'emerald',
+  'amber',
+  'violet',
+  'cyan',
+  'rose',
+]);
+
+const FONT_SCALE_KEYS = Object.freeze(['sm', 'md', 'lg', 'xl']);
+
+const TOPBAR_SLOT_KEYS = Object.freeze([
+  'context',
+  'tps',
+  'ttft',
+  'avg_tps',
+  'cost',
+  'session_cost',
+  'cache_hit',
+  'session_tokens',
+  'quota_auto',
+  'gemini_5h',
+  'gemini_weekly',
+  'claude_5h',
+  'claude_weekly',
+]);
+
+const DEFAULT_TOPBAR_SLOTS = Object.freeze(['tps', 'ttft', 'context']);
+const MIN_TOPBAR_SLOTS = 1;
+const MAX_TOPBAR_SLOTS = 5;
+
+const OVERVIEW_MODULE_KEYS = Object.freeze([
+  'metrics',
+  'context',
+  'quotas',
+  'live_tasks',
+]);
+
+const DEFAULT_OVERVIEW_MODULES = Object.freeze([
+  'metrics',
+  'context',
+  'quotas',
+  'live_tasks',
+]);
+
+const DEFAULT_HOVER_MODULES = Object.freeze(['metrics', 'context', 'quotas']);
+
+const OVERVIEW_METRIC_KEYS = Object.freeze([
+  'tps',
+  'ttft',
+  'avg_tps',
+  'step_cost',
+  'session_cost',
+  'cache_hit',
+  'session_tokens',
+  'context_usage',
+  'quota_tightest',
+]);
+
+const DEFAULT_OVERVIEW_METRICS = Object.freeze([
+  'tps',
+  'ttft',
+  'avg_tps',
+  'step_cost',
+]);
+
+const STEP_TABLE_COLUMN_KEYS = Object.freeze([
+  'step',
+  'time',
+  'model',
+  'tps',
+  'ttft',
+  'duration',
+  'tokens_combo',
+  'tokens_io_cache',
+  'tokens_custom',
+  'input_tokens',
+  'cache_tokens',
+  'output_tokens',
+  'cache',
+  'cost',
+]);
+
+const DEFAULT_STEP_TABLE_COLUMNS = Object.freeze([
+  'step',
+  'model',
+  'tps',
+  'ttft',
+  'tokens_combo',
+  'cache',
+  'cost',
+]);
+
+const DEFAULT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
+
+const STEP_TOKEN_SEGMENT_ALIASES = Object.freeze({
+  context: 'context',
+  ctx: 'context',
+  '上下文': 'context',
+  in: 'in',
+  new: 'in',
+  input: 'in',
+  '输入': 'in',
+  '新输入': 'in',
+  out: 'out',
+  output: 'out',
+  '输出': 'out',
+  '总输出': 'out',
+  cache: 'cache',
+  cached: 'cache',
+  cache_read: 'cache',
+  cacheread: 'cache',
+  '缓存': 'cache',
+  '缓存读': 'cache',
+  think: 'think',
+  thinking: 'think',
+  '思考': 'think',
+  reply: 'reply',
+  body: 'reply',
+  resp: 'reply',
+  response: 'reply',
+  text: 'reply',
+  '正文': 'reply',
+  '回复': 'reply',
+  total: 'total',
+  all: 'total',
+  sum: 'total',
+  '总计': 'total',
+  '总token': 'total',
+});
+
+const POPOVER_WIDTH_MODES = Object.freeze(['auto', 'custom']);
+const MIN_POPOVER_WIDTH = 440;
+const MAX_POPOVER_WIDTH = 1080;
+const DEFAULT_POPOVER_WIDTH = 580;
+
+/**
+ * 归一化界面语言枚举（默认 `'zh-CN'`，支持 `'auto'`/`'system'` 与 `'en-US'`）。
+ *
+ * @param {unknown} lang
+ * @returns {'auto'|'zh-CN'|'en-US'}
+ */
+function normalizeLanguageSetting(lang) {
+  const raw = String(lang ?? '').trim();
+  if (!raw) return 'zh-CN';
+  const lower = raw.toLowerCase();
+  if (lower === 'auto' || lower === 'system') return 'auto';
+  if (lower === 'en' || lower === 'en-us' || lower.startsWith('en-')) return 'en-US';
+  if (lower === 'zh' || lower === 'zh-cn' || lower.startsWith('zh')) return 'zh-CN';
+  return 'zh-CN';
+}
+
+/**
+ * 归一化主题强调色预设键（默认 `'host'` 跟随宿主原生主题）。
+ *
+ * @param {unknown} accent
+ * @returns {'host'|'blue'|'emerald'|'amber'|'violet'|'cyan'|'rose'}
+ */
+function normalizeThemeAccent(accent) {
+  const clean = String(accent ?? '').trim().toLowerCase();
+  return THEME_ACCENT_KEYS.includes(clean) ? /** @type {any} */ (clean) : 'host';
+}
+
+/**
+ * 归一化面板字号档位（默认 `'md'` 标准 100%）。
+ *
+ * @param {unknown} scale
+ * @returns {'sm'|'md'|'lg'|'xl'}
+ */
+function normalizeFontScale(scale) {
+  const clean = String(scale ?? '').trim().toLowerCase();
+  return FONT_SCALE_KEYS.includes(clean) ? /** @type {any} */ (clean) : 'md';
+}
+
+/**
+ * 归一化模型名称展示模式（`'short'` | `'upstream_compact'` | `'upstream'`），兼容历史 `showUpstreamModel`。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyShowUpstream]
+ * @returns {'short'|'upstream_compact'|'upstream'}
+ */
+function normalizeModelDisplayMode(mode, legacyShowUpstream) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+    return 'upstream_compact';
+  }
+  if (m === 'short') return 'short';
+  if (legacyShowUpstream === true) return 'upstream';
+  return 'short';
+}
+
+/**
+ * 归一化 Orchestrator 系列模型 ID 显示风格（`'compact'` vs `'full'`，默认 `'compact'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'compact'|'full'}
+ */
+function normalizeOrchestratorIdMode(mode) {
+  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+}
+
+/**
+ * 归一化悬浮主面板宽度模式（`'auto'` | `'custom'`，默认 `'auto'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'auto'|'custom'}
+ */
+function normalizePopoverWidthMode(mode) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
+}
+
+/**
+ * 归一化悬浮主面板自定义宽度像素值（范围 `440..1080`，默认 `580`）。
+ *
+ * @param {unknown} width
+ * @returns {number}
+ */
+function normalizePopoverWidth(width) {
+  const num = Number(width);
+  if (!Number.isFinite(num) || num <= 0) return DEFAULT_POPOVER_WIDTH;
+  return Math.max(MIN_POPOVER_WIDTH, Math.min(MAX_POPOVER_WIDTH, Math.round(num)));
+}
+
+/**
+ * 解析步骤表自定义 Token 组合表达式，支持 `:`、`/`、`,`、`|` 分隔与中英文别名（1~4 项不重复）。
+ *
+ * @param {unknown} raw
+ * @returns {Array<'context'|'in'|'out'|'cache'|'think'|'reply'|'total'>}
+ */
+function parseStepTokenComboSegments(raw) {
+  const str = String(raw ?? '').trim();
+  const out = [];
+  const seen = new Set();
+  if (str) {
+    for (const part of str.split(/[:/,|]+/)) {
+      const key = part.trim().toLowerCase();
+      if (!key) continue;
+      const mapped = Object.prototype.hasOwnProperty.call(STEP_TOKEN_SEGMENT_ALIASES, key)
+        ? STEP_TOKEN_SEGMENT_ALIASES[key]
+        : null;
+      if (!mapped || seen.has(mapped)) continue;
+      seen.add(mapped);
+      out.push(/** @type {any} */ (mapped));
+      if (out.length >= 4) break;
+    }
+  }
+  return out.length > 0 ? out : ['context', 'in', 'cache'];
+}
+
+/**
+ * 归一化步骤表自定义 Token 组合格式字符串（如 `'context:new:cache'` -> `'context:in:cache'`）。
+ *
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function normalizeStepTokenComboFormat(raw) {
+  return parseStepTokenComboSegments(raw).join(':');
+}
+
+/**
+ * 归一化插件更新策略枚举（兼容历史 `autoUpdatePlugin` 布尔开关，默认 `'manual'`）。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyAutoUpdate]
+ * @returns {'off'|'manual'|'auto'}
+ */
+function normalizePluginUpdateMode(mode, legacyAutoUpdate) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'off' || m === 'manual' || m === 'auto') return m;
+  if (legacyAutoUpdate === true) return 'auto';
+  return 'manual';
+}
+
+/**
+ * 归一化面板挂载方式枚举（`'dual'` | `'composer'` | `'sidebar'`），兼容历史 `enableWindowOverlay`。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyEnableOverlay]
+ * @returns {'dual'|'composer'|'sidebar'}
+ */
+function normalizeWindowMountMode(mode, legacyEnableOverlay) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'composer' || m === 'input') return 'composer';
+  if (m === 'sidebar' || m === 'sidebar_only' || m === 'off') return 'sidebar';
+  if (m === 'dual' || m === 'topbar') return 'dual';
+  if (legacyEnableOverlay === false) return 'sidebar';
+  return 'dual';
+}
+
+/**
+ * 归一化每周额度统计模式枚举（`'official'` | `'custom_tokens'` | `'custom_cost'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'official'|'custom_tokens'|'custom_cost'}
+ */
+function normalizeWeeklyLimitMode(mode) {
+  const m = String(mode || '').trim().toLowerCase();
+  if (m === 'custom_tokens' || m === 'tokens') return 'custom_tokens';
+  if (m === 'custom_cost' || m === 'cost') return 'custom_cost';
+  return 'official';
+}
+
+/**
+ * 归一化顶栏/输入框胶囊槽位数组（1~5 项动态自添加，默认 3 项，自动清洗历史 `'none'` 与重复项）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeTopbarCapsuleSlots(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_TOPBAR_SLOTS];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const val = String(item ?? '').trim();
+    if (!val || val === 'none') continue;
+    const mapped = val === 'step_cost' ? 'cost' : val;
+    if (!TOPBAR_SLOT_KEYS.includes(mapped) || seen.has(mapped)) continue;
+    seen.add(mapped);
+    out.push(mapped);
+    if (out.length >= MAX_TOPBAR_SLOTS) break;
+  }
+  if (out.length < MIN_TOPBAR_SLOTS) {
+    return ['context'];
+  }
+  return out;
+}
+
+/**
+ * 归一化实时监控第一行指标矩阵的槽位与顺序（1~4 项，默认 4 项）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeOverviewMetrics(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_OVERVIEW_METRICS];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const rawVal = String(item ?? '').trim();
+    const val = rawVal === 'cost' ? 'step_cost' : rawVal;
+    if (!OVERVIEW_METRIC_KEYS.includes(val) || seen.has(val)) continue;
+    seen.add(val);
+    out.push(val);
+    if (out.length >= 4) break;
+  }
+  return out.length > 0 ? out : ['tps'];
+}
+
+/**
+ * 归一化实时监控视图展示的模块及上下顺序（1~4 项，默认 4 项全开）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeOverviewModules(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_OVERVIEW_MODULES];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const val = String(item ?? '').trim();
+    if (!OVERVIEW_MODULE_KEYS.includes(val) || seen.has(val)) continue;
+    seen.add(val);
+    out.push(val);
+    if (out.length >= OVERVIEW_MODULE_KEYS.length) break;
+  }
+  return out.length > 0 ? out : ['metrics'];
+}
+
+/**
+ * 归一化鼠标悬停速览窗展示的模块及上下顺序（0~4 项，默认 3 项；显式空数组 `[]` 表示禁用悬停弹窗）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeHoverModules(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_HOVER_MODULES];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const val = String(item ?? '').trim();
+    if (!OVERVIEW_MODULE_KEYS.includes(val) || seen.has(val)) continue;
+    seen.add(val);
+    out.push(val);
+    if (out.length >= OVERVIEW_MODULE_KEYS.length) break;
+  }
+  return out;
+}
+
+/**
+ * 归一化调用明细「按步查看」表格列配置与左右顺序（2~14 列，默认保留现有 7 列）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeStepTableColumns(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_STEP_TABLE_COLUMNS];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const val = String(item ?? '').trim();
+    if (!STEP_TABLE_COLUMN_KEYS.includes(val) || seen.has(val)) continue;
+    seen.add(val);
+    out.push(val);
+    if (out.length >= STEP_TABLE_COLUMN_KEYS.length) break;
+  }
+  if (out.length < 2) {
+    for (const fallbackCol of ['step', 'model', 'tps']) {
+      if (!seen.has(fallbackCol)) {
+        seen.add(fallbackCol);
+        out.push(fallbackCol);
+      }
+      if (out.length >= 2) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * 归一化独立 Web 服务自动托管端口（`0` 表示关闭自动拉起，合法监听端口范围 `1024..65535`）。
+ *
+ * @param {unknown} port
+ * @returns {number}
+ */
+function normalizeStandalonePort(port) {
+  const num = Number(port);
+  if (!Number.isInteger(num) || num <= 0) return 0;
+  if (num >= 1024 && num <= 65535) return num;
+  return 0;
+}
+return { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort };
+})();
+
+// --- shared/telemetry-display-rules.mjs ---
+const { THIRD_PARTY_POOL_RE, isThirdPartyPoolText, classifySpeedTier, classifyCacheTier, classifyStepCostTier, classifyTtftTier, formatCompactTokens, formatCompactCapsuleCost, formatCompactCapsuleTtft, resolveCapsuleQuotaSlotPct, scaleBucketsExact } = (() => {
+/**
+ * @fileoverview 跨 Backend / Frontend / CLI 共用的纯展示阈值、紧凑格式化、第三方配额分池与精确整数缩放规则。
+ */
+
+const THIRD_PARTY_POOL_RE =
+  /3p|claude|anthropic|fable|gpt|openai|oss|sonnet|opus|haiku|third[-_\s]?party/i;
+
+/**
+ * 判断模型或配额桶文本是否归属第三方模型池（Claude & GPT / OSS / 3P）。
+ *
+ * @param {unknown} text
+ * @returns {boolean}
+ */
+function isThirdPartyPoolText(text) {
+  return THIRD_PARTY_POOL_RE.test(String(text || ''));
+}
+
+/**
+ * 输出速度四档语义色阶分类（`'muted'|'good'|'info'|'warn'|'danger'`）。
+ */
+function classifySpeedTier(tokPerSec) {
+  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
+    return 'muted';
+  }
+  const v = Number(tokPerSec);
+  if (v >= 60) return 'good';
+  if (v >= 35) return 'info';
+  if (v >= 20) return 'warn';
+  return 'danger';
+}
+
+/**
+ * 缓存命中率四档语义色阶分类（`'muted'|'good'|'info'|'warn'|'danger'`）。
+ */
+function classifyCacheTier(cacheHitPct, promptTokens = null) {
+  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
+    return 'muted';
+  }
+  const v = Number(cacheHitPct);
+  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
+    return 'muted';
+  }
+  if (v >= 85) return 'good';
+  if (v >= 65) return 'info';
+  if (v >= 30) return 'warn';
+  return 'danger';
+}
+
+/**
+ * 单步费用告警色阶分类（`''|'warn'|'danger'`）。
+ */
+function classifyStepCostTier(costUsd) {
+  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
+  const v = Number(costUsd);
+  if (v >= 0.3) return 'danger';
+  if (v >= 0.15) return 'warn';
+  return '';
+}
+
+/**
+ * 首字延迟告警色阶分类（`'muted'|''|'warn'|'danger'`）。
+ */
+function classifyTtftTier(ttftSec) {
+  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) {
+    return 'muted';
+  }
+  const v = Number(ttftSec);
+  if (v >= 30) return 'danger';
+  if (v >= 18) return 'warn';
+  return '';
+}
+
+function formatCompactTokens(num) {
+  const n = Number(num || 0);
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function formatCompactCapsuleCost(costUsd) {
+  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '--';
+  const val = Math.max(0, Number(costUsd));
+  if (val === 0) return '$0.00';
+  if (val < 0.001) return '<$0.001';
+  if (val < 1) return `$${val.toFixed(3)}`;
+  if (val < 100) return `$${val.toFixed(2)}`;
+  return `$${Math.round(val)}`;
+}
+
+function formatCompactCapsuleTtft(ttftSec) {
+  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '--s';
+  const val = Number(ttftSec);
+  if (val < 1) return `${val.toFixed(2)}s`;
+  if (val < 100) return `${val.toFixed(1)}s`;
+  return `${Math.round(val)}s`;
+}
+
+/**
+ * 解析胶囊指定配额槽位（`quota_auto` / `gemini_5h` / `gemini_weekly` / `claude_5h` / `claude_weekly`）的整数剩余百分比。
+ *
+ * @param {object|null|undefined} quotas
+ * @param {string} slotKey
+ * @returns {number|null}
+ */
+function resolveCapsuleQuotaSlotPct(quotas, slotKey) {
+  if (!quotas || typeof quotas !== 'object') return null;
+  const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
+  const activePool = quotas.activePool || null;
+  const weekly = quotas.weekly || null;
+
+  if (slotKey === 'quota_auto') {
+    const candidates = [];
+    if (activePool && Number.isFinite(Number(activePool.remainingPct))) {
+      candidates.push(Number(activePool.remainingPct));
+    }
+    if (activePool && Number.isFinite(Number(activePool.weeklyRemainingPct))) {
+      candidates.push(Number(activePool.weeklyRemainingPct));
+    }
+    if (!candidates.length && weekly && Number.isFinite(Number(weekly.remainingPct))) {
+      candidates.push(Number(weekly.remainingPct));
+    }
+    if (!candidates.length && pools.length > 0) {
+      for (const p of pools) {
+        if (p && Number.isFinite(Number(p.remainingPct))) candidates.push(Number(p.remainingPct));
+        if (p && Number.isFinite(Number(p.weeklyRemainingPct))) {
+          candidates.push(Number(p.weeklyRemainingPct));
+        }
+      }
+    }
+    if (!candidates.length) return null;
+    return Math.max(0, Math.min(100, Math.round(Math.min(...candidates))));
+  }
+
+  const isClaude = slotKey.startsWith('claude_');
+  const isWeekly = slotKey.endsWith('_weekly');
+  let rawPct = null;
+
+  if (isClaude) {
+    const claudePool =
+      pools.find((p) => p?.poolKey === 'Claude & GPT') ||
+      pools.find((p) => isThirdPartyPoolText(p?.poolKey || p?.poolLabel || ''));
+    const cand = isWeekly ? claudePool?.weeklyRemainingPct : claudePool?.remainingPct;
+    if (cand != null && Number.isFinite(Number(cand))) {
+      rawPct = Number(cand);
+    } else if (activePool && isThirdPartyPoolText(activePool.family || activePool.poolLabel || '')) {
+      const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
+      if (fb != null && Number.isFinite(Number(fb))) rawPct = Number(fb);
+    }
+  } else {
+    const stdGemini =
+      pools.find((p) => p?.poolKey === 'Gemini') ||
+      pools.find(
+        (p) =>
+          /gemini/i.test(String(p?.poolKey || p?.poolLabel || '')) &&
+          !/carbon|argon/i.test(String(p?.poolKey || ''))
+      );
+    const geminiFamilyPools = pools.filter((p) =>
+      /gemini|carbon|argon/i.test(String(p?.poolKey || p?.poolLabel || ''))
+    );
+    const primaryCand = isWeekly ? stdGemini?.weeklyRemainingPct : stdGemini?.remainingPct;
+    if (primaryCand != null && Number.isFinite(Number(primaryCand))) {
+      rawPct = Number(primaryCand);
+    } else {
+      const familyVals = geminiFamilyPools
+        .map((p) => (isWeekly ? p?.weeklyRemainingPct : p?.remainingPct))
+        .filter((v) => v != null && Number.isFinite(Number(v)))
+        .map(Number);
+      if (familyVals.length > 0) {
+        rawPct = Math.min(...familyVals);
+      } else if (
+        activePool &&
+        !isThirdPartyPoolText(activePool.family || activePool.poolLabel || '')
+      ) {
+        const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
+        if (fb != null && Number.isFinite(Number(fb))) rawPct = Number(fb);
+      }
+      if (
+        rawPct == null &&
+        isWeekly &&
+        weekly &&
+        !isThirdPartyPoolText(weekly.poolFamily || '') &&
+        weekly.remainingPct != null &&
+        Number.isFinite(Number(weekly.remainingPct))
+      ) {
+        rawPct = Number(weekly.remainingPct);
+      }
+    }
+  }
+
+  if (rawPct == null || !Number.isFinite(rawPct)) return null;
+  return Math.max(0, Math.min(100, Math.round(rawPct)));
+}
+
+/**
+ * 使用最大余数法（Hamilton 方法）将各非零分桶等比缩放至目标整数总和，
+ * 保证 0 值通道绝不被凭空分配余数，且缩放后各分桶之和精确等于 `targetTotal`。
+ *
+ * @param {Record<string, number>} buckets
+ * @param {readonly string[]} keys
+ * @param {number} targetTotal
+ * @returns {Record<string, number>}
+ */
+function scaleBucketsExact(buckets, keys, targetTotal) {
+  const safeTarget = Math.max(0, Math.round(Number(targetTotal || 0)));
+  const out = {};
+  let currentSum = 0;
+  for (const k of keys) {
+    const val = Math.max(0, Number(buckets[k] || 0));
+    out[k] = val;
+    currentSum += val;
+  }
+  if (safeTarget === 0 || currentSum <= 0) {
+    for (const k of keys) out[k] = 0;
+    return out;
+  }
+  if (currentSum === safeTarget) {
+    for (const k of keys) out[k] = Math.round(out[k]);
+    return out;
+  }
+  const remainders = [];
+  let assigned = 0;
+  for (const k of keys) {
+    const rawVal = out[k];
+    if (rawVal <= 0) {
+      out[k] = 0;
+      continue;
+    }
+    const exact = (rawVal * safeTarget) / currentSum;
+    const floored = Math.floor(exact);
+    out[k] = floored;
+    assigned += floored;
+    remainders.push({ key: k, rem: exact - floored, orig: rawVal });
+  }
+  const diff = safeTarget - assigned;
+  if (diff > 0 && remainders.length > 0) {
+    remainders.sort((a, b) => b.rem - a.rem || b.orig - a.orig);
+    for (let i = 0; i < diff; i++) {
+      out[remainders[i % remainders.length].key] += 1;
+    }
+  }
+  return out;
+}
+return { THIRD_PARTY_POOL_RE, isThirdPartyPoolText, classifySpeedTier, classifyCacheTier, classifyStepCostTier, classifyTtftTier, formatCompactTokens, formatCompactCapsuleCost, formatCompactCapsuleTtft, resolveCapsuleQuotaSlotPct, scaleBucketsExact };
+})();
+
+// --- shared/window-bridge-protocol.mjs ---
+const { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_OVERLAY_KEY, CONTEXT_WINDOWS_GLOBAL_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge } = (() => {
+const WINDOW_BRIDGE_KEY = '__AGUsageMonitorBridge';
+const WINDOW_BRIDGE_ROUTE_KEY = 'hostRouteCascadeId';
+const WINDOW_OVERLAY_KEY = '__AGUsageMonitorOverlay';
+const CONTEXT_WINDOWS_GLOBAL_KEY = '__AGUsageMonitorContextWindows';
+
+const WINDOW_OVERLAY_METHODS = Object.freeze({
+  ensureAlive: 'ensureAlive',
+  getDockKind: 'getDockKind',
+  getMountMode: 'getMountMode',
+  updateBridge: 'updateBridge',
+  applyMountMode: 'applyMountMode',
+  syncHostRoute: 'syncHostRoute',
+  deliverRpc: 'deliverRpc',
+  dispose: 'dispose',
+});
+
+const BRIDGE_API_ROUTE_DEFS = Object.freeze([
+  Object.freeze({ path: '/api/telemetry', method: 'GET', action: 'telemetry' }),
+  Object.freeze({ path: '/api/settings', method: 'POST', action: 'settings' }),
+  Object.freeze({ path: '/api/accounts', method: 'GET', action: 'accounts_get' }),
+  Object.freeze({ path: '/api/accounts/update', method: 'POST', action: 'accounts_update' }),
+  Object.freeze({ path: '/api/context-window', method: 'POST', action: 'context_window' }),
+  Object.freeze({ path: '/api/settings/reset', method: 'POST', action: 'settings_reset' }),
+  Object.freeze({ path: '/api/cache/rebuild', method: 'POST', action: 'cache_rebuild' }),
+  Object.freeze({ path: '/api/cloud-sync', method: 'POST', action: 'cloud_sync' }),
+  Object.freeze({ path: '/api/plugin-update', method: 'POST', action: 'plugin_update' }),
+  Object.freeze({ path: '/api/bridge/relaunch', method: 'POST', action: 'bridge_relaunch' }),
+]);
+
+const BRIDGE_API_PATHS = Object.freeze(BRIDGE_API_ROUTE_DEFS.map((r) => r.path));
+
+function readInjectedWindowBridge() {
+  return typeof window === 'undefined' ? undefined : window[WINDOW_BRIDGE_KEY];
+}
+return { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_OVERLAY_KEY, CONTEXT_WINDOWS_GLOBAL_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge };
+})();
+
 // --- src/icons/svgRegistry.js ---
+const { SVG_ICON_DEFS } = (() => {
 /**
  * @fileoverview Pure vector SVG icon registry (16x16 grid).
  * Strictly zero emoji characters anywhere in the codebase.
@@ -93,6 +834,10 @@ const SVG_ICON_DEFS = Object.freeze({
   close: [
     { tag: 'path', attrs: { d: 'M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6' } },
   ],
+  copy: [
+    { tag: 'rect', attrs: { x: '5.2', y: '5.2', width: '8.3', height: '8.3', rx: '1.3' } },
+    { tag: 'path', attrs: { d: 'M3.5 10.8H2.8a1.3 1.3 0 0 1-1.3-1.3V3.3A1.3 1.3 0 0 1 2.8 2h6.2a1.3 1.3 0 0 1 1.3 1.3v.7' } },
+  ],
   grip: [
     { tag: 'circle', attrs: { cx: '6', cy: '4', r: '1.05', fill: 'currentColor', stroke: 'none' } },
     { tag: 'circle', attrs: { cx: '10', cy: '4', r: '1.05', fill: 'currentColor', stroke: 'none' } },
@@ -102,8 +847,11 @@ const SVG_ICON_DEFS = Object.freeze({
     { tag: 'circle', attrs: { cx: '10', cy: '12', r: '1.05', fill: 'currentColor', stroke: 'none' } },
   ],
 });
+return { SVG_ICON_DEFS };
+})();
 
 // --- src/icons/SvgIcon.js ---
+const { SVG_NS, createSvgIcon, patchSvgIcon } = (() => {
 /**
  * @fileoverview Dynamic SVG icon component and incremental icon patcher.
  */
@@ -149,8 +897,11 @@ function patchSvgIcon(svgEl, name) {
   }
   return true;
 }
+return { SVG_NS, createSvgIcon, patchSvgIcon };
+})();
 
 // --- src/core/reactive.js ---
+const { createReactiveStore } = (() => {
 /**
  * @fileoverview Fine-grained reactive store with async microtask batching
  * and structural slice comparison to prevent full-page re-renders.
@@ -268,8 +1019,11 @@ function createReactiveStore(initialState) {
     subscribe,
   };
 }
+return { createReactiveStore };
+})();
 
 // --- src/i18n/zh-CN.js ---
+const { I18N_MESSAGES_ZH_CN } = (() => {
 /**
  * @fileoverview Simplified Chinese (zh-CN) dictionary for Antigravity Usage & Speed Monitor.
  * Matches 100% of the existing out-of-the-box UI copy. Zero emoji characters.
@@ -327,6 +1081,9 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'fmt.subAgent': '子代理',
   'fmt.subBadge': '子{index}',
   'fmt.subBadgeShort': '子',
+  'fmt.sideQuestion': '旁路提问',
+  'fmt.sideBadge': '旁{index}',
+  'fmt.sideBadgeShort': '旁',
   'fmt.selectedCount': '已选 {count} {unit}',
   'fmt.selectedListTitle': '已选 ({count})：{names}',
   'fmt.selectPlaceholder': '请选择',
@@ -451,6 +1208,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'live.currentSession': '当前会话',
   'live.switchSessionTitle': '点击切换查看会话：{title}',
   'live.thinking': '推理中',
+  'live.generating': '生成中',
   'live.running': '运行中',
   'live.done': '已完成',
   'live.doneWithSteps': '已完成 ({steps} 步)',
@@ -703,6 +1461,21 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.mountDual': '双栖挂载 (顶部栏 + 侧边栏)',
   'settings.str.mountComposer': '输入框挂载 (输入框 + 侧边栏)',
   'settings.str.mountSidebar': '仅侧边栏',
+  'settings.bridge.restartTitle': '已自动补齐启动参数，重启一次即可启用悬浮胶囊',
+  'settings.bridge.ctxRestartTitle': '已自动补齐启动参数，重启一次即可激活上下文覆写',
+  'settings.bridge.restartBody': '已自动为桌面 / 开始菜单 / 任务栏快捷方式及自启项写入 --remote-debugging-port=0（后续每次正常打开均 100% 全自动挂载）。点击下方按钮即可退出托盘后台并立即生效。',
+  'settings.bridge.noPortTitle': '未检测到本地调试端口，主窗口挂载暂未生效',
+  'settings.bridge.unreachableTitle': '本地调试端口未就绪，主窗口挂载暂未生效',
+  'settings.bridge.ctxTitle': '未连通本地调试通道，上下文窗口覆写暂未注入',
+  'settings.bridge.guideWin': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动补齐快捷方式参数、退出托盘后台并带参重启生效。',
+  'settings.bridge.guideMac': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可一键带参重开客户端生效，也可复制参数通过 open -a "Antigravity" --args --remote-debugging-port=0 启动。',
+  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动写入 .desktop 启动器并重启生效。',
+  'settings.bridge.relaunchBtn': '立即重启并启用挂载',
+  'settings.bridge.relaunchingBtn': '正在重启客户端...',
+  'settings.bridge.relaunchFailed': '自动重启失败，请从托盘退出后重试',
+  'settings.bridge.dismissAria': '暂时关闭提示',
+  'settings.bridge.copyFlagBtn': '复制 {cmd}',
+  'settings.bridge.copiedBtn': '已复制启动参数',
   'settings.str.popoverWidthLabel': '悬浮面板宽度',
   'settings.str.popoverWidthAuto': '自适应',
   'settings.str.popoverWidthCustom': '指定宽度',
@@ -771,6 +1544,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.ctxUnavailable': '{name}（当前不可用）',
   'settings.oth.ctxConfigured': '{name} · 已设置',
   'settings.oth.ctxConfiguredReported': '{name} · 已设置 / 最近 {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · 待重启生效',
   'settings.oth.ctxDefaultReported': '默认 · 最近 {name}',
   'settings.oth.ctxReported': '最近一次请求由宿主报告为 {name}。',
   'settings.oth.ctxMixed': '各推理档设置不同',
@@ -791,9 +1565,95 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.resetConfirmBtn': '再次点击确认重置',
   'settings.oth.resettingBtn': '重置中…',
   'settings.oth.resetAllDone': '已恢复全部默认设置',
+
+  // Structured Live Activity Actions
+  'live.act.run_command': '执行命令',
+  'live.act.read_file': '读取文件',
+  'live.act.edit_file': '修改文件',
+  'live.act.write_file': '写入文件',
+  'live.act.grep_search': '搜索代码',
+  'live.act.find_file': '查找文件',
+  'live.act.read_url': '读取网页',
+  'live.act.search_web': '网页搜索',
+  'live.act.invoke_subagent': '调用子代理',
+  'live.act.send_message': '通信子代理',
+  'live.act.manage_subagents': '管理子代理',
+  'live.act.manage_task': '后台任务',
+  'live.act.schedule': '定时任务',
+  'live.act.ask_question': '等待用户选择',
+  'live.act.search_marketplace': '查询插件',
+  'live.act.mcp_tool': '调用 MCP',
+  'live.act.tool_call': '调用工具',
+  'live.act.thinking': '推理中',
+  'live.act.compacting': '上下文压缩',
+  'live.act.responding': '正在输出回复',
+  'live.act.waiting_subagent': '等待子代理',
+  'live.act.starting': '启动中',
+  'live.act.done': '已完成',
+  'live.act.awaitingApproval': '等待确认 · {label}',
+  'live.act.compactionResuming': '已完成压缩，正在恢复推理',
+
+  // SVG Charts (SessionStepCharts & TrendAreaChart)
+  'chart.step.empty': '当前范围暂无可绘制的调用步骤',
+  'chart.step.excluded': '未纳入',
+  'chart.step.zeroSteps': '0 步',
+  'chart.step.stepAdd': '本步 +{tokens}',
+  'chart.step.ioSplit': '入 {inTok} · 缓 {cacheTok} · 出 {outTok}',
+  'chart.step.cacheShort': '缓存 {pct}%',
+  'chart.step.compactionCheckpoint': '上下文自动压缩检查点',
+  'chart.step.cacheHitOut': '缓存命中 {pct}% · 输出 +{outTok}',
+  'chart.step.ttftShort': '首字 {sec}s',
+  'chart.step.outAndCtx': '输出 {outTok} · 上下文 {ctxTok}',
+  'chart.step.compactionStep': '上下文压缩步',
+  'chart.step.noSpeedSample': '无测速样本',
+  'chart.step.ctxAndCache': '上下文 {ctxTok} · 缓存 {pct}%',
+  'chart.step.noTtftSample': '无首字计时样本',
+  'chart.step.cumCost': '累计 {cost}',
+  'chart.step.cacheAndStepTok': '缓存 {pct}% · 本步 {tokens}',
+  'chart.step.noSamples': '无样本',
+  'chart.step.peakShort': '峰 {val}',
+  'chart.step.peakPill': '峰值 {tag} · {val}',
+  'chart.step.stepsCount': '{count}步',
+  'chart.step.multiPrefix': '{count} 模型 · ',
+  'chart.step.sumTokens': '{prefix}累计 {tokens}',
+  'chart.step.peakTokens': '{prefix}峰值 {tokens}',
+  'chart.step.currentCtx': '当前 {tokens}',
+  'chart.step.meanTps': '{prefix}均值 {val} tok/s',
+  'chart.step.meanSec': '{prefix}均值 {val}s',
+  'chart.step.noValidSamples': '暂无有效样本',
+  'chart.step.sumCost': '{prefix}累计 {cost}',
+  'chart.fit.empty': '该模型暂无有效拟合样本',
+  'chart.fit.loess': 'LOESS 拟合',
+  'chart.fit.olsLinear': 'OLS 线性',
+  'chart.fit.olsReg': 'OLS 回归',
+  'chart.fit.observed': '观测值',
+  'chart.fit.tipFit': '拟合 {val}',
+  'chart.fit.tipObs': '观测 {val}',
+  'chart.fit.zeroSamples': '0 样本',
+  'chart.fit.peerMean': '{label} 均 {val}',
+  'chart.fit.peerCompare': '同图对比：{peers}',
+  'chart.fit.curvesCount': '{count} 条拟合线',
+  'chart.fit.multiBadge': '{steps}步 · {models} 模型对比',
+  'chart.fit.singleBadge': '{steps}步 · 均 {mean}',
+  'chart.fit.olsTitle': 'OLS: y = {slope}x + {intercept} · 样本标准差 SD = ±{sd}',
+  'chart.trend.hmMonthYear': '{yy}年{month}月',
+  'chart.trend.hmMonthOnly': '{month}月',
+  'chart.trend.wdayMon': '一',
+  'chart.trend.wdayWed': '三',
+  'chart.trend.wdayFri': '五',
+  'chart.trend.wdaySun': '日',
+  'chart.trend.hmAria': '每日用量热力格子图',
+  'chart.trend.hmLess': '少',
+  'chart.trend.hmMore': '多',
+  'chart.trend.hmActivePeak': '活跃 {active}/{total} 天 · 峰值 {label} · {tokens}',
+  'chart.trend.hmActiveZero': '活跃 0/{total} 天',
+  'chart.trend.peakPill': '峰值 {label} · {tokens}',
 });
+return { I18N_MESSAGES_ZH_CN };
+})();
 
 // --- src/i18n/en-US.js ---
+const { I18N_MESSAGES_EN_US } = (() => {
 /**
  * @fileoverview English (en-US) dictionary for Antigravity Usage & Speed Monitor.
  * Zero emoji characters.
@@ -851,6 +1711,9 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'fmt.subAgent': 'Subagent',
   'fmt.subBadge': 'S{index}',
   'fmt.subBadgeShort': 'Sub',
+  'fmt.sideQuestion': 'Side Question',
+  'fmt.sideBadge': 'Q{index}',
+  'fmt.sideBadgeShort': 'Q',
   'fmt.selectedCount': '{count} {unit} selected',
   'fmt.selectedListTitle': 'Selected ({count}): {names}',
   'fmt.selectPlaceholder': 'Select',
@@ -975,6 +1838,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'live.currentSession': 'Current Session',
   'live.switchSessionTitle': 'Switch monitor to session: {title}',
   'live.thinking': 'Thinking',
+  'live.generating': 'Generating',
   'live.running': 'Running',
   'live.done': 'Done',
   'live.doneWithSteps': 'Done ({steps} steps)',
@@ -1227,6 +2091,21 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.mountDual': 'Dual Mount (Titlebar + Sidebar)',
   'settings.str.mountComposer': 'Composer Mount (Input Box + Sidebar)',
   'settings.str.mountSidebar': 'Sidebar Only',
+  'settings.bridge.restartTitle': 'Launch Flag Auto-Configured — Restart Once to Activate',
+  'settings.bridge.ctxRestartTitle': 'Launch Flag Auto-Configured — Restart Once for Context Override',
+  'settings.bridge.restartBody': 'Automatically added --remote-debugging-port=0 to your shortcuts and startup entries (future launches mount 100% automatically). Click below to close tray processes and relaunch now.',
+  'settings.bridge.noPortTitle': 'Local Debug Port Missing — Window Mount Inactive',
+  'settings.bridge.unreachableTitle': 'Local Debug Port Not Ready — Window Mount Inactive',
+  'settings.bridge.ctxTitle': 'Local Debug Port Inactive — Context Override Pending',
+  'settings.bridge.guideWin': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to auto-configure shortcuts, close tray background processes, and relaunch.',
+  'settings.bridge.guideMac': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to relaunch with the flag in one click, or run open -a "Antigravity" --args --remote-debugging-port=0.',
+  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to update your .desktop launcher and relaunch.',
+  'settings.bridge.relaunchBtn': 'Relaunch & Enable Mount',
+  'settings.bridge.relaunchingBtn': 'Relaunching Host...',
+  'settings.bridge.relaunchFailed': 'Auto-relaunch failed — quit from tray and retry',
+  'settings.bridge.dismissAria': 'Dismiss notice for now',
+  'settings.bridge.copyFlagBtn': 'Copy {cmd}',
+  'settings.bridge.copiedBtn': 'Copied to Clipboard',
   'settings.str.popoverWidthLabel': 'Popover Width',
   'settings.str.popoverWidthAuto': 'Auto Fit',
   'settings.str.popoverWidthCustom': 'Custom',
@@ -1295,6 +2174,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.ctxUnavailable': '{name} (currently unavailable)',
   'settings.oth.ctxConfigured': '{name} · Set',
   'settings.oth.ctxConfiguredReported': '{name} · Set / Last seen {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · Pending Restart',
   'settings.oth.ctxDefaultReported': 'Default · Last seen {name}',
   'settings.oth.ctxReported': 'The host reported {name} on the latest request.',
   'settings.oth.ctxMixed': 'Different limits by thinking level',
@@ -1315,9 +2195,95 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.resetConfirmBtn': 'Click Again to Confirm',
   'settings.oth.resettingBtn': 'Resetting…',
   'settings.oth.resetAllDone': 'All preferences restored to defaults',
+
+  // Structured Live Activity Actions
+  'live.act.run_command': 'Run Command',
+  'live.act.read_file': 'Read File',
+  'live.act.edit_file': 'Edit File',
+  'live.act.write_file': 'Write File',
+  'live.act.grep_search': 'Search Code',
+  'live.act.find_file': 'Find Files',
+  'live.act.read_url': 'Read Web Page',
+  'live.act.search_web': 'Search Web',
+  'live.act.invoke_subagent': 'Invoke Subagent',
+  'live.act.send_message': 'Message Subagent',
+  'live.act.manage_subagents': 'Manage Subagents',
+  'live.act.manage_task': 'Manage Task',
+  'live.act.schedule': 'Schedule Task',
+  'live.act.ask_question': 'Waiting for User Choice',
+  'live.act.search_marketplace': 'Search Plugins',
+  'live.act.mcp_tool': 'Call MCP Tool',
+  'live.act.tool_call': 'Call Tool',
+  'live.act.thinking': 'Thinking',
+  'live.act.compacting': 'Compacting Context',
+  'live.act.responding': 'Responding',
+  'live.act.waiting_subagent': 'Waiting for Subagent',
+  'live.act.starting': 'Starting',
+  'live.act.done': 'Completed',
+  'live.act.awaitingApproval': 'Awaiting Approval · {label}',
+  'live.act.compactionResuming': 'Compaction finished, resuming reasoning',
+
+  // SVG Charts (SessionStepCharts & TrendAreaChart)
+  'chart.step.empty': 'No plottable steps in current scope',
+  'chart.step.excluded': 'Excluded',
+  'chart.step.zeroSteps': '0 steps',
+  'chart.step.stepAdd': 'Step +{tokens}',
+  'chart.step.ioSplit': 'In {inTok} · Cache {cacheTok} · Out {outTok}',
+  'chart.step.cacheShort': 'Cache {pct}%',
+  'chart.step.compactionCheckpoint': 'Auto-compaction checkpoint',
+  'chart.step.cacheHitOut': 'Cache hit {pct}% · Out +{outTok}',
+  'chart.step.ttftShort': 'TTFT {sec}s',
+  'chart.step.outAndCtx': 'Out {outTok} · Context {ctxTok}',
+  'chart.step.compactionStep': 'Compaction step',
+  'chart.step.noSpeedSample': 'No speed sample',
+  'chart.step.ctxAndCache': 'Context {ctxTok} · Cache {pct}%',
+  'chart.step.noTtftSample': 'No TTFT sample',
+  'chart.step.cumCost': 'Total {cost}',
+  'chart.step.cacheAndStepTok': 'Cache {pct}% · Step {tokens}',
+  'chart.step.noSamples': 'No samples',
+  'chart.step.peakShort': 'Peak {val}',
+  'chart.step.peakPill': 'Peak {tag} · {val}',
+  'chart.step.stepsCount': '{count} steps',
+  'chart.step.multiPrefix': '{count} models · ',
+  'chart.step.sumTokens': '{prefix}Total {tokens}',
+  'chart.step.peakTokens': '{prefix}Peak {tokens}',
+  'chart.step.currentCtx': 'Current {tokens}',
+  'chart.step.meanTps': '{prefix}Avg {val} tok/s',
+  'chart.step.meanSec': '{prefix}Avg {val}s',
+  'chart.step.noValidSamples': 'No valid samples',
+  'chart.step.sumCost': '{prefix}Total {cost}',
+  'chart.fit.empty': 'No valid regression samples for this model',
+  'chart.fit.loess': 'LOESS Fit',
+  'chart.fit.olsLinear': 'OLS Linear',
+  'chart.fit.olsReg': 'OLS Reg',
+  'chart.fit.observed': 'Observed',
+  'chart.fit.tipFit': 'Fit {val}',
+  'chart.fit.tipObs': 'Obs {val}',
+  'chart.fit.zeroSamples': '0 samples',
+  'chart.fit.peerMean': '{label} Avg {val}',
+  'chart.fit.peerCompare': 'Compare: {peers}',
+  'chart.fit.curvesCount': '{count} fit curves',
+  'chart.fit.multiBadge': '{steps} steps · {models} models',
+  'chart.fit.singleBadge': '{steps} steps · Avg {mean}',
+  'chart.fit.olsTitle': 'OLS: y = {slope}x + {intercept} · Sample SD = ±{sd}',
+  'chart.trend.hmMonthYear': "{month}/{yy}",
+  'chart.trend.hmMonthOnly': 'M{month}',
+  'chart.trend.wdayMon': 'M',
+  'chart.trend.wdayWed': 'W',
+  'chart.trend.wdayFri': 'F',
+  'chart.trend.wdaySun': 'S',
+  'chart.trend.hmAria': 'Daily usage heatmap',
+  'chart.trend.hmLess': 'Less',
+  'chart.trend.hmMore': 'More',
+  'chart.trend.hmActivePeak': 'Active {active}/{total}d · Peak {label} · {tokens}',
+  'chart.trend.hmActiveZero': 'Active 0/{total}d',
+  'chart.trend.peakPill': 'Peak {label} · {tokens}',
 });
+return { I18N_MESSAGES_EN_US };
+})();
 
 // --- src/i18n/index.js ---
+const { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t } = (() => {
 /**
  * @fileoverview Reactive lightweight i18n engine (`zh-CN` / `en-US` / `auto`).
  * Default language is `'zh-CN'` so out-of-the-box UI matches existing behavior 100%.
@@ -1330,11 +2296,7 @@ const I18N_DICTIONARIES = Object.freeze({
 });
 
 function normalizeI18nLanguage(raw) {
-  const val = String(raw ?? '').trim();
-  if (val === 'auto') return 'auto';
-  if (/^en(?:-|$)/i.test(val)) return 'en-US';
-  if (/^zh(?:-|$)/i.test(val)) return 'zh-CN';
-  return 'zh-CN';
+  return normalizeLanguageSetting(raw);
 }
 
 function detectHostSystemLocale() {
@@ -1387,8 +2349,11 @@ function t(key, vars = undefined) {
     vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : ''
   );
 }
+return { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t };
+})();
 
 // --- src/core/appearance.js ---
+const { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, applyAppearanceToRoot } = (() => {
 /**
  * @fileoverview Theme accent palette & panel font-scale appearance engine.
  * Applies CSS custom properties cleanly to Sidebar `:root` and Shadow DOM hosts,
@@ -1408,8 +2373,15 @@ const THEME_ACCENT_PRESETS = Object.freeze([
 const FONT_SCALE_FACTORS = Object.freeze({
   sm: 0.92,
   md: 1,
-  lg: 1.08,
-  xl: 1.15,
+  lg: 1.14,
+  xl: 1.28,
+});
+
+const PANEL_SCALE_FACTORS = Object.freeze({
+  sm: 1,
+  md: 1,
+  lg: 1.09,
+  xl: 1.18,
 });
 
 function normalizeClientThemeAccent(raw) {
@@ -1461,17 +2433,23 @@ function applyAppearanceToRoot(targetEl, settings, { includeFontScale = true } =
   if (includeFontScale) {
     const scaleKey = normalizeClientFontScale(settings?.fontScale);
     const factor = FONT_SCALE_FACTORS[scaleKey] ?? 1;
+    const panelFactor = PANEL_SCALE_FACTORS[scaleKey] ?? 1;
     setOrClearStyleVar(targetEl, '--ui-font-scale', factor === 1 ? '' : String(factor));
+    setOrClearStyleVar(targetEl, '--ui-panel-scale', panelFactor === 1 ? '' : String(panelFactor));
     targetEl.setAttribute?.('data-font-scale', scaleKey);
   } else {
     setOrClearStyleVar(targetEl, '--ui-font-scale', '');
+    setOrClearStyleVar(targetEl, '--ui-panel-scale', '');
     if (typeof targetEl.removeAttribute === 'function') {
       targetEl.removeAttribute('data-font-scale');
     }
   }
 }
+return { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, applyAppearanceToRoot };
+})();
 
 // --- src/core/domPatch.js ---
+const { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList } = (() => {
 /**
  * @fileoverview Incremental DOM patching utilities and keyed list reconciler.
  * Prevents full innerHTML replacements and preserves active DOM element state.
@@ -1671,8 +2649,11 @@ function patchKeyedList(container, items, { keyFn, sigFn, createRow, updateRow }
     }
   }
 }
+return { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList };
+})();
 
 // --- src/core/component.js ---
+const { defineComponent } = (() => {
 /**
  * @fileoverview Vue-inspired lightweight component kernel supporting
  * props, custom v-model value transmission (emit('update:modelValue', val)),
@@ -1747,8 +2728,11 @@ function defineComponent({ name, setup }) {
     };
   };
 }
+return { defineComponent };
+})();
 
 // --- src/core/formatters.js ---
+const { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatLiveActivityLabel, formatLiveActivityDetail } = (() => {
 /**
  * @fileoverview Pure formatting utilities for speed metrics, token counts,
  * USD estimates, countdown timers, and custom datetime displays.
@@ -1771,53 +2755,24 @@ function formatCachePct(value) {
 }
 
 function getSpeedToneClass(tokPerSec) {
-  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
-    return 'tone-muted';
-  }
-  const v = Number(tokPerSec);
-  if (v >= 60) return 'tone-good';
-  if (v >= 35) return 'tone-info';
-  if (v >= 20) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifySpeedTier(tokPerSec)}`;
 }
 
 function getCacheToneClass(cacheHitPct, promptTokens = null) {
-  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
-    return 'tone-muted';
-  }
-  const v = Number(cacheHitPct);
-  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
-    return 'tone-muted';
-  }
-  if (v >= 85) return 'tone-good';
-  if (v >= 65) return 'tone-info';
-  if (v >= 30) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifyCacheTier(cacheHitPct, promptTokens)}`;
 }
 
 function getStepCostToneClass(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
-  const v = Number(costUsd);
-  if (v >= 0.3) return 'tone-danger';
-  if (v >= 0.15) return 'tone-warn';
-  return '';
+  const tier = classifyStepCostTier(costUsd);
+  return tier ? `tone-${tier}` : '';
 }
 
 function getTtftToneClass(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '';
-  const v = Number(ttftSec);
-  if (v >= 30) return 'tone-danger';
-  if (v >= 18) return 'tone-warn';
-  return '';
+  const tier = classifyTtftTier(ttftSec);
+  return tier === 'warn' || tier === 'danger' ? `tone-${tier}` : '';
 }
 
-function formatTokens(num) {
-  const n = Number(num || 0);
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(Math.round(n));
-}
+const formatTokens = formatCompactTokens;
 
 function formatTokensPrecise(num) {
   const n = Number(num || 0);
@@ -1922,23 +2877,6 @@ function formatElapsedSec(seconds) {
   return `${h}h ${remM}m`;
 }
 
-/**
- * 归一化普通模型显示模式（`'short'` 精简代号 | `'upstream_compact'` 去厂商前缀原始 ID | `'upstream'` 完整原始 ID）。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyShowUpstream]
- * @returns {'short'|'upstream_compact'|'upstream'}
- */
-function normalizeModelDisplayMode(mode, legacyShowUpstream) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-    return 'upstream_compact';
-  }
-  if (m === 'short') return 'short';
-  if (legacyShowUpstream === true) return 'upstream';
-  return 'short';
-}
 
 /**
  * 隐藏原始模型 ID 开头的 `gemini-`、`claude-`、`gpt-` 厂商前缀以节省单行表格空间（确保剥离后非空）。
@@ -1958,15 +2896,7 @@ function stripCompactionMarker(rawText) {
     .trim();
 }
 
-/**
- * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
- *
- * @param {unknown} mode
- * @returns {'compact'|'full'}
- */
-function normalizeOrchestratorIdDisplayMode(mode) {
-  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-}
+const normalizeOrchestratorIdDisplayMode = normalizeOrchestratorIdMode;
 
 /**
  * 统一解析步骤、会话摘要或模型汇总行面向用户的模型显示文本与悬停提示。
@@ -2009,23 +2939,35 @@ function resolveModelDisplayInfo(target, settings = {}, options = {}) {
   }
 
   const shortText = String(
-    target.activeModelShort ?? target.modelShort ?? target.shortName ?? ''
+    target.activeBaseModelShort ??
+      target.baseModelShort ??
+      target.activeModelShort ??
+      target.modelShort ??
+      target.shortName ??
+      ''
   ).trim();
   const labelText = String(
-    target.activeModelLabel ?? target.modelLabel ?? target.label ?? ''
+    target.activeBaseModelLabel ??
+      target.baseModelLabel ??
+      target.activeModelLabel ??
+      target.modelLabel ??
+      target.label ??
+      ''
   ).trim();
   const upstreamText = String(
-    target.activeModelUpstream ?? target.modelUpstream ?? target.upstreamName ?? ''
+    target.baseModelUpstream ??
+      target.activeModelUpstream ??
+      target.modelUpstream ??
+      target.upstreamName ??
+      ''
   ).trim();
+  const rawCompactionText = `${target.activeModelShort ?? target.modelShort ?? ''} ${target.activeModelLabel ?? target.modelLabel ?? ''} ${target.activeModelUpstream ?? target.modelUpstream ?? ''}`;
   const responseText = String(target.responseModel ?? '').trim();
   const modelKeyText = String(target.modelKey ?? '').trim();
 
   const isCompaction =
     Boolean(target.isCompactionStep) ||
-    /·(?:压缩|compact)\s*$/iu.test(shortText) ||
-    /·(?:压缩|compact)\s*$/iu.test(upstreamText) ||
-    /·(?:压缩|compact)\s*$/iu.test(labelText) ||
-    /\[自动压缩\]\s*$/u.test(labelText);
+    /·(?:压缩|compact)(?=\s|$)|\[自动压缩\]/iu.test(rawCompactionText);
 
   const compactionSuffix = isCompaction ? t('fmt.compactionSuffix') : '';
 
@@ -2263,12 +3205,144 @@ function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
   });
 }
 
+/**
+ * 根据代理索引返回对应的微边框语义徽章样式类名。
+ *
+ * @param {number} [index=0]
+ * @param {boolean} [isMain=false]
+ * @returns {string}
+ */
+function getAgentBadgeClass(index = 0, isMain = false) {
+  if (isMain || index <= 0) return 'badge-main';
+  const slot = ((index - 1) % 3) + 1;
+  return `badge-sub-${slot}`;
+}
+
+/**
+ * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理或旁路提问的紧凑徽章文本（零正则反拆中文）。
+ *
+ * @param {object|null|undefined} agent
+ * @returns {string}
+ */
+function formatAgentBadgeText(agent) {
+  if (!agent) return t('fmt.mainBadge');
+  const kind =
+    agent.agentKind ||
+    (agent.isMain
+      ? 'main'
+      : agent.isSideQuestion || agent.typeName === 'side_question'
+        ? 'side_question'
+        : 'subagent');
+  if (kind === 'all') return t('header.scopeAllShort');
+  if (kind === 'main') return t('fmt.mainBadge');
+  if (kind === 'side_question') {
+    const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
+    if (ord > 0) return t('fmt.sideBadge', { index: ord });
+    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    return t('fmt.sideBadgeShort');
+  }
+  const ord = Number(agent.agentOrdinal || agent.index || 0);
+  if (ord > 0) return t('fmt.subBadge', { index: ord });
+  if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+  return t('fmt.subBadgeShort');
+}
+
+/**
+ * 基于结构化 `agentKind` / `agentOrdinal` / `customRole` 格式化代理完整显示名称（零正则反拆中文）。
+ *
+ * @param {object|null|undefined} agent
+ * @returns {string}
+ */
+function formatAgentLabel(agent) {
+  if (!agent) return t('fmt.mainAgent');
+  const kind =
+    agent.agentKind ||
+    (agent.isMain
+      ? 'main'
+      : agent.isSideQuestion || agent.typeName === 'side_question'
+        ? 'side_question'
+        : 'subagent');
+  if (kind === 'all') return t('header.scopeAll');
+  if (kind === 'main') return t('fmt.mainAgent');
+
+  const rawCustom =
+    agent.customRole !== undefined
+      ? String(agent.customRole || '').trim()
+      : String(agent.role || '').trim();
+  if (kind === 'side_question') {
+    const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
+    const baseLabel = ord > 0 ? `${t('fmt.sideQuestion')} #${ord}` : t('fmt.sideQuestion');
+    const isGeneric =
+      !rawCustom ||
+      rawCustom === baseLabel ||
+      rawCustom === agent.shortLabel ||
+      rawCustom === t('fmt.sideQuestion') ||
+      rawCustom === 'Side Question' ||
+      rawCustom === 'side_question';
+    return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+  }
+
+  const ord = Number(agent.agentOrdinal || agent.index || 0);
+  const baseLabel = ord > 0 ? `${t('fmt.subAgent')} #${ord}` : t('fmt.subAgent');
+  const isGeneric =
+    !rawCustom ||
+    rawCustom === baseLabel ||
+    rawCustom === agent.shortLabel ||
+    rawCustom === t('fmt.subAgent') ||
+    rawCustom === 'Subagent';
+  return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+}
+
+/**
+ * 基于后端结构化 `actionKey` + `waitingApproval` 渲染实时动作短标题（兼容自定义 `label` 回退）。
+ *
+ * @param {object|null|undefined} act
+ * @param {string} [fallbackKey='live.thinking']
+ * @returns {string}
+ */
+function formatLiveActivityLabel(act, fallbackKey = 'live.thinking') {
+  if (!act || typeof act !== 'object') return t(fallbackKey);
+  let baseLabel = '';
+  if (act.actionKey) {
+    const i18nKey = `live.act.${act.actionKey}`;
+    const translated = t(i18nKey);
+    if (translated && translated !== i18nKey) {
+      baseLabel = translated;
+    }
+  }
+  if (!baseLabel) {
+    baseLabel = String(act.label || '').trim() || t(fallbackKey);
+  }
+  if (act.waitingApproval) {
+    return t('live.act.awaitingApproval', { label: baseLabel });
+  }
+  return baseLabel;
+}
+
+/**
+ * 基于后端结构化 `detailKey` 渲染实时动作补充说明（兼容自由文本 `detail`）。
+ *
+ * @param {object|null|undefined} act
+ * @returns {string}
+ */
+function formatLiveActivityDetail(act) {
+  if (!act || typeof act !== 'object') return '';
+  if (act.detailKey === 'compaction_resuming') {
+    return t('live.act.compactionResuming');
+  }
+  return String(act.detail || '');
+}
+return { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatLiveActivityLabel, formatLiveActivityDetail };
+})();
+
 // --- src/core/httpClient.js ---
+const { getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi } = (() => {
 /**
  * @fileoverview Async HTTP client with AbortController cancellation for stale
  * polling requests, concurrent GET deduplication, and dual-mode transport
  * (Sidecar Webview `window.sidecar.fetch` + Main Window Loopback Bridge).
  */
+
 
 const inFlightGets = new Map();
 const activeControllers = new Map();
@@ -2279,8 +3353,7 @@ const activeControllers = new Map();
  * @returns {{ port: number, token: string, bundleVersion?: string, stylesCss?: string } | null}
  */
 function getWindowBridgeConfig() {
-  if (typeof window === 'undefined') return null;
-  const br = window.__AGUsageMonitorBridge;
+  const br = readInjectedWindowBridge();
   const port = Number(br?.port || 0);
   if (br && Number.isInteger(port) && port > 0 && typeof br.token === 'string' && br.token) {
     return br;
@@ -2507,19 +3580,15 @@ async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTi
   }
   return promise;
 }
+return { getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi };
+})();
 
 // --- src/store/uiStore.js ---
+const { getViewTabs, uiStore, getVisibleMonitorView } = (() => {
 /**
  * @fileoverview UI navigation and view state store.
  */
 
-
-const VIEW_TABS = Object.freeze([
-  { value: 'overview', label: '实时监控', icon: 'pulse' },
-  { value: 'consumption', label: '用量统计', icon: 'chart-bar' },
-  { value: 'steps', label: '调用明细', icon: 'table' },
-  { value: 'settings', label: '偏好设置', icon: 'sliders' },
-]);
 
 function getViewTabs() {
   return [
@@ -2543,8 +3612,11 @@ const uiStore = createReactiveStore({
 function getVisibleMonitorView(state = uiStore.getState()) {
   return state.monitorVisible ? state.activeView : null;
 }
+return { getViewTabs, uiStore, getVisibleMonitorView };
+})();
 
 // --- src/store/telemetryStore.js ---
+const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -2568,7 +3640,7 @@ function extractHostRouteCascadeId() {
   if (m && CASCADE_UUID_RE.test(m[1])) {
     return m[1];
   }
-  const extBridgeRouteId = String(window.__AGUsageMonitorBridge?.hostRouteCascadeId || '').trim();
+  const extBridgeRouteId = String(readInjectedWindowBridge()?.[WINDOW_BRIDGE_ROUTE_KEY] || '').trim();
   if (extBridgeRouteId && CASCADE_UUID_RE.test(extBridgeRouteId)) {
     return extBridgeRouteId;
   }
@@ -2650,308 +3722,33 @@ let loopActive = false;
 let loopIntervalMs = 2000;
 let loopTickFn = null;
 
-const CLIENT_TOPBAR_SLOT_KEYS = Object.freeze([
-  'context',
-  'tps',
-  'ttft',
-  'avg_tps',
-  'cost',
-  'session_cost',
-  'cache_hit',
-  'session_tokens',
-  'quota_auto',
-  'gemini_5h',
-  'gemini_weekly',
-  'claude_5h',
-  'claude_weekly',
-]);
+const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
+const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
+const CLIENT_OVERVIEW_MODULE_KEYS = OVERVIEW_MODULE_KEYS;
+const DEFAULT_CLIENT_OVERVIEW_MODULES = DEFAULT_OVERVIEW_MODULES;
+const DEFAULT_CLIENT_HOVER_MODULES = DEFAULT_HOVER_MODULES;
+const CLIENT_OVERVIEW_METRIC_KEYS = OVERVIEW_METRIC_KEYS;
+const DEFAULT_CLIENT_OVERVIEW_METRICS = DEFAULT_OVERVIEW_METRICS;
+const CLIENT_STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
+const DEFAULT_CLIENT_STEP_COLUMNS = DEFAULT_STEP_TABLE_COLUMNS;
+const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+const MIN_CLIENT_POPOVER_WIDTH = MIN_POPOVER_WIDTH;
+const MAX_CLIENT_POPOVER_WIDTH = MAX_POPOVER_WIDTH;
+const DEFAULT_CLIENT_POPOVER_WIDTH = DEFAULT_POPOVER_WIDTH;
 
-const DEFAULT_CLIENT_TOPBAR_SLOTS = Object.freeze(['tps', 'ttft', 'context']);
-
-const CLIENT_OVERVIEW_MODULE_KEYS = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
-
-const DEFAULT_CLIENT_OVERVIEW_MODULES = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
-
-const DEFAULT_CLIENT_HOVER_MODULES = Object.freeze(['metrics', 'context', 'quotas']);
-
-const CLIENT_OVERVIEW_METRIC_KEYS = Object.freeze([
-  'tps',
-  'ttft',
-  'avg_tps',
-  'step_cost',
-  'session_cost',
-  'cache_hit',
-  'session_tokens',
-  'context_usage',
-  'quota_tightest',
-]);
-
-const DEFAULT_CLIENT_OVERVIEW_METRICS = Object.freeze([
-  'tps',
-  'ttft',
-  'avg_tps',
-  'step_cost',
-]);
-
-const CLIENT_STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'time',
-  'model',
-  'tps',
-  'ttft',
-  'duration',
-  'tokens_combo',
-  'tokens_io_cache',
-  'tokens_custom',
-  'input_tokens',
-  'cache_tokens',
-  'output_tokens',
-  'cache',
-  'cost',
-]);
-
-const DEFAULT_CLIENT_STEP_COLUMNS = Object.freeze([
-  'step',
-  'model',
-  'tps',
-  'ttft',
-  'tokens_combo',
-  'cache',
-  'cost',
-]);
-
-const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
-
-const CLIENT_STEP_TOKEN_ALIASES = Object.freeze({
-  context: 'context',
-  ctx: 'context',
-  '上下文': 'context',
-  in: 'in',
-  new: 'in',
-  input: 'in',
-  '输入': 'in',
-  '新输入': 'in',
-  out: 'out',
-  output: 'out',
-  '输出': 'out',
-  '总输出': 'out',
-  cache: 'cache',
-  cached: 'cache',
-  cache_read: 'cache',
-  cacheread: 'cache',
-  '缓存': 'cache',
-  '缓存读': 'cache',
-  think: 'think',
-  thinking: 'think',
-  '思考': 'think',
-  reply: 'reply',
-  body: 'reply',
-  resp: 'reply',
-  response: 'reply',
-  text: 'reply',
-  '正文': 'reply',
-  '回复': 'reply',
-  total: 'total',
-  all: 'total',
-  sum: 'total',
-  '总计': 'total',
-  '总token': 'total',
-});
-
-function parseClientStepTokenComboSegments(raw) {
-  const str = String(raw ?? '').trim();
-  const out = [];
-  const seen = new Set();
-  if (str) {
-    for (const part of str.split(/[:/,|]+/)) {
-      const key = part.trim().toLowerCase();
-      if (!key) continue;
-      const mapped = Object.prototype.hasOwnProperty.call(CLIENT_STEP_TOKEN_ALIASES, key)
-        ? CLIENT_STEP_TOKEN_ALIASES[key]
-        : null;
-      if (!mapped || seen.has(mapped)) continue;
-      seen.add(mapped);
-      out.push(mapped);
-      if (out.length >= 4) break;
-    }
-  }
-  return out.length > 0 ? out : ['context', 'in', 'cache'];
-}
-
-function normalizeClientStepTokenComboFormat(raw) {
-  return parseClientStepTokenComboSegments(raw).join(':');
-}
-
-const MIN_CLIENT_POPOVER_WIDTH = 440;
-const MAX_CLIENT_POPOVER_WIDTH = 1080;
-const DEFAULT_CLIENT_POPOVER_WIDTH = 580;
-
-function normalizeClientPopoverWidthMode(mode) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
-}
-
-function normalizeClientPopoverWidth(width) {
-  const num = Number(width);
-  if (!Number.isFinite(num) || num <= 0) return DEFAULT_CLIENT_POPOVER_WIDTH;
-  return Math.max(MIN_CLIENT_POPOVER_WIDTH, Math.min(MAX_CLIENT_POPOVER_WIDTH, Math.round(num)));
-}
-
-function normalizeClientModelDisplayMode(mode, legacyShowUpstream) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-    return 'upstream_compact';
-  }
-  if (m === 'short') return 'short';
-  if (legacyShowUpstream === true) return 'upstream';
-  return 'short';
-}
-
-function normalizeClientOrderedList(raw, { allowedKeys, defaultItems, minLen, maxLen }) {
-  if (!Array.isArray(raw)) {
-    return [...defaultItems];
-  }
-  const allowedSet = new Set(allowedKeys);
-  const seen = new Set();
-  const out = [];
-  for (const item of raw) {
-    const key = String(item ?? '').trim();
-    if (!key || key === 'none' || !allowedSet.has(key) || seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-    if (out.length >= maxLen) break;
-  }
-  if (out.length < minLen) {
-    for (const fallbackKey of [...defaultItems, ...allowedKeys]) {
-      if (!seen.has(fallbackKey) && allowedSet.has(fallbackKey)) {
-        seen.add(fallbackKey);
-        out.push(fallbackKey);
-        if (out.length >= minLen) break;
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * 归一化前端顶栏胶囊动态槽位配置数组（支持 1..5 项不重复指标，兼容迁移旧版 `'none'` 占位）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientTopbarSlots(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_TOPBAR_SLOT_KEYS,
-    defaultItems: DEFAULT_CLIENT_TOPBAR_SLOTS,
-    minLen: 1,
-    maxLen: 5,
-  });
-}
-
-/**
- * 归一化鼠标悬浮速览窗展示模块列表（支持 0..4 项，`0` 项代表关闭悬浮窗）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientHoverModules(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
-    defaultItems: DEFAULT_CLIENT_HOVER_MODULES,
-    minLen: 0,
-    maxLen: 4,
-  });
-}
-
-/**
- * 归一化实时监控视图展示模块列表（支持 1..4 项）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientOverviewModules(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
-    defaultItems: DEFAULT_CLIENT_OVERVIEW_MODULES,
-    minLen: 1,
-    maxLen: 4,
-  });
-}
-
-/**
- * 归一化实时监控第一行指标矩阵配置（支持 1..4 项）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientOverviewMetrics(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_METRIC_KEYS,
-    defaultItems: DEFAULT_CLIENT_OVERVIEW_METRICS,
-    minLen: 1,
-    maxLen: 4,
-  });
-}
-
-/**
- * 归一化调用明细「按步查看」显示列配置（支持 2..12 列）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientStepColumns(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_STEP_COLUMN_KEYS,
-    defaultItems: DEFAULT_CLIENT_STEP_COLUMNS,
-    minLen: 2,
-    maxLen: CLIENT_STEP_COLUMN_KEYS.length,
-  });
-}
-
-/**
- * 归一化前端插件更新策略（`'off'` | `'manual'` | `'auto'`），兼容旧版布尔字段。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyAutoUpdate]
- * @returns {'off'|'manual'|'auto'}
- */
-function normalizeClientUpdateMode(mode, legacyAutoUpdate) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'off' || m === 'manual' || m === 'auto') return m;
-  if (legacyAutoUpdate === true) return 'auto';
-  return 'manual';
-}
-
-function normalizeClientOrchestratorIdMode(mode) {
-  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-}
-
-/**
- * 归一化前端面板挂载方式（`'dual'` | `'composer'` | `'sidebar'`），兼容旧版 `enableWindowOverlay` 布尔字段。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyEnableOverlay]
- * @returns {'dual'|'composer'|'sidebar'}
- */
-function normalizeClientWindowMountMode(mode, legacyEnableOverlay) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'composer' || m === 'input') return 'composer';
-  if (m === 'sidebar' || m === 'off') return 'sidebar';
-  if (m === 'dual' || m === 'topbar') return 'dual';
-  if (legacyEnableOverlay === false) return 'sidebar';
-  return 'dual';
-}
+const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
+const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
+const normalizeClientPopoverWidthMode = normalizePopoverWidthMode;
+const normalizeClientPopoverWidth = normalizePopoverWidth;
+const normalizeClientModelDisplayMode = normalizeModelDisplayMode;
+const normalizeClientTopbarSlots = normalizeTopbarCapsuleSlots;
+const normalizeClientHoverModules = normalizeHoverModules;
+const normalizeClientOverviewModules = normalizeOverviewModules;
+const normalizeClientOverviewMetrics = normalizeOverviewMetrics;
+const normalizeClientStepColumns = normalizeStepTableColumns;
+const normalizeClientUpdateMode = normalizePluginUpdateMode;
+const normalizeClientOrchestratorIdMode = normalizeOrchestratorIdMode;
+const normalizeClientWindowMountMode = normalizeWindowMountMode;
 
 function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
@@ -2966,15 +3763,6 @@ function isEquivalentTelemetry(prev, next) {
     }
     return true;
   };
-  const normMount = (mode, legacyEnableOverlay) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    if (m === 'composer' || m === 'input') return 'composer';
-    if (m === 'sidebar' || m === 'off') return 'sidebar';
-    if (m === 'dual' || m === 'topbar') return 'dual';
-    if (legacyEnableOverlay === false) return 'sidebar';
-    return 'dual';
-  };
-
   // 1. 比对系统设置项（外观语言/主题/字号、模型显示策略、更新策略、挂载与结构布局配置）
   const pAct = prev.activeConversation;
   const nAct = next.activeConversation;
@@ -2984,6 +3772,7 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
   if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
   if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if ((prev.hostPlatform || '') !== (next.hostPlatform || '')) return false;
   if (Boolean(pSet?.contextWindowRiskAccepted) !== Boolean(nSet?.contextWindowRiskAccepted)) {
     return false;
   }
@@ -2993,51 +3782,29 @@ function isEquivalentTelemetry(prev, next) {
   ) {
     return false;
   }
-  const normModelMode = (mode, legacyShowUpstream) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-    if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-      return 'upstream_compact';
-    }
-    if (m === 'short') return 'short';
-    return legacyShowUpstream === true ? 'upstream' : 'short';
-  };
-  const normPopMode = (mode) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
-  };
-  const normPopW = (w) => {
-    const n = Number(w);
-    return Number.isFinite(n) && n > 0 ? Math.max(440, Math.min(1080, Math.round(n))) : 580;
-  };
   if (
-    normModelMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
-    normModelMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
+    normalizeModelDisplayMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
+    normalizeModelDisplayMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
   ) {
     return false;
   }
   if (pSet?.showUpstreamModel !== nSet?.showUpstreamModel) return false;
-  if (normPopMode(pSet?.popoverWidthMode) !== normPopMode(nSet?.popoverWidthMode)) {
+  if (normalizePopoverWidthMode(pSet?.popoverWidthMode) !== normalizePopoverWidthMode(nSet?.popoverWidthMode)) {
     return false;
   }
-  if (normPopW(pSet?.popoverWidth) !== normPopW(nSet?.popoverWidth)) {
+  if (normalizePopoverWidth(pSet?.popoverWidth) !== normalizePopoverWidth(nSet?.popoverWidth)) {
     return false;
   }
   if (
-    String(pSet?.stepTokenComboFormat ?? 'context:in:cache').trim() !==
-    String(nSet?.stepTokenComboFormat ?? 'context:in:cache').trim()
+    String(pSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim() !==
+    String(nSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim()
   ) {
     return false;
   }
-  const prevOrchIdMode =
-    String(pSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
-      ? 'full'
-      : 'compact';
-  const nextOrchIdMode =
-    String(nSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
-      ? 'full'
-      : 'compact';
-  if (prevOrchIdMode !== nextOrchIdMode) {
+  if (
+    normalizeOrchestratorIdMode(pSet?.orchestratorIdMode) !==
+    normalizeOrchestratorIdMode(nSet?.orchestratorIdMode)
+  ) {
     return false;
   }
   if (pSet?.weeklyLimitMode !== nSet?.weeklyLimitMode) return false;
@@ -3046,8 +3813,8 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.pluginUpdateMode ?? '') !== (nSet?.pluginUpdateMode ?? '')) return false;
   if (pSet?.autoUpdatePlugin !== nSet?.autoUpdatePlugin) return false;
   if (
-    normMount(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
-    normMount(nSet?.windowMountMode, nSet?.enableWindowOverlay)
+    normalizeClientWindowMountMode(pSet?.windowMountMode, pSet?.enableWindowOverlay) !==
+    normalizeClientWindowMountMode(nSet?.windowMountMode, nSet?.enableWindowOverlay)
   ) {
     return false;
   }
@@ -3073,7 +3840,19 @@ function isEquivalentTelemetry(prev, next) {
   if (!sameArr(pSet?.overviewMetrics, nSet?.overviewMetrics)) return false;
   if (!sameArr(pSet?.stepTableColumns, nSet?.stepTableColumns)) return false;
 
-  // 2. 比对云端状态
+  // 2. 比对云端状态与桥接健康度
+  const pWb = prev.windowBridge;
+  const nWb = next.windowBridge;
+  if (
+    (pWb?.state || '') !== (nWb?.state || '') ||
+    Boolean(pWb?.argvUpdatedThisBoot) !== Boolean(nWb?.argvUpdatedThisBoot) ||
+    Boolean(pWb?.argvConfigured) !== Boolean(nWb?.argvConfigured) ||
+    Boolean(pWb?.launcherConfigured) !== Boolean(nWb?.launcherConfigured) ||
+    Boolean(pWb?.canRelaunch) !== Boolean(nWb?.canRelaunch) ||
+    Number(pWb?.aliveCount || 0) !== Number(nWb?.aliveCount || 0)
+  ) {
+    return false;
+  }
   const pCloud = prev.cloudStatus;
   const nCloud = next.cloudStatus;
   if (
@@ -3615,12 +4394,6 @@ async function requestTelemetry(params, force) {
     consecutivePollFailures = 0;
 
     const latestSt = telemetryStore.getState();
-    const previousAccount = latestSt.telemetry?.account;
-    const nextAccount = payload?.account;
-    const accountChanged = previousAccount?.status === 'signedIn' &&
-      (nextAccount?.status === 'signedOut' || (nextAccount?.status === 'signedIn' &&
-        (previousAccount.email || previousAccount.name) !== (nextAccount.email || nextAccount.name)));
-    const accountPatch = accountChanged ? { selectedConversationId: '' } : {};
     if (force) {
       const elapsed = Date.now() - startMs;
       if (elapsed < 220) {
@@ -3631,7 +4404,6 @@ async function requestTelemetry(params, force) {
       }
       if (feedbackTimer) clearTimeout(feedbackTimer);
       telemetryStore.setState({
-        ...accountPatch,
         telemetry: payload,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: 'synced',
@@ -3644,7 +4416,6 @@ async function requestTelemetry(params, force) {
       const isSame = isEquivalentTelemetry(latestSt.telemetry, payload);
       const nextTelemetry = isSame ? latestSt.telemetry : payload;
       telemetryStore.setState({
-        ...accountPatch,
         telemetry: nextTelemetry,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
@@ -3680,9 +4451,7 @@ async function saveSettingsPatch(patch) {
     safePatch.fontScale = normalizeClientFontScale(safePatch.fontScale);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
-    const mode = safePatch.weeklyLimitMode;
-    safePatch.weeklyLimitMode =
-      mode === 'custom_tokens' || mode === 'custom_cost' ? mode : 'official';
+    safePatch.weeklyLimitMode = normalizeWeeklyLimitMode(safePatch.weeklyLimitMode);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'enableCliStatusLine')) {
     safePatch.enableCliStatusLine = Boolean(safePatch.enableCliStatusLine);
@@ -3822,6 +4591,18 @@ async function triggerCloudSync() {
   return res;
 }
 
+async function triggerBridgeHostRelaunch() {
+  try {
+    return await callSidecarApi('/api/bridge/relaunch', { method: 'POST', body: {} });
+  } catch {
+    // 兼容热更新后常驻父进程 main.mjs 尚未重注册新路由的场景，平滑回退至既有 POST /api/settings 通道转发至最新 Worker
+    return callSidecarApi('/api/settings', {
+      method: 'POST',
+      body: { __bridgeAction: 'relaunch' },
+    });
+  }
+}
+
 async function triggerPluginUpdate() {
   const res = await callSidecarApi('/api/plugin-update', { method: 'POST', body: {} });
   if (res?.ok && res?.restarting) {
@@ -3881,54 +4662,6 @@ function stopAsyncTelemetryLoop() {
   }
 }
 
-/**
- * 根据代理索引返回对应的微边框语义徽章样式类名。
- *
- * @param {number} [index=0]
- * @param {boolean} [isMain=false]
- * @returns {string}
- */
-function getAgentBadgeClass(index = 0, isMain = false) {
-  if (isMain || index <= 0) return 'badge-main';
-  const slot = ((index - 1) % 3) + 1;
-  return `badge-sub-${slot}`;
-}
-
-/**
- * 格式化主/子代理的紧凑短徽章文本（中文如 `主` / `子1`，英文如 `Main` / `S1`）。
- *
- * @param {object|null|undefined} agent
- * @returns {string}
- */
-function formatAgentBadgeText(agent) {
-  if (!isEnglishLocale()) {
-    if (!agent || agent.isMain) return agent?.badgeText || '主';
-    return agent.badgeText || `子${agent.index || ''}`;
-  }
-  if (!agent || agent.isMain) return t('fmt.mainBadge');
-  return agent.index ? t('fmt.subBadge', { index: agent.index }) : t('fmt.subBadgeShort');
-}
-
-/**
- * 格式化主/子代理的完整显示名称（如 `子代理 #1 · Codebase Researcher`）。
- *
- * @param {object|null|undefined} agent
- * @returns {string}
- */
-function formatAgentLabel(agent) {
-  if (!isEnglishLocale()) {
-    if (!agent) return '主代理';
-    if (agent.isMain) return agent.shortLabel || '主代理';
-    const rolePart = agent.role && agent.role !== '子代理' ? ` · ${agent.role}` : '';
-    return `${agent.shortLabel || '子代理'}${rolePart}`;
-  }
-  if (!agent || agent.isMain) return t('fmt.mainAgent');
-  const idx = Number(agent.index || 0);
-  const baseLabel = idx > 0 ? `${t('fmt.subAgent')} #${idx}` : t('fmt.subAgent');
-  const rolePart =
-    agent.role && agent.role !== '子代理' && agent.role !== 'Subagent' ? ` · ${agent.role}` : '';
-  return `${baseLabel}${rolePart}`;
-}
 
 /**
  * 解析当前选中的主/子代理作用域视图数据与独立上下文窗口检视目标。
@@ -3939,46 +4672,73 @@ function formatAgentLabel(agent) {
  * @param {string} [ctxInspectorAgentId='auto']
  * @param {boolean} [includeSteps=false] 是否组装调用明细所需的步骤列表
  */
+const scopedStepProjectionMemo = new WeakMap();
+
 function resolveScopedConversation(
   telemetry,
   selectedAgentScope = 'all',
   ctxInspectorAgentId = 'auto',
   includeSteps = false
 ) {
-  const active = telemetry?.activeConversation || {};
+  const rawActive = telemetry?.activeConversation;
+  const active = rawActive || {};
   const agents = Array.isArray(active.agents) && active.agents.length > 0 ? active.agents : [];
   const hasSubagents = Boolean(active.hasSubagents && agents.length > 1);
   const subagents = agents.filter((a) => !a.isMain);
-  const mainAgent = agents.find((a) => a.isMain) || active;
-  if (includeSteps && !Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
-    mainAgent.recentSteps = active.recentSteps;
-  }
-  const aggregated = active.aggregated || active;
-  if (includeSteps && hasSubagents && !Array.isArray(aggregated.recentSteps)) {
-    const combined = [];
-    for (const ag of agents) {
-      const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
-      for (const step of steps) combined.push(step);
+  let mainAgent = agents.find((a) => a.isMain) || active;
+  let aggregated = active.aggregated || active;
+  let resolvedAgents = agents;
+
+  if (includeSteps) {
+    let cached = rawActive && typeof rawActive === 'object' ? scopedStepProjectionMemo.get(rawActive) : null;
+    if (!cached) {
+      let nextMain = mainAgent;
+      let nextAgents = agents;
+      if (!Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
+        nextMain = { ...mainAgent, recentSteps: active.recentSteps };
+        if (agents.includes(mainAgent)) {
+          nextAgents = agents.map((ag) => (ag === mainAgent ? nextMain : ag));
+        }
+      }
+      let nextAgg = aggregated;
+      if (hasSubagents && !Array.isArray(aggregated.recentSteps)) {
+        const combined = [];
+        for (const ag of nextAgents) {
+          const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
+          for (const step of steps) combined.push(step);
+        }
+        combined.sort(
+          (a, b) =>
+            (b.createdAtMs || 0) - (a.createdAtMs || 0) ||
+            (b.agentIndex || 0) - (a.agentIndex || 0) ||
+            (b.stepIndex || 0) - (a.stepIndex || 0)
+        );
+        nextAgg = { ...aggregated, recentSteps: combined };
+      }
+      cached = { mainAgent: nextMain, aggregated: nextAgg, agents: nextAgents };
+      if (rawActive && typeof rawActive === 'object') {
+        scopedStepProjectionMemo.set(rawActive, cached);
+      }
     }
-    combined.sort(
-      (a, b) =>
-        (b.createdAtMs || 0) - (a.createdAtMs || 0) ||
-        (b.agentIndex || 0) - (a.agentIndex || 0) ||
-        (b.stepIndex || 0) - (a.stepIndex || 0)
-    );
-    aggregated.recentSteps = combined;
+    mainAgent = cached.mainAgent;
+    aggregated = cached.aggregated;
+    resolvedAgents = cached.agents;
   }
 
   if (!hasSubagents) {
+    const singleScoped =
+      includeSteps && !Array.isArray(active.recentSteps) && Array.isArray(mainAgent.recentSteps)
+        ? { ...active, recentSteps: mainAgent.recentSteps }
+        : active;
     return {
       hasSubagents: false,
       effectiveScope: 'main',
       effectiveCtxScope: 'main',
-      agents,
+      agents: resolvedAgents,
       subagents: [],
       mainAgent,
       aggregated,
-      scopedConv: active,
+      scopedConv: singleScoped,
       ctxAgent: mainAgent,
     };
   }
@@ -3994,13 +4754,13 @@ function resolveScopedConversation(
   const scopedConv =
     effectiveScope === 'all'
       ? aggregated
-      : agents.find((a) => a.agentId === effectiveScope) || mainAgent;
+      : resolvedAgents.find((a) => a.agentId === effectiveScope) || mainAgent;
 
   let ctxAgent = scopedConv;
   let effectiveCtxScope = effectiveScope;
   if (effectiveScope === 'all') {
     if (ctxInspectorAgentId && ctxInspectorAgentId !== 'auto') {
-      const matched = agents.find((a) => a.agentId === ctxInspectorAgentId);
+      const matched = resolvedAgents.find((a) => a.agentId === ctxInspectorAgentId);
       if (matched) {
         ctxAgent = matched;
         effectiveCtxScope = matched.agentId;
@@ -4012,8 +4772,8 @@ function resolveScopedConversation(
     }
     if (effectiveCtxScope === 'auto') {
       ctxAgent =
-        agents.find((a) => a.agentId === aggregated.activeAgentId) ||
-        agents.find((a) => a.isRunning) ||
+        resolvedAgents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
+        resolvedAgents.find((a) => !a.isSideQuestion && a.isRunning) ||
         mainAgent;
     }
   }
@@ -4022,7 +4782,7 @@ function resolveScopedConversation(
     hasSubagents: true,
     effectiveScope,
     effectiveCtxScope,
-    agents,
+    agents: resolvedAgents,
     subagents,
     mainAgent,
     aggregated,
@@ -4031,7 +4791,28 @@ function resolveScopedConversation(
   };
 }
 
+/**
+ * 判断宿主系统是否为 macOS (`darwin`)：优先读取后端遥测或双栖桥接注入的 `platform`，首帧缺省时回退 UA/平台标识。
+ *
+ * @param {Record<string, any>|null|undefined} telemetry
+ * @returns {boolean}
+ */
+function isMacHostPlatform(telemetry) {
+  const p = String(telemetry?.hostPlatform || readInjectedWindowBridge()?.platform || '')
+    .trim()
+    .toLowerCase();
+  if (p) return p === 'darwin';
+  if (typeof navigator !== 'undefined') {
+    const ua = String(navigator.platform || navigator.userAgent || '');
+    return /\b(?:mac|darwin)\b|macintosh|mac\s*os/i.test(ua);
+  }
+  return false;
+}
+return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform };
+})();
+
 // --- src/components/ui/TopLongPillNav.js ---
+const { TopLongPillNav } = (() => {
 /**
  * @fileoverview Top Long-Pill Navigation Bar (顶部唯一长药丸功能分割栏).
  * Splits the application into focused single-viewport views and animates
@@ -4121,12 +4902,14 @@ const TopLongPillNav = defineComponent({
         }
 
         patchText(entry.labelEl, item.label);
-        if (item.badge !== undefined && item.badge !== null && item.badge !== '') {
+        const hasBadge = item.badge !== undefined && item.badge !== null && item.badge !== '';
+        if (hasBadge) {
           patchAttr(entry.badgeEl, 'hidden', false);
           patchText(entry.badgeEl, `(${item.badge})`);
         } else {
           patchAttr(entry.badgeEl, 'hidden', true);
         }
+        patchAttr(entry.btn, 'title', hasBadge ? `${item.label} (${item.badge})` : item.label);
 
         const isActive = item.value === modelValue;
         patchClasses(entry.btn, { 'is-active': isActive });
@@ -4147,8 +4930,11 @@ const TopLongPillNav = defineComponent({
     };
   },
 });
+return { TopLongPillNav };
+})();
 
 // --- src/components/ui/CustomSelect.js ---
+const { CustomSelect } = (() => {
 /**
  * @fileoverview Bespoke CustomSelect dropdown component replacing native <select> / <option>.
  * Supports both single-select and multi-select (`multiple: true`) modes, with incremental
@@ -4473,8 +5259,11 @@ const CustomSelect = defineComponent({
     };
   },
 });
+return { CustomSelect };
+})();
 
 // --- src/components/ui/CustomNumberInput.js ---
+const { CustomNumberInput } = (() => {
 /**
  * @fileoverview Bespoke CustomNumberInput spinbutton & precision stepper.
  * Replaces native <input type="number"> with custom SVG step controls,
@@ -4601,8 +5390,11 @@ const CustomNumberInput = defineComponent({
     };
   },
 });
+return { CustomNumberInput };
+})();
 
 // --- src/components/ui/CustomDateTimePicker.js ---
+const { CustomDateTimePicker } = (() => {
 /**
  * @fileoverview Bespoke CustomDateTimePicker calendar matrix and hour/minute stepper.
  * Replaces native <input type="datetime-local"> and emits Unix epoch ms.
@@ -4871,8 +5663,11 @@ const CustomDateTimePicker = defineComponent({
     };
   },
 });
+return { CustomDateTimePicker };
+})();
 
 // --- src/components/ui/CustomScrollbar.js ---
+const { CustomScrollbar } = (() => {
 /**
  * @fileoverview Bespoke custom scrollbar component (零原生滚动条).
  * Hides native OS scrollbars completely and renders a precision 4px floating
@@ -5035,8 +5830,11 @@ const CustomScrollbar = defineComponent({
     };
   },
 });
+return { CustomScrollbar };
+})();
 
 // --- src/components/ui/SegmentedControl.js ---
+const { SegmentedControl } = (() => {
 /**
  * @fileoverview Micro-bezel (2px radius) SegmentedControl switcher
  * for time-range filtering, context limit selection, and sub-table switching.
@@ -5091,8 +5889,11 @@ const SegmentedControl = defineComponent({
     };
   },
 });
+return { SegmentedControl };
+})();
 
 // --- src/components/ui/ContextSegmentMeter.js ---
+const { ContextSegmentMeter } = (() => {
 /**
  * @fileoverview 10-channel segmented context window progress bar updated via
  * CSS custom variables against the current model's automatic compaction baseline,
@@ -5179,8 +5980,11 @@ const ContextSegmentMeter = defineComponent({
     };
   },
 });
+return { ContextSegmentMeter };
+})();
 
 // --- src/components/ui/FourSegmentBar.js ---
+const { createFourSegmentBar } = (() => {
 /**
  * @fileoverview 通用 4 段式 Token 构成比例条组件 (FourSegmentBar).
  * 用于在消费概览、热门模型明细及数据来源明细中直观展示：
@@ -5227,8 +6031,11 @@ function createFourSegmentBar() {
 
   return { el, update };
 }
+return { createFourSegmentBar };
+})();
 
 // --- src/components/charts/TrendAreaChart.js ---
+const { HEATMAP_DAYS_THRESHOLD, createTrendAreaChart } = (() => {
 /**
  * @fileoverview 交互式历史用量趋势图组件 (TrendAreaChart).
  * 支持双模式自适应切换：
@@ -5404,7 +6211,9 @@ function buildHeatmapMonthTicks(slots, firstDow, totalWeeks) {
     if (totalWeeks > 16 && c.col >= totalWeeks - 1) continue;
     if (ticks.length > 0 && c.col < nextAllowedCol) continue;
     const showYear = crossYear && (c.month === 1 || ticks.length === 0);
-    const text = showYear ? `${String(c.year).slice(-2)}年${c.month}月` : `${c.month}月`;
+    const text = showYear
+      ? t('chart.trend.hmMonthYear', { yy: String(c.year).slice(-2), month: c.month })
+      : t('chart.trend.hmMonthOnly', { month: c.month });
     ticks.push({ col: c.col, text });
     nextAllowedCol = c.col + (showYear ? baseMinGap + 1 : baseMinGap);
   }
@@ -5539,26 +6348,41 @@ function createTrendAreaChart() {
   const plotStage = h('div', { className: 'trend-plot-stage' }, [peakPill, svg]);
 
   // 类 GitHub 每日小格子热力图容器（> 90 天模式）
-  const weekdayLabels = ['一', '', '三', '', '五', '', '日'];
+  const wdayMonEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayMon') });
+  const wdayWedEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayWed') });
+  const wdayFriEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdayFri') });
+  const wdaySunEl = h('span', { className: 'trend-hm-wday', text: t('chart.trend.wdaySun') });
   const hmWeekdaysEl = h('div', { className: 'trend-hm-weekdays', 'aria-hidden': 'true' }, [
     h('span', { className: 'trend-hm-month-spacer' }),
-    ...weekdayLabels.map((txt) => h('span', { className: 'trend-hm-wday', text: txt })),
+    wdayMonEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdayWedEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdayFriEl,
+    h('span', { className: 'trend-hm-wday', text: '' }),
+    wdaySunEl,
   ]);
   const hmMonthsEl = h('div', { className: 'trend-hm-months' });
-  const hmGridEl = h('div', { className: 'trend-hm-grid', role: 'grid', 'aria-label': '每日用量热力格子图' });
+  const hmGridEl = h('div', {
+    className: 'trend-hm-grid',
+    role: 'grid',
+    'aria-label': t('chart.trend.hmAria'),
+  });
   const hmTrackEl = h('div', { className: 'trend-hm-track' }, [hmMonthsEl, hmGridEl]);
   const hmScrollEl = h('div', { className: 'trend-hm-scroll' }, [hmTrackEl]);
   const hmBodyEl = h('div', { className: 'trend-heatmap-body' }, [hmWeekdaysEl, hmScrollEl]);
 
   const hmSummaryEl = h('span', { className: 'trend-hm-summary text-mono', text: '' });
+  const hmLessEl = h('span', { text: t('chart.trend.hmLess') });
+  const hmMoreEl = h('span', { text: t('chart.trend.hmMore') });
   const hmLegendEl = h('span', { className: 'trend-hm-legend', 'aria-hidden': 'true' }, [
-    h('span', { text: '少' }),
+    hmLessEl,
     h('span', { className: 'trend-hm-swatch lv-0' }),
     h('span', { className: 'trend-hm-swatch lv-1' }),
     h('span', { className: 'trend-hm-swatch lv-2' }),
     h('span', { className: 'trend-hm-swatch lv-3' }),
     h('span', { className: 'trend-hm-swatch lv-4' }),
-    h('span', { text: '多' }),
+    hmMoreEl,
   ]);
   const hmFooterEl = h('div', { className: 'trend-hm-footer' }, [hmSummaryEl, hmLegendEl]);
   const heatmapStage = h('div', { className: 'trend-heatmap-stage', hidden: true }, [
@@ -5577,6 +6401,8 @@ function createTrendAreaChart() {
   let currentPts = [];
   let currentIsHeatmap = false;
   let currentHeatmapWeeks = 0;
+  let currentHeatmapFirstDow = 0;
+  let currentHeatmapGapPx = 2;
   let currentCellEls = [];
   let tickElsByIdx = new Map();
   let hoveredIdx = -1;
@@ -5585,7 +6411,10 @@ function createTrendAreaChart() {
 
   function populateTooltipContent(slot) {
     patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
-    patchText(tipCallsEl, `${Math.max(0, Math.floor(Number(slot.calls) || 0))} 次`);
+    patchText(
+      tipCallsEl,
+      t('cons.callsCount', { calls: Math.max(0, Math.floor(Number(slot.calls) || 0)) })
+    );
     const slotTok = safeSlotTokens(slot.tokens);
     patchText(tipTokensEl, `${formatTokensPrecise(slotTok)} tok`);
     const slotCost = Number.isFinite(Number(slot.costUsd)) ? Math.max(0, Number(slot.costUsd)) : 0;
@@ -5605,7 +6434,11 @@ function createTrendAreaChart() {
     if (hasSubBreakdown) {
       patchText(
         tipSubEl,
-        `入 ${formatTokensPrecise(safeSlotTokens(slot.inputTokens))} · 缓 ${formatTokensPrecise(safeSlotTokens(slot.cacheReadTokens))} · 出 ${formatTokensPrecise(safeSlotTokens(slot.outputTokens))}`
+        t('chart.step.ioSplit', {
+          inTok: formatTokensPrecise(safeSlotTokens(slot.inputTokens)),
+          cacheTok: formatTokensPrecise(safeSlotTokens(slot.cacheReadTokens)),
+          outTok: formatTokensPrecise(safeSlotTokens(slot.outputTokens)),
+        })
       );
     }
   }
@@ -5741,21 +6574,117 @@ function createTrendAreaChart() {
     showLineHoverAtIndex(idx);
   }
 
-  function findHeatmapCellFromEvent(e) {
+  function findDirectHeatmapCell(e) {
     let cur = e?.target || null;
     while (cur && cur !== hmGridEl) {
       const idxAttr = cur.getAttribute?.('data-slot-idx');
       if (idxAttr !== null && idxAttr !== undefined && idxAttr !== '') {
-        return { idx: Number(idxAttr), cellEl: cur };
+        const idx = Number(idxAttr);
+        if (Number.isFinite(idx) && idx >= 0 && idx < currentSlots.length) {
+          return { idx, cellEl: cur };
+        }
       }
       cur = cur.parentNode || null;
     }
     return null;
   }
 
+  function resolveHeatmapCellFromPointer(e) {
+    const directHit = findDirectHeatmapCell(e);
+    if (directHit) return directHit;
+
+    const clientX = Number(e?.clientX);
+    const clientY = Number(e?.clientY);
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+      if (hoveredIdx >= 0 && hoveredIdx < currentSlots.length && currentCellEls[hoveredIdx]) {
+        return { idx: hoveredIdx, cellEl: currentCellEls[hoveredIdx] };
+      }
+      return null;
+    }
+
+    const rect = hmGridEl.getBoundingClientRect?.();
+    if (!rect || !(rect.width > 0) || !(rect.height > 0) || currentHeatmapWeeks <= 0) {
+      if (hoveredIdx >= 0 && hoveredIdx < currentSlots.length && currentCellEls[hoveredIdx]) {
+        return { idx: hoveredIdx, cellEl: currentCellEls[hoveredIdx] };
+      }
+      return null;
+    }
+
+    const W = currentHeatmapWeeks;
+    const G = currentHeatmapGapPx;
+    const relX = clientX - rect.left;
+    const relY = clientY - rect.top;
+    if (
+      relX < -(G + 1) ||
+      relX > rect.width + G + 1 ||
+      relY < -(G + 1) ||
+      relY > rect.height + G + 1
+    ) {
+      return null;
+    }
+
+    const pitchX = (rect.width + G) / W;
+    const pitchY = (rect.height + G) / 7;
+    const cellW = Math.max(1, pitchX - G);
+    const cellH = Math.max(1, pitchY - G);
+
+    function distanceToCell(c, r) {
+      const x0 = c * pitchX;
+      const y0 = r * pitchY;
+      const dx = relX < x0 ? x0 - relX : relX > x0 + cellW ? relX - (x0 + cellW) : 0;
+      const dy = relY < y0 ? y0 - relY : relY > y0 + cellH ? relY - (y0 + cellH) : 0;
+      return { chebyshev: Math.max(dx, dy), distSq: dx * dx + dy * dy };
+    }
+
+    // 指针滑入当前悬停格四周的空隙（gap）时保持原高亮，彻底消除跨格空隙闪烁与边缘微抖
+    if (hoveredIdx >= 0 && hoveredIdx < currentSlots.length && currentCellEls[hoveredIdx]) {
+      const curGridPos = currentHeatmapFirstDow + hoveredIdx;
+      const curCol = Math.floor(curGridPos / 7);
+      const curRow = curGridPos % 7;
+      if (distanceToCell(curCol, curRow).chebyshev <= G + 0.75) {
+        return { idx: hoveredIdx, cellEl: currentCellEls[hoveredIdx] };
+      }
+    }
+
+    // 快速扫过或初始落入格子间隙时，按网格步距吸附到最近的有效日期格
+    const approxCol = Math.max(0, Math.min(W - 1, Math.floor((relX + G * 0.5) / pitchX)));
+    const approxRow = Math.max(0, Math.min(6, Math.floor((relY + G * 0.5) / pitchY)));
+    const directSlotIdx = approxCol * 7 + approxRow - currentHeatmapFirstDow;
+    if (
+      directSlotIdx >= 0 &&
+      directSlotIdx < currentSlots.length &&
+      currentCellEls[directSlotIdx]
+    ) {
+      return { idx: directSlotIdx, cellEl: currentCellEls[directSlotIdx] };
+    }
+
+    // 首周补位或末周未来空白边缘：仅当仍在相邻有效格的间隙光晕内才吸附，深入纯空白角则清空
+    let bestIdx = -1;
+    let bestDistSq = Infinity;
+    for (let dc = -1; dc <= 1; dc++) {
+      const c = approxCol + dc;
+      if (c < 0 || c >= W) continue;
+      for (let dr = -1; dr <= 1; dr++) {
+        const r = approxRow + dr;
+        if (r < 0 || r > 6) continue;
+        const sIdx = c * 7 + r - currentHeatmapFirstDow;
+        if (sIdx < 0 || sIdx >= currentSlots.length || !currentCellEls[sIdx]) continue;
+        const d = distanceToCell(c, r);
+        if (d.chebyshev <= G + 1.5 && d.distSq < bestDistSq) {
+          bestDistSq = d.distSq;
+          bestIdx = sIdx;
+        }
+      }
+    }
+    if (bestIdx >= 0) {
+      return { idx: bestIdx, cellEl: currentCellEls[bestIdx] };
+    }
+    return null;
+  }
+
   function handleHeatmapPointer(e) {
     if (!currentIsHeatmap || !currentSlots.length) return;
-    const hit = findHeatmapCellFromEvent(e);
+    const hit = resolveHeatmapCellFromPointer(e);
     if (!hit || !Number.isFinite(hit.idx)) {
       clearHover();
       return;
@@ -5858,19 +6787,28 @@ function createTrendAreaChart() {
     const nonZeroVals = [];
 
     for (let i = 0; i < slots.length; i++) {
-      const t = safeSlotTokens(slots[i]?.tokens);
-      if (t > 0) {
+      const tokVal = safeSlotTokens(slots[i]?.tokens);
+      if (tokVal > 0) {
         activeDays++;
-        nonZeroVals.push(t);
+        nonZeroVals.push(tokVal);
       }
-      if (t >= maxTokens) {
-        maxTokens = t;
+      if (tokVal >= maxTokens) {
+        maxTokens = tokVal;
         peakIdx = i;
       }
     }
 
+    const locale = getEffectiveLocale();
+    patchText(wdayMonEl, t('chart.trend.wdayMon'));
+    patchText(wdayWedEl, t('chart.trend.wdayWed'));
+    patchText(wdayFriEl, t('chart.trend.wdayFri'));
+    patchText(wdaySunEl, t('chart.trend.wdaySun'));
+    patchAttr(hmGridEl, 'aria-label', t('chart.trend.hmAria'));
+    patchText(hmLessEl, t('chart.trend.hmLess'));
+    patchText(hmMoreEl, t('chart.trend.hmMore'));
+
     const sig =
-      `${useHeatmap ? 'hm' : `line:${viewW}`}|` +
+      `${locale}|${useHeatmap ? 'hm' : `line:${viewW}`}|` +
       slots
         .map(
           (s) =>
@@ -5892,10 +6830,13 @@ function createTrendAreaChart() {
             : 0;
         const totalCells = firstDow + slots.length;
         const totalWeeks = Math.max(1, Math.ceil(totalCells / 7));
+        const gapPx = totalWeeks > 42 ? 1.5 : 2;
         currentHeatmapWeeks = totalWeeks;
+        currentHeatmapFirstDow = firstDow;
+        currentHeatmapGapPx = gapPx;
 
         patchStyleVar(hmBodyEl, '--hm-weeks', String(totalWeeks));
-        patchStyleVar(hmBodyEl, '--hm-gap', totalWeeks > 42 ? '1.5px' : '2px');
+        patchStyleVar(hmBodyEl, '--hm-gap', `${gapPx}px`);
 
         // 重建顶部对齐月份标签
         while (hmMonthsEl.firstChild) hmMonthsEl.removeChild(hmMonthsEl.firstChild);
@@ -5947,8 +6888,13 @@ function createTrendAreaChart() {
       const peakSlot = slots[peakIdx];
       const summaryText =
         maxTokens > 0 && peakSlot?.label
-          ? `活跃 ${activeDays}/${slots.length} 天 · 峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
-          : `活跃 0/${slots.length} 天`;
+          ? t('chart.trend.hmActivePeak', {
+              active: activeDays,
+              total: slots.length,
+              label: peakSlot.label,
+              tokens: formatTokensPrecise(maxTokens),
+            })
+          : t('chart.trend.hmActiveZero', { total: slots.length });
       patchText(hmSummaryEl, summaryText);
 
       if (hoveredIdx >= slots.length) {
@@ -6047,7 +6993,10 @@ function createTrendAreaChart() {
     const peakSlot = slots[peakIdx];
     const peakText =
       maxTokens > 0 && peakSlot?.label
-        ? `峰值 ${peakSlot.label} · ${formatTokensPrecise(maxTokens)}`
+        ? t('chart.trend.peakPill', {
+            label: peakSlot.label,
+            tokens: formatTokensPrecise(maxTokens),
+          })
         : formatTokensPrecise(maxTokens);
     patchText(peakPill, peakText);
     const pctLeft = Math.max(12, Math.min(88, (peakPt.x / viewW) * 100));
@@ -6062,8 +7011,11 @@ function createTrendAreaChart() {
 
   return { el: chartWrap, update, destroy };
 }
+return { HEATMAP_DAYS_THRESHOLD, createTrendAreaChart };
+})();
 
 // --- src/components/charts/SessionStepCharts.js ---
+const { MODEL_COLOR_VARS, getStepModelGroupKey, toChronologicalSteps, computeLinearFit, computePublicationFit, createSessionLineChart, createModelFitChart } = (() => {
 /**
  * @fileoverview 当前会话步骤级线性走势图与模型趋势拟合图组件 (SessionStepCharts).
  *
@@ -6095,16 +7047,16 @@ const MODEL_COLOR_VARS = Object.freeze([
  * @returns {string}
  */
 function getStepModelGroupKey(step) {
-  if (!step || typeof step !== 'object') return '模型未知';
-  const rawLabel = String(step.modelLabel || step.label || '')
+  if (!step || typeof step !== 'object') return t('fmt.unknownModel');
+  const rawLabel = String(step.baseModelLabel || step.modelLabel || step.label || '')
     .replace(/\s*\[自动压缩\]\s*$/u, '')
     .replace(/\s*\((?:Max|XHigh|High|Medium|Low|Thinking|Extra Low|Tiered)\)\s*$/i, '')
     .trim();
   if (rawLabel) return rawLabel;
-  const rawShort = String(step.modelShort || step.shortName || '')
-    .replace(/·压缩\s*$/u, '')
+  const rawShort = String(step.baseModelShort || step.modelShort || step.shortName || '')
+    .replace(/·(?:压缩|Compact)\s*$/iu, '')
     .trim();
-  return rawShort || '模型未知';
+  return rawShort || t('fmt.unknownModel');
 }
 
 /**
@@ -6479,21 +7431,6 @@ function computePublicationFit(
 }
 
 /**
- * 计算样本点上的平滑回归拟合值序列（供单元测试与轻量调用直接读取）。
- *
- * @param {number[]} ys
- * @param {{ minVal?: number, maxVal?: number, xs?: number[] }} [bounds]
- * @returns {number[]}
- */
-function computeLoessFit(ys, { minVal = 0, maxVal = Infinity, xs = null } = {}) {
-  const n = Array.isArray(ys) ? ys.length : 0;
-  if (n === 0) return [];
-  const xArr =
-    Array.isArray(xs) && xs.length === n ? xs : Array.from({ length: n }, (_, idx) => idx);
-  return computePublicationFit(xArr, ys, { minVal, maxVal }).sampleFits;
-}
-
-/**
  * Heckbert 科学坐标轴刻度取整算法，生成科研图表风格的均匀整洁刻度。
  */
 function niceStepNumber(range, round) {
@@ -6646,7 +7583,17 @@ function computeStepTickIndices(count) {
 function formatStepAxisTag(st, showAgentPrefix) {
   const num = `#${Number(st?.stepIndex ?? 0)}`;
   if (!showAgentPrefix) return num;
-  const badge = st?.agentBadge || (st?.isSubagent ? '子' : '主');
+  const badge = formatAgentBadgeText({
+    agentKind:
+      st?.agentKind || (!st?.isSubagent ? 'main' : st?.isSideQuestion ? 'side_question' : 'subagent'),
+    agentOrdinal:
+      st?.agentOrdinal || (st?.isSideQuestion ? st?.sideIndex || 0 : st?.agentIndex || 0),
+    isMain: !st?.isSubagent,
+    isSideQuestion: Boolean(st?.isSideQuestion),
+    sideIndex: st?.sideIndex || 0,
+    index: st?.agentIndex || 0,
+    badgeText: st?.agentBadge,
+  });
   return `${badge}${num}`;
 }
 
@@ -6781,7 +7728,7 @@ function createSessionLineChart() {
 
   const emptyHintEl = h('div', {
     className: 'sstep-empty-hint text-muted',
-    text: '当前范围暂无可绘制的调用步骤',
+    text: t('chart.step.empty'),
     hidden: true,
   });
 
@@ -6859,7 +7806,10 @@ function createSessionLineChart() {
 
     patchText(tipHeadLeft, pt.stepTag);
     patchText(tipHeadRight, pt.modelText);
-    patchText(tipMainLeft, pt.valid ? formatChartMetricValue(currentMetric, pt.value) : '未纳入');
+    patchText(
+      tipMainLeft,
+      pt.valid ? formatChartMetricValue(currentMetric, pt.value) : t('chart.step.excluded')
+    );
     patchText(tipMainRight, pt.secondaryRight || '');
     patchAttr(tipSub, 'hidden', !pt.subDetail);
     if (pt.subDetail) {
@@ -6986,6 +7936,7 @@ function createSessionLineChart() {
       ? steps
       : steps.filter((st) => st && targetKeySet.has(getStepModelGroupKey(st)));
 
+    patchText(emptyHintEl, t('chart.step.empty'));
     if (!matchedSteps.length) {
       currentPoints = [];
       lastSig = 'empty';
@@ -6999,7 +7950,7 @@ function createSessionLineChart() {
       patchAttr(peakPill, 'hidden', true);
       patchAttr(emptyHintEl, 'hidden', false);
       clearHover();
-      return { summaryBadge: '0 步' };
+      return { summaryBadge: t('chart.step.zeroSteps') };
     }
 
     const modelColorMap = new Map();
@@ -7013,7 +7964,7 @@ function createSessionLineChart() {
         const disp = resolveModelDisplayInfo({ modelLabel: gk, label: gk }, displaySettings, {
           fallback: gk,
         });
-        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+        modelLabelByGroup.set(gk, disp.baseText || disp.text || gk);
       }
     }
     for (const st of matchedSteps) {
@@ -7026,7 +7977,7 @@ function createSessionLineChart() {
       }
       if (!modelLabelByGroup.has(gk)) {
         const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
-        modelLabelByGroup.set(gk, disp.text.replace(/·压缩\s*$/u, '').trim() || gk);
+        modelLabelByGroup.set(gk, disp.baseText || disp.text || gk);
       }
     }
 
@@ -7086,41 +8037,62 @@ function createSessionLineChart() {
 
       if (metric === 'totalTokens') {
         value = isMultiCompare ? modelCumTok : runningTokens;
-        secondaryRight = `本步 +${formatTokens(stepTotalTok)}`;
-        subDetail = `入 ${formatTokens(inTok)} · 缓 ${formatTokens(cacheTok)} · 出 ${formatTokens(outTok)}`;
+        secondaryRight = t('chart.step.stepAdd', { tokens: formatTokens(stepTotalTok) });
+        subDetail = t('chart.step.ioSplit', {
+          inTok: formatTokens(inTok),
+          cacheTok: formatTokens(cacheTok),
+          outTok: formatTokens(outTok),
+        });
       } else if (metric === 'context') {
         value = ctxTok;
         if (hasPrevCtx) {
           const sign = ctxDelta >= 0 ? '+' : '-';
           secondaryRight = `${sign}${formatTokens(Math.abs(ctxDelta))}`;
         } else {
-          secondaryRight = `缓存 ${Number(st.cacheHitPct ?? 0)}%`;
+          secondaryRight = t('chart.step.cacheShort', { pct: Number(st.cacheHitPct ?? 0) });
         }
         subDetail = st.isCompactionStep
-          ? '上下文自动压缩检查点'
-          : `缓存命中 ${Number(st.cacheHitPct ?? 0)}% · 输出 +${formatTokens(outTok)}`;
+          ? t('chart.step.compactionCheckpoint')
+          : t('chart.step.cacheHitOut', {
+              pct: Number(st.cacheHitPct ?? 0),
+              outTok: formatTokens(outTok),
+            });
       } else if (metric === 'tps') {
         valid = !st.isCompactionStep && Number.isFinite(st.tokPerSec) && st.tokPerSec > 0;
         value = valid ? Number(st.tokPerSec) : 0;
-        secondaryRight = Number.isFinite(st.ttftSec) ? `首字 ${st.ttftSec.toFixed(1)}s` : '';
+        secondaryRight = Number.isFinite(st.ttftSec)
+          ? t('chart.step.ttftShort', { sec: st.ttftSec.toFixed(1) })
+          : '';
         subDetail = valid
-          ? `输出 ${formatTokens(outTok)} · 上下文 ${formatTokens(ctxTok)}`
-          : speedReasonText(st.selectedSpeedReason) || (st.isCompactionStep ? '上下文压缩步' : '无测速样本');
+          ? t('chart.step.outAndCtx', {
+              outTok: formatTokens(outTok),
+              ctxTok: formatTokens(ctxTok),
+            })
+          : speedReasonText(st.selectedSpeedReason) ||
+            (st.isCompactionStep ? t('chart.step.compactionStep') : t('chart.step.noSpeedSample'));
       } else if (metric === 'ttft') {
         valid = !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0;
         value = valid ? Number(st.ttftSec) : 0;
         secondaryRight = Number.isFinite(st.tokPerSec) ? `${st.tokPerSec.toFixed(1)} tok/s` : '';
         subDetail = valid
-          ? `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(st.cacheHitPct ?? 0)}%`
+          ? t('chart.step.ctxAndCache', {
+              ctxTok: formatTokens(ctxTok),
+              pct: Number(st.cacheHitPct ?? 0),
+            })
           : st.isCompactionStep
-            ? '上下文压缩步'
-            : '无首字计时样本';
+            ? t('chart.step.compactionStep')
+            : t('chart.step.noTtftSample');
       } else if (metric === 'cost') {
         valid = stepCost !== null;
         value = valid ? stepCost : 0;
         const shownCumCost = isMultiCompare ? modelCumCost : runningCost;
-        secondaryRight = `累计 ${formatUsd(shownCumCost, { precise: shownCumCost > 0 && shownCumCost < 0.1 })}`;
-        subDetail = `缓存 ${Number(st.cacheHitPct ?? 0)}% · 本步 ${formatTokens(stepTotalTok)}`;
+        secondaryRight = t('chart.step.cumCost', {
+          cost: formatUsd(shownCumCost, { precise: shownCumCost > 0 && shownCumCost < 0.1 }),
+        });
+        subDetail = t('chart.step.cacheAndStepTok', {
+          pct: Number(st.cacheHitPct ?? 0),
+          tokens: formatTokens(stepTotalTok),
+        });
       }
 
       if (valid) {
@@ -7180,11 +8152,12 @@ function createSessionLineChart() {
     const validPoints = points.filter((p) => p.valid);
     patchAttr(emptyHintEl, 'hidden', validPoints.length > 0);
 
+    const locale = getEffectiveLocale();
     const colorSig = Array.from(modelColorMap.entries())
       .map(([k, v]) => `${k}=${v}`)
       .join(',');
     const sig =
-      `${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
+      `${locale}|${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
       points
         .map((p) => `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}`)
         .join('|');
@@ -7319,12 +8292,12 @@ function createSessionLineChart() {
           patchStyleVar(swatch, '--swatch-bg', colorVar);
           const stStat = perModelStats.get(gk);
           const baseLabel = modelLabelByGroup.get(gk) || gk;
-          let summarySuffix = '无样本';
+          let summarySuffix = t('chart.step.noSamples');
           if (stStat && stStat.count > 0) {
             if (metric === 'totalTokens') {
               summarySuffix = formatTokens(stStat.cumTok);
             } else if (metric === 'context') {
-              summarySuffix = `峰 ${formatTokens(stStat.max)}`;
+              summarySuffix = t('chart.step.peakShort', { val: formatTokens(stStat.max) });
             } else if (metric === 'tps' || metric === 'ttft') {
               summarySuffix = formatChartMetricCompact(metric, stStat.sum / stStat.count);
             } else if (metric === 'cost') {
@@ -7362,7 +8335,10 @@ function createSessionLineChart() {
       const peakPt = points[peakIdx];
       patchText(
         peakPill,
-        `峰值 ${peakPt.stepTag} · ${formatChartMetricCompact(metric, peakPt.value)}`
+        t('chart.step.peakPill', {
+          tag: peakPt.stepTag,
+          val: formatChartMetricCompact(metric, peakPt.value),
+        })
       );
       patchStyleVar(peakPill, '--sstep-accent', isMultiCompare ? peakPt.dotColor : accentColor);
       const pctLeft = Math.max(14, Math.min(86, (peakPt.x / viewW) * 100));
@@ -7378,28 +8354,42 @@ function createSessionLineChart() {
       showHoverAt(hoveredIdx);
     }
 
-    let summaryBadge = `${matchedSteps.length}步`;
+    let summaryBadge = t('chart.step.stepsCount', { count: matchedSteps.length });
     const activeCompareCount = isMultiCompare ? targetKeys.length : 1;
-    const multiPrefix = isMultiCompare ? `${activeCompareCount} 模型 · ` : '';
+    const multiPrefix = isMultiCompare
+      ? t('chart.step.multiPrefix', { count: activeCompareCount })
+      : '';
     if (metric === 'totalTokens') {
-      summaryBadge = `${multiPrefix}累计 ${formatTokens(runningTokens)}`;
+      summaryBadge = t('chart.step.sumTokens', {
+        prefix: multiPrefix,
+        tokens: formatTokens(runningTokens),
+      });
     } else if (metric === 'context') {
       const lastCtx = points[points.length - 1]?.value || 0;
       summaryBadge = isMultiCompare
-        ? `${multiPrefix}峰值 ${formatTokens(maxVal)}`
-        : `当前 ${formatTokens(lastCtx)}`;
+        ? t('chart.step.peakTokens', { prefix: multiPrefix, tokens: formatTokens(maxVal) })
+        : t('chart.step.currentCtx', { tokens: formatTokens(lastCtx) });
     } else if (metric === 'tps') {
       summaryBadge =
         validCount > 0
-          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)} tok/s`
-          : '暂无有效样本';
+          ? t('chart.step.meanTps', {
+              prefix: multiPrefix,
+              val: (validSum / validCount).toFixed(1),
+            })
+          : t('chart.step.noValidSamples');
     } else if (metric === 'ttft') {
       summaryBadge =
         validCount > 0
-          ? `${multiPrefix}均值 ${(validSum / validCount).toFixed(1)}s`
-          : '暂无有效样本';
+          ? t('chart.step.meanSec', {
+              prefix: multiPrefix,
+              val: (validSum / validCount).toFixed(1),
+            })
+          : t('chart.step.noValidSamples');
     } else if (metric === 'cost') {
-      summaryBadge = `${multiPrefix}累计 ${formatUsd(runningCost, { precise: runningCost > 0 && runningCost < 0.1 })}`;
+      summaryBadge = t('chart.step.sumCost', {
+        prefix: multiPrefix,
+        cost: formatUsd(runningCost, { precise: runningCost > 0 && runningCost < 0.1 }),
+      });
     }
 
     return { summaryBadge };
@@ -7490,7 +8480,7 @@ function createModelFitChart() {
 
   const emptyHintEl = h('div', {
     className: 'sstep-empty-hint text-muted',
-    text: '该模型暂无有效拟合样本',
+    text: t('chart.fit.empty'),
     hidden: true,
   });
 
@@ -7505,14 +8495,16 @@ function createModelFitChart() {
     tipSub,
   ]);
 
-  const fitMethodLabelEl = h('span', { text: 'LOESS 拟合' });
+  const fitMethodLabelEl = h('span', { text: t('chart.fit.loess') });
+  const olsLegendTextEl = h('span', { text: t('chart.fit.olsLinear') });
   const olsLegendWrapEl = h('span', { className: 'sstep-fit-legend-ols' }, [
     h('span', { className: 'sstep-fit-swatch is-ols' }),
-    h('span', { text: 'OLS 线性' }),
+    olsLegendTextEl,
   ]);
+  const obsLegendTextEl = h('span', { text: t('chart.fit.observed') });
   const singleLegendEl = h('span', { className: 'sstep-fit-legend' }, [
     h('span', { className: 'sstep-fit-swatch is-scatter' }),
-    h('span', { text: '观测值' }),
+    obsLegendTextEl,
     h('span', { className: 'sstep-fit-swatch is-curve' }),
     fitMethodLabelEl,
     h('span', { className: 'sstep-fit-swatch is-ci' }),
@@ -7595,8 +8587,14 @@ function createModelFitChart() {
     patchAttr(tooltipEl, 'hidden', false);
     patchText(tipHeadLeft, sp.stepTag);
     patchText(tipHeadRight, sp.modelText);
-    patchText(tipMainLeft, `拟合 ${formatChartMetricValue(currentMetric, sp.fitVal)}`);
-    patchText(tipMainRight, `观测 ${formatChartMetricValue(currentMetric, sp.rawVal)}`);
+    patchText(
+      tipMainLeft,
+      t('chart.fit.tipFit', { val: formatChartMetricValue(currentMetric, sp.fitVal) })
+    );
+    patchText(
+      tipMainRight,
+      t('chart.fit.tipObs', { val: formatChartMetricValue(currentMetric, sp.rawVal) })
+    );
 
     patchAttr(tipSub, 'hidden', false);
     if (sp.compareHint) {
@@ -7610,7 +8608,10 @@ function createModelFitChart() {
       const ctxTok = Math.max(0, Number(sp.st?.contextTokens || 0));
       patchText(
         tipSub,
-        `上下文 ${formatTokens(ctxTok)} · 缓存 ${Number(sp.st?.cacheHitPct ?? 0)}%`
+        t('chart.step.ctxAndCache', {
+          ctxTok: formatTokens(ctxTok),
+          pct: Number(sp.st?.cacheHitPct ?? 0),
+        })
       );
     }
 
@@ -7876,10 +8877,15 @@ function createModelFitChart() {
           xVal: globalX,
           rawVal,
           stepTag: formatStepAxisTag(st, showAgentPrefix),
-          modelText: disp.text.replace(/·压缩\s*$/u, '').trim() || disp.text,
+          modelText: disp.baseText || disp.text,
         });
       }
     }
+
+    const locale = getEffectiveLocale();
+    patchText(emptyHintEl, t('chart.fit.empty'));
+    patchText(obsLegendTextEl, t('chart.fit.observed'));
+    patchText(olsLegendTextEl, t('chart.fit.olsLinear'));
 
     if (fitCacheMetric !== metric) {
       fitCache.clear();
@@ -7904,9 +8910,10 @@ function createModelFitChart() {
       patchAttr(singleLegendEl, 'hidden', false);
       patchAttr(multiLegendEl, 'hidden', true);
       patchAttr(emptyHintEl, 'hidden', false);
+      patchText(fitMethodLabelEl, t('chart.fit.loess'));
       patchText(fitStatsEl, 'n = 0');
       clearHover();
-      return { sampleCount: 0, summaryBadge: '0 样本' };
+      return { sampleCount: 0, summaryBadge: t('chart.fit.zeroSamples') };
     }
 
     patchAttr(emptyHintEl, 'hidden', true);
@@ -7988,7 +8995,12 @@ function createModelFitChart() {
             if (interp !== null) {
               peerParts.push(`${other.label} ${formatChartMetricCompact(metric, interp)}`);
             } else {
-              peerParts.push(`${other.label} 均 ${formatChartMetricCompact(metric, other.pubFit.mean)}`);
+              peerParts.push(
+                t('chart.fit.peerMean', {
+                  label: other.label,
+                  val: formatChartMetricCompact(metric, other.pubFit.mean),
+                })
+              );
             }
           }
           return {
@@ -8001,7 +9013,10 @@ function createModelFitChart() {
             ciHigh: s.pubFit.sampleCiHigh[i],
             ciHalf: s.pubFit.sampleCiHalf[i],
             seriesColor: s.colorVar,
-            compareHint: peerParts.length > 0 ? `同图对比：${peerParts.join(' · ')}` : '',
+            compareHint:
+              peerParts.length > 0
+                ? t('chart.fit.peerCompare', { peers: peerParts.join(' · ') })
+                : '',
           };
         });
         s.samples = sSamples;
@@ -8011,7 +9026,7 @@ function createModelFitChart() {
       currentSamples = combinedSamples;
 
       const sig =
-        `multi|${viewW}|${targetKeys.join(',')}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+        `multi|${locale}|${viewW}|${targetKeys.join(',')}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
         seriesList
           .map(
             (s) =>
@@ -8125,7 +9140,7 @@ function createModelFitChart() {
         fitStatsEl,
         seriesList.length <= 2
           ? seriesList.map((s) => `R²=${s.pubFit.r2.toFixed(2)}`).join(' · ')
-          : `${seriesList.length} 条拟合线`
+          : t('chart.fit.curvesCount', { count: seriesList.length })
       );
       patchAttr(fitStatsEl, 'title', r2SummaryTitle);
 
@@ -8137,7 +9152,10 @@ function createModelFitChart() {
 
       return {
         sampleCount: combinedSamples.length,
-        summaryBadge: `${combinedSamples.length}步 · ${seriesList.length} 模型对比`,
+        summaryBadge: t('chart.fit.multiBadge', {
+          steps: combinedSamples.length,
+          models: seriesList.length,
+        }),
       };
     }
 
@@ -8152,7 +9170,10 @@ function createModelFitChart() {
     const rawYs = filtered.map((d) => d.rawVal);
     const pubFit = reusePublicationFit(null, xs, rawYs, maxBound, false);
 
-    patchText(fitMethodLabelEl, pubFit.method === 'LOESS' ? 'LOESS 拟合' : 'OLS 回归');
+    patchText(
+      fitMethodLabelEl,
+      pubFit.method === 'LOESS' ? t('chart.fit.loess') : t('chart.fit.olsReg')
+    );
     patchAttr(olsLegendWrapEl, 'hidden', filtered.length < 6);
 
     let dataMin = Infinity;
@@ -8205,7 +9226,7 @@ function createModelFitChart() {
     currentSamples = samples;
 
     const sig =
-      `single|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
+      `single|${locale}|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
       samples.map((s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}`).join('|');
 
     if (sig !== lastSig) {
@@ -8281,7 +9302,10 @@ function createModelFitChart() {
       }
     }
 
-    const summaryBadge = `${samples.length}步 · 均 ${formatChartMetricCompact(metric, pubFit.mean)}`;
+    const summaryBadge = t('chart.fit.singleBadge', {
+      steps: samples.length,
+      mean: formatChartMetricCompact(metric, pubFit.mean),
+    });
     if (samples.length >= 2) {
       const rSign = pubFit.r >= 0 ? '+' : '';
       const slopeSign = pubFit.slope >= 0 ? '+' : '';
@@ -8289,7 +9313,11 @@ function createModelFitChart() {
       patchAttr(
         fitStatsEl,
         'title',
-        `OLS: y = ${slopeSign}${pubFit.slope.toFixed(3)}x + ${pubFit.intercept.toFixed(2)} · 样本标准差 SD = ±${pubFit.sd.toFixed(2)}`
+        t('chart.fit.olsTitle', {
+          slope: `${slopeSign}${pubFit.slope.toFixed(3)}`,
+          intercept: pubFit.intercept.toFixed(2),
+          sd: pubFit.sd.toFixed(2),
+        })
       );
     } else {
       patchText(fitStatsEl, `n = ${samples.length}`);
@@ -8307,8 +9335,11 @@ function createModelFitChart() {
 
   return { el: rootEl, update, destroy };
 }
+return { MODEL_COLOR_VARS, getStepModelGroupKey, toChronologicalSteps, computeLinearFit, computePublicationFit, createSessionLineChart, createModelFitChart };
+})();
 
 // --- src/registries/metricRegistry.js ---
+const { CAPSULE_METRIC_KEYS, getCapsuleMetricOptions, getOverviewMetricOptions, resolveQuotaCapsuleSummary, resolveSpecificQuotaSlotSummary, resolveCapsuleMetricPresentation, resolveOverviewMetricCell } = (() => {
 /**
  * @fileoverview Decoupled Metric Registry (`metricRegistry.js`).
  * Centralizes presentation & option metadata for:
@@ -8317,35 +9348,7 @@ function createModelFitChart() {
  */
 
 
-const CAPSULE_METRIC_KEYS = Object.freeze([
-  'context',
-  'tps',
-  'ttft',
-  'avg_tps',
-  'cost',
-  'session_cost',
-  'cache_hit',
-  'session_tokens',
-  'quota_auto',
-  'gemini_5h',
-  'gemini_weekly',
-  'claude_5h',
-  'claude_weekly',
-]);
-
-const OVERVIEW_METRIC_KEYS = Object.freeze([
-  'tps',
-  'ttft',
-  'avg_tps',
-  'step_cost',
-  'session_cost',
-  'cache_hit',
-  'session_tokens',
-  'context_usage',
-  'quota_tightest',
-]);
-
-const THIRD_PARTY_FAMILY_RE = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i;
+const CAPSULE_METRIC_KEYS = TOPBAR_SLOT_KEYS;
 
 function getCapsuleMetricOptions() {
   return CAPSULE_METRIC_KEYS.map((key) => ({
@@ -8434,96 +9437,12 @@ function resolveQuotaCapsuleSummary(quotas) {
  * @returns {{ roundedPct: number, shortText: string } | null}
  */
 function resolveSpecificQuotaSlotSummary(quotas, slotKey) {
-  if (!quotas) return null;
-  const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
-  const activePool = quotas.activePool || null;
-  const isClaude = slotKey.startsWith('claude_');
-  const isWeekly = slotKey.endsWith('_weekly');
-  let rawPct = null;
-
-  if (isClaude) {
-    const claudePool =
-      pools.find((p) => p?.poolKey === 'Claude & GPT') ||
-      pools.find((p) => THIRD_PARTY_FAMILY_RE.test(String(p?.poolKey || p?.poolLabel || '')));
-    const cand = isWeekly ? claudePool?.weeklyRemainingPct : claudePool?.remainingPct;
-    if (cand != null && Number.isFinite(Number(cand))) {
-      rawPct = Number(cand);
-    } else if (
-      activePool &&
-      THIRD_PARTY_FAMILY_RE.test(String(activePool.family || activePool.poolLabel || ''))
-    ) {
-      const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-      if (fb != null && Number.isFinite(Number(fb))) {
-        rawPct = Number(fb);
-      }
-    }
-  } else {
-    const stdGemini =
-      pools.find((p) => p?.poolKey === 'Gemini') ||
-      pools.find(
-        (p) =>
-          /gemini/i.test(String(p?.poolKey || p?.poolLabel || '')) &&
-          !/carbon|argon/i.test(String(p?.poolKey || ''))
-      );
-    const geminiFamilyPools = pools.filter((p) =>
-      /gemini|carbon|argon/i.test(String(p?.poolKey || p?.poolLabel || ''))
-    );
-    const primaryCand = isWeekly ? stdGemini?.weeklyRemainingPct : stdGemini?.remainingPct;
-    if (primaryCand != null && Number.isFinite(Number(primaryCand))) {
-      rawPct = Number(primaryCand);
-    } else {
-      const familyVals = geminiFamilyPools
-        .map((p) => (isWeekly ? p?.weeklyRemainingPct : p?.remainingPct))
-        .filter((v) => v != null && Number.isFinite(Number(v)))
-        .map(Number);
-      if (familyVals.length > 0) {
-        rawPct = Math.min(...familyVals);
-      } else if (
-        activePool &&
-        !THIRD_PARTY_FAMILY_RE.test(String(activePool.family || activePool.poolLabel || ''))
-      ) {
-        const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-        if (fb != null && Number.isFinite(Number(fb))) {
-          rawPct = Number(fb);
-        }
-      }
-      if (
-        rawPct == null &&
-        isWeekly &&
-        quotas.weekly &&
-        !THIRD_PARTY_FAMILY_RE.test(String(quotas.weekly.poolFamily || '')) &&
-        quotas.weekly.remainingPct != null &&
-        Number.isFinite(Number(quotas.weekly.remainingPct))
-      ) {
-        rawPct = Number(quotas.weekly.remainingPct);
-      }
-    }
-  }
-
-  if (rawPct == null || !Number.isFinite(rawPct)) return null;
-  const rounded = Math.max(0, Math.min(100, Math.round(rawPct)));
+  const rounded = resolveCapsuleQuotaSlotPct(quotas, slotKey);
+  if (rounded == null) return null;
   return {
     roundedPct: rounded,
     shortText: t('capsule.quotaLeft', { pct: rounded }),
   };
-}
-
-function formatCompactCapsuleCost(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '--';
-  const val = Math.max(0, Number(costUsd));
-  if (val === 0) return '$0.00';
-  if (val < 0.001) return '<$0.001';
-  if (val < 1) return `$${val.toFixed(3)}`;
-  if (val < 100) return `$${val.toFixed(2)}`;
-  return `$${Math.round(val)}`;
-}
-
-function formatCompactCapsuleTtft(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '--s';
-  const val = Number(ttftSec);
-  if (val < 1) return `${val.toFixed(2)}s`;
-  if (val < 100) return `${val.toFixed(1)}s`;
-  return `${Math.round(val)}s`;
 }
 
 /**
@@ -8747,15 +9666,16 @@ function resolveCapsuleMetricPresentation(metricKey, slotCtx, ringCircumference)
   };
 }
 
-function translateRawAgentBadge(rawBadge) {
-  if (!rawBadge) return '';
-  if (!isEnglishLocale()) return String(rawBadge);
-  const str = String(rawBadge).trim();
-  if (str === '主') return t('fmt.mainBadge');
-  const m = str.match(/^子(\d+)$/);
-  if (m) return t('fmt.subBadge', { index: m[1] });
-  if (str === '子') return t('fmt.subBadgeShort');
-  return str;
+function resolveActiveBadgeText(active) {
+  if (!active?.activeAgentBadge && !active?.activeAgentKind) return '';
+  return formatAgentBadgeText({
+    agentKind:
+      active.activeAgentKind ||
+      (!active.activeAgentId || active.activeAgentId === 'main' ? 'main' : 'subagent'),
+    agentOrdinal: Number(active.activeAgentOrdinal || 0),
+    isMain: !active.activeAgentId || active.activeAgentId === 'main',
+    badgeText: active.activeAgentBadge,
+  });
 }
 
 /**
@@ -8777,7 +9697,7 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
       fallback: t('fmt.unknownModel'),
     }).text;
     const reason = speedReasonText(active.latestSpeedReason);
-    const badgeStr = translateRawAgentBadge(active.activeAgentBadge);
+    const badgeStr = resolveActiveBadgeText(active);
     const modelAndAgent =
       hasSubagents && badgeStr ? `[${badgeStr}] ${activeModelDisplay}` : activeModelDisplay;
     const hasSpeed = Number.isFinite(active.latestTokPerSec) && Number(active.latestTokPerSec) > 0;
@@ -8967,8 +9887,11 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
     subClass: 'cell-sub',
   };
 }
+return { CAPSULE_METRIC_KEYS, getCapsuleMetricOptions, getOverviewMetricOptions, resolveQuotaCapsuleSummary, resolveSpecificQuotaSlotSummary, resolveCapsuleMetricPresentation, resolveOverviewMetricCell };
+})();
 
 // --- src/components/widgets/MetricMatrixWidget.js ---
+const { MetricMatrixWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Metric Matrix Widget (`MetricMatrixWidget.js`).
  * Renders 1..4 user-selected telemetry cells dynamically via `metricRegistry.js`.
@@ -9061,8 +9984,11 @@ const MetricMatrixWidget = defineComponent({
     };
   },
 });
+return { MetricMatrixWidget };
+})();
 
 // --- src/components/widgets/ContextWindowWidget.js ---
+const { CTX_CHANNEL_DEFS, ContextWindowWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Context Window Widget (`ContextWindowWidget.js`).
  * Supports both interactive multi-agent inspector mode (`LiveOverviewView`)
@@ -9355,12 +10281,16 @@ const ContextWindowWidget = defineComponent({
       if (interactiveInspector) {
         patchAttr(ctxInspectorBar, 'hidden', !hasSubagents);
         if (hasSubagents && ctxAgent) {
-          const rawActiveBadge = aggregated?.activeAgentBadge || '主';
-          const activeBadgeText = isEnglishLocale()
-            ? rawActiveBadge === '主'
-              ? t('fmt.mainBadge')
-              : rawActiveBadge.replace(/^子(\d+)$/, (_, n) => t('fmt.subBadge', { index: n }))
-            : rawActiveBadge;
+          const activeBadgeText = formatAgentBadgeText({
+            agentKind:
+              aggregated?.activeAgentKind ||
+              (!aggregated?.activeAgentId || aggregated.activeAgentId === 'main'
+                ? 'main'
+                : 'subagent'),
+            agentOrdinal: Number(aggregated?.activeAgentOrdinal || 0),
+            isMain: !aggregated?.activeAgentId || aggregated.activeAgentId === 'main',
+            badgeText: aggregated?.activeAgentBadge,
+          });
 
           const pillItems = [
             {
@@ -9551,8 +10481,11 @@ const ContextWindowWidget = defineComponent({
     };
   },
 });
+return { CTX_CHANNEL_DEFS, ContextWindowWidget };
+})();
 
 // --- src/components/widgets/QuotaPoolsWidget.js ---
+const { buildQuotaPoolItems, createPoolQuotaRow, formatQuotaSummaryFooter, syncPoolQuotaRow, quotaPoolRowSig, QuotaPoolsWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Quota Pools Widget (`QuotaPoolsWidget.js`).
  * Renders dynamic multi-pool quota bars (Gemini, Argon/Carbon, Claude & GPT)
@@ -9900,20 +10833,81 @@ const QuotaPoolsWidget = defineComponent({
     };
   },
 });
+return { buildQuotaPoolItems, createPoolQuotaRow, formatQuotaSummaryFooter, syncPoolQuotaRow, quotaPoolRowSig, QuotaPoolsWidget };
+})();
 
 // --- src/components/widgets/LiveActivityWidget.js ---
+const { buildFallbackRunningConversations, LiveActivityWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Live Running Tasks Widget (`LiveActivityWidget.js`).
  * Displays active multi-session running conversations & collapsible subagent activity
- * with an isolated 1s elapsed timer lifecycle.
+ * with an isolated 1s elapsed timer lifecycle. Supports both Overview/Hover widget mode
+ * and controlled Multi-Session Floating Panel mode (`WindowOverlayShell.js`).
  */
 
+
+function buildFallbackRunningConversations(
+  data,
+  { agents = [], aggregated = null, latestTokPerSec = undefined, contextUsedPct = undefined } = {}
+) {
+  if (!data) return [];
+  if (Array.isArray(data.runningConversations) && data.runningConversations.length > 0) {
+    return data.runningConversations;
+  }
+  const activeConv = data.activeConversation || {};
+  if (!activeConv.isRunning && !aggregated?.isRunning) return [];
+  return [
+    {
+      cascadeId: activeConv.cascadeId || 'current',
+      title: activeConv.title || t('live.currentSession'),
+      isCurrentSelected: true,
+      isMainRunning: Boolean(activeConv.isRunning),
+      isRunning: true,
+      mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
+      subagentCount: Math.max(0, (agents?.length || 1) - 1),
+      runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
+      ...(latestTokPerSec !== undefined ? { latestTokPerSec } : {}),
+      ...(contextUsedPct !== undefined ? { contextUsedPct } : {}),
+      subagents: (agents || [])
+        .filter((a) => !a.isMain)
+        .map((s, idx) => ({
+          cascadeId: s.cascadeId || s.agentId,
+          index: s.index || idx + 1,
+          agentKind: s.agentKind || (s.isSideQuestion ? 'side_question' : 'subagent'),
+          agentOrdinal: s.agentOrdinal || (s.isSideQuestion ? s.sideIndex || 0 : s.index || idx + 1),
+          customRole: s.customRole,
+          ...(s.isSideQuestion ? { isSideQuestion: true, sideIndex: s.sideIndex || 0 } : {}),
+          badgeText: formatAgentBadgeText({ ...s, index: s.index || idx + 1 }),
+          shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
+          role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
+          isRunning: Boolean(s.isRunning),
+          stepCount: Number(s.stepCount || 0),
+          lastModifiedMs: s.lastModifiedMs || 0,
+          liveActivity: s.liveActivity || {
+            phase: s.isRunning ? 'thinking' : 'done',
+            actionKey: s.isRunning ? 'thinking' : 'done',
+            label: s.isRunning ? t('live.thinking') : t('live.done'),
+            detail: '',
+            stepProgress: '',
+            startedAtMs: s.lastModifiedMs || 0,
+            signature: `${s.agentId}:${s.stepCount || 0}`,
+          },
+        })),
+    },
+  ];
+}
 
 const LiveActivityWidget = defineComponent({
   name: 'LiveActivityWidget',
   setup({ props, onCleanup }) {
     const interactive = props.interactive !== false;
     const preview = Boolean(props.preview);
+    const defaultExpandRunningSubs = Boolean(props.defaultExpandRunningSubs);
+    const showSessionExtras = Boolean(props.showSessionExtras);
+    const onSelectSession =
+      typeof props.onSelectSession === 'function' ? props.onSelectSession : null;
+    const onLayoutChange =
+      typeof props.onLayoutChange === 'function' ? props.onLayoutChange : null;
     const getCtxAgentId =
       typeof props.getCtxAgentId === 'function'
         ? props.getCtxAgentId
@@ -9927,10 +10921,19 @@ const LiveActivityWidget = defineComponent({
       'aria-live': 'polite',
     });
 
-    const expandedTaskConvIds = new Set();
+    const manualSubExpandMap = new Map();
     const activityTimersMap = new Map();
     let liveTickTimer = null;
-    let latestData = null;
+    let latestUpdateArgs = null;
+
+    function resolveIsExpanded(item) {
+      const runSubCount = Number(item?.runningSubagentCount || 0);
+      if (!interactive) return runSubCount > 0;
+      if (manualSubExpandMap.has(item.cascadeId)) {
+        return Boolean(manualSubExpandMap.get(item.cascadeId));
+      }
+      return defaultExpandRunningSubs ? runSubCount > 0 : false;
+    }
 
     function bindLiveElapsedTimer(timerKey, sig, rawStartMs, targetEl) {
       const now = Date.now();
@@ -9993,6 +10996,20 @@ const LiveActivityWidget = defineComponent({
         className: 'live-task-title',
         text: t('live.currentSession'),
       });
+      const hereTagEl = showSessionExtras
+        ? h('span', {
+            className: 'wm-session-tag is-here',
+            hidden: true,
+            text: t('multi.hereTag'),
+          })
+        : null;
+      const metricsEl = showSessionExtras
+        ? h('span', {
+            className: 'wm-task-metrics text-mono',
+            hidden: true,
+            text: '',
+          })
+        : null;
       const subToggleBtn = h('button', {
         type: 'button',
         className: 'live-sub-toggle',
@@ -10005,8 +11022,16 @@ const LiveActivityWidget = defineComponent({
       });
 
       const headerEl = h('div', { className: 'live-task-header' }, [
-        h('div', { className: 'live-task-title-wrap' }, [dotWrap, titleEl]),
-        h('div', { className: 'live-task-header-right' }, [subToggleBtn, elapsedEl]),
+        h('div', { className: 'live-task-title-wrap' }, [
+          dotWrap,
+          titleEl,
+          ...(hereTagEl ? [hereTagEl] : []),
+        ]),
+        h('div', { className: 'live-task-header-right' }, [
+          ...(metricsEl ? [metricsEl] : []),
+          subToggleBtn,
+          elapsedEl,
+        ]),
       ]);
 
       const mainBadge = h('span', {
@@ -10047,6 +11072,8 @@ const LiveActivityWidget = defineComponent({
           cardEl,
           dotIcon,
           titleEl,
+          hereTagEl,
+          metricsEl,
           subToggleBtn,
           elapsedEl,
           mainBadge,
@@ -10085,103 +11112,86 @@ const LiveActivityWidget = defineComponent({
       };
     }
 
-    function update({ data } = {}) {
-      latestData = data || null;
-      if (!data) {
+    function update({ data = null, items = null, hostRouteConversationId = '' } = {}) {
+      latestUpdateArgs = { data, items, hostRouteConversationId };
+      if (!data && !Array.isArray(items)) {
         patchAttr(liveActivityBar, 'hidden', true);
         stopLiveTicker();
         return;
       }
 
-      const { agents, aggregated } = resolveScopedConversation(
-        data,
-        'all',
-        getCtxAgentId()
-      );
+      let rawRunningList = Array.isArray(items) ? items : null;
+      if (!rawRunningList) {
+        const { agents, aggregated } = resolveScopedConversation(
+          data,
+          'all',
+          getCtxAgentId()
+        );
+        rawRunningList = buildFallbackRunningConversations(data, { agents, aggregated });
+      }
 
-      const rawRunningList =
-        Array.isArray(data.runningConversations) && data.runningConversations.length > 0
-          ? data.runningConversations
-          : data.activeConversation?.isRunning || aggregated?.isRunning
-            ? [
-                {
-                  cascadeId: data.activeConversation?.cascadeId || 'current',
-                  title: data.activeConversation?.title || t('live.currentSession'),
-                  isCurrentSelected: true,
-                  isMainRunning: Boolean(data.activeConversation?.isRunning),
-                  isRunning: true,
-                  mainActivity:
-                    data.activeConversation?.liveActivity || aggregated?.liveActivity || null,
-                  subagentCount: Math.max(0, agents.length - 1),
-                  runningSubagentCount: agents.filter((a) => !a.isMain && a.isRunning).length,
-                  subagents: agents
-                    .filter((a) => !a.isMain)
-                    .map((s, idx) => ({
-                      cascadeId: s.cascadeId || s.agentId,
-                      index: s.index || idx + 1,
-                      badgeText: formatAgentBadgeText({ ...s, index: s.index || idx + 1 }),
-                      shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-                      role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
-                      isRunning: Boolean(s.isRunning),
-                      stepCount: Number(s.stepCount || 0),
-                      lastModifiedMs: s.lastModifiedMs || 0,
-                      liveActivity: s.liveActivity || {
-                        phase: s.isRunning ? 'thinking' : 'done',
-                        label: s.isRunning ? t('live.thinking') : t('live.done'),
-                        detail: '',
-                        stepProgress: '',
-                        startedAtMs: s.lastModifiedMs || 0,
-                        signature: `${s.agentId}:${s.stepCount || 0}`,
-                      },
-                    })),
-                },
-              ]
-            : [];
+      if (manualSubExpandMap.size > 0) {
+        const runningIdsSet = new Set(rawRunningList.map((item) => item.cascadeId));
+        for (const id of [...manualSubExpandMap.keys()]) {
+          if (!runningIdsSet.has(id)) {
+            manualSubExpandMap.delete(id);
+          }
+        }
+      }
 
       const hasRunningTasks = rawRunningList.length > 0;
       patchAttr(liveActivityBar, 'hidden', !hasRunningTasks);
       if (!hasRunningTasks) {
         stopLiveTicker();
-        expandedTaskConvIds.clear();
+        patchKeyedList(liveActivityBar, [], {});
         return;
       }
+
+      if (!isVisibleFn()) {
+        pauseTicker();
+        return;
+      }
+
+      const locale = getEffectiveLocale();
+      const hostRouteLower = showSessionExtras
+        ? String(hostRouteConversationId || extractHostRouteCascadeId() || '').toLowerCase()
+        : '';
 
       const activeTimerKeys = new Set();
       for (const item of rawRunningList) {
         activeTimerKeys.add(`main:${item.cascadeId}`);
-        for (const sub of item.subagents || []) {
-          if (sub?.isRunning) {
-            activeTimerKeys.add(`sub:${sub.cascadeId}`);
+        const subCount = Number(item.subagentCount || item.subagents?.length || 0);
+        const isExp = resolveIsExpanded(item);
+        if (subCount > 0 && isExp) {
+          for (const sub of item.subagents || []) {
+            if (sub?.isRunning) {
+              activeTimerKeys.add(`sub:${sub.cascadeId}`);
+            }
           }
         }
       }
 
-      const runningIdsSet = new Set(rawRunningList.map((item) => item.cascadeId));
-      for (const id of [...expandedTaskConvIds]) {
-        if (!runningIdsSet.has(id)) {
-          expandedTaskConvIds.delete(id);
-        }
-      }
-
-      const locale = getEffectiveLocale();
       patchKeyedList(liveActivityBar, rawRunningList, {
         keyFn: (item) => item.cascadeId,
         sigFn: (item) => {
-          const isExp = interactive
-            ? expandedTaskConvIds.has(item.cascadeId)
-            : Number(item.runningSubagentCount || 0) > 0;
+          const isExp = resolveIsExpanded(item);
+          const isHere =
+            showSessionExtras &&
+            Boolean(hostRouteLower) &&
+            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
           const subSig = (item.subagents || [])
             .map(
               (s) =>
                 `${s.cascadeId}:${s.isRunning}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
             )
             .join('|');
-          return `${locale}:${item.cascadeId}:${item.title}:${item.isMainRunning}:${item.subagentCount}:${item.runningSubagentCount}:${isExp}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
+          return `${locale}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${item.runningSubagentCount}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
         },
         createRow: createLiveTaskCard,
         updateRow: (refs, item) => {
           const act = item.mainActivity || {
             phase: 'thinking',
+            actionKey: 'thinking',
             label: t('live.thinking'),
             detail: '',
             stepProgress: '',
@@ -10200,9 +11210,18 @@ const LiveActivityWidget = defineComponent({
           const convTitle = item.title || item.cascadeId?.slice(0, 8) || t('live.currentSession');
           patchText(refs.titleEl, convTitle);
           if (interactive && !preview) {
-            patchAttr(refs.titleEl, 'title', t('live.switchSessionTitle', { title: convTitle }));
-            refs.titleEl.onclick = () => {
-              if (item.cascadeId && item.cascadeId !== 'current') {
+            patchAttr(
+              refs.titleEl,
+              'title',
+              onSelectSession
+                ? t('multi.inspectSessionTitle', { title: convTitle })
+                : t('live.switchSessionTitle', { title: convTitle })
+            );
+            refs.titleEl.onclick = (e) => {
+              e?.stopPropagation?.();
+              if (onSelectSession) {
+                onSelectSession(item.cascadeId);
+              } else if (item.cascadeId && item.cascadeId !== 'current') {
                 uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
                 telemetryStore.setState({ selectedConversationId: item.cascadeId });
                 fetchTelemetry({ force: false });
@@ -10210,11 +11229,32 @@ const LiveActivityWidget = defineComponent({
             };
           }
 
+          if (showSessionExtras && refs.hereTagEl && refs.metricsEl) {
+            const isHere =
+              Boolean(hostRouteLower) &&
+              String(item.cascadeId || '').toLowerCase() === hostRouteLower;
+            patchText(refs.hereTagEl, t('multi.hereTag'));
+            patchAttr(refs.hereTagEl, 'hidden', !isHere);
+
+            const metricParts = [];
+            if (Number.isFinite(item.latestTokPerSec) && item.latestTokPerSec > 0) {
+              metricParts.push(
+                `${item.latestTokPerSec >= 100 ? Math.round(item.latestTokPerSec) : item.latestTokPerSec.toFixed(1)} t/s`
+              );
+            }
+            if (item.contextUsedPct != null && Number.isFinite(Number(item.contextUsedPct))) {
+              metricParts.push(`${Math.round(Number(item.contextUsedPct))}%`);
+            }
+            const metricsStr = metricParts.join(' · ');
+            patchAttr(refs.metricsEl, 'hidden', !metricsStr);
+            if (metricsStr) {
+              patchText(refs.metricsEl, metricsStr);
+            }
+          }
+
           const subCount = Number(item.subagentCount || item.subagents?.length || 0);
           const runSubCount = Number(item.runningSubagentCount || 0);
-          const isExpanded = interactive
-            ? expandedTaskConvIds.has(item.cascadeId)
-            : runSubCount > 0;
+          const isExpanded = resolveIsExpanded(item);
           patchText(refs.mainBadge, t('fmt.mainBadge'));
           patchAttr(refs.mainBadge, 'hidden', subCount === 0);
           patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
@@ -10234,39 +11274,37 @@ const LiveActivityWidget = defineComponent({
               );
               refs.subToggleBtn.onclick = (e) => {
                 e.stopPropagation();
-                if (expandedTaskConvIds.has(item.cascadeId)) {
-                  expandedTaskConvIds.delete(item.cascadeId);
-                } else {
-                  expandedTaskConvIds.add(item.cascadeId);
-                }
-                if (latestData) update({ data: latestData });
+                manualSubExpandMap.set(item.cascadeId, !isExpanded);
+                if (latestUpdateArgs) update(latestUpdateArgs);
+                onLayoutChange?.();
               };
             }
           }
 
+          const mainLabel = formatLiveActivityLabel(act, 'live.thinking');
+          const detailStr = formatLiveActivityDetail(act);
           const mainTimerKey = `main:${item.cascadeId}`;
           activeTimerKeys.add(mainTimerKey);
           bindLiveElapsedTimer(
             mainTimerKey,
-            `${item.cascadeId}:${act.signature || act.label}`,
+            `${item.cascadeId}:${act.signature || mainLabel}`,
             act.startedAtMs,
             refs.elapsedEl
           );
 
-          patchText(refs.mainPhase, act.label || t('live.thinking'));
+          patchText(refs.mainPhase, mainLabel);
           const progText = act.stepProgress ? `[${act.stepProgress}]` : '';
           patchAttr(refs.mainProgress, 'hidden', !progText);
           if (progText) {
             patchText(refs.mainProgress, progText);
           }
 
-          const detailStr = act.detail || '';
           patchAttr(refs.mainSep, 'hidden', !detailStr);
           patchAttr(refs.mainDetail, 'hidden', !detailStr);
           patchText(refs.mainDetail, detailStr);
 
-          if (interactive) {
-            const fullTooltip = `[${convTitle}] ${t('fmt.mainAgent')} · ${act.label || ''}${progText ? ` ${progText}` : ''}${detailStr ? ` · ${detailStr}` : ''}`;
+          if (interactive && !showSessionExtras) {
+            const fullTooltip = `[${convTitle}] ${t('fmt.mainAgent')} · ${mainLabel}${progText ? ` ${progText}` : ''}${detailStr ? ` · ${detailStr}` : ''}`;
             patchAttr(refs.cardEl, 'title', fullTooltip);
           }
 
@@ -10282,6 +11320,7 @@ const LiveActivityWidget = defineComponent({
               updateRow: (subRefs, sub) => {
                 const subAct = sub.liveActivity || {
                   phase: sub.isRunning ? 'thinking' : 'done',
+                  actionKey: sub.isRunning ? 'thinking' : 'done',
                   label: sub.isRunning ? t('live.thinking') : t('live.done'),
                   detail: '',
                   stepProgress: '',
@@ -10298,20 +11337,30 @@ const LiveActivityWidget = defineComponent({
                 patchAttr(subRefs.subBadge, 'class', `agent-badge ${badgeCls}`);
                 patchText(subRefs.subBadge, subBadgeText);
 
-                const roleText = sub.role || sub.shortLabel || t('fmt.subAgent');
+                const fallbackRole =
+                  sub.agentKind === 'side_question' || sub.isSideQuestion
+                    ? `${t('fmt.sideQuestion')}${sub.agentOrdinal || sub.sideIndex ? ` #${sub.agentOrdinal || sub.sideIndex}` : ''}`
+                    : `${t('fmt.subAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`;
+                const roleText =
+                  sub.customRole !== undefined
+                    ? sub.customRole || fallbackRole
+                    : sub.role || sub.shortLabel || fallbackRole;
                 patchText(subRefs.subRole, roleText);
 
-                const rawSubLabel = sub.isRunning
-                  ? subAct.label || ''
-                  : subAct.label || t('live.done');
+                const subLabel = sub.isRunning
+                  ? formatLiveActivityLabel(subAct, 'live.running')
+                  : formatLiveActivityLabel(subAct, 'live.done');
+                const subDetail = formatLiveActivityDetail(subAct);
                 const subProg = subAct.stepProgress ? ` [${subAct.stepProgress}]` : '';
-                const summaryStr = [`${rawSubLabel}${subProg}`.trim(), subAct.detail || '']
-                  .filter(Boolean)
-                  .join(' ');
+                const summaryStr = showSessionExtras
+                  ? sub.isRunning
+                    ? `${subLabel}${subProg}${subDetail ? ` · ${subDetail}` : ''}`
+                    : t('live.doneWithSteps', { steps: sub.stepCount || 0 })
+                  : [`${subLabel}${subProg}`.trim(), subDetail].filter(Boolean).join(' ');
                 patchAttr(subRefs.subSummary, 'hidden', !summaryStr);
                 patchText(subRefs.subSummary, summaryStr);
 
-                if (interactive) {
+                if (interactive && !showSessionExtras) {
                   patchAttr(
                     subRefs.rowEl,
                     'title',
@@ -10324,8 +11373,8 @@ const LiveActivityWidget = defineComponent({
                   activeTimerKeys.add(subTimerKey);
                   bindLiveElapsedTimer(
                     subTimerKey,
-                    `${sub.cascadeId}:${subAct.signature || subAct.label}`,
-                    subAct.startedAtMs,
+                    `${sub.cascadeId}:${subAct.signature || subLabel}`,
+                    subAct.startedAtMs || sub.lastModifiedMs,
                     subRefs.subElapsed
                   );
                 } else {
@@ -10365,8 +11414,11 @@ const LiveActivityWidget = defineComponent({
     };
   },
 });
+return { buildFallbackRunningConversations, LiveActivityWidget };
+})();
 
 // --- src/registries/widgetRegistry.js ---
+const { OVERVIEW_WIDGET_KEYS, OVERVIEW_WIDGET_REGISTRY, getOverviewModuleOptions, createDynamicWidgetHost } = (() => {
 /**
  * @fileoverview Decoupled Overview & Hover Widget Registry (`widgetRegistry.js`).
  * Maps module keys (`metrics`, `context`, `quotas`, `live_tasks`) to standalone
@@ -10375,12 +11427,7 @@ const LiveActivityWidget = defineComponent({
  */
 
 
-const OVERVIEW_WIDGET_KEYS = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
+const OVERVIEW_WIDGET_KEYS = OVERVIEW_MODULE_KEYS;
 
 const OVERVIEW_WIDGET_REGISTRY = Object.freeze({
   metrics: {
@@ -10576,8 +11623,11 @@ function createDynamicWidgetHost({
     destroy,
   };
 }
+return { OVERVIEW_WIDGET_KEYS, OVERVIEW_WIDGET_REGISTRY, getOverviewModuleOptions, createDynamicWidgetHost };
+})();
 
 // --- src/registries/stepColumnRegistry.js ---
+const { STEP_COLUMN_KEYS, DEFAULT_STEP_COLUMN_KEYS, formatCustomTokenComboHeader, STEP_COLUMN_REGISTRY, getStepColumnOptions } = (() => {
 /**
  * @fileoverview Decoupled Step Table Column Registry (`stepColumnRegistry.js`).
  * Defines all 12 customizable columns for `StepsDetailView` ("按步查看"),
@@ -10586,32 +11636,11 @@ function createDynamicWidgetHost({
  */
 
 
-const STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'time',
-  'model',
-  'tps',
-  'ttft',
-  'duration',
-  'tokens_combo',
-  'tokens_io_cache',
-  'tokens_custom',
-  'input_tokens',
-  'cache_tokens',
-  'output_tokens',
-  'cache',
-  'cost',
-]);
-
-const DEFAULT_STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'model',
-  'tps',
-  'ttft',
-  'tokens_combo',
-  'cache',
-  'cost',
-]);
+const STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
+const DEFAULT_STEP_COLUMN_KEYS = DEFAULT_STEP_TABLE_COLUMNS;
+const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
+const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
 
 function resolveStepTokenParts(st) {
   const inTok = Math.max(0, Number(st?.inputTokens || 0));
@@ -10785,7 +11814,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
       if (reason && !refs.speedReason) {
         refs.speedReason = h('div', {
           className: 'text-muted',
-          style: 'font-size: var(--fs-2xs);',
+          style: 'font-size: var(--fs-xs);',
         });
         refs.wrapEl.appendChild(refs.speedReason);
       }
@@ -11015,8 +12044,11 @@ function getStepColumnOptions(
     label: STEP_COLUMN_REGISTRY[key].optLabel(ctx),
   }));
 }
+return { STEP_COLUMN_KEYS, DEFAULT_STEP_COLUMN_KEYS, formatCustomTokenComboHeader, STEP_COLUMN_REGISTRY, getStepColumnOptions };
+})();
 
 // --- src/components/widgets/CapsuleBarWidget.js ---
+const { RING_RADIUS, RING_CIRCUMFERENCE, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget } = (() => {
 /**
  * @fileoverview Shared Decoupled Capsule Bar Primitives & Widget (`CapsuleBarWidget.js`).
  * Powers both the live host window capsule (`WindowOverlayShell.js`) and the
@@ -11026,6 +12058,91 @@ function getStepColumnOptions(
 
 const RING_RADIUS = 5.2;
 const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
+
+/**
+ * Compute shared context ring + 1..5 capsule slot metric payload from telemetry & scoped conversation.
+ */
+function buildCapsuleSlotContext(
+  data,
+  { scopedConv = null, overviewConv = null, ctxAgent = null, aggregated = null } = {}
+) {
+  if (!data) return { hasTelemetry: false };
+  const activeConv = data.activeConversation || {};
+  const overviewActive = overviewConv || scopedConv || aggregated || activeConv;
+  const capActive = scopedConv || aggregated || activeConv || {};
+  const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
+  const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
+  const totalTokens = Number(ctx.totalTokens || 0);
+  const usedPct =
+    limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
+  const dashOffset = +(
+    RING_CIRCUMFERENCE *
+    (1 - Math.max(0, Math.min(100, usedPct)) / 100)
+  ).toFixed(2);
+
+  const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
+  const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
+  const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
+  const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
+  const sessionTokens =
+    Number(capActive.stepCount || 0) > 0 ||
+    capActive.totalTokens != null ||
+    capInTok + capCacheTok + capOutTok > 0
+      ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
+      : null;
+
+  return {
+    hasTelemetry: true,
+    usedPct,
+    dashOffset,
+    isRunning,
+    tps: scopedConv?.latestTokPerSec ?? aggregated?.latestTokPerSec ?? activeConv.latestTokPerSec ?? null,
+    avgTps: scopedConv?.avgTokPerSec ?? aggregated?.avgTokPerSec ?? activeConv.avgTokPerSec ?? null,
+    ttft: scopedConv?.latestTtftSec ?? aggregated?.latestTtftSec ?? activeConv.latestTtftSec ?? null,
+    stepCost:
+      scopedConv?.latestStepCostUsd ??
+      aggregated?.latestStepCostUsd ??
+      activeConv.latestStepCostUsd ??
+      null,
+    sessionCost:
+      scopedConv?.sessionCostUsd ?? aggregated?.sessionCostUsd ?? activeConv.sessionCostUsd ?? null,
+    cacheHitPct:
+      Number(capActive.stepCount || 0) > 0
+        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
+        : null,
+    latestPromptTokens: capActive.latestPromptTokens ?? null,
+    sessionTokens,
+    quotas: data.quotas,
+  };
+}
+
+/**
+ * Compute multi-session button state & normalized running conversation list.
+ */
+function resolveMultiSessionCapsuleState(
+  data,
+  { agents = [], aggregated = null, latestTokPerSec = undefined, contextUsedPct = undefined } = {}
+) {
+  const rawRunningList = buildFallbackRunningConversations(data, {
+    agents,
+    aggregated,
+    latestTokPerSec,
+    contextUsedPct,
+  });
+  const runningCount = rawRunningList.length;
+  const runningSubCount = rawRunningList.reduce(
+    (acc, item) => acc + Number(item.runningSubagentCount || 0),
+    0
+  );
+  const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+  const multiBtnText =
+    runningCount > 0
+      ? runningSubCount > 0
+        ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+        : t('capsule.multiRunning', { count: runningCount })
+      : t('capsule.multiZero');
+  return { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText };
+}
 
 /**
  * Create a single reusable capsule metric slot node (`0..4`) with an optional SVG context ring.
@@ -11231,11 +12348,6 @@ const CapsuleBarWidget = defineComponent({
       ]
     );
 
-    const titlebarRightMock = h('div', { className: 'preview-win-controls', 'aria-hidden': 'true' }, [
-      h('span', { className: 'preview-win-dot' }),
-      h('span', { className: 'preview-win-dot' }),
-      h('span', { className: 'preview-win-dot' }),
-    ]);
     const composerSendMock = h(
       'span',
       { className: 'preview-composer-send', 'aria-hidden': 'true', hidden: true },
@@ -11245,7 +12357,7 @@ const CapsuleBarWidget = defineComponent({
     const hostBarEl = h(
       'div',
       { className: 'preview-capsule-bar', 'data-mount-mode': 'dual' },
-      [titlebarLeftMock, composerLeftMock, capsuleCluster, titlebarRightMock, composerSendMock]
+      [titlebarLeftMock, composerLeftMock, capsuleCluster, composerSendMock]
     );
 
     const sidebarHintEl = h('div', {
@@ -11274,7 +12386,6 @@ const CapsuleBarWidget = defineComponent({
       });
 
       patchAttr(titlebarLeftMock, 'hidden', isComposer);
-      patchAttr(titlebarRightMock, 'hidden', isComposer);
       patchAttr(composerLeftMock, 'hidden', !isComposer);
       patchAttr(composerSendMock, 'hidden', !isComposer);
       patchAttr(sidebarHintEl, 'hidden', !isSidebar);
@@ -11289,75 +12400,26 @@ const CapsuleBarWidget = defineComponent({
         return;
       }
 
-      const { scopedConv, ctxAgent, aggregated } = resolveScopedConversation(
+      const { agents, scopedConv, ctxAgent, aggregated } = resolveScopedConversation(
         data,
         'all',
         'auto'
       );
-      const activeConv = data.activeConversation || {};
-      const capActive = scopedConv || aggregated || activeConv;
-      const ctx = ctxAgent?.context || capActive.context || activeConv.context || {};
-      const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
-      const totalTokens = Number(ctx.totalTokens || 0);
-      const usedPct =
-        limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
-      const dashOffset = +(
-        RING_CIRCUMFERENCE *
-        (1 - Math.max(0, Math.min(100, usedPct)) / 100)
-      ).toFixed(2);
-
-      const rawRunningList = Array.isArray(data.runningConversations)
-        ? data.runningConversations
-        : [];
-      const runningCount = rawRunningList.length;
-      const runningSubCount = rawRunningList.reduce(
-        (acc, item) => acc + Number(item.runningSubagentCount || 0),
-        0
-      );
-      const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+      const slotCtx = buildCapsuleSlotContext(data, { scopedConv, ctxAgent, aggregated });
+      const { runningCount, hasWaiting, multiBtnText } = resolveMultiSessionCapsuleState(data, {
+        agents,
+        aggregated,
+        contextUsedPct: slotCtx.usedPct,
+      });
 
       patchClasses(multiBtn, {
         'is-running': runningCount > 0 && !hasWaiting,
         'is-waiting': runningCount > 0 && hasWaiting,
       });
-      const multiBtnText =
-        runningCount > 0
-          ? runningSubCount > 0
-            ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
-            : t('capsule.multiRunning', { count: runningCount })
-          : t('capsule.multiZero');
       patchText(multiLabel, multiBtnText);
 
-      const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
-      const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
-      const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
-      const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
-      const sessionTokens =
-        Number(capActive.stepCount || 0) > 0 ||
-        capActive.totalTokens != null ||
-        capInTok + capCacheTok + capOutTok > 0
-          ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
-          : null;
-
-      patchClasses(capsuleBtn, { 'is-running': isRunning });
-      syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, {
-        hasTelemetry: true,
-        usedPct,
-        dashOffset,
-        isRunning,
-        tps: capActive.latestTokPerSec ?? null,
-        avgTps: capActive.avgTokPerSec ?? null,
-        ttft: capActive.latestTtftSec ?? null,
-        stepCost: capActive.latestStepCostUsd ?? null,
-        sessionCost: capActive.sessionCostUsd ?? null,
-        cacheHitPct:
-          Number(capActive.stepCount || 0) > 0
-            ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
-            : null,
-        latestPromptTokens: capActive.latestPromptTokens ?? null,
-        sessionTokens,
-        quotas: data.quotas,
-      });
+      patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
+      syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
     }
 
     return {
@@ -11373,8 +12435,11 @@ const CapsuleBarWidget = defineComponent({
     };
   },
 });
+return { RING_RADIUS, RING_CIRCUMFERENCE, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget };
+})();
 
 // --- src/components/widgets/StepTableWidget.js ---
+const { formatTurnPromptText, StepTableWidget } = (() => {
 /**
  * @fileoverview Reusable Decoupled Step Table Widget (`StepTableWidget.js`).
  * Powers both `StepsDetailView` ("按步查看") and `SettingsStructureTab` live preview,
@@ -11383,14 +12448,11 @@ const CapsuleBarWidget = defineComponent({
  */
 
 
-function formatTurnPromptText(rawPrompt) {
+function formatTurnPromptText(rawPrompt, { hasMedia = false, mediaOnly = false } = {}) {
   const text = String(rawPrompt || '').trim();
-  if (!text || !isEnglishLocale()) return text;
-  if (text === '[图片/附件提问]') return t('steps.turnMediaOnly');
-  if (text.endsWith(' [附图]')) {
-    return `${text.slice(0, -5)} ${t('steps.turnMediaSuffix')}`;
-  }
-  return text;
+  if (mediaOnly || (!text && hasMedia)) return t('steps.turnMediaOnly');
+  if (!text) return '';
+  return hasMedia ? `${text} ${t('steps.turnMediaSuffix')}` : text;
 }
 
 const StepTableWidget = defineComponent({
@@ -11570,7 +12632,13 @@ const StepTableWidget = defineComponent({
       const getStepIsLatest = (st) =>
         Boolean(useRootTurn ? (st?.isRootLatestTurn ?? st?.isLatestTurn) : st?.isLatestTurn);
       const getStepPrompt = (st) =>
-        (useRootTurn ? (st?.rootTurnPrompt ?? st?.turnPrompt) : st?.turnPrompt) || '';
+        (useRootTurn
+          ? (st?.rootTurnPromptClean ?? st?.rootTurnPrompt ?? st?.turnPromptClean ?? st?.turnPrompt)
+          : (st?.turnPromptClean ?? st?.turnPrompt)) || '';
+      const getStepHasMedia = (st) =>
+        Boolean(useRootTurn ? (st?.rootTurnHasMedia ?? st?.turnHasMedia) : st?.turnHasMedia);
+      const getStepMediaOnly = (st) =>
+        Boolean(useRootTurn ? (st?.rootTurnMediaOnly ?? st?.turnMediaOnly) : st?.turnMediaOnly);
       const turnKeys = showStepTurnRail ? tableSteps.map((st) => {
         const tIdx = getStepTurnIdx(st);
         if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
@@ -11579,8 +12647,13 @@ const StepTableWidget = defineComponent({
       const formattedPrompts = new Map();
       function formattedTurnPrompt(st) {
         const raw = getStepPrompt(st);
-        if (!formattedPrompts.has(raw)) formattedPrompts.set(raw, formatTurnPromptText(raw));
-        return formattedPrompts.get(raw);
+        const hasMedia = getStepHasMedia(st);
+        const mediaOnly = getStepMediaOnly(st);
+        const cacheKey = `${mediaOnly ? 2 : hasMedia ? 1 : 0}:${raw}`;
+        if (!formattedPrompts.has(cacheKey)) {
+          formattedPrompts.set(cacheKey, formatTurnPromptText(raw, { hasMedia, mediaOnly }));
+        }
+        return formattedPrompts.get(cacheKey);
       }
 
       const decoratedSteps = tableSteps.map((st, idx) => {
@@ -11702,26 +12775,38 @@ const StepTableWidget = defineComponent({
             const badgeCls = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
             const clickableCls = interactiveBadges && onSelectAgentScopes ? ' is-clickable' : '';
             patchAttr(refs.agentBadgeEl, 'class', `agent-badge${clickableCls} ${badgeCls}`);
-            const badgeText = isEnglishLocale()
-              ? formatAgentBadgeText({
-                  isMain: !st.isSubagent,
-                  index: st.agentIndex || 0,
-                  badgeText: st.agentBadge,
-                })
-              : st.agentBadge || (st.isSubagent ? '子' : '主');
+            const badgeText = formatAgentBadgeText({
+              agentKind:
+                st.agentKind ||
+                (!st.isSubagent ? 'main' : st.isSideQuestion ? 'side_question' : 'subagent'),
+              agentOrdinal:
+                st.agentOrdinal || (st.isSideQuestion ? st.sideIndex || 0 : st.agentIndex || 0),
+              isMain: !st.isSubagent,
+              isSideQuestion: Boolean(st.isSideQuestion),
+              sideIndex: st.sideIndex || 0,
+              index: st.agentIndex || 0,
+              badgeText: st.agentBadge,
+            });
             patchText(refs.agentBadgeEl, badgeText);
 
             if (interactiveBadges && onSelectAgentScopes) {
               const targetScope = st.agentId || 'main';
               const isSoleTarget =
                 effectiveScopes.length === 1 && effectiveScopes[0] === targetScope;
-              const agentName = isEnglishLocale()
-                ? formatAgentLabel({
-                    isMain: !st.isSubagent,
-                    index: st.agentIndex || 0,
-                    role: st.agentRole || '',
-                  })
-                : st.agentLabel || t('steps.unitAgent');
+              const agentName = formatAgentLabel({
+                agentKind:
+                  st.agentKind ||
+                  (!st.isSubagent ? 'main' : st.isSideQuestion ? 'side_question' : 'subagent'),
+                agentOrdinal:
+                  st.agentOrdinal || (st.isSideQuestion ? st.sideIndex || 0 : st.agentIndex || 0),
+                customRole: st.agentCustomRole,
+                isMain: !st.isSubagent,
+                isSideQuestion: Boolean(st.isSideQuestion),
+                sideIndex: st.sideIndex || 0,
+                index: st.agentIndex || 0,
+                role: st.agentRole || '',
+                shortLabel: st.agentLabel || '',
+              });
               patchAttr(
                 refs.agentBadgeEl,
                 'title',
@@ -11789,8 +12874,11 @@ const StepTableWidget = defineComponent({
     };
   },
 });
+return { formatTurnPromptText, StepTableWidget };
+})();
 
 // --- src/components/settings/structurePreviewMock.js ---
+const { buildStructurePreviewTelemetry } = (() => {
 /**
  * @fileoverview Realistic Simulated Telemetry Builder (`structurePreviewMock.js`)
  * for `SettingsStructureTab` real-UI live previews.
@@ -11819,7 +12907,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     totalTokens: 142800,
     limitTokens: 256000,
     compactionLimitTokens: 256000,
+    compactionUsedTokens: 142800,
     usedPct: 55.8,
+    messagesTokens: 119660,
     toolResultsTokens: 86400,
     assistantTokens: 24200,
     systemToolsTokens: 11800,
@@ -11836,7 +12926,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     totalTokens: 72704,
     limitTokens: 256000,
     compactionLimitTokens: 256000,
+    compactionUsedTokens: 72704,
     usedPct: 28.4,
+    messagesTokens: 63704,
     toolResultsTokens: 51200,
     assistantTokens: 11400,
     systemToolsTokens: 5600,
@@ -11990,6 +13082,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       responseTokens: 260,
       cacheHitPct: 0,
       costUsd: 0.198,
+      inCostUsd: 0.19,
+      cacheCostUsd: 0,
+      outCostUsd: 0.008,
       createdAtMs: anchorMinMs - 215_000,
       turnIndex: 1,
       rootTurnIndex: 1,
@@ -12012,10 +13107,12 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     isRunning: true,
     stepCount: 16,
     speedSampleCount: 15,
+    speedSummary: { sampleCount: 15, excludedCount: 1 },
     latestTokPerSec: 68.4,
     avgTokPerSec: 54.8,
     latestTtftSec: 1.15,
     avgTtftSec: 1.62,
+    ttftSummary: { avgSec: 1.62, sampleCount: 15 },
     latestStepCostUsd: 0.042,
     sessionCostUsd: 1.16,
     latestCacheHitPct: 94.5,
@@ -12031,6 +13128,24 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     latestUpstreamModel: 'gemini-4-carbon-high',
     activeModelLabel: 'Gemini 4 Carbon (High)',
     activeModelShort: 'gemini-4-carbon',
+    activeModelUpstream: 'gemini-4-carbon-high',
+    sessionUnpricedCalls: 0,
+    modelBreakdown: [
+      {
+        modelKey: 'MODEL_PLACEHOLDER_M37',
+        modelShort: 'gemini-4-carbon',
+        modelLabel: 'Gemini 4 Carbon (High)',
+        upstreamModel: 'gemini-4-carbon-high',
+        calls: 16,
+        inputTokens: 152400,
+        cacheReadTokens: 1260000,
+        outputTokens: 22100,
+        thinkingTokens: 14200,
+        totalTokens: 1434500,
+        costUsd: 1.16,
+        sharePct: 100,
+      },
+    ],
     context: mainContext,
     recentSteps: mockSteps.filter((s) => !s.isSubagent),
   };
@@ -12046,10 +13161,12 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     isRunning: false,
     stepCount: 8,
     speedSampleCount: 8,
+    speedSummary: { sampleCount: 8, excludedCount: 0 },
     latestTokPerSec: 96.2,
     avgTokPerSec: 88.5,
     latestTtftSec: 0.68,
     avgTtftSec: 0.82,
+    ttftSummary: { avgSec: 0.82, sampleCount: 8 },
     latestStepCostUsd: 0.009,
     sessionCostUsd: 0.12,
     latestCacheHitPct: 88.1,
@@ -12065,33 +13182,69 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     latestUpstreamModel: 'gemini-3.8-flash-n',
     activeModelLabel: 'Gemini 3.8 Flash',
     activeModelShort: 'gemini-3.8-flash',
+    activeModelUpstream: 'gemini-3.8-flash-n',
+    sessionUnpricedCalls: 0,
+    modelBreakdown: [
+      {
+        modelKey: 'MODEL_PLACEHOLDER_M42',
+        modelShort: 'gemini-3.8-flash',
+        modelLabel: 'Gemini 3.8 Flash',
+        upstreamModel: 'gemini-3.8-flash-n',
+        calls: 8,
+        inputTokens: 34000,
+        cacheReadTokens: 280000,
+        outputTokens: 6300,
+        thinkingTokens: 2100,
+        totalTokens: 320300,
+        costUsd: 0.12,
+        sharePct: 100,
+      },
+    ],
     context: subContext,
     recentSteps: mockSteps.filter((s) => s.isSubagent),
   };
 
   const aggregated = {
     ...mainAgent,
+    agentId: 'all',
+    isMain: false,
+    agentKind: 'all',
+    agentOrdinal: 0,
+    badgeText: t('header.scopeAllShort'),
+    activeAgentId: 'main',
+    activeAgentKind: 'main',
+    activeAgentOrdinal: 0,
     stepCount: 24,
     speedSampleCount: 23,
+    speedSummary: { sampleCount: 23, excludedCount: 1 },
     avgTokPerSec: 59.6,
     avgTtftSec: 1.38,
+    ttftSummary: { avgSec: 1.38, sampleCount: 23 },
     sessionCostUsd: 1.28,
+    sessionUnpricedCalls: 0,
     sessionCacheHitPct: 88.9,
     inputTokens: 186400,
     cacheReadTokens: 1540000,
     outputTokens: 28400,
     totalTokens: 1754800,
-    activeAgentBadge: '主',
+    activeAgentBadge: t('fmt.mainBadge'),
+    modelBreakdown: [...mainAgent.modelBreakdown, ...subAgent1.modelBreakdown],
     recentSteps: mockSteps,
   };
 
   return {
     settings: mergedSettings,
     account: {
-      planName: 'Google AI Pro',
-      aiCredits: 1200,
+      tierName: 'Google AI Ultra',
+      planName: 'Pro',
+      aiCredits: 0,
     },
     quotas: {
+      meta: {
+        hasOfficialData: true,
+        isStale: false,
+        refreshFailed: false,
+      },
       activePool: {
         family: 'Gemini',
         poolKey: 'Gemini',
@@ -12193,8 +13346,11 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     },
   };
 }
+return { buildStructurePreviewTelemetry };
+})();
 
 // --- src/components/settings/CollapsibleSection.js ---
+const { CollapsibleSection } = (() => {
 /**
  * @fileoverview Reusable Section Card (`CollapsibleSection.js`)
  * for `SettingsStructureTab` — supports both accordion mode (`collapsible: true`)
@@ -12363,8 +13519,11 @@ const CollapsibleSection = defineComponent({
     };
   },
 });
+return { CollapsibleSection };
+})();
 
 // --- src/components/settings/EditableSlotList.js ---
+const { EditableSlotList } = (() => {
 /**
  * @fileoverview Reusable Drag-Sortable & `+` / `-` / `↑` / `↓` Dynamic Slot List (`EditableSlotList.js`).
  * Powers Topbar Capsule Slots (1..5), Hover Popup Modules (0..4),
@@ -12806,8 +13965,11 @@ const EditableSlotList = defineComponent({
     };
   },
 });
+return { EditableSlotList };
+})();
 
 // --- src/components/settings/ThemeColorPicker.js ---
+const { ThemeColorPicker } = (() => {
 /**
  * @fileoverview Host-aware Theme Accent Swatch Picker (`ThemeColorPicker.js`).
  * Provides the default "跟随宿主" (`host`) pill plus 6 curated color swatches.
@@ -12908,8 +14070,313 @@ const ThemeColorPicker = defineComponent({
     };
   },
 });
+return { ThemeColorPicker };
+})();
+
+// --- src/components/settings/BridgeStatusNotice.js ---
+const { BridgeStatusNotice } = (() => {
+/**
+ * @fileoverview Shared CDP / Window Bridge diagnostic & one-click relaunch card (`BridgeStatusNotice.js`).
+ * Surfaces automatic shortcut provisioning status and a one-click host relaunch button when
+ * Antigravity 2.33.0+ runs without an active `DevToolsActivePort` (`no_devtools_port` / `cdp_unreachable`).
+ */
+
+
+const LAUNCH_FLAG_TEXT = '--remote-debugging-port=0';
+
+async function copyTextToClipboard(text) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fallback to temporary textarea inside restricted webview contexts
+  }
+  try {
+    if (typeof document === 'undefined' || !document.body) return false;
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', 'true');
+    area.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+    document.body.appendChild(area);
+    area.select?.();
+    const ok = Boolean(document.execCommand?.('copy'));
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+const BridgeStatusNotice = defineComponent({
+  name: 'BridgeStatusNotice',
+  setup({ props, onCleanup }) {
+    let contextMode = Boolean(props?.contextMode);
+    const dismissible = Boolean(props?.dismissible);
+    let lastPayload = {
+      visible: false,
+      windowBridge: null,
+      hostPlatform: 'win32',
+    };
+    let dismissed = false;
+    let copied = false;
+    let copiedTimer = null;
+    let relaunchState = 'idle'; // 'idle' | 'relaunching' | 'failed'
+    let relaunchResetTimer = null;
+    let destroyed = false;
+
+    const headIconEl = createSvgIcon('warning', { size: 13, className: 'settings-bridge-icon' });
+    const titleEl = h('strong', { className: 'settings-bridge-title', text: '' });
+    const bodyEl = h('p', { className: 'settings-bridge-desc', text: '' });
+
+    const dismissBtnEl = dismissible
+      ? h(
+          'button',
+          {
+            type: 'button',
+            className: 'btn-ghost-sm settings-bridge-dismiss-btn',
+            'aria-label': t('settings.bridge.dismissAria'),
+            title: t('settings.bridge.dismissAria'),
+            onClick: () => {
+              dismissed = true;
+              render();
+              props?.onDismiss?.();
+            },
+          },
+          [createSvgIcon('close', { size: 11 })]
+        )
+      : null;
+
+    const relaunchBtnIconEl = createSvgIcon('refresh', { size: 11 });
+    const relaunchBtnTextEl = h('span', {
+      className: 'settings-bridge-relaunch-text',
+      text: t('settings.bridge.relaunchBtn'),
+    });
+    const relaunchBtnEl = h(
+      'button',
+      {
+        type: 'button',
+        className: 'settings-bridge-relaunch-btn',
+        onClick: async () => {
+          if (relaunchState === 'relaunching' || destroyed) return;
+          relaunchState = 'relaunching';
+          if (relaunchResetTimer) {
+            clearTimeout(relaunchResetTimer);
+            relaunchResetTimer = null;
+          }
+          syncActionButtons();
+          try {
+            const res = await triggerBridgeHostRelaunch();
+            if (destroyed) return;
+            if (!res || res.ok === false) {
+              relaunchState = 'failed';
+              syncActionButtons();
+              relaunchResetTimer = setTimeout(() => {
+                relaunchResetTimer = null;
+                if (destroyed) return;
+                relaunchState = 'idle';
+                syncActionButtons();
+              }, 3500);
+              relaunchResetTimer?.unref?.();
+              return;
+            }
+            // Reset button if host is still open after 9s (e.g. cancelled close prompt)
+            relaunchResetTimer = setTimeout(() => {
+              relaunchResetTimer = null;
+              if (destroyed) return;
+              relaunchState = 'idle';
+              syncActionButtons();
+            }, 9000);
+            relaunchResetTimer?.unref?.();
+          } catch {
+            if (destroyed) return;
+            relaunchState = 'failed';
+            syncActionButtons();
+            relaunchResetTimer = setTimeout(() => {
+              relaunchResetTimer = null;
+              if (destroyed) return;
+              relaunchState = 'idle';
+              syncActionButtons();
+            }, 3500);
+            relaunchResetTimer?.unref?.();
+          }
+        },
+      },
+      [relaunchBtnIconEl, relaunchBtnTextEl]
+    );
+
+    const copyBtnIconEl = createSvgIcon('copy', { size: 11 });
+    const copyBtnTextEl = h('span', {
+      className: 'settings-bridge-copy-text',
+      text: t('settings.bridge.copyFlagBtn', { cmd: LAUNCH_FLAG_TEXT }),
+    });
+    const copyBtnEl = h(
+      'button',
+      {
+        type: 'button',
+        className: 'btn-ghost-sm settings-bridge-copy-btn',
+        onClick: async () => {
+          await copyTextToClipboard(LAUNCH_FLAG_TEXT);
+          if (destroyed) return;
+          copied = true;
+          if (copiedTimer) clearTimeout(copiedTimer);
+          syncActionButtons();
+          copiedTimer = setTimeout(() => {
+            copiedTimer = null;
+            if (destroyed) return;
+            copied = false;
+            syncActionButtons();
+          }, 1800);
+          copiedTimer?.unref?.();
+        },
+      },
+      [copyBtnIconEl, copyBtnTextEl]
+    );
+
+    const headLeftEl = h('div', { className: 'settings-bridge-head-main' }, [headIconEl, titleEl]);
+    const headRowEl = h(
+      'div',
+      { className: 'settings-bridge-head' },
+      dismissBtnEl ? [headLeftEl, dismissBtnEl] : [headLeftEl]
+    );
+    const actionsRowEl = h('div', { className: 'settings-bridge-actions' }, [
+      relaunchBtnEl,
+      copyBtnEl,
+    ]);
+
+    const rootEl = h(
+      'div',
+      {
+        className: 'settings-bridge-notice',
+        role: 'status',
+        hidden: true,
+      },
+      [headRowEl, bodyEl, actionsRowEl]
+    );
+
+    function syncActionButtons() {
+      const canRelaunch = lastPayload.windowBridge?.canRelaunch !== false;
+      patchAttr(relaunchBtnEl, 'hidden', !canRelaunch);
+      patchAttr(relaunchBtnEl, 'disabled', relaunchState === 'relaunching');
+      patchText(
+        relaunchBtnTextEl,
+        relaunchState === 'relaunching'
+          ? t('settings.bridge.relaunchingBtn')
+          : relaunchState === 'failed'
+            ? t('settings.bridge.relaunchFailed')
+            : t('settings.bridge.relaunchBtn')
+      );
+
+      patchSvgIcon(copyBtnIconEl, copied ? 'check' : 'copy');
+      patchText(
+        copyBtnTextEl,
+        copied
+          ? t('settings.bridge.copiedBtn')
+          : t('settings.bridge.copyFlagBtn', { cmd: LAUNCH_FLAG_TEXT })
+      );
+
+      if (dismissBtnEl) {
+        const aria = t('settings.bridge.dismissAria');
+        patchAttr(dismissBtnEl, 'aria-label', aria);
+        patchAttr(dismissBtnEl, 'title', aria);
+      }
+    }
+
+    function render() {
+      const wb = lastPayload.windowBridge;
+      const state = String(wb?.state || '').trim();
+      if (state === 'active') {
+        dismissed = false;
+      }
+      const shouldShow =
+        !dismissed &&
+        Boolean(lastPayload.visible) &&
+        !isWindowOverlayMode() &&
+        (state === 'no_devtools_port' || state === 'cdp_unreachable');
+
+      patchAttr(rootEl, 'hidden', !shouldShow);
+      if (!shouldShow) return;
+
+      const isAutoConfigured = Boolean(
+        wb?.launcherConfigured || wb?.argvUpdatedThisBoot || wb?.argvConfigured
+      );
+      patchClasses(rootEl, {
+        'is-restart': isAutoConfigured,
+        'is-warn': !isAutoConfigured,
+      });
+      patchSvgIcon(headIconEl, isAutoConfigured ? 'refresh' : 'warning');
+
+      let titleText = '';
+      if (isAutoConfigured) {
+        titleText = contextMode
+          ? t('settings.bridge.ctxRestartTitle')
+          : t('settings.bridge.restartTitle');
+      } else if (contextMode) {
+        titleText = t('settings.bridge.ctxTitle');
+      } else if (state === 'cdp_unreachable') {
+        titleText = t('settings.bridge.unreachableTitle');
+      } else {
+        titleText = t('settings.bridge.noPortTitle');
+      }
+
+      const plat = String(lastPayload.hostPlatform || '').trim().toLowerCase();
+      let bodyText = '';
+      if (isAutoConfigured) {
+        bodyText = t('settings.bridge.restartBody');
+      } else if (plat === 'darwin') {
+        bodyText = t('settings.bridge.guideMac');
+      } else if (plat === 'linux') {
+        bodyText = t('settings.bridge.guideLinux');
+      } else {
+        bodyText = t('settings.bridge.guideWin');
+      }
+
+      patchText(titleEl, titleText);
+      patchText(bodyEl, bodyText);
+      syncActionButtons();
+    }
+
+    function update(next = {}) {
+      if (typeof next.contextMode === 'boolean') {
+        contextMode = next.contextMode;
+      }
+      lastPayload = {
+        ...lastPayload,
+        ...next,
+      };
+      render();
+    }
+
+    onCleanup(() => {
+      destroyed = true;
+      if (copiedTimer) {
+        clearTimeout(copiedTimer);
+        copiedTimer = null;
+      }
+      if (relaunchResetTimer) {
+        clearTimeout(relaunchResetTimer);
+        relaunchResetTimer = null;
+      }
+    });
+
+    return {
+      el: rootEl,
+      refs: {
+        update,
+        refreshLabels: render,
+        relaunchBtnEl,
+        copyBtnEl,
+        dismissBtnEl,
+      },
+    };
+  },
+});
+return { BridgeStatusNotice };
+})();
 
 // --- src/views/settings/SettingsGeneralTab.js ---
+const { SettingsGeneralTab } = (() => {
 /**
  * @fileoverview Preferences Tab 1: `SettingsGeneralTab.js` ("常规").
  * Manages UI Language (`zh-CN` / `en-US` / `auto`), Theme Accent (`host` + 6 swatches),
@@ -13372,8 +14839,11 @@ const SettingsGeneralTab = defineComponent({
     };
   },
 });
+return { SettingsGeneralTab };
+})();
 
 // --- src/views/settings/SettingsStructureTab.js ---
+const { SettingsStructureTab } = (() => {
 /**
  * @fileoverview Preferences Tab 2: `SettingsStructureTab.js` ("结构").
  * Organizes the 4 structure settings panes under a dedicated 3rd-level menu bar,
@@ -13452,6 +14922,8 @@ const SettingsStructureTab = defineComponent({
     let rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
+    let latestWindowBridge = null;
+    let latestHostPlatform = 'win32';
 
     function isStructureVisible() {
       const st = uiStore.getState();
@@ -13662,6 +15134,8 @@ const SettingsStructureTab = defineComponent({
       },
     });
 
+    const mountBridgeNotice = BridgeStatusNotice({});
+
     const mountSection = CollapsibleSection({
       collapsible: false,
       icon: 'dock',
@@ -13695,6 +15169,7 @@ const SettingsStructureTab = defineComponent({
         mountPreviewCanvas,
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [mountModeLabelEl, windowMountSelect.el]),
+        mountBridgeNotice.el,
         h('div', { className: 'form-row' }, [
           h('div', { className: 'settings-inline-row' }, [
             popoverWidthLabelEl,
@@ -13726,6 +15201,11 @@ const SettingsStructureTab = defineComponent({
       windowMountSelect.setProps({
         modelValue: draftWindowMountMode,
         options: getMountModeOptions(),
+      });
+      mountBridgeNotice.refs.update({
+        visible: draftWindowMountMode !== 'sidebar',
+        windowBridge: latestWindowBridge,
+        hostPlatform: latestHostPlatform,
       });
       popoverWidthModeToggle.setProps({
         modelValue: draftPopoverWidthMode,
@@ -13782,7 +15262,7 @@ const SettingsStructureTab = defineComponent({
       isVisibleFn: () => isStructureVisible() && activeThirdTab === 'hover',
       initialModuleKeys: [],
     });
-    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
       hoverPreviewTipEl,
       hoverPreviewEmptyEl,
     ]);
@@ -13874,7 +15354,7 @@ const SettingsStructureTab = defineComponent({
       isVisibleFn: () => isStructureVisible() && activeThirdTab === 'overview',
       initialModuleKeys: [],
     });
-    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
       overviewPreviewContainerEl,
     ]);
 
@@ -14133,7 +15613,7 @@ const SettingsStructureTab = defineComponent({
       items: draftStepColumns,
       options: getStepColumnOptions(draftStepTokenComboFormat),
       minItems: 2,
-      maxItems: 15,
+      maxItems: 14,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
         draftStepColumns = normalizeClientStepColumns(previewItems);
@@ -14316,9 +15796,15 @@ const SettingsStructureTab = defineComponent({
       stepsSection.el,
     ]);
 
-    function renderSettings(settings) {
+    function renderSettings(
+      settings,
+      windowBridge = latestWindowBridge,
+      hostPlatform = latestHostPlatform
+    ) {
       if (!settings) return;
       latestSettings = settings;
+      if (windowBridge !== undefined) latestWindowBridge = windowBridge;
+      if (hostPlatform) latestHostPlatform = hostPlatform;
       draftWindowMountMode = normalizeClientWindowMountMode(
         settings.windowMountMode,
         settings.enableWindowOverlay
@@ -14420,6 +15906,7 @@ const SettingsStructureTab = defineComponent({
 
     onCleanup(() => {
       unsubUi();
+      mountBridgeNotice.destroy();
       capsulePreviewWidget.destroy();
       hoverPreviewHost.destroy();
       overviewPreviewHost.destroy();
@@ -14448,6 +15935,7 @@ const SettingsStructureTab = defineComponent({
       refs: {
         thirdNavBar,
         capsulePreviewWidget,
+        mountBridgeNotice,
         hoverPreviewHost,
         overviewPreviewHost,
         stepTablePreview,
@@ -14472,240 +15960,11 @@ const SettingsStructureTab = defineComponent({
     };
   },
 });
-
-// --- src/views/settings/SettingsAccountTab.js ---
-/** @fileoverview Saved account credentials and the host's active account quota. */
-
-
-const key = (name) => `settings.account.${name}`;
-const errors = new Set([
-  'unsupported', 'invalidEmail', 'invalidCredential', 'credentialTooLarge', 'notFound',
-  'noCurrentCredential', 'busy', 'storeFailed', 'rollbackFailed', 'credentialAccessDenied',
-  'credentialChanged', 'credentialRejected', 'identityMismatch', 'oauthClientUnavailable',
-  'oauthUnavailable', 'quotaUnavailable',
-]);
-
-function renderQuotaRows(container, quotaPools) {
-  const locale = getEffectiveLocale();
-  const pools = quotaPools.filter((pool) => Number.isFinite(pool.remainingPct) || Number.isFinite(pool.weeklyRemainingPct));
-  patchKeyedList(container, pools, {
-    keyFn: (pool) => pool.poolKey || pool.poolLabel,
-    sigFn: (pool) => JSON.stringify([locale, pool.poolLabel, pool.remainingPct, pool.weeklyRemainingPct]),
-    createRow: () => {
-      const label = h('span');
-      const remaining = h('span', { className: 'settings-account-quota' });
-      return { el: h('div', { className: 'settings-action-block' }, [label, remaining]), refs: { label, remaining } };
-    },
-    updateRow: ({ label, remaining }, pool) => {
-      patchText(label, pool.poolLabel || pool.poolKey);
-      const values = [];
-      if (Number.isFinite(pool.remainingPct)) values.push(t(key('quota5h'), { percent: pool.remainingPct }));
-      if (Number.isFinite(pool.weeklyRemainingPct)) values.push(t(key('quotaWeekly'), { percent: pool.weeklyRemainingPct }));
-      patchText(remaining, values.join(' · '));
-    },
-  });
-  return pools.length;
-}
-
-const SettingsAccountTab = defineComponent({
-  name: 'SettingsAccountTab',
-  setup({ props, onCleanup }) {
-    let account = null;
-    let quotas = null;
-    let accounts = [];
-    let selectedEmail = '';
-    let supported = null;
-    let operation = '';
-    let status = '';
-    let disposed = false;
-    const savedQuotas = new Map();
-
-    const title = h('span', { className: 'panel-title' });
-    const identityLabel = h('div', { className: 'settings-action-title' });
-    const identity = h('div', { className: 'settings-action-desc settings-account-identity' });
-    const plan = h('div', { className: 'settings-action-desc' });
-    const quotaTitle = h('div', { className: 'settings-action-title' });
-    const quotaRows = h('div', { className: 'settings-account-list' });
-    const quotaMessage = h('div', { className: 'settings-action-desc' });
-    const savedTitle = h('span', { className: 'panel-title' });
-    const savedRows = h('div', { className: 'settings-account-list' });
-    const savedMessage = h('div', { className: 'settings-action-desc' });
-    const pending = h('div', { className: 'settings-action-desc', role: 'status' });
-    const feedback = h('div', { className: 'settings-action-desc', role: 'status' });
-    const capture = h('button', { type: 'button', className: 'btn-secondary', onClick: () => request('capture') });
-    const reload = h('button', { type: 'button', className: 'btn-secondary', onClick: () => request('list') });
-    const credentialLabel = h('span');
-    const importHint = h('div', { className: 'settings-action-desc' });
-    const credential = h('input', { type: 'password', required: true, autocomplete: 'off', spellcheck: 'false', maxlength: 16384 });
-    const save = h('button', { type: 'submit', className: 'btn-secondary' });
-    const form = h('form', { className: 'settings-account-form', autocomplete: 'off', onSubmit: importCredential }, [
-      h('label', {}, [credentialLabel, credential]),
-      importHint,
-      save,
-    ]);
-
-    function render() {
-      const signedIn = account?.status === 'signedIn';
-      const activeEmail = signedIn ? account.email?.trim().toLowerCase() : '';
-      const canWrite = supported === true && !operation;
-      const locale = getEffectiveLocale();
-      patchText(title, t(key('current')));
-      patchText(identityLabel, t(key('email')));
-      patchText(identity, signedIn ? account.email || account.name :
-        t(key(account?.status === 'signedOut' ? 'signedOut' : 'unknown')));
-      patchText(plan, signedIn ? account.tierName || account.planName || '' : '');
-      patchAttr(plan, 'hidden', !plan.textContent);
-
-      patchText(quotaTitle, t(key('quota')));
-      const poolCount = renderQuotaRows(quotaRows, signedIn ? quotas?.pools || [] : []);
-      patchText(quotaMessage, t(key(poolCount ? 'quotaStale' : 'noQuota')));
-      patchAttr(quotaMessage, 'hidden', poolCount > 0 && !quotas?.meta?.isStale);
-
-      patchText(savedTitle, t(key('savedCredentials')));
-      patchText(capture, t(key('capture')));
-      patchText(reload, t(key('reload')));
-      patchText(save, t(key('save')));
-      patchText(credentialLabel, t(key('credential')));
-      patchText(importHint, t(key('importHint')));
-      patchAttr(capture, 'disabled', !canWrite || !activeEmail);
-      patchAttr(reload, 'disabled', Boolean(operation));
-      patchAttr(form, 'hidden', supported === false);
-      patchAttr(save, 'disabled', !canWrite);
-      patchAttr(credential, 'disabled', !canWrite);
-      patchText(savedMessage, t(key(supported === null ? 'loading' : 'empty')));
-      patchAttr(savedMessage, 'hidden', accounts.length > 0 || supported === false || Boolean(status));
-      const message = status || (operation === 'switch' ? 'switching' : operation === 'quota' ? 'loadingQuota' :
-        operation === 'save' || operation === 'capture' ? 'verifying' : '');
-      patchText(feedback, message ? t(key(message)) : '');
-      patchAttr(feedback, 'hidden', !message);
-      const waiting = selectedEmail && activeEmail !== selectedEmail;
-      patchText(pending, waiting ? t(key('pending'), { email: selectedEmail }) : '');
-      patchAttr(pending, 'hidden', !waiting);
-
-      patchKeyedList(savedRows, accounts, {
-        keyFn: (addr) => addr,
-        sigFn: (addr) => JSON.stringify([locale, activeEmail, selectedEmail, canWrite, savedQuotas.get(addr)]),
-        createRow: (addr) => {
-          const state = h('div', { className: 'settings-action-desc' });
-          const select = h('button', {
-            type: 'button', className: 'btn-secondary settings-account-switch', onClick: () => request('switch', { email: addr }),
-          });
-          const remove = h('button', {
-            type: 'button', className: 'btn-secondary', onClick: () => request('remove', { email: addr }),
-          });
-          const loadQuota = h('button', {
-            type: 'button', className: 'btn-secondary settings-account-load-quota', onClick: () => request('quota', { email: addr }),
-          });
-          const rows = h('div', { className: 'settings-account-list' });
-          const empty = h('div', { className: 'settings-action-desc' });
-          return {
-            el: h('div', { className: 'settings-account-entry' }, [
-              h('div', { className: 'settings-action-block' }, [
-                h('div', { className: 'settings-action-info' }, [h('div', { className: 'settings-account-identity', text: addr }), state]),
-                h('div', { className: 'settings-account-buttons' }, [loadQuota, select, remove]),
-              ]), rows, empty,
-            ]),
-            refs: { state, select, remove, loadQuota, rows, empty },
-          };
-        },
-        updateRow: (row, addr) => {
-          const active = addr === activeEmail;
-          const written = addr === selectedEmail && !active;
-          patchText(row.state, active ? t(key('active')) : written ? t(key('written')) : '');
-          patchAttr(row.state, 'hidden', !active && !written);
-          patchText(row.select, t(key('switch')));
-          patchText(row.remove, t(key('remove')));
-          patchText(row.loadQuota, t(key('loadQuota')));
-          patchAttr(row.select, 'disabled', !canWrite);
-          patchAttr(row.remove, 'disabled', !canWrite);
-          patchAttr(row.loadQuota, 'disabled', !canWrite);
-          const cached = savedQuotas.get(addr);
-          const count = renderQuotaRows(row.rows, cached || []);
-          patchText(row.empty, t(key('emptyCredentialQuota')));
-          patchAttr(row.empty, 'hidden', !cached || count > 0);
-        },
-      });
-      props.onLayoutChange?.();
-    }
-
-    async function request(action, fields) {
-      if (operation) return;
-      operation = action;
-      status = '';
-      render();
-      try {
-        const result = action === 'list'
-          ? await callSidecarApi('/api/accounts')
-          : await callSidecarApi('/api/accounts/update', { method: 'POST', body: { action, ...fields }, cdpTimeoutMs: 40000 });
-        if (disposed) return;
-        if (result?.error) {
-          if (result.error === 'unsupported') supported = false;
-          status = errors.has(result.error) ? result.error : 'storeFailed';
-          return;
-        }
-        if (action === 'quota') {
-          savedQuotas.set(result.email, result.pools);
-          return;
-        }
-        supported = result?.supported === true;
-        accounts = result?.accounts || [];
-        selectedEmail = result?.selectedEmail || '';
-        if (action === 'save' || action === 'capture') status = 'saved';
-        if (action === 'remove') {
-          savedQuotas.delete(fields.email);
-          status = 'removed';
-        }
-        if (action === 'switch') {
-          status = result.confirmed ? 'switched' : '';
-          void fetchTelemetry({ force: true }).catch(() => {});
-        }
-      } catch {
-        status = 'storeFailed';
-      } finally {
-        operation = '';
-        if (!disposed) render();
-      }
-    }
-
-    function importCredential(event) {
-      event.preventDefault();
-      if (operation) return;
-      const input = credential.value;
-      credential.value = '';
-      void request('save', { credential: input });
-    }
-
-    function renderAccount(value, quotaData) {
-      if (account === value && quotas === quotaData) return;
-      account = value;
-      quotas = quotaData;
-      render();
-    }
-
-    const root = h('div', { className: 'settings-tab-stack' }, [
-      h('section', { className: 'panel' }, [
-        h('div', { className: 'panel-header' }, [title]),
-        h('div', { className: 'settings-action-block' }, [
-          h('div', { className: 'settings-action-info' }, [identityLabel, identity, plan]),
-        ]),
-        quotaTitle, quotaRows, quotaMessage, pending,
-      ]),
-      h('section', { className: 'panel' }, [
-        h('div', { className: 'panel-header' }, [savedTitle]),
-        h('div', { className: 'settings-account-buttons' }, [capture, reload]),
-        savedRows, savedMessage, form, feedback,
-      ]),
-    ]);
-    render();
-    onCleanup(() => {
-      disposed = true;
-      credential.value = '';
-    });
-    return { el: root, refs: { renderAccount, refreshLabels: render, load: () => request('list') } };
-  },
-});
+return { SettingsStructureTab };
+})();
 
 // --- src/views/settings/SettingsOtherTab.js ---
+const { SettingsOtherTab } = (() => {
 /**
  * @fileoverview Preferences Tab 3: `SettingsOtherTab.js` ("其他").
  * Houses Model Identifier Formatting, Per-Model Context Windows,
@@ -14736,6 +15995,8 @@ const SettingsOtherTab = defineComponent({
     let draftContextRiskAccepted = false;
     let acceptingContextRisk = false;
     let latestSettings = null;
+    let latestWindowBridge = null;
+    let latestHostPlatform = 'win32';
     let contextWindowModels = [];
     let contextModelId = '';
     let savingContextWindow = false;
@@ -14885,9 +16146,11 @@ const SettingsOtherTab = defineComponent({
         }
       },
     });
+    const ctxBridgeNotice = BridgeStatusNotice({ contextMode: true });
     const ctxModelRow = h('div', { className: 'form-row' }, [ctxModelLabel, ctxModelSelect.el]);
     const ctxWindowRow = h('div', { className: 'form-row' }, [ctxWindowLabel, ctxWindowSelect.el]);
     const ctxControlsBody = h('div', { className: 'ctx-controls-body is-locked' }, [
+      ctxBridgeNotice.el,
       ctxModelRow,
       ctxWindowRow,
       h('div', { className: 'form-row' }, [ctxHint]),
@@ -14964,6 +16227,13 @@ const SettingsOtherTab = defineComponent({
       patchAttr(ctxRiskAcceptBtn, 'disabled', acceptingContextRisk);
 
       const saved = latestSettings?.modelContextWindows || {};
+      const wbState = String(latestWindowBridge?.state || '').trim();
+      const isBridgeMissing = wbState === 'no_devtools_port' || wbState === 'cdp_unreachable';
+      ctxBridgeNotice.refs.update({
+        visible: unlocked,
+        windowBridge: latestWindowBridge,
+        hostPlatform: latestHostPlatform,
+      });
       const models = new Map(contextWindowModels.map((model) => [model.id, model]));
       const knownIds = new Set(contextWindowModels.flatMap(({ id, members = [] }) => [id, ...members]));
       for (const id of Object.keys(saved)) {
@@ -15008,6 +16278,7 @@ const SettingsOtherTab = defineComponent({
             else if (value) {
               const name = formatLimit(value);
               if (!isAvailable(model, value)) meta = t('settings.oth.ctxUnavailable', { name });
+              else if (isBridgeMissing) meta = t('settings.oth.ctxPendingBridge', { name });
               else if (/^\d+$/.test(value) && model.reportedLimitTokens && Number(value) !== model.reportedLimitTokens) {
                 meta = t('settings.oth.ctxConfiguredReported', {
                   name,
@@ -15178,10 +16449,17 @@ const SettingsOtherTab = defineComponent({
       maintPanel,
     ]);
 
-    function renderSettings(settings, models = contextWindowModels) {
+    function renderSettings(
+      settings,
+      models = contextWindowModels,
+      windowBridge = latestWindowBridge,
+      hostPlatform = latestHostPlatform
+    ) {
       if (!settings) return;
       latestSettings = settings;
       contextWindowModels = models;
+      if (windowBridge !== undefined) latestWindowBridge = windowBridge;
+      if (hostPlatform) latestHostPlatform = hostPlatform;
       draftModelDisplayMode = normalizeClientModelDisplayMode(
         settings.modelDisplayMode,
         settings.showUpstreamModel
@@ -15239,6 +16517,7 @@ const SettingsOtherTab = defineComponent({
       if (resetConfirmTimer) clearTimeout(resetConfirmTimer);
       stepModelSelect.destroy();
       orchestratorIdSelect.destroy();
+      ctxBridgeNotice.destroy();
       ctxModelSelect.destroy();
       ctxWindowSelect.destroy();
     });
@@ -15248,6 +16527,7 @@ const SettingsOtherTab = defineComponent({
       refs: {
         stepModelSelect,
         orchestratorIdSelect,
+        ctxBridgeNotice,
         ctxModelSelect,
         ctxWindowSelect,
         rebuildCacheBtn,
@@ -15258,8 +16538,11 @@ const SettingsOtherTab = defineComponent({
     };
   },
 });
+return { SettingsOtherTab };
+})();
 
 // --- src/components/layout/TopSessionHeader.js ---
+const { TopSessionHeader } = (() => {
 /**
  * @fileoverview Row 1 of the compact top bar:
  * Bespoke CustomSelect for session switching, SVG live status indicator,
@@ -15356,20 +16639,24 @@ const TopSessionHeader = defineComponent({
 
     let lastActiveCascadeId = '';
 
+    function syncSessionScopeOnCascadeChange(telemetry) {
+      const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
+      if (!currentCascadeId) return;
+      if (lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
+        lastActiveCascadeId = currentCascadeId;
+        const uiSt = uiStore.getState();
+        if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
+          uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
+        }
+      } else {
+        lastActiveCascadeId = currentCascadeId;
+      }
+    }
+
     function renderHeaderState() {
       const telSt = telemetryStore.getState();
       const uiSt = uiStore.getState();
       const telemetry = telSt.telemetry;
-      const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
-      if (currentCascadeId && lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
-        lastActiveCascadeId = currentCascadeId;
-        if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
-          uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-          return;
-        }
-      } else if (currentCascadeId) {
-        lastActiveCascadeId = currentCascadeId;
-      }
       if (!uiSt.monitorVisible) return;
 
       patchAttr(updateBtn, 'aria-label', t('header.ariaUpdate'));
@@ -15490,7 +16777,7 @@ const TopSessionHeader = defineComponent({
       } else if (isRunning) {
         const runningAgent = (telemetry?.activeConversation?.agents || []).find((a) => a.isRunning);
         const runSuffix =
-          hasSubagents && runningAgent ? ` · ${runningAgent.badgeText || runningAgent.shortLabel}` : '';
+          hasSubagents && runningAgent ? ` · ${formatAgentBadgeText(runningAgent)}` : '';
         patchSvgIcon(statusIcon, 'bolt');
         patchText(statusText, t('header.statusGenerating', { suffix: runSuffix }));
         patchClasses(statusTag, {
@@ -15527,7 +16814,10 @@ const TopSessionHeader = defineComponent({
         syncState: st.syncState,
         telemetry: st.telemetry,
       }),
-      () => renderHeaderState()
+      (slice) => {
+        syncSessionScopeOnCascadeChange(slice.telemetry);
+        renderHeaderState();
+      }
     );
 
     const unsubI18n = i18nStore.subscribe(
@@ -15555,8 +16845,11 @@ const TopSessionHeader = defineComponent({
     };
   },
 });
+return { TopSessionHeader };
+})();
 
 // --- src/views/LiveOverviewView.js ---
+const { LiveOverviewView } = (() => {
 /**
  * @fileoverview View 1: Decoupled `LiveOverviewView.js` (实时监控视图).
  * Acts as a lightweight host container delegating all telemetry cards
@@ -15571,7 +16864,6 @@ const LiveOverviewView = defineComponent({
   setup({ onCleanup }) {
     const overviewInner = h('div', {
       className: 'overview-modules-host',
-      style: 'display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: 2px;',
     });
 
     const widgetHost = createDynamicWidgetHost({
@@ -15713,8 +17005,11 @@ const LiveOverviewView = defineComponent({
     };
   },
 });
+return { LiveOverviewView };
+})();
 
 // --- src/views/ConsumptionView.js ---
+const { ConsumptionView } = (() => {
 /**
  * @fileoverview View 2: ConsumptionView (全景消耗统计视图).
  * 采用 5 段式分析布局展示指定时间窗口内的全量 Token 与费用消耗：
@@ -16259,22 +17554,14 @@ const ConsumptionView = defineComponent({
       let cachePct = 0;
       let outPct = 0;
       if (totalTokens > 0) {
-        const rawTenths = [
-          (inputTokens / totalTokens) * 1000,
-          (cacheTokens / totalTokens) * 1000,
-          (outputTokens / totalTokens) * 1000,
-        ];
-        const floored = rawTenths.map((v) => Math.max(0, Math.floor(v)));
-        const rem = Math.max(0, 1000 - (floored[0] + floored[1] + floored[2]));
-        const order = [0, 1, 2].sort(
-          (a, b) => rawTenths[b] - floored[b] - (rawTenths[a] - floored[a])
+        const scaled = scaleBucketsExact(
+          { in: inputTokens, cache: cacheTokens, out: outputTokens },
+          ['in', 'cache', 'out'],
+          1000
         );
-        for (let k = 0; k < rem && k < 3; k++) {
-          floored[order[k]] += 1;
-        }
-        inPct = +(floored[0] / 10).toFixed(1);
-        cachePct = +(floored[1] / 10).toFixed(1);
-        outPct = +(floored[2] / 10).toFixed(1);
+        inPct = +(scaled.in / 10).toFixed(1);
+        cachePct = +(scaled.cache / 10).toFixed(1);
+        outPct = +(scaled.out / 10).toFixed(1);
       }
 
       patchText(inputSharePct, `${inPct}%`);
@@ -16510,8 +17797,11 @@ const ConsumptionView = defineComponent({
     };
   },
 });
+return { ConsumptionView };
+})();
 
 // --- src/views/StepsDetailView.js ---
+const { StepsDetailView } = (() => {
 /**
  * @fileoverview View 3: StepsDetailView (步骤明细与总汇总分析视图).
  * 提供“按步查看”与“总汇总”双子视图切换：
@@ -16910,17 +18200,20 @@ const StepsDetailView = defineComponent({
     let isDirty = false;
 
     function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
-      const activeCand = getStepModelGroupKey({
-        modelLabel: scopedConv?.activeModelLabel,
-        modelShort: scopedConv?.activeModelShort,
-      });
-      if (
-        activeCand &&
-        activeCand !== '模型未知' &&
-        activeCand !== t('fmt.unknownModel') &&
-        availableModelKeys.has(activeCand)
-      ) {
-        return activeCand;
+      if (scopedConv?.hasKnownModel !== false) {
+        const activeCand = getStepModelGroupKey({
+          baseModelLabel: scopedConv?.activeBaseModelLabel,
+          baseModelShort: scopedConv?.activeBaseModelShort,
+          modelLabel: scopedConv?.activeModelLabel,
+          modelShort: scopedConv?.activeModelShort,
+        });
+        if (
+          activeCand &&
+          activeCand !== t('fmt.unknownModel') &&
+          availableModelKeys.has(activeCand)
+        ) {
+          return activeCand;
+        }
       }
       for (let i = chronoSteps.length - 1; i >= 0; i--) {
         const st = chronoSteps[i];
@@ -17100,7 +18393,7 @@ const StepsDetailView = defineComponent({
         if (!stepModelOptionMap.has(gk)) {
           const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
           stepModelOptionMap.set(gk, {
-            label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
+            label: disp.baseText || disp.text || gk,
             calls: 0,
           });
         }
@@ -17131,7 +18424,7 @@ const StepsDetailView = defineComponent({
         });
         perModelOptions.push({
           value: gk,
-          label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
+          label: disp.baseText || disp.text || gk,
           meta: t('header.convMetaSteps', { count: Number(m.calls || 0) }),
         });
       }
@@ -17639,8 +18932,11 @@ const StepsDetailView = defineComponent({
     };
   },
 });
+return { StepsDetailView };
+})();
 
 // --- src/views/SettingsView.js ---
+const { SHOW_ACCOUNT_TAB, SettingsView } = (() => {
 /**
  * @fileoverview View 4: Modular preferences ("常规" / "结构" / "账号" / "其他").
  * Orchestrates the four preference tabs
@@ -17684,7 +18980,7 @@ const SettingsView = defineComponent({
 
     const generalTab = SettingsGeneralTab({ onLayoutChange: refreshScroll });
     const structureTab = SettingsStructureTab({ onLayoutChange: refreshScroll });
-    const accountTab = SettingsAccountTab({ onLayoutChange: refreshScroll });
+    const accountTab = null; // SettingsAccountTab kept in src/views/settings/ for future opt-in
     const otherTab = SettingsOtherTab({ onLayoutChange: refreshScroll });
 
     let showingAccount = false;
@@ -17692,25 +18988,27 @@ const SettingsView = defineComponent({
       const target =
         subTab === 'structure' ||
         subTab === 'other' ||
-        (SHOW_ACCOUNT_TAB && subTab === 'account')
+        (accountTab && subTab === 'account')
           ? subTab
           : 'general';
       subNavSwitch.setValue(target);
       patchAttr(generalTab.el, 'hidden', target !== 'general');
       patchAttr(structureTab.el, 'hidden', target !== 'structure');
       patchAttr(structureTab.refs.thirdNavBar, 'hidden', target !== 'structure');
-      patchAttr(accountTab.el, 'hidden', !SHOW_ACCOUNT_TAB || target !== 'account');
       patchAttr(otherTab.el, 'hidden', target !== 'other');
-      const nextShowingAccount = SHOW_ACCOUNT_TAB && target === 'account' && activeView === 'settings';
-      if (nextShowingAccount && !showingAccount) void accountTab.refs.load();
-      showingAccount = nextShowingAccount;
+      if (accountTab) {
+        patchAttr(accountTab.el, 'hidden', target !== 'account');
+        const nextShowingAccount = target === 'account' && activeView === 'settings';
+        if (nextShowingAccount && !showingAccount) void accountTab.refs.load();
+        showingAccount = nextShowingAccount;
+      }
       refreshScroll();
     }
 
     const contentContainer = h(
       'div',
       {},
-      SHOW_ACCOUNT_TAB
+      accountTab
         ? [generalTab.el, structureTab.el, accountTab.el, otherTab.el]
         : [generalTab.el, structureTab.el, otherTab.el]
     );
@@ -17734,10 +19032,23 @@ const SettingsView = defineComponent({
       const telemetry = telemetryStore.getState().telemetry;
       const settings = telemetry?.settings;
       if (settingsSubTab === 'structure') {
-        if (settings) structureTab.refs.renderSettings(settings);
+        if (settings) {
+          structureTab.refs.renderSettings(
+            settings,
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
       } else if (settingsSubTab === 'other') {
-        if (settings) otherTab.refs.renderSettings(settings, telemetry.contextWindowModels || []);
-      } else if (SHOW_ACCOUNT_TAB && settingsSubTab === 'account') {
+        if (settings) {
+          otherTab.refs.renderSettings(
+            settings,
+            telemetry.contextWindowModels || [],
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
+      } else if (accountTab && settingsSubTab === 'account') {
         accountTab.refs.renderAccount(telemetry?.account, telemetry?.quotas);
       } else {
         if (settings) generalTab.refs.renderSettings(settings);
@@ -17749,6 +19060,8 @@ const SettingsView = defineComponent({
     const unsubTelemetry = telemetryStore.subscribe(
       (st) => ({
         settings: st.telemetry?.settings,
+        windowBridge: st.telemetry?.windowBridge,
+        hostPlatform: st.telemetry?.hostPlatform,
         cloudStatus: st.telemetry?.cloudStatus,
         contextWindowModels: st.telemetry?.contextWindowModels,
         account: st.telemetry?.account,
@@ -17777,7 +19090,7 @@ const SettingsView = defineComponent({
         });
         generalTab.refs.refreshLabels();
         structureTab.refs.refreshLabels();
-        accountTab.refs.refreshLabels();
+        accountTab?.refs.refreshLabels();
         otherTab.refs.refreshLabels();
         refreshScroll();
       }
@@ -17790,7 +19103,7 @@ const SettingsView = defineComponent({
       subNavSwitch.destroy();
       generalTab.destroy();
       structureTab.destroy();
-      accountTab.destroy();
+      accountTab?.destroy();
       otherTab.destroy();
       viewScrollbar.destroy();
     });
@@ -17815,8 +19128,11 @@ const SettingsView = defineComponent({
     };
   },
 });
+return { SHOW_ACCOUNT_TAB, SettingsView };
+})();
 
 // --- src/App.js ---
+const { App } = (() => {
 /**
  * @fileoverview Root Application Shell (App.js).
  * Combines the compact dual-layer header (TopSessionHeader + TopLongPillNav)
@@ -17841,6 +19157,36 @@ const App = defineComponent({
     const stepsView = StepsDetailView();
     const settingsView = SettingsView();
 
+    const globalBridgeNotice = BridgeStatusNotice({
+      dismissible: true,
+    });
+    const bannerSlotEl = h('div', { className: 'app-bridge-banner-slot', hidden: true }, [
+      globalBridgeNotice.el,
+    ]);
+
+    function syncGlobalBridgeBanner() {
+      const activeView = uiStore.getState().activeView;
+      const telemetry = telemetryStore.getState().telemetry;
+      const settings = telemetry?.settings;
+      const mountMode = settings
+        ? normalizeClientWindowMountMode(settings.windowMountMode, settings.enableWindowOverlay)
+        : 'sidebar';
+      const hasCtxOverrides = Boolean(
+        settings?.modelContextWindows && Object.keys(settings.modelContextWindows).length > 0
+      );
+      const shouldOfferGlobal =
+        !isWindowOverlayMode() &&
+        activeView !== 'settings' &&
+        (mountMode !== 'sidebar' || hasCtxOverrides);
+      globalBridgeNotice.refs.update({
+        visible: shouldOfferGlobal,
+        contextMode: mountMode === 'sidebar' && hasCtxOverrides,
+        windowBridge: telemetry?.windowBridge || null,
+        hostPlatform: telemetry?.hostPlatform || 'win32',
+      });
+      patchAttr(bannerSlotEl, 'hidden', globalBridgeNotice.el.hasAttribute('hidden'));
+    }
+
     const viewMap = {
       overview: overviewView.el,
       consumption: consumptionView.el,
@@ -17857,6 +19203,7 @@ const App = defineComponent({
 
     const shellEl = h('main', { className: 'app-shell' }, [
       h('div', { className: 'top-deck' }, [sessionHeader.el, topPillNav.el]),
+      bannerSlotEl,
       stageEl,
     ]);
 
@@ -17896,6 +19243,7 @@ const App = defineComponent({
           settingsView.refs?.viewScrollbar?.refresh();
         }
         syncStepsBadge();
+        syncGlobalBridgeBanner();
       }
     );
 
@@ -17904,8 +19252,16 @@ const App = defineComponent({
         stepCount: st.telemetry?.activeConversation?.stepCount ?? 0,
         totalStepsAllAgents: st.telemetry?.activeConversation?.totalStepsAllAgents ?? 0,
         subagentCount: st.telemetry?.activeConversation?.subagentCount ?? 0,
+        windowMountMode: st.telemetry?.settings?.windowMountMode,
+        enableWindowOverlay: st.telemetry?.settings?.enableWindowOverlay,
+        modelContextWindows: st.telemetry?.settings?.modelContextWindows,
+        windowBridge: st.telemetry?.windowBridge,
+        hostPlatform: st.telemetry?.hostPlatform,
       }),
-      () => syncStepsBadge()
+      () => {
+        syncStepsBadge();
+        syncGlobalBridgeBanner();
+      }
     );
 
     const unsubScopeBadge = uiStore.subscribe(
@@ -17915,7 +19271,11 @@ const App = defineComponent({
 
     const unsubI18n = i18nStore.subscribe(
       (st) => st.locale,
-      () => syncStepsBadge()
+      () => {
+        syncStepsBadge();
+        globalBridgeNotice.refs.refreshLabels();
+        patchAttr(bannerSlotEl, 'hidden', globalBridgeNotice.el.hasAttribute('hidden'));
+      }
     );
 
     onCleanup(() => {
@@ -17923,6 +19283,7 @@ const App = defineComponent({
       unsubStepCount();
       unsubScopeBadge();
       unsubI18n();
+      globalBridgeNotice.destroy();
       sessionHeader.destroy();
       topPillNav.destroy();
       overviewView.destroy();
@@ -17936,6 +19297,7 @@ const App = defineComponent({
       refs: {
         sessionHeader,
         topPillNav,
+        globalBridgeNotice,
         overviewView,
         consumptionView,
         stepsView,
@@ -17944,8 +19306,11 @@ const App = defineComponent({
     };
   },
 });
+return { App };
+})();
 
 // --- src/components/layout/WindowOverlayShell.js ---
+const { computeCapsuleLayoutMode, mountWindowOverlay } = (() => {
 /**
  * @fileoverview 主窗口双栖挂载外壳 (WindowOverlayShell.js).
  *
@@ -18722,7 +20087,7 @@ function isImmediatelyBeforeNode(node, refNode) {
 function isIdeExtensionChatFrame() {
   try {
     if (typeof window === 'undefined') return false;
-    if (window.__AGUsageMonitorBridge?.isIdeChatFrame === true) return true;
+    if (readInjectedWindowBridge()?.isIdeChatFrame === true) return true;
     return /[?&]extension(?:View|Variant)=/i.test(String(window.location?.search || ''));
   } catch {
     return false;
@@ -18733,7 +20098,7 @@ function resolveActiveDockTarget(options = undefined) {
   const settings = telemetryStore.getState().telemetry?.settings;
   const rawMode =
     settings?.windowMountMode ??
-    (typeof window !== 'undefined' ? window.__AGUsageMonitorBridge?.mountMode : undefined);
+    readInjectedWindowBridge()?.mountMode;
   const mountMode =
     options?.mountMode ||
     normalizeClientWindowMountMode(rawMode, settings?.enableWindowOverlay);
@@ -18834,14 +20199,14 @@ function mountWindowOverlay() {
   let carryOverMultiPinnedOpen = false;
   let carryOverPointer = null;
   try {
-    const prevOv = window.__AGUsageMonitorOverlay;
+    const prevOv = window[WINDOW_OVERLAY_KEY];
     carryOverTelemetry = prevOv?.getTelemetrySnapshot?.() || null;
     carryOverTooltipOpen = Boolean(prevOv?.isHoverOpen?.());
     carryOverPopoverOpen = Boolean(prevOv?.isOpen?.());
     carryOverMultiHoverOpen = Boolean(prevOv?.isMultiHoverOpen?.());
     carryOverMultiPinnedOpen = Boolean(prevOv?.isMultiPinnedOpen?.());
     carryOverPointer = prevOv?.getLastPointer?.() || null;
-    prevOv?.dispose?.();
+    prevOv?.[WINDOW_OVERLAY_METHODS.dispose]?.();
   } catch {
     // 忽略旧实例卸载异常
   }
@@ -18880,9 +20245,6 @@ function mountWindowOverlay() {
   let multiPinned = false;
   let hoverLeaveTimer = null;
   let multiLeaveTimer = null;
-  const manualSubExpandMap = new Map();
-  const multiTimersMap = new Map();
-  let multiLiveTickTimer = null;
   let hasPointerCoords = Boolean(
     carryOverPointer &&
       Number.isFinite(carryOverPointer.x) &&
@@ -18978,52 +20340,6 @@ function mountWindowOverlay() {
       }
       setMultiOpen(false);
     }, 90);
-  }
-
-  function bindMultiElapsedTimer(timerKey, sig, rawStartMs, targetEl) {
-    const now = Date.now();
-    const prev = multiTimersMap.get(timerKey);
-    let startMs = prev?.startMs || 0;
-    if (!prev || prev.sig !== sig) {
-      const validRaw = Number(rawStartMs || 0);
-      startMs = validRaw > 0 && validRaw <= now + 2000 ? validRaw : now;
-    } else if (startMs <= 0 && Number(rawStartMs) > 0 && Number(rawStartMs) <= now + 2000) {
-      startMs = Number(rawStartMs);
-    }
-    multiTimersMap.set(timerKey, { sig, startMs, el: targetEl });
-    const elapsedSec = Math.max(0, (now - startMs) / 1000);
-    patchText(targetEl, formatElapsedSec(elapsedSec));
-  }
-
-  function tickMultiElapsedDisplay() {
-    const now = Date.now();
-    for (const entry of multiTimersMap.values()) {
-      if (!entry?.el) continue;
-      const elapsedSec = entry.startMs > 0 ? Math.max(0, (now - entry.startMs) / 1000) : 0;
-      patchText(entry.el, formatElapsedSec(elapsedSec));
-    }
-  }
-
-  function pauseMultiLiveTicker() {
-    if (multiLiveTickTimer) {
-      clearInterval(multiLiveTickTimer);
-      multiLiveTickTimer = null;
-    }
-  }
-
-  function stopMultiLiveTicker() {
-    pauseMultiLiveTicker();
-    multiTimersMap.clear();
-  }
-
-  function ensureMultiLiveTicker() {
-    if (multiTimersMap.size === 0) {
-      stopMultiLiveTicker();
-      return;
-    }
-    if (!multiLiveTickTimer) {
-      multiLiveTickTimer = setInterval(tickMultiElapsedDisplay, 1000);
-    }
   }
 
   function inspectSessionInMonitor(cascadeId) {
@@ -19283,8 +20599,6 @@ function mountWindowOverlay() {
   portalShadow.appendChild(portalStyleEl);
 
   const initialSettings = telemetryStore.getState().telemetry?.settings;
-  applyAppearanceToRoot(capsuleHost, initialSettings, { includeFontScale: false });
-  applyAppearanceToRoot(portalHost, initialSettings, { includeFontScale: true });
 
   // 悬停全景概览浮层（完全解耦至 widgetRegistry，由 hoverModules 动态驱动 0..4 个独立组件，零硬编码）
   const hoverUpdateVerText = h('span', { text: t('capsule.hoverNewVerGeneric') });
@@ -19324,105 +20638,7 @@ function mountWindowOverlay() {
     [hoverUpdateBar, hoverWidgetsContainer]
   );
 
-  // 左侧多会话实时看板浮层（活跃运行会话卡片 + 近期多窗口会话速览，全槽位预占、就地补丁更新）
-  function createMultiLiveSubRow() {
-    const subBadge = h('span', {
-      className: 'agent-badge badge-sub-1',
-      text: t('fmt.subBadge', { index: 1 }),
-    });
-    const subRole = h('span', { className: 'live-sub-role', text: t('fmt.subAgent') });
-    const subSummary = h('span', { className: 'live-sub-summary', text: '' });
-    const subElapsed = h('span', { className: 'live-sub-elapsed text-mono', text: '0s' });
-    const rowEl = h('div', { className: 'live-sub-row' }, [
-      h('div', { className: 'live-sub-left' }, [subBadge, subRole, subSummary]),
-      subElapsed,
-    ]);
-    return {
-      el: rowEl,
-      refs: { rowEl, subBadge, subRole, subSummary, subElapsed },
-    };
-  }
-
-  function createMultiLiveTaskCard() {
-    const dotIcon = createSvgIcon('dot', { size: 11 });
-    patchClasses(dotIcon, { 'is-pulsing': true });
-    const dotWrap = h('span', { className: 'live-activity-dot' }, [dotIcon]);
-    const titleEl = h('strong', { className: 'live-task-title', text: t('live.currentSession') });
-    const hereTagEl = h('span', {
-      className: 'wm-session-tag is-here',
-      hidden: true,
-      text: t('multi.hereTag'),
-    });
-    const metricsEl = h('span', {
-      className: 'wm-task-metrics text-mono',
-      hidden: true,
-      text: '',
-    });
-    const subToggleBtn = h('button', {
-      type: 'button',
-      className: 'live-sub-toggle',
-      hidden: true,
-      text: t('live.subToggleIdle', { total: 0, arrow: '▸' }),
-    });
-    const elapsedEl = h('span', {
-      className: 'live-activity-elapsed text-mono',
-      text: '0s',
-    });
-
-    const headerEl = h('div', { className: 'live-task-header' }, [
-      h('div', { className: 'live-task-title-wrap' }, [dotWrap, titleEl, hereTagEl]),
-      h('div', { className: 'live-task-header-right' }, [metricsEl, subToggleBtn, elapsedEl]),
-    ]);
-
-    const mainBadge = h('span', {
-      className: 'agent-badge badge-main',
-      hidden: true,
-      text: t('fmt.mainBadge'),
-    });
-    const mainPhase = h('strong', { className: 'live-activity-phase', text: t('live.thinking') });
-    const mainProgress = h('span', {
-      className: 'live-activity-progress text-mono',
-      hidden: true,
-      text: '',
-    });
-    const mainSep = h('span', { className: 'live-activity-sep', hidden: true, text: '·' });
-    const mainDetail = h('span', {
-      className: 'live-activity-detail',
-      hidden: true,
-      text: '',
-    });
-
-    const mainRowEl = h('div', { className: 'live-task-main-row' }, [
-      mainBadge,
-      mainPhase,
-      mainProgress,
-      mainSep,
-      mainDetail,
-    ]);
-
-    const subListEl = h('div', { className: 'live-sub-list', hidden: true });
-    const cardEl = h('div', { className: 'live-task-card' }, [headerEl, mainRowEl, subListEl]);
-
-    return {
-      el: cardEl,
-      refs: {
-        cardEl,
-        dotIcon,
-        titleEl,
-        hereTagEl,
-        metricsEl,
-        subToggleBtn,
-        elapsedEl,
-        mainBadge,
-        mainPhase,
-        mainProgress,
-        mainSep,
-        mainDetail,
-        subListEl,
-      },
-    };
-  }
-
+  // 左侧多会话实时看板浮层（受控复用 LiveActivityWidget，保持零硬编码与同一套计时器状态机）
   const multiPinBadge = h('span', {
     className: 'wm-pin-badge',
     hidden: true,
@@ -19439,10 +20655,16 @@ function mountWindowOverlay() {
       multiEmptyTextEl,
     ]),
   ]);
-  const multiRunningListEl = h('div', {
-    className: 'live-activity-list',
-    hidden: true,
-    'aria-live': 'polite',
+  const multiRunningWidget = LiveActivityWidget({
+    defaultExpandRunningSubs: true,
+    showSessionExtras: true,
+    isVisibleFn: () => Boolean(multiOpen && !document.hidden && !disposed),
+    onSelectSession: inspectSessionInMonitor,
+    onLayoutChange: () => {
+      if (multiOpen) {
+        positionFloatingElements();
+      }
+    },
   });
 
   const multiTitleTextEl = h('span', { text: t('multi.title') });
@@ -19476,7 +20698,7 @@ function mountWindowOverlay() {
         }
       },
     },
-    [multiHeaderEl, multiEmptyEl, multiRunningListEl]
+    [multiHeaderEl, multiEmptyEl, multiRunningWidget.el]
   );
 
   // 完整四标签悬浮容器
@@ -19493,9 +20715,19 @@ function mountWindowOverlay() {
     [appInstance.el]
   );
 
+  function syncPortalAppearance(settings) {
+    applyAppearanceToRoot(capsuleHost, settings, { includeFontScale: false });
+    applyAppearanceToRoot(portalHost, settings, { includeFontScale: true });
+    const scaleKey = normalizeClientFontScale(settings?.fontScale);
+    popoverEl.setAttribute?.('data-font-scale', scaleKey);
+    hoverTipEl.setAttribute?.('data-font-scale', scaleKey);
+    multiPanelEl.setAttribute?.('data-font-scale', scaleKey);
+  }
+
   portalShadow.appendChild(multiPanelEl);
   portalShadow.appendChild(hoverTipEl);
   portalShadow.appendChild(popoverEl);
+  syncPortalAppearance(initialSettings);
   (document.body || document.documentElement).appendChild(portalHost);
 
   // --- 3. 几何测量、IDE 主题桥接、顶栏停靠与防溢出定位 ---
@@ -19668,6 +20900,8 @@ function mountWindowOverlay() {
     return true;
   }
 
+  const isMac = () => isMacHostPlatform(telemetryStore.getState().telemetry);
+
   function updateFixedFallbackPosition() {
     const dockMode = capsuleHost.getAttribute('data-dock');
     if (dockMode === 'flow' || dockMode === 'ide-titlebar' || dockMode === 'composer') {
@@ -19677,18 +20911,29 @@ function mountWindowOverlay() {
     }
     try {
       const vw = Number(window.innerWidth || 1280);
-      let rightOffset = 144;
+      const minRight = isMac() ? 12 : 144;
+      let rightOffset = minRight;
       const anchor = findNativeTopRightAnchor();
       if (anchor?.getBoundingClientRect) {
         const r = anchor.getBoundingClientRect();
         if (r.width > 0 && r.left > 0 && r.left < vw) {
-          rightOffset = Math.max(144, Math.ceil(vw - r.left + 6));
+          rightOffset = Math.max(minRight, Math.ceil(vw - r.left + 6));
         }
       }
       capsuleHost.style.top = '7px';
       capsuleHost.style.right = `${rightOffset}px`;
     } catch {
       // 忽略回退坐标计算异常
+    }
+  }
+
+  function syncCapsuleOsAttr() {
+    const nextOs = isMac() ? 'mac' : 'default';
+    if (capsuleHost.getAttribute('data-os') !== nextOs) {
+      patchAttr(capsuleHost, 'data-os', nextOs);
+      if (capsuleHost.getAttribute('data-dock') === 'fixed') {
+        updateFixedFallbackPosition();
+      }
     }
   }
 
@@ -19761,10 +21006,19 @@ function mountWindowOverlay() {
               }
             }
           }
-          if (!hasVisibleWindowControls && navigator?.windowControlsOverlay?.visible) {
+          if (navigator?.windowControlsOverlay?.visible) {
             const wcoRect = navigator.windowControlsOverlay.getTitlebarAreaRect?.();
-            if (wcoRect && wcoRect.width > 0 && tbRect.right > wcoRect.right + 4) {
-              rightSiblingsWidth += tbRect.right - wcoRect.right;
+            if (wcoRect && wcoRect.width > 0) {
+              if (!hasVisibleWindowControls && tbRect.right > wcoRect.right + 4) {
+                rightSiblingsWidth += tbRect.right - wcoRect.right;
+              }
+              const leftOverlayInset = wcoRect.left - tbRect.left;
+              if (leftOverlayInset > leftContentWidth) {
+                leftContentWidth = Math.min(
+                  Math.round(tbRect.width * 0.45),
+                  Math.ceil(leftOverlayInset)
+                );
+              }
             }
           }
 
@@ -19777,10 +21031,11 @@ function mountWindowOverlay() {
         if (tbRect.width > 0) {
           const titleEl = titlebar.firstElementChild;
           const titleInner = titleEl?.firstElementChild;
+          const macTrafficReserve = isMac() ? 80 : 168;
           const contentStart = titleInner?.getBoundingClientRect
             ? Math.max(8, titleInner.getBoundingClientRect().left - tbRect.left)
-            : tbRect.left < 168
-              ? 168 - tbRect.left
+            : tbRect.left < macTrafficReserve
+              ? macTrafficReserve - tbRect.left
               : 12;
           const minTitleWidth = 180;
           let siblingButtonsWidth = 64;
@@ -19834,8 +21089,17 @@ function mountWindowOverlay() {
       const vh = Number(window.innerHeight || 800);
       const navRight = getLeftSidebarRightEdge(vw);
       const minLeft = navRight > 0 ? Math.max(12, navRight + 12) : 12;
-      const defaultCardW = Math.min(FLOATING_CARD_WIDTH, Math.max(280, vw - 24));
-      const defaultMultiW = Math.min(MULTI_PANEL_WIDTH, Math.max(280, vw - 24));
+      const curSettings = telemetryStore.getState().telemetry?.settings;
+      const panelScale =
+        PANEL_SCALE_FACTORS[normalizeClientFontScale(curSettings?.fontScale)] ?? 1;
+      const defaultCardW = Math.min(
+        Math.round(FLOATING_CARD_WIDTH * panelScale),
+        Math.max(280, vw - 24)
+      );
+      const defaultMultiW = Math.min(
+        Math.round(MULTI_PANEL_WIDTH * panelScale),
+        Math.max(280, vw - 24)
+      );
       const isDockComposer = capsuleHost.getAttribute('data-dock') === 'composer';
 
       if (multiOpen) {
@@ -19883,9 +21147,8 @@ function mountWindowOverlay() {
 
       if (popoverOpen) {
         const maxPopCardW = Math.max(280, vw - minLeft - 12);
-        const curSettings = telemetryStore.getState().telemetry?.settings;
         const popWidthMode = normalizeClientPopoverWidthMode(curSettings?.popoverWidthMode);
-        let desiredPopW = Math.min(POPOVER_BASE_WIDTH, maxPopCardW);
+        let desiredPopW = Math.min(Math.round(POPOVER_BASE_WIDTH * panelScale), maxPopCardW);
         if (popWidthMode === 'custom') {
           desiredPopW = Math.min(
             normalizeClientPopoverWidth(curSettings?.popoverWidth),
@@ -20050,6 +21313,7 @@ function mountWindowOverlay() {
     if (bodyOrDoc && !portalHost.isConnected) {
       bodyOrDoc.appendChild(portalHost);
     }
+    syncCapsuleOsAttr();
     ensureWorkbenchThemeObserved();
 
     const dockTarget = resolveRuntimeDockTarget();
@@ -20218,12 +21482,13 @@ function mountWindowOverlay() {
     patchAttr(multiPanelEl, 'hidden', !multiOpen);
     if (multiOpen) {
       renderCapsuleTelemetry();
+      multiRunningWidget.refs.resumeTicker();
       positionFloatingElements();
       if (typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => positionFloatingElements());
       }
     } else {
-      pauseMultiLiveTicker();
+      multiRunningWidget.refs.pauseTicker();
     }
   }
 
@@ -20298,18 +21563,10 @@ function mountWindowOverlay() {
   }
 
   function renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, hostRouteConversationId) {
-    if (manualSubExpandMap.size > 0) {
-      const runningIds = new Set(rawRunningList.map((item) => item.cascadeId));
-      for (const id of manualSubExpandMap.keys()) {
-        if (!runningIds.has(id)) manualSubExpandMap.delete(id);
-      }
+    if (!multiOpen || document.hidden) {
+      multiRunningWidget.refs.pauseTicker();
+      return;
     }
-    if (!multiOpen || document.hidden) return;
-    const localeKey = getEffectiveLocale();
-    const hostRouteLower = String(
-      hostRouteConversationId || extractHostRouteCascadeId() || ''
-    ).toLowerCase();
-
     patchText(
       multiRunningMetaEl,
       runningCount > 0
@@ -20319,201 +21576,10 @@ function mountWindowOverlay() {
         : t('multi.allIdle')
     );
     patchAttr(multiEmptyEl, 'hidden', runningCount > 0);
-    patchAttr(multiRunningListEl, 'hidden', runningCount === 0);
-
-    if (runningCount === 0) {
-      stopMultiLiveTicker();
-      patchKeyedList(multiRunningListEl, [], {});
-    } else {
-      const activeTimerKeys = new Set();
-      for (const item of rawRunningList) {
-        activeTimerKeys.add(`main:${item.cascadeId}`);
-        const subCount = Number(item.subagentCount || item.subagents?.length || 0);
-        const runSubs = Number(item.runningSubagentCount || 0);
-        const isExp = manualSubExpandMap.has(item.cascadeId)
-          ? manualSubExpandMap.get(item.cascadeId)
-          : runSubs > 0;
-        if (subCount > 0 && isExp) {
-          for (const sub of item.subagents || []) {
-            if (sub?.isRunning) {
-              activeTimerKeys.add(`sub:${sub.cascadeId}`);
-            }
-          }
-        }
-      }
-
-      patchKeyedList(multiRunningListEl, rawRunningList, {
-        keyFn: (item) => item.cascadeId,
-        sigFn: (item) => {
-          const runSubs = Number(item.runningSubagentCount || 0);
-          const isExp = manualSubExpandMap.has(item.cascadeId)
-            ? manualSubExpandMap.get(item.cascadeId)
-            : runSubs > 0;
-          const isHere =
-            Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
-          const subSig = (item.subagents || [])
-            .map(
-              (s) =>
-                `${s.cascadeId}:${s.isRunning}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
-            )
-            .join('|');
-          return `${localeKey}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${runSubs}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
-        },
-        createRow: createMultiLiveTaskCard,
-        updateRow: (refs, item) => {
-          const act = item.mainActivity || {
-            phase: 'thinking',
-            label: t('live.thinking'),
-            detail: '',
-            stepProgress: '',
-            startedAtMs: item.lastModifiedMs || 0,
-            signature: `fallback:${item.lastModifiedMs || 0}`,
-          };
-          const isWaiting = act.phase === 'waiting';
-          const isCompacting = act.phase === 'compacting';
-          patchClasses(refs.cardEl, {
-            'is-waiting': isWaiting,
-            'is-compacting': isCompacting,
-          });
-          patchClasses(refs.dotIcon, { 'is-pulsing': true });
-
-          const convTitle =
-            item.title || item.cascadeId?.slice(0, 8) || t('live.currentSession');
-          patchText(refs.titleEl, convTitle);
-          patchAttr(refs.titleEl, 'title', t('multi.inspectSessionTitle', { title: convTitle }));
-          refs.titleEl.onclick = (e) => {
-            e.stopPropagation();
-            inspectSessionInMonitor(item.cascadeId);
-          };
-
-          const isHere =
-            Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
-          patchText(refs.hereTagEl, t('multi.hereTag'));
-          patchAttr(refs.hereTagEl, 'hidden', !isHere);
-
-          const metricParts = [];
-          if (Number.isFinite(item.latestTokPerSec) && item.latestTokPerSec > 0) {
-            metricParts.push(
-              `${item.latestTokPerSec >= 100 ? Math.round(item.latestTokPerSec) : item.latestTokPerSec.toFixed(1)} t/s`
-            );
-          }
-          if (item.contextUsedPct != null && Number.isFinite(Number(item.contextUsedPct))) {
-            metricParts.push(`${Math.round(Number(item.contextUsedPct))}%`);
-          }
-          const metricsStr = metricParts.join(' · ');
-          patchAttr(refs.metricsEl, 'hidden', !metricsStr);
-          if (metricsStr) {
-            patchText(refs.metricsEl, metricsStr);
-          }
-
-          const subCount = Number(item.subagentCount || item.subagents?.length || 0);
-          const runSubCount = Number(item.runningSubagentCount || 0);
-          const isExpanded = manualSubExpandMap.has(item.cascadeId)
-            ? manualSubExpandMap.get(item.cascadeId)
-            : runSubCount > 0;
-          patchText(refs.mainBadge, t('fmt.mainBadge'));
-          patchAttr(refs.mainBadge, 'hidden', subCount === 0);
-          patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
-          if (subCount > 0) {
-            const arrow = isExpanded ? '▾' : '▸';
-            const toggleText =
-              runSubCount > 0
-                ? t('live.subToggleRunning', { run: runSubCount, total: subCount, arrow })
-                : t('live.subToggleIdle', { total: subCount, arrow });
-            patchText(refs.subToggleBtn, toggleText);
-            patchClasses(refs.subToggleBtn, { 'is-expanded': isExpanded });
-            refs.subToggleBtn.onclick = (e) => {
-              e.stopPropagation();
-              manualSubExpandMap.set(item.cascadeId, !isExpanded);
-              renderCapsuleTelemetry();
-              if (multiOpen) {
-                positionFloatingElements();
-              }
-            };
-          }
-
-          const mainTimerKey = `main:${item.cascadeId}`;
-          activeTimerKeys.add(mainTimerKey);
-          bindMultiElapsedTimer(
-            mainTimerKey,
-            `${item.cascadeId}:${act.signature || act.label}`,
-            act.startedAtMs,
-            refs.elapsedEl
-          );
-
-          patchText(refs.mainPhase, act.label || t('live.thinking'));
-          const progText = act.stepProgress ? `[${act.stepProgress}]` : '';
-          patchAttr(refs.mainProgress, 'hidden', !progText);
-          if (progText) {
-            patchText(refs.mainProgress, progText);
-          }
-
-          const detailStr = act.detail || '';
-          patchAttr(refs.mainSep, 'hidden', !detailStr);
-          patchAttr(refs.mainDetail, 'hidden', !detailStr);
-          patchText(refs.mainDetail, detailStr);
-
-          const showSubs = subCount > 0 && isExpanded;
-          patchAttr(refs.subListEl, 'hidden', !showSubs);
-          if (showSubs) {
-            const subItems = item.subagents || [];
-            patchKeyedList(refs.subListEl, subItems, {
-              keyFn: (sub) => sub.cascadeId,
-              sigFn: (sub) =>
-                `${localeKey}:${sub.cascadeId}:${sub.role}:${sub.isRunning}:${sub.stepCount}:${sub.liveActivity?.signature || ''}:${sub.isRunning ? multiTimersMap.has(`sub:${sub.cascadeId}`) : true}`,
-              createRow: createMultiLiveSubRow,
-              updateRow: (subRefs, sub) => {
-                const subAct = sub.liveActivity || {
-                  phase: sub.isRunning ? 'thinking' : 'done',
-                  label: sub.isRunning ? t('live.thinking') : t('live.done'),
-                  detail: '',
-                  stepProgress: '',
-                  startedAtMs: sub.lastModifiedMs || 0,
-                };
-                patchClasses(subRefs.rowEl, { 'is-done': !sub.isRunning });
-                const subBadgeCls = getAgentBadgeClass(sub.index || 1, false);
-                patchAttr(subRefs.subBadge, 'class', `agent-badge ${subBadgeCls}`);
-                patchText(subRefs.subBadge, formatAgentBadgeText(sub));
-                patchText(subRefs.subRole, sub.role || sub.shortLabel || t('fmt.subAgent'));
-
-                const subProg = subAct.stepProgress ? ` [${subAct.stepProgress}]` : '';
-                const summaryText = sub.isRunning
-                  ? `${subAct.label || t('live.running')}${subProg}${subAct.detail ? ` · ${subAct.detail}` : ''}`
-                  : t('live.doneWithSteps', { steps: sub.stepCount || 0 });
-                patchText(subRefs.subSummary, summaryText);
-
-                const subTimerKey = `sub:${sub.cascadeId}`;
-                if (sub.isRunning) {
-                  activeTimerKeys.add(subTimerKey);
-                  bindMultiElapsedTimer(
-                    subTimerKey,
-                    `${sub.cascadeId}:${subAct.signature || subAct.label}`,
-                    subAct.startedAtMs || sub.lastModifiedMs,
-                    subRefs.subElapsed
-                  );
-                } else {
-                  multiTimersMap.delete(subTimerKey);
-                  patchText(
-                    subRefs.subElapsed,
-                    t('header.convMetaSteps', { count: sub.stepCount || 0 })
-                  );
-                }
-              },
-            });
-          }
-        },
-      });
-
-      for (const k of [...multiTimersMap.keys()]) {
-        if (!activeTimerKeys.has(k)) {
-          multiTimersMap.delete(k);
-        }
-      }
-      ensureMultiLiveTicker();
-      tickMultiElapsedDisplay();
-    }
+    multiRunningWidget.refs.update({
+      items: rawRunningList,
+      hostRouteConversationId,
+    });
   }
 
   function renderHoverWidgets() {
@@ -20533,8 +21599,8 @@ function mountWindowOverlay() {
     const telemetry = telSt.telemetry;
 
     setI18nLanguage(telemetry?.settings?.language);
-    applyAppearanceToRoot(capsuleHost, telemetry?.settings, { includeFontScale: false });
-    applyAppearanceToRoot(portalHost, telemetry?.settings, { includeFontScale: true });
+    syncPortalAppearance(telemetry?.settings);
+    syncCapsuleOsAttr();
 
     const showMulti = telemetry?.settings?.showTopbarMultiSession !== false;
     patchAttr(multiBtn, 'hidden', !showMulti);
@@ -20556,7 +21622,7 @@ function mountWindowOverlay() {
       patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
       patchText(multiLabel, t('capsule.multiZero'));
       patchText(multiRunningMetaEl, t('multi.loading'));
-      stopMultiLiveTicker();
+      multiRunningWidget.refs.stopLiveTicker();
 
       applyCapsuleSlots(slotKeys, { hasTelemetry: false });
       return;
@@ -20569,138 +21635,36 @@ function mountWindowOverlay() {
       uiSt.selectedAgentScope,
       uiSt.ctxInspectorAgentId
     );
-    const activeConv = telemetry.activeConversation || {};
-    const overviewActive = overviewScopedConv || activeConv;
-    const ctx = ctxAgent?.context || overviewActive.context || activeConv.context || {};
-    const limitTokens = Number(ctx.compactionLimitTokens || ctx.limitTokens || 256000);
-    const totalTokens = Number(ctx.totalTokens || 0);
-    const usedPct =
-      limitTokens > 0 ? Math.min(100, +((totalTokens / limitTokens) * 100).toFixed(1)) : 0;
-    const dashOffset = +(
-      RING_CIRCUMFERENCE *
-      (1 - Math.max(0, Math.min(100, usedPct)) / 100)
-    ).toFixed(2);
-    // --- 4a. 同步左侧多会话实时状态胶囊与浮层看板 ---
-    const rawRunningList =
-      Array.isArray(telemetry.runningConversations) && telemetry.runningConversations.length > 0
-        ? telemetry.runningConversations
-        : activeConv.isRunning || aggregated?.isRunning
-          ? [
-              {
-                cascadeId: activeConv.cascadeId || 'current',
-                title: activeConv.title || t('live.currentSession'),
-                isCurrentSelected: true,
-                isMainRunning: Boolean(activeConv.isRunning),
-                isRunning: true,
-                mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
-                subagentCount: Math.max(0, (agents?.length || 1) - 1),
-                runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
-                latestTokPerSec: overviewActive.latestTokPerSec ?? null,
-                contextUsedPct: usedPct,
-                subagents: (agents || [])
-                  .filter((a) => !a.isMain)
-                  .map((s, idx) => ({
-                    cascadeId: s.cascadeId || s.agentId,
-                    index: s.index || idx + 1,
-                    badgeText: s.badgeText || t('fmt.subBadge', { index: idx + 1 }),
-                    shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-                    role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
-                    isRunning: Boolean(s.isRunning),
-                    stepCount: Number(s.stepCount || 0),
-                    lastModifiedMs: s.lastModifiedMs || 0,
-                    liveActivity: s.liveActivity || {
-                      phase: s.isRunning ? 'thinking' : 'done',
-                      label: s.isRunning ? t('live.thinking') : t('live.done'),
-                      detail: '',
-                      stepProgress: '',
-                      startedAtMs: s.lastModifiedMs || 0,
-                      signature: `${s.agentId}:${s.stepCount || 0}`,
-                    },
-                  })),
-              },
-            ]
-          : [];
-
-    const runningCount = rawRunningList.length;
-    const runningSubCount = rawRunningList.reduce(
-      (acc, item) => acc + Number(item.runningSubagentCount || 0),
-      0
-    );
-    const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
+    const overviewActive = overviewScopedConv || telemetry.activeConversation || {};
+    const slotCtx = buildCapsuleSlotContext(telemetry, {
+      scopedConv: capsuleScopedConv,
+      overviewConv: overviewActive,
+      ctxAgent,
+      aggregated,
+    });
+    const { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText } =
+      resolveMultiSessionCapsuleState(telemetry, {
+        agents,
+        aggregated,
+        latestTokPerSec: overviewActive.latestTokPerSec ?? null,
+        contextUsedPct: slotCtx.usedPct,
+      });
 
     patchClasses(multiBtn, {
       'is-running': runningCount > 0 && !hasWaiting,
       'is-waiting': runningCount > 0 && hasWaiting,
     });
-    const multiBtnText =
-      runningCount > 0
-        ? runningSubCount > 0
-          ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
-          : t('capsule.multiRunning', { count: runningCount })
-        : t('capsule.multiZero');
     patchText(multiLabel, multiBtnText);
 
-    renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, telSt.hostRouteConversationId);
+    renderMultiRunningPanel(
+      rawRunningList,
+      runningCount,
+      runningSubCount,
+      telSt.hostRouteConversationId
+    );
 
-    // --- 4b. 同步右侧 1..5 动态槽位胶囊与组件化悬停浮层 ---
-    const isRunning = Boolean(aggregated?.isRunning || activeConv.isRunning);
-    const capActive = capsuleScopedConv || aggregated || activeConv || {};
-    const tps =
-      capsuleScopedConv?.latestTokPerSec ??
-      aggregated?.latestTokPerSec ??
-      activeConv.latestTokPerSec ??
-      null;
-    const avgTps =
-      capsuleScopedConv?.avgTokPerSec ??
-      aggregated?.avgTokPerSec ??
-      activeConv.avgTokPerSec ??
-      null;
-    const ttft =
-      capsuleScopedConv?.latestTtftSec ??
-      aggregated?.latestTtftSec ??
-      activeConv.latestTtftSec ??
-      null;
-    const capsuleStepCost =
-      capsuleScopedConv?.latestStepCostUsd ??
-      aggregated?.latestStepCostUsd ??
-      activeConv.latestStepCostUsd ??
-      null;
-    const sessionCost =
-      capsuleScopedConv?.sessionCostUsd ??
-      aggregated?.sessionCostUsd ??
-      activeConv.sessionCostUsd ??
-      null;
-    const cacheHitPct =
-      Number(capActive.stepCount || 0) > 0
-        ? capActive.latestCacheHitPct ?? capActive.sessionCacheHitPct ?? null
-        : null;
-    const latestPromptTokens = capActive.latestPromptTokens ?? null;
-    const capInTok = Math.max(0, Number(capActive.inputTokens || 0));
-    const capCacheTok = Math.max(0, Number(capActive.cacheReadTokens || 0));
-    const capOutTok = Math.max(0, Number(capActive.outputTokens || 0));
-    const sessionTokens =
-      Number(capActive.stepCount || 0) > 0 ||
-      capActive.totalTokens != null ||
-      capInTok + capCacheTok + capOutTok > 0
-        ? Math.max(0, Number(capActive.totalTokens ?? capInTok + capCacheTok + capOutTok))
-        : null;
-
-    patchClasses(capsuleBtn, { 'is-running': isRunning });
-    applyCapsuleSlots(slotKeys, {
-      hasTelemetry: true,
-      usedPct,
-      dashOffset,
-      isRunning,
-      tps,
-      avgTps,
-      ttft,
-      stepCost: capsuleStepCost,
-      sessionCost,
-      cacheHitPct,
-      latestPromptTokens,
-      sessionTokens,
-      quotas: telemetry.quotas,
-    });
+    patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
+    applyCapsuleSlots(slotKeys, slotCtx);
 
     const updateMode = normalizeClientUpdateMode(
       telemetry.settings?.pluginUpdateMode,
@@ -20877,7 +21841,7 @@ function mountWindowOverlay() {
   const onVisibilityChange = () => {
     if (document.hidden) {
       uiStore.setState({ monitorVisible: false });
-      pauseMultiLiveTicker();
+      multiRunningWidget.refs.pauseTicker();
       hasPointerCoords = false;
       if (tooltipOpen) {
         setTooltipOpen(false);
@@ -20979,28 +21943,28 @@ function mountWindowOverlay() {
 
   const handle = {
     bundleVersion,
-    ensureAlive() {
+    [WINDOW_OVERLAY_METHODS.ensureAlive]() {
       if (disposed) return false;
       return ensureCapsuleDocked();
     },
-    syncHostRoute() {
+    [WINDOW_OVERLAY_METHODS.syncHostRoute]() {
       if (disposed) return false;
       syncHostRouteIfChanged();
       return true;
     },
-    updateBridge(nextBridge) {
+    [WINDOW_OVERLAY_METHODS.updateBridge](nextBridge) {
       if (disposed || !nextBridge || typeof nextBridge !== 'object') return false;
       const port = Number(nextBridge.port || 0);
       const token = String(nextBridge.token || '');
       if (!Number.isInteger(port) || port <= 0 || !token) return false;
-      const cur = window.__AGUsageMonitorBridge || {};
+      const cur = readInjectedWindowBridge() || {};
       const portChanged = Number(cur.port || 0) !== port || String(cur.token || '') !== token;
       cur.port = port;
       cur.token = token;
       if (portChanged) {
         cur.transportMode = 'http';
       }
-      window.__AGUsageMonitorBridge = cur;
+      window[WINDOW_BRIDGE_KEY] = cur;
       void fetchTelemetry({ force: false });
       return true;
     },
@@ -21010,7 +21974,7 @@ function mountWindowOverlay() {
     getLastPointer() {
       return hasPointerCoords ? { x: lastPointerX, y: lastPointerY } : null;
     },
-    deliverRpc(responses) {
+    [WINDOW_OVERLAY_METHODS.deliverRpc](responses) {
       if (disposed) return 0;
       return deliverCdpBridgeResponses(responses);
     },
@@ -21035,14 +21999,13 @@ function mountWindowOverlay() {
     isMultiHoverOpen: () => Boolean(multiOpen && !multiPinned),
     isMultiPinnedOpen: () => Boolean(multiOpen && multiPinned),
     getLayoutMode: () => layoutMode,
-    getDockKind: () => String(capsuleHost.getAttribute('data-dock') || ''),
-    getMountMode: () => lastAppliedMountMode,
-    applyMountMode(nextMode) {
+    [WINDOW_OVERLAY_METHODS.getDockKind]: () => String(capsuleHost.getAttribute('data-dock') || ''),
+    [WINDOW_OVERLAY_METHODS.getMountMode]: () => lastAppliedMountMode,
+    [WINDOW_OVERLAY_METHODS.applyMountMode](nextMode) {
       if (disposed) return false;
       const normalized = normalizeClientWindowMountMode(nextMode, nextMode !== 'sidebar');
-      if (typeof window !== 'undefined' && window.__AGUsageMonitorBridge) {
-        window.__AGUsageMonitorBridge.mountMode = normalized;
-      }
+      const bridgeConfig = readInjectedWindowBridge();
+      if (bridgeConfig) bridgeConfig.mountMode = normalized;
       const curTel = telemetryStore.getState().telemetry;
       if (curTel?.settings) {
         telemetryStore.setState({
@@ -21059,7 +22022,7 @@ function mountWindowOverlay() {
       lastAppliedMountMode = normalized;
       return ensureCapsuleDocked();
     },
-    dispose() {
+    [WINDOW_OVERLAY_METHODS.dispose]() {
       if (disposed) return;
       disposed = true;
       clearInterval(watchdogTimer);
@@ -21071,7 +22034,7 @@ function mountWindowOverlay() {
         clearTimeout(multiLeaveTimer);
         multiLeaveTimer = null;
       }
-      stopMultiLiveTicker();
+      multiRunningWidget.refs.stopLiveTicker();
       if (dockRafId && typeof cancelAnimationFrame === 'function') {
         cancelAnimationFrame(dockRafId);
         dockRafId = 0;
@@ -21112,17 +22075,20 @@ function mountWindowOverlay() {
       try {
         portalHost.remove();
       } catch {}
-      if (window.__AGUsageMonitorOverlay === handle) {
-        delete window.__AGUsageMonitorOverlay;
+      if (window[WINDOW_OVERLAY_KEY] === handle) {
+        delete window[WINDOW_OVERLAY_KEY];
       }
     },
   };
 
-  window.__AGUsageMonitorOverlay = handle;
+  window[WINDOW_OVERLAY_KEY] = handle;
   return handle;
 }
+return { computeCapsuleLayoutMode, mountWindowOverlay };
+})();
 
 // --- src/main.js ---
+(() => {
 /**
  * @fileoverview Async entry point for Antigravity Usage & Speed Monitor.
  * Automatically branches between Auxiliary Sidebar Webview mode (`#app-root`)
@@ -21135,14 +22101,17 @@ async function bootstrapApp(mountTarget = document.getElementById('app-root')) {
   const appInstance = App();
   mountTarget.appendChild(appInstance.el);
 
+  const syncDocAppearance = (settings) => {
+    setI18nLanguage(settings?.language);
+    if (typeof document !== 'undefined' && document.documentElement) {
+      applyAppearanceToRoot(document.documentElement, settings, { includeFontScale: true });
+    }
+  };
+  syncDocAppearance(telemetryStore.getState().telemetry?.settings);
+
   const unsubAppearance = telemetryStore.subscribe(
     (st) => st.telemetry?.settings,
-    (settings) => {
-      setI18nLanguage(settings?.language);
-      if (typeof document !== 'undefined' && document.documentElement) {
-        applyAppearanceToRoot(document.documentElement, settings, { includeFontScale: true });
-      }
-    }
+    syncDocAppearance
   );
 
   const stopPolling = startAsyncTelemetryLoop(2000);
@@ -21183,4 +22152,5 @@ function init() {
 }
 
 init();
+})();
 })();

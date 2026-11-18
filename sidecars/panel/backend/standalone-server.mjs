@@ -356,8 +356,8 @@ export function createStandaloneWebServer(options = {}) {
     );
   }
 
-  if (options.lsAddr && options.csrfToken) {
-    setLsRuntimeEndpoint(options.lsAddr, options.csrfToken, { isDynamic: false });
+  if (options.lsAddr) {
+    setLsRuntimeEndpoint(options.lsAddr, options.csrfToken || '', { isDynamic: false });
   }
 
   const expectedCookieVal = token ? deriveCookieValue(token) : '';

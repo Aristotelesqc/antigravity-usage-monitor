@@ -11,7 +11,6 @@ import { telemetryStore } from '../store/telemetryStore.js';
 import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import { CustomScrollbar } from '../components/ui/CustomScrollbar.js';
 import { SegmentedControl } from '../components/ui/SegmentedControl.js';
-import { SettingsAccountTab } from './settings/SettingsAccountTab.js';
 import { SettingsGeneralTab } from './settings/SettingsGeneralTab.js';
 import { SettingsOtherTab } from './settings/SettingsOtherTab.js';
 import { SettingsStructureTab } from './settings/SettingsStructureTab.js';
@@ -52,7 +51,7 @@ export const SettingsView = defineComponent({
 
     const generalTab = SettingsGeneralTab({ onLayoutChange: refreshScroll });
     const structureTab = SettingsStructureTab({ onLayoutChange: refreshScroll });
-    const accountTab = SettingsAccountTab({ onLayoutChange: refreshScroll });
+    const accountTab = null; // SettingsAccountTab kept in src/views/settings/ for future opt-in
     const otherTab = SettingsOtherTab({ onLayoutChange: refreshScroll });
 
     let showingAccount = false;
@@ -60,25 +59,27 @@ export const SettingsView = defineComponent({
       const target =
         subTab === 'structure' ||
         subTab === 'other' ||
-        (SHOW_ACCOUNT_TAB && subTab === 'account')
+        (accountTab && subTab === 'account')
           ? subTab
           : 'general';
       subNavSwitch.setValue(target);
       patchAttr(generalTab.el, 'hidden', target !== 'general');
       patchAttr(structureTab.el, 'hidden', target !== 'structure');
       patchAttr(structureTab.refs.thirdNavBar, 'hidden', target !== 'structure');
-      patchAttr(accountTab.el, 'hidden', !SHOW_ACCOUNT_TAB || target !== 'account');
       patchAttr(otherTab.el, 'hidden', target !== 'other');
-      const nextShowingAccount = SHOW_ACCOUNT_TAB && target === 'account' && activeView === 'settings';
-      if (nextShowingAccount && !showingAccount) void accountTab.refs.load();
-      showingAccount = nextShowingAccount;
+      if (accountTab) {
+        patchAttr(accountTab.el, 'hidden', target !== 'account');
+        const nextShowingAccount = target === 'account' && activeView === 'settings';
+        if (nextShowingAccount && !showingAccount) void accountTab.refs.load();
+        showingAccount = nextShowingAccount;
+      }
       refreshScroll();
     }
 
     const contentContainer = h(
       'div',
       {},
-      SHOW_ACCOUNT_TAB
+      accountTab
         ? [generalTab.el, structureTab.el, accountTab.el, otherTab.el]
         : [generalTab.el, structureTab.el, otherTab.el]
     );
@@ -102,10 +103,23 @@ export const SettingsView = defineComponent({
       const telemetry = telemetryStore.getState().telemetry;
       const settings = telemetry?.settings;
       if (settingsSubTab === 'structure') {
-        if (settings) structureTab.refs.renderSettings(settings);
+        if (settings) {
+          structureTab.refs.renderSettings(
+            settings,
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
       } else if (settingsSubTab === 'other') {
-        if (settings) otherTab.refs.renderSettings(settings, telemetry.contextWindowModels || []);
-      } else if (SHOW_ACCOUNT_TAB && settingsSubTab === 'account') {
+        if (settings) {
+          otherTab.refs.renderSettings(
+            settings,
+            telemetry.contextWindowModels || [],
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
+      } else if (accountTab && settingsSubTab === 'account') {
         accountTab.refs.renderAccount(telemetry?.account, telemetry?.quotas);
       } else {
         if (settings) generalTab.refs.renderSettings(settings);
@@ -117,6 +131,8 @@ export const SettingsView = defineComponent({
     const unsubTelemetry = telemetryStore.subscribe(
       (st) => ({
         settings: st.telemetry?.settings,
+        windowBridge: st.telemetry?.windowBridge,
+        hostPlatform: st.telemetry?.hostPlatform,
         cloudStatus: st.telemetry?.cloudStatus,
         contextWindowModels: st.telemetry?.contextWindowModels,
         account: st.telemetry?.account,
@@ -145,7 +161,7 @@ export const SettingsView = defineComponent({
         });
         generalTab.refs.refreshLabels();
         structureTab.refs.refreshLabels();
-        accountTab.refs.refreshLabels();
+        accountTab?.refs.refreshLabels();
         otherTab.refs.refreshLabels();
         refreshScroll();
       }
@@ -158,7 +174,7 @@ export const SettingsView = defineComponent({
       subNavSwitch.destroy();
       generalTab.destroy();
       structureTab.destroy();
-      accountTab.destroy();
+      accountTab?.destroy();
       otherTab.destroy();
       viewScrollbar.destroy();
     });

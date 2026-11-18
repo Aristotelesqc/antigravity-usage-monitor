@@ -4,6 +4,17 @@
  */
 
 import { isEnglishLocale, t } from '../i18n/index.js';
+import {
+  normalizeModelDisplayMode,
+  normalizeOrchestratorIdMode,
+} from '../../shared/settings-normalization.mjs';
+import {
+  classifyCacheTier,
+  classifySpeedTier,
+  classifyStepCostTier,
+  classifyTtftTier,
+  formatCompactTokens,
+} from '../../shared/telemetry-display-rules.mjs';
 
 const EN_MONTH_SHORT = Object.freeze([
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -21,53 +32,24 @@ export function formatCachePct(value) {
 }
 
 export function getSpeedToneClass(tokPerSec) {
-  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
-    return 'tone-muted';
-  }
-  const v = Number(tokPerSec);
-  if (v >= 60) return 'tone-good';
-  if (v >= 35) return 'tone-info';
-  if (v >= 20) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifySpeedTier(tokPerSec)}`;
 }
 
 export function getCacheToneClass(cacheHitPct, promptTokens = null) {
-  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
-    return 'tone-muted';
-  }
-  const v = Number(cacheHitPct);
-  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
-    return 'tone-muted';
-  }
-  if (v >= 85) return 'tone-good';
-  if (v >= 65) return 'tone-info';
-  if (v >= 30) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifyCacheTier(cacheHitPct, promptTokens)}`;
 }
 
 export function getStepCostToneClass(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
-  const v = Number(costUsd);
-  if (v >= 0.3) return 'tone-danger';
-  if (v >= 0.15) return 'tone-warn';
-  return '';
+  const tier = classifyStepCostTier(costUsd);
+  return tier ? `tone-${tier}` : '';
 }
 
 export function getTtftToneClass(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '';
-  const v = Number(ttftSec);
-  if (v >= 30) return 'tone-danger';
-  if (v >= 18) return 'tone-warn';
-  return '';
+  const tier = classifyTtftTier(ttftSec);
+  return tier === 'warn' || tier === 'danger' ? `tone-${tier}` : '';
 }
 
-export function formatTokens(num) {
-  const n = Number(num || 0);
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(Math.round(n));
-}
+export const formatTokens = formatCompactTokens;
 
 export function formatTokensPrecise(num) {
   const n = Number(num || 0);
@@ -172,23 +154,7 @@ export function formatElapsedSec(seconds) {
   return `${h}h ${remM}m`;
 }
 
-/**
- * 归一化普通模型显示模式（`'short'` 精简代号 | `'upstream_compact'` 去厂商前缀原始 ID | `'upstream'` 完整原始 ID）。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyShowUpstream]
- * @returns {'short'|'upstream_compact'|'upstream'}
- */
-export function normalizeModelDisplayMode(mode, legacyShowUpstream) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-    return 'upstream_compact';
-  }
-  if (m === 'short') return 'short';
-  if (legacyShowUpstream === true) return 'upstream';
-  return 'short';
-}
+export { normalizeModelDisplayMode };
 
 /**
  * 隐藏原始模型 ID 开头的 `gemini-`、`claude-`、`gpt-` 厂商前缀以节省单行表格空间（确保剥离后非空）。
@@ -208,15 +174,7 @@ function stripCompactionMarker(rawText) {
     .trim();
 }
 
-/**
- * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
- *
- * @param {unknown} mode
- * @returns {'compact'|'full'}
- */
-export function normalizeOrchestratorIdDisplayMode(mode) {
-  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-}
+export const normalizeOrchestratorIdDisplayMode = normalizeOrchestratorIdMode;
 
 /**
  * 统一解析步骤、会话摘要或模型汇总行面向用户的模型显示文本与悬停提示。
@@ -259,23 +217,35 @@ export function resolveModelDisplayInfo(target, settings = {}, options = {}) {
   }
 
   const shortText = String(
-    target.activeModelShort ?? target.modelShort ?? target.shortName ?? ''
+    target.activeBaseModelShort ??
+      target.baseModelShort ??
+      target.activeModelShort ??
+      target.modelShort ??
+      target.shortName ??
+      ''
   ).trim();
   const labelText = String(
-    target.activeModelLabel ?? target.modelLabel ?? target.label ?? ''
+    target.activeBaseModelLabel ??
+      target.baseModelLabel ??
+      target.activeModelLabel ??
+      target.modelLabel ??
+      target.label ??
+      ''
   ).trim();
   const upstreamText = String(
-    target.activeModelUpstream ?? target.modelUpstream ?? target.upstreamName ?? ''
+    target.baseModelUpstream ??
+      target.activeModelUpstream ??
+      target.modelUpstream ??
+      target.upstreamName ??
+      ''
   ).trim();
+  const rawCompactionText = `${target.activeModelShort ?? target.modelShort ?? ''} ${target.activeModelLabel ?? target.modelLabel ?? ''} ${target.activeModelUpstream ?? target.modelUpstream ?? ''}`;
   const responseText = String(target.responseModel ?? '').trim();
   const modelKeyText = String(target.modelKey ?? '').trim();
 
   const isCompaction =
     Boolean(target.isCompactionStep) ||
-    /·(?:压缩|compact)\s*$/iu.test(shortText) ||
-    /·(?:压缩|compact)\s*$/iu.test(upstreamText) ||
-    /·(?:压缩|compact)\s*$/iu.test(labelText) ||
-    /\[自动压缩\]\s*$/u.test(labelText);
+    /·(?:压缩|compact)(?=\s|$)|\[自动压缩\]/iu.test(rawCompactionText);
 
   const compactionSuffix = isCompaction ? t('fmt.compactionSuffix') : '';
 
@@ -511,4 +481,132 @@ export function mergeModelsByDisplayName(models = [], settings = {}, options = {
       sourceLabels: acc.sourceLabels,
     };
   });
+}
+
+/**
+ * 根据代理索引返回对应的微边框语义徽章样式类名。
+ *
+ * @param {number} [index=0]
+ * @param {boolean} [isMain=false]
+ * @returns {string}
+ */
+export function getAgentBadgeClass(index = 0, isMain = false) {
+  if (isMain || index <= 0) return 'badge-main';
+  const slot = ((index - 1) % 3) + 1;
+  return `badge-sub-${slot}`;
+}
+
+/**
+ * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理或旁路提问的紧凑徽章文本（零正则反拆中文）。
+ *
+ * @param {object|null|undefined} agent
+ * @returns {string}
+ */
+export function formatAgentBadgeText(agent) {
+  if (!agent) return t('fmt.mainBadge');
+  const kind =
+    agent.agentKind ||
+    (agent.isMain
+      ? 'main'
+      : agent.isSideQuestion || agent.typeName === 'side_question'
+        ? 'side_question'
+        : 'subagent');
+  if (kind === 'all') return t('header.scopeAllShort');
+  if (kind === 'main') return t('fmt.mainBadge');
+  if (kind === 'side_question') {
+    const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
+    if (ord > 0) return t('fmt.sideBadge', { index: ord });
+    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    return t('fmt.sideBadgeShort');
+  }
+  const ord = Number(agent.agentOrdinal || agent.index || 0);
+  if (ord > 0) return t('fmt.subBadge', { index: ord });
+  if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+  return t('fmt.subBadgeShort');
+}
+
+/**
+ * 基于结构化 `agentKind` / `agentOrdinal` / `customRole` 格式化代理完整显示名称（零正则反拆中文）。
+ *
+ * @param {object|null|undefined} agent
+ * @returns {string}
+ */
+export function formatAgentLabel(agent) {
+  if (!agent) return t('fmt.mainAgent');
+  const kind =
+    agent.agentKind ||
+    (agent.isMain
+      ? 'main'
+      : agent.isSideQuestion || agent.typeName === 'side_question'
+        ? 'side_question'
+        : 'subagent');
+  if (kind === 'all') return t('header.scopeAll');
+  if (kind === 'main') return t('fmt.mainAgent');
+
+  const rawCustom =
+    agent.customRole !== undefined
+      ? String(agent.customRole || '').trim()
+      : String(agent.role || '').trim();
+  if (kind === 'side_question') {
+    const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
+    const baseLabel = ord > 0 ? `${t('fmt.sideQuestion')} #${ord}` : t('fmt.sideQuestion');
+    const isGeneric =
+      !rawCustom ||
+      rawCustom === baseLabel ||
+      rawCustom === agent.shortLabel ||
+      rawCustom === t('fmt.sideQuestion') ||
+      rawCustom === 'Side Question' ||
+      rawCustom === 'side_question';
+    return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+  }
+
+  const ord = Number(agent.agentOrdinal || agent.index || 0);
+  const baseLabel = ord > 0 ? `${t('fmt.subAgent')} #${ord}` : t('fmt.subAgent');
+  const isGeneric =
+    !rawCustom ||
+    rawCustom === baseLabel ||
+    rawCustom === agent.shortLabel ||
+    rawCustom === t('fmt.subAgent') ||
+    rawCustom === 'Subagent';
+  return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+}
+
+/**
+ * 基于后端结构化 `actionKey` + `waitingApproval` 渲染实时动作短标题（兼容自定义 `label` 回退）。
+ *
+ * @param {object|null|undefined} act
+ * @param {string} [fallbackKey='live.thinking']
+ * @returns {string}
+ */
+export function formatLiveActivityLabel(act, fallbackKey = 'live.thinking') {
+  if (!act || typeof act !== 'object') return t(fallbackKey);
+  let baseLabel = '';
+  if (act.actionKey) {
+    const i18nKey = `live.act.${act.actionKey}`;
+    const translated = t(i18nKey);
+    if (translated && translated !== i18nKey) {
+      baseLabel = translated;
+    }
+  }
+  if (!baseLabel) {
+    baseLabel = String(act.label || '').trim() || t(fallbackKey);
+  }
+  if (act.waitingApproval) {
+    return t('live.act.awaitingApproval', { label: baseLabel });
+  }
+  return baseLabel;
+}
+
+/**
+ * 基于后端结构化 `detailKey` 渲染实时动作补充说明（兼容自由文本 `detail`）。
+ *
+ * @param {object|null|undefined} act
+ * @returns {string}
+ */
+export function formatLiveActivityDetail(act) {
+  if (!act || typeof act !== 'object') return '';
+  if (act.detailKey === 'compaction_resuming') {
+    return t('live.act.compactionResuming');
+  }
+  return String(act.detail || '');
 }

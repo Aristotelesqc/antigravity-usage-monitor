@@ -513,7 +513,7 @@ export async function ensureLsEndpointDiscovered({
   if (lsRuntimeEndpoint.addr === 'test.invalid') {
     return false;
   }
-  if (!force && lsRuntimeEndpoint.baseUrl && lsRuntimeEndpoint.csrfToken) {
+  if (!force && lsRuntimeEndpoint.baseUrl && (lsRuntimeEndpoint.csrfToken || !lsRuntimeEndpoint.isDynamic)) {
     return true;
   }
   if (lsDiscoveryState.inFlight) {

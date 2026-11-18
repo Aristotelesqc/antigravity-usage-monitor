@@ -435,17 +435,20 @@ export const StepsDetailView = defineComponent({
     let isDirty = false;
 
     function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
-      const activeCand = getStepModelGroupKey({
-        modelLabel: scopedConv?.activeModelLabel,
-        modelShort: scopedConv?.activeModelShort,
-      });
-      if (
-        activeCand &&
-        activeCand !== '模型未知' &&
-        activeCand !== t('fmt.unknownModel') &&
-        availableModelKeys.has(activeCand)
-      ) {
-        return activeCand;
+      if (scopedConv?.hasKnownModel !== false) {
+        const activeCand = getStepModelGroupKey({
+          baseModelLabel: scopedConv?.activeBaseModelLabel,
+          baseModelShort: scopedConv?.activeBaseModelShort,
+          modelLabel: scopedConv?.activeModelLabel,
+          modelShort: scopedConv?.activeModelShort,
+        });
+        if (
+          activeCand &&
+          activeCand !== t('fmt.unknownModel') &&
+          availableModelKeys.has(activeCand)
+        ) {
+          return activeCand;
+        }
       }
       for (let i = chronoSteps.length - 1; i >= 0; i--) {
         const st = chronoSteps[i];
@@ -625,7 +628,7 @@ export const StepsDetailView = defineComponent({
         if (!stepModelOptionMap.has(gk)) {
           const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
           stepModelOptionMap.set(gk, {
-            label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
+            label: disp.baseText || disp.text || gk,
             calls: 0,
           });
         }
@@ -656,7 +659,7 @@ export const StepsDetailView = defineComponent({
         });
         perModelOptions.push({
           value: gk,
-          label: disp.text.replace(/·(?:压缩|Compact)\s*$/iu, '').trim() || gk,
+          label: disp.baseText || disp.text || gk,
           meta: t('header.convMetaSteps', { count: Number(m.calls || 0) }),
         });
       }

@@ -41,6 +41,7 @@ import {
   saveSettingsPatch,
 } from '../../store/telemetryStore.js';
 import { getVisibleMonitorView, uiStore } from '../../store/uiStore.js';
+import { BridgeStatusNotice } from '../../components/settings/BridgeStatusNotice.js';
 import { CollapsibleSection } from '../../components/settings/CollapsibleSection.js';
 import { EditableSlotList } from '../../components/settings/EditableSlotList.js';
 import { buildStructurePreviewTelemetry } from '../../components/settings/structurePreviewMock.js';
@@ -119,6 +120,8 @@ export const SettingsStructureTab = defineComponent({
     let rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
+    let latestWindowBridge = null;
+    let latestHostPlatform = 'win32';
 
     function isStructureVisible() {
       const st = uiStore.getState();
@@ -329,6 +332,8 @@ export const SettingsStructureTab = defineComponent({
       },
     });
 
+    const mountBridgeNotice = BridgeStatusNotice({});
+
     const mountSection = CollapsibleSection({
       collapsible: false,
       icon: 'dock',
@@ -362,6 +367,7 @@ export const SettingsStructureTab = defineComponent({
         mountPreviewCanvas,
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [mountModeLabelEl, windowMountSelect.el]),
+        mountBridgeNotice.el,
         h('div', { className: 'form-row' }, [
           h('div', { className: 'settings-inline-row' }, [
             popoverWidthLabelEl,
@@ -393,6 +399,11 @@ export const SettingsStructureTab = defineComponent({
       windowMountSelect.setProps({
         modelValue: draftWindowMountMode,
         options: getMountModeOptions(),
+      });
+      mountBridgeNotice.refs.update({
+        visible: draftWindowMountMode !== 'sidebar',
+        windowBridge: latestWindowBridge,
+        hostPlatform: latestHostPlatform,
       });
       popoverWidthModeToggle.setProps({
         modelValue: draftPopoverWidthMode,
@@ -449,7 +460,7 @@ export const SettingsStructureTab = defineComponent({
       isVisibleFn: () => isStructureVisible() && activeThirdTab === 'hover',
       initialModuleKeys: [],
     });
-    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
       hoverPreviewTipEl,
       hoverPreviewEmptyEl,
     ]);
@@ -541,7 +552,7 @@ export const SettingsStructureTab = defineComponent({
       isVisibleFn: () => isStructureVisible() && activeThirdTab === 'overview',
       initialModuleKeys: [],
     });
-    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
       overviewPreviewContainerEl,
     ]);
 
@@ -800,7 +811,7 @@ export const SettingsStructureTab = defineComponent({
       items: draftStepColumns,
       options: getStepColumnOptions(draftStepTokenComboFormat),
       minItems: 2,
-      maxItems: 15,
+      maxItems: 14,
       addBtnTextFn: (count, max) => t('settings.str.addStepCol', { count, max }),
       onPreview: (previewItems) => {
         draftStepColumns = normalizeClientStepColumns(previewItems);
@@ -983,9 +994,15 @@ export const SettingsStructureTab = defineComponent({
       stepsSection.el,
     ]);
 
-    function renderSettings(settings) {
+    function renderSettings(
+      settings,
+      windowBridge = latestWindowBridge,
+      hostPlatform = latestHostPlatform
+    ) {
       if (!settings) return;
       latestSettings = settings;
+      if (windowBridge !== undefined) latestWindowBridge = windowBridge;
+      if (hostPlatform) latestHostPlatform = hostPlatform;
       draftWindowMountMode = normalizeClientWindowMountMode(
         settings.windowMountMode,
         settings.enableWindowOverlay
@@ -1087,6 +1104,7 @@ export const SettingsStructureTab = defineComponent({
 
     onCleanup(() => {
       unsubUi();
+      mountBridgeNotice.destroy();
       capsulePreviewWidget.destroy();
       hoverPreviewHost.destroy();
       overviewPreviewHost.destroy();
@@ -1115,6 +1133,7 @@ export const SettingsStructureTab = defineComponent({
       refs: {
         thirdNavBar,
         capsulePreviewWidget,
+        mountBridgeNotice,
         hoverPreviewHost,
         overviewPreviewHost,
         stepTablePreview,
