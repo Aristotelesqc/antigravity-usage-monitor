@@ -3677,21 +3677,6 @@ html[data-standalone="true"] .app-shell {
   white-space: nowrap;
 }
 
-.preview-win-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding-left: 4px;
-  flex-shrink: 0;
-}
-
-.preview-win-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--text-secondary) 26%, transparent);
-}
-
 .preview-composer-send {
   display: inline-flex;
   align-items: center;

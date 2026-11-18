@@ -1705,6 +1705,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     const previewCapsuleSlots = sec0.querySelectorAll('.wm-cap-slot');
     const previewMultiBtn = sec0.querySelector('.wm-multi-btn');
     assert.ok(previewCapsuleBar, 'Pane 0 mounts real CapsuleBarWidget preview');
+    assert.equal(previewCapsuleBar.querySelector('.preview-win-controls'), null, 'No redundant 3 window dots after capsule');
     assert.equal(previewCapsuleSlots.length, 5, 'Preview CapsuleBarWidget mounts real 5 capsule slots');
     assert.equal(previewCapsuleSlots[0].children[0].textContent, '68.4 t/s', 'Preview slot 0 renders simulated speed');
     assert.equal(previewCapsuleSlots[0].classList.contains('tone-good'), true, 'Preview capsule 68.4 t/s shares tone-good green with cards');

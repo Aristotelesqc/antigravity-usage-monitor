@@ -11458,11 +11458,6 @@ const CapsuleBarWidget = defineComponent({
       ]
     );
 
-    const titlebarRightMock = h('div', { className: 'preview-win-controls', 'aria-hidden': 'true' }, [
-      h('span', { className: 'preview-win-dot' }),
-      h('span', { className: 'preview-win-dot' }),
-      h('span', { className: 'preview-win-dot' }),
-    ]);
     const composerSendMock = h(
       'span',
       { className: 'preview-composer-send', 'aria-hidden': 'true', hidden: true },
@@ -11472,7 +11467,7 @@ const CapsuleBarWidget = defineComponent({
     const hostBarEl = h(
       'div',
       { className: 'preview-capsule-bar', 'data-mount-mode': 'dual' },
-      [titlebarLeftMock, composerLeftMock, capsuleCluster, titlebarRightMock, composerSendMock]
+      [titlebarLeftMock, composerLeftMock, capsuleCluster, composerSendMock]
     );
 
     const sidebarHintEl = h('div', {
@@ -11501,7 +11496,6 @@ const CapsuleBarWidget = defineComponent({
       });
 
       patchAttr(titlebarLeftMock, 'hidden', isComposer);
-      patchAttr(titlebarRightMock, 'hidden', isComposer);
       patchAttr(composerLeftMock, 'hidden', !isComposer);
       patchAttr(composerSendMock, 'hidden', !isComposer);
       patchAttr(sidebarHintEl, 'hidden', !isSidebar);
