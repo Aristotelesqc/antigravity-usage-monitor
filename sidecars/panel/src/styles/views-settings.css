@@ -230,17 +230,13 @@
   font-weight: 600;
 }
 
-/* --- 结构页真实 UI 实时预览画布（无套娃外框，直接呈现真实组件） --- */
+/* --- 结构页真实 UI 实时预览画布（1:1 零缩放、零套娃外框，直接呈现真实组件） --- */
 .structure-preview-canvas {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
-}
-
-.structure-preview-canvas.is-scaled {
-  zoom: 0.9;
 }
 
 .wm-hover-tip.is-preview {
@@ -260,10 +256,7 @@
 }
 
 .overview-modules-host.is-preview {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
+  padding-bottom: 0;
 }
 
 .structure-preview-empty,
@@ -296,6 +289,10 @@
   background: var(--surface-bg);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
+  font-family: "Google Sans Flex", "Google Sans", system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow-x: auto;
   user-select: none;
 }

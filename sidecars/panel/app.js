@@ -12237,10 +12237,12 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     isRunning: true,
     stepCount: 16,
     speedSampleCount: 15,
+    speedSummary: { sampleCount: 15, excludedCount: 1 },
     latestTokPerSec: 68.4,
     avgTokPerSec: 54.8,
     latestTtftSec: 1.15,
     avgTtftSec: 1.62,
+    ttftSummary: { avgSec: 1.62, sampleCount: 15 },
     latestStepCostUsd: 0.042,
     sessionCostUsd: 1.16,
     latestCacheHitPct: 94.5,
@@ -12271,10 +12273,12 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     isRunning: false,
     stepCount: 8,
     speedSampleCount: 8,
+    speedSummary: { sampleCount: 8, excludedCount: 0 },
     latestTokPerSec: 96.2,
     avgTokPerSec: 88.5,
     latestTtftSec: 0.68,
     avgTtftSec: 0.82,
+    ttftSummary: { avgSec: 0.82, sampleCount: 8 },
     latestStepCostUsd: 0.009,
     sessionCostUsd: 0.12,
     latestCacheHitPct: 88.1,
@@ -12298,8 +12302,10 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     ...mainAgent,
     stepCount: 24,
     speedSampleCount: 23,
+    speedSummary: { sampleCount: 23, excludedCount: 1 },
     avgTokPerSec: 59.6,
     avgTtftSec: 1.38,
+    ttftSummary: { avgSec: 1.38, sampleCount: 23 },
     sessionCostUsd: 1.28,
     sessionCacheHitPct: 88.9,
     inputTokens: 186400,
@@ -12313,8 +12319,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
   return {
     settings: mergedSettings,
     account: {
-      planName: 'Google AI Pro',
-      aiCredits: 1200,
+      tierName: 'Google AI Ultra',
+      planName: 'Pro',
+      aiCredits: 0,
     },
     quotas: {
       activePool: {
@@ -14007,7 +14014,7 @@ const SettingsStructureTab = defineComponent({
       isVisibleFn: () => isStructureVisible() && activeThirdTab === 'hover',
       initialModuleKeys: [],
     });
-    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+    const hoverPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
       hoverPreviewTipEl,
       hoverPreviewEmptyEl,
     ]);
@@ -14099,7 +14106,7 @@ const SettingsStructureTab = defineComponent({
       isVisibleFn: () => isStructureVisible() && activeThirdTab === 'overview',
       initialModuleKeys: [],
     });
-    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas is-scaled' }, [
+    const overviewPreviewCanvas = h('div', { className: 'structure-preview-canvas' }, [
       overviewPreviewContainerEl,
     ]);
 
@@ -15796,7 +15803,6 @@ const LiveOverviewView = defineComponent({
   setup({ onCleanup }) {
     const overviewInner = h('div', {
       className: 'overview-modules-host',
-      style: 'display: flex; flex-direction: column; gap: var(--space-3); padding-bottom: 2px;',
     });
 
     const widgetHost = createDynamicWidgetHost({

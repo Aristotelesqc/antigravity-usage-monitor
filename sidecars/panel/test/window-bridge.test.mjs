@@ -1943,6 +1943,21 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(sec2.hasAttribute('hidden'), false);
     const overviewPreviewHostEl = sec2.querySelector('.overview-modules-host');
     assert.equal(overviewPreviewHostEl.children.length, 4, 'Overview preview mounts all 4 real overview widgets');
+    assert.equal(
+      sec2.querySelector('.structure-preview-canvas').classList.contains('is-scaled'),
+      false,
+      'Overview preview canvas renders 1:1 without zoom scaling'
+    );
+    const previewCellSubs = Array.from(overviewPreviewHostEl.children[0].querySelectorAll('.cell-sub')).map(
+      (el) => el.textContent
+    );
+    assert.ok(previewCellSubs.includes('均值 1.4s'), 'Preview TTFT card shows populated mean TTFT');
+    assert.ok(previewCellSubs.includes('有效 23/24 步'), 'Preview Avg TPS card shows populated valid sample ratio');
+    assert.equal(
+      overviewPreviewHostEl.children[2].querySelector('.panel-meta').textContent,
+      'Google AI Ultra · Pro',
+      'Preview quota badge matches real tier · plan format'
+    );
 
     const [ovModWrap, ovMetricWrap] = sec2.querySelectorAll('.editable-slot-wrap');
     // Move row 2 ('quotas') up above 'context' -> ['metrics', 'quotas', 'context', 'live_tasks']
