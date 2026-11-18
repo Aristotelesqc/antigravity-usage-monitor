@@ -730,6 +730,7 @@ const BRIDGE_API_ROUTE_DEFS = Object.freeze([
   Object.freeze({ path: '/api/cache/rebuild', method: 'POST', action: 'cache_rebuild' }),
   Object.freeze({ path: '/api/cloud-sync', method: 'POST', action: 'cloud_sync' }),
   Object.freeze({ path: '/api/plugin-update', method: 'POST', action: 'plugin_update' }),
+  Object.freeze({ path: '/api/bridge/relaunch', method: 'POST', action: 'bridge_relaunch' }),
 ]);
 
 const BRIDGE_API_PATHS = Object.freeze(BRIDGE_API_ROUTE_DEFS.map((r) => r.path));
@@ -1460,14 +1461,19 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.mountDual': '双栖挂载 (顶部栏 + 侧边栏)',
   'settings.str.mountComposer': '输入框挂载 (输入框 + 侧边栏)',
   'settings.str.mountSidebar': '仅侧边栏',
-  'settings.bridge.restartTitle': '已自动补齐调试端口参数，请重启客户端生效',
-  'settings.bridge.restartBody': '已参照 IDE 方案向本地 argv.json 自动写入 "remote-debugging-port": "0"。请完全退出客户端（含系统托盘后台）后重新启动；若 Antigravity 2.33.0+ 桌面端重启后仍未生效，可在启动时追加下方参数。',
+  'settings.bridge.restartTitle': '已自动补齐启动参数，重启一次即可启用悬浮胶囊',
+  'settings.bridge.ctxRestartTitle': '已自动补齐启动参数，重启一次即可激活上下文覆写',
+  'settings.bridge.restartBody': '已自动为桌面 / 开始菜单 / 任务栏快捷方式及自启项写入 --remote-debugging-port=0（后续每次正常打开均 100% 全自动挂载）。点击下方按钮即可退出托盘后台并立即生效。',
   'settings.bridge.noPortTitle': '未检测到本地调试端口，主窗口挂载暂未生效',
-  'settings.bridge.unreachableTitle': '本地调试端口不可达，主窗口挂载暂未生效',
+  'settings.bridge.unreachableTitle': '本地调试端口未就绪，主窗口挂载暂未生效',
   'settings.bridge.ctxTitle': '未连通本地调试通道，上下文窗口覆写暂未注入',
-  'settings.bridge.guideWin': 'Antigravity 2.33.0+ 默认不再开启调试端口（本地 argv.json 已写入配置）。请先从系统托盘完全退出并重启；若桌面端仍未生效，请在快捷方式「目标」末尾追加 --remote-debugging-port=0 后启动。',
-  'settings.bridge.guideMac': 'Antigravity 2.33.0+ 默认不再开启调试端口（本地 argv.json 已写入配置）。请先完全退出（Cmd+Q）并重启；若桌面端仍未生效，可通过终端执行 open -a "Antigravity" --args --remote-debugging-port=0 启动。',
-  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ 默认不再开启调试端口（本地 argv.json 已写入配置）。请先完全退出并重启；若桌面端仍未生效，请在启动器 .desktop 的 Exec= 末尾追加 --remote-debugging-port=0 后启动。',
+  'settings.bridge.guideWin': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动补齐快捷方式参数、退出托盘后台并带参重启生效。',
+  'settings.bridge.guideMac': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可一键带参重开客户端生效，也可复制参数通过 open -a "Antigravity" --args --remote-debugging-port=0 启动。',
+  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ 默认不再开启调试端口。点击「立即重启并启用挂载」即可自动写入 .desktop 启动器并重启生效。',
+  'settings.bridge.relaunchBtn': '立即重启并启用挂载',
+  'settings.bridge.relaunchingBtn': '正在重启客户端...',
+  'settings.bridge.relaunchFailed': '自动重启失败，请从托盘退出后重试',
+  'settings.bridge.dismissAria': '暂时关闭提示',
   'settings.bridge.copyFlagBtn': '复制 {cmd}',
   'settings.bridge.copiedBtn': '已复制启动参数',
   'settings.str.popoverWidthLabel': '悬浮面板宽度',
@@ -2084,14 +2090,19 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.mountDual': 'Dual Mount (Titlebar + Sidebar)',
   'settings.str.mountComposer': 'Composer Mount (Input Box + Sidebar)',
   'settings.str.mountSidebar': 'Sidebar Only',
-  'settings.bridge.restartTitle': 'Debug Port Configured — Restart Required',
-  'settings.bridge.restartBody': 'Automatically added "remote-debugging-port": "0" to local argv.json. Quit Antigravity completely (including any tray process) and relaunch; if Desktop 2.33.0+ still has no port after restart, launch with the flag below.',
+  'settings.bridge.restartTitle': 'Launch Flag Auto-Configured — Restart Once to Activate',
+  'settings.bridge.ctxRestartTitle': 'Launch Flag Auto-Configured — Restart Once for Context Override',
+  'settings.bridge.restartBody': 'Automatically added --remote-debugging-port=0 to your shortcuts and startup entries (future launches mount 100% automatically). Click below to close tray processes and relaunch now.',
   'settings.bridge.noPortTitle': 'Local Debug Port Missing — Window Mount Inactive',
-  'settings.bridge.unreachableTitle': 'Local Debug Port Unreachable — Window Mount Inactive',
+  'settings.bridge.unreachableTitle': 'Local Debug Port Not Ready — Window Mount Inactive',
   'settings.bridge.ctxTitle': 'Local Debug Port Inactive — Context Override Pending',
-  'settings.bridge.guideWin': 'Antigravity 2.33.0+ no longer opens a debug port by default (argv.json is already configured). Fully quit from the system tray and relaunch first; if Desktop still fails, append --remote-debugging-port=0 to your shortcut Target.',
-  'settings.bridge.guideMac': 'Antigravity 2.33.0+ no longer opens a debug port by default (argv.json is already configured). Fully quit (Cmd+Q) and relaunch first; if Desktop still fails, launch via open -a "Antigravity" --args --remote-debugging-port=0.',
-  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ no longer opens a debug port by default (argv.json is already configured). Fully quit and relaunch first; if Desktop still fails, append --remote-debugging-port=0 to Exec= in your .desktop launcher.',
+  'settings.bridge.guideWin': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to auto-configure shortcuts, close tray background processes, and relaunch.',
+  'settings.bridge.guideMac': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to relaunch with the flag in one click, or run open -a "Antigravity" --args --remote-debugging-port=0.',
+  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ no longer opens a debug port by default. Click "Relaunch & Enable Mount" to update your .desktop launcher and relaunch.',
+  'settings.bridge.relaunchBtn': 'Relaunch & Enable Mount',
+  'settings.bridge.relaunchingBtn': 'Relaunching Host...',
+  'settings.bridge.relaunchFailed': 'Auto-relaunch failed — quit from tray and retry',
+  'settings.bridge.dismissAria': 'Dismiss notice for now',
   'settings.bridge.copyFlagBtn': 'Copy {cmd}',
   'settings.bridge.copiedBtn': 'Copied to Clipboard',
   'settings.str.popoverWidthLabel': 'Popover Width',
@@ -3603,7 +3614,7 @@ return { getViewTabs, uiStore, getVisibleMonitorView };
 })();
 
 // --- src/store/telemetryStore.js ---
-const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform } = (() => {
+const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -3834,6 +3845,8 @@ function isEquivalentTelemetry(prev, next) {
     (pWb?.state || '') !== (nWb?.state || '') ||
     Boolean(pWb?.argvUpdatedThisBoot) !== Boolean(nWb?.argvUpdatedThisBoot) ||
     Boolean(pWb?.argvConfigured) !== Boolean(nWb?.argvConfigured) ||
+    Boolean(pWb?.launcherConfigured) !== Boolean(nWb?.launcherConfigured) ||
+    Boolean(pWb?.canRelaunch) !== Boolean(nWb?.canRelaunch) ||
     Number(pWb?.aliveCount || 0) !== Number(nWb?.aliveCount || 0)
   ) {
     return false;
@@ -4576,6 +4589,18 @@ async function triggerCloudSync() {
   return res;
 }
 
+async function triggerBridgeHostRelaunch() {
+  try {
+    return await callSidecarApi('/api/bridge/relaunch', { method: 'POST', body: {} });
+  } catch {
+    // 兼容热更新后常驻父进程 main.mjs 尚未重注册新路由的场景，平滑回退至既有 POST /api/settings 通道转发至最新 Worker
+    return callSidecarApi('/api/settings', {
+      method: 'POST',
+      body: { __bridgeAction: 'relaunch' },
+    });
+  }
+}
+
 async function triggerPluginUpdate() {
   const res = await callSidecarApi('/api/plugin-update', { method: 'POST', body: {} });
   if (res?.ok && res?.restarting) {
@@ -4781,7 +4806,7 @@ function isMacHostPlatform(telemetry) {
   }
   return false;
 }
-return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform };
+return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform };
 })();
 
 // --- src/components/ui/TopLongPillNav.js ---
@@ -14049,9 +14074,9 @@ return { ThemeColorPicker };
 // --- src/components/settings/BridgeStatusNotice.js ---
 const { BridgeStatusNotice } = (() => {
 /**
- * @fileoverview Shared CDP / Window Bridge diagnostic notice card (`BridgeStatusNotice.js`).
- * Surfaces actionable restart or `--remote-debugging-port=0` guidance when Antigravity 2.33.0+
- * runs without an active `DevToolsActivePort` (`no_devtools_port` / `cdp_unreachable`).
+ * @fileoverview Shared CDP / Window Bridge diagnostic & one-click relaunch card (`BridgeStatusNotice.js`).
+ * Surfaces automatic shortcut provisioning status and a one-click host relaunch button when
+ * Antigravity 2.33.0+ runs without an active `DevToolsActivePort` (`no_devtools_port` / `cdp_unreachable`).
  */
 
 
@@ -14086,18 +14111,98 @@ const BridgeStatusNotice = defineComponent({
   name: 'BridgeStatusNotice',
   setup({ props, onCleanup }) {
     const contextMode = Boolean(props?.contextMode);
+    const dismissible = Boolean(props?.dismissible);
     let lastPayload = {
       visible: false,
       windowBridge: null,
       hostPlatform: 'win32',
     };
+    let dismissed = false;
     let copied = false;
     let copiedTimer = null;
+    let relaunchState = 'idle'; // 'idle' | 'relaunching' | 'failed'
+    let relaunchResetTimer = null;
     let destroyed = false;
 
     const headIconEl = createSvgIcon('warning', { size: 13, className: 'settings-bridge-icon' });
     const titleEl = h('strong', { className: 'settings-bridge-title', text: '' });
     const bodyEl = h('p', { className: 'settings-bridge-desc', text: '' });
+
+    const dismissBtnEl = dismissible
+      ? h(
+          'button',
+          {
+            type: 'button',
+            className: 'btn-ghost-sm settings-bridge-dismiss-btn',
+            'aria-label': t('settings.bridge.dismissAria'),
+            title: t('settings.bridge.dismissAria'),
+            onClick: () => {
+              dismissed = true;
+              render();
+              props?.onDismiss?.();
+            },
+          },
+          [createSvgIcon('close', { size: 11 })]
+        )
+      : null;
+
+    const relaunchBtnIconEl = createSvgIcon('refresh', { size: 11 });
+    const relaunchBtnTextEl = h('span', {
+      className: 'settings-bridge-relaunch-text',
+      text: t('settings.bridge.relaunchBtn'),
+    });
+    const relaunchBtnEl = h(
+      'button',
+      {
+        type: 'button',
+        className: 'settings-bridge-relaunch-btn',
+        onClick: async () => {
+          if (relaunchState === 'relaunching' || destroyed) return;
+          relaunchState = 'relaunching';
+          if (relaunchResetTimer) {
+            clearTimeout(relaunchResetTimer);
+            relaunchResetTimer = null;
+          }
+          syncActionButtons();
+          try {
+            const res = await triggerBridgeHostRelaunch();
+            if (destroyed) return;
+            if (!res || res.ok === false) {
+              relaunchState = 'failed';
+              syncActionButtons();
+              relaunchResetTimer = setTimeout(() => {
+                relaunchResetTimer = null;
+                if (destroyed) return;
+                relaunchState = 'idle';
+                syncActionButtons();
+              }, 3500);
+              relaunchResetTimer?.unref?.();
+              return;
+            }
+            // Reset button if host is still open after 9s (e.g. cancelled close prompt)
+            relaunchResetTimer = setTimeout(() => {
+              relaunchResetTimer = null;
+              if (destroyed) return;
+              relaunchState = 'idle';
+              syncActionButtons();
+            }, 9000);
+            relaunchResetTimer?.unref?.();
+          } catch {
+            if (destroyed) return;
+            relaunchState = 'failed';
+            syncActionButtons();
+            relaunchResetTimer = setTimeout(() => {
+              relaunchResetTimer = null;
+              if (destroyed) return;
+              relaunchState = 'idle';
+              syncActionButtons();
+            }, 3500);
+            relaunchResetTimer?.unref?.();
+          }
+        },
+      },
+      [relaunchBtnIconEl, relaunchBtnTextEl]
+    );
 
     const copyBtnIconEl = createSvgIcon('copy', { size: 11 });
     const copyBtnTextEl = h('span', {
@@ -14114,18 +14219,29 @@ const BridgeStatusNotice = defineComponent({
           if (destroyed) return;
           copied = true;
           if (copiedTimer) clearTimeout(copiedTimer);
-          syncCopyBtn();
+          syncActionButtons();
           copiedTimer = setTimeout(() => {
             copiedTimer = null;
             if (destroyed) return;
             copied = false;
-            syncCopyBtn();
+            syncActionButtons();
           }, 1800);
           copiedTimer?.unref?.();
         },
       },
       [copyBtnIconEl, copyBtnTextEl]
     );
+
+    const headLeftEl = h('div', { className: 'settings-bridge-head-main' }, [headIconEl, titleEl]);
+    const headRowEl = h(
+      'div',
+      { className: 'settings-bridge-head' },
+      dismissBtnEl ? [headLeftEl, dismissBtnEl] : [headLeftEl]
+    );
+    const actionsRowEl = h('div', { className: 'settings-bridge-actions' }, [
+      relaunchBtnEl,
+      copyBtnEl,
+    ]);
 
     const rootEl = h(
       'div',
@@ -14134,14 +14250,22 @@ const BridgeStatusNotice = defineComponent({
         role: 'status',
         hidden: true,
       },
-      [
-        h('div', { className: 'settings-bridge-head' }, [headIconEl, titleEl]),
-        bodyEl,
-        copyBtnEl,
-      ]
+      [headRowEl, bodyEl, actionsRowEl]
     );
 
-    function syncCopyBtn() {
+    function syncActionButtons() {
+      const canRelaunch = lastPayload.windowBridge?.canRelaunch !== false;
+      patchAttr(relaunchBtnEl, 'hidden', !canRelaunch);
+      patchAttr(relaunchBtnEl, 'disabled', relaunchState === 'relaunching');
+      patchText(
+        relaunchBtnTextEl,
+        relaunchState === 'relaunching'
+          ? t('settings.bridge.relaunchingBtn')
+          : relaunchState === 'failed'
+            ? t('settings.bridge.relaunchFailed')
+            : t('settings.bridge.relaunchBtn')
+      );
+
       patchSvgIcon(copyBtnIconEl, copied ? 'check' : 'copy');
       patchText(
         copyBtnTextEl,
@@ -14149,12 +14273,22 @@ const BridgeStatusNotice = defineComponent({
           ? t('settings.bridge.copiedBtn')
           : t('settings.bridge.copyFlagBtn', { cmd: LAUNCH_FLAG_TEXT })
       );
+
+      if (dismissBtnEl) {
+        const aria = t('settings.bridge.dismissAria');
+        patchAttr(dismissBtnEl, 'aria-label', aria);
+        patchAttr(dismissBtnEl, 'title', aria);
+      }
     }
 
     function render() {
       const wb = lastPayload.windowBridge;
       const state = String(wb?.state || '').trim();
+      if (state === 'active') {
+        dismissed = false;
+      }
       const shouldShow =
+        !dismissed &&
         Boolean(lastPayload.visible) &&
         !isWindowOverlayMode() &&
         (state === 'no_devtools_port' || state === 'cdp_unreachable');
@@ -14162,16 +14296,20 @@ const BridgeStatusNotice = defineComponent({
       patchAttr(rootEl, 'hidden', !shouldShow);
       if (!shouldShow) return;
 
-      const isRestartPending = state === 'no_devtools_port' && Boolean(wb?.argvUpdatedThisBoot);
+      const isAutoConfigured = Boolean(
+        wb?.launcherConfigured || wb?.argvUpdatedThisBoot || wb?.argvConfigured
+      );
       patchClasses(rootEl, {
-        'is-restart': isRestartPending,
-        'is-warn': !isRestartPending,
+        'is-restart': isAutoConfigured,
+        'is-warn': !isAutoConfigured,
       });
-      patchSvgIcon(headIconEl, isRestartPending ? 'refresh' : 'warning');
+      patchSvgIcon(headIconEl, isAutoConfigured ? 'refresh' : 'warning');
 
       let titleText = '';
-      if (isRestartPending) {
-        titleText = t('settings.bridge.restartTitle');
+      if (isAutoConfigured) {
+        titleText = contextMode
+          ? t('settings.bridge.ctxRestartTitle')
+          : t('settings.bridge.restartTitle');
       } else if (contextMode) {
         titleText = t('settings.bridge.ctxTitle');
       } else if (state === 'cdp_unreachable') {
@@ -14182,7 +14320,7 @@ const BridgeStatusNotice = defineComponent({
 
       const plat = String(lastPayload.hostPlatform || '').trim().toLowerCase();
       let bodyText = '';
-      if (isRestartPending) {
+      if (isAutoConfigured) {
         bodyText = t('settings.bridge.restartBody');
       } else if (plat === 'darwin') {
         bodyText = t('settings.bridge.guideMac');
@@ -14194,7 +14332,7 @@ const BridgeStatusNotice = defineComponent({
 
       patchText(titleEl, titleText);
       patchText(bodyEl, bodyText);
-      syncCopyBtn();
+      syncActionButtons();
     }
 
     function update(next = {}) {
@@ -14211,6 +14349,10 @@ const BridgeStatusNotice = defineComponent({
         clearTimeout(copiedTimer);
         copiedTimer = null;
       }
+      if (relaunchResetTimer) {
+        clearTimeout(relaunchResetTimer);
+        relaunchResetTimer = null;
+      }
     });
 
     return {
@@ -14218,7 +14360,9 @@ const BridgeStatusNotice = defineComponent({
       refs: {
         update,
         refreshLabels: render,
+        relaunchBtnEl,
         copyBtnEl,
+        dismissBtnEl,
       },
     };
   },
@@ -19005,6 +19149,30 @@ const App = defineComponent({
     const stepsView = StepsDetailView();
     const settingsView = SettingsView();
 
+    const globalBridgeNotice = BridgeStatusNotice({
+      dismissible: true,
+    });
+    const bannerSlotEl = h('div', { className: 'app-bridge-banner-slot', hidden: true }, [
+      globalBridgeNotice.el,
+    ]);
+
+    function syncGlobalBridgeBanner() {
+      const activeView = uiStore.getState().activeView;
+      const telemetry = telemetryStore.getState().telemetry;
+      const settings = telemetry?.settings;
+      const mountMode = settings
+        ? normalizeClientWindowMountMode(settings.windowMountMode, settings.enableWindowOverlay)
+        : 'sidebar';
+      const shouldOfferGlobal =
+        !isWindowOverlayMode() && activeView !== 'settings' && mountMode !== 'sidebar';
+      globalBridgeNotice.refs.update({
+        visible: shouldOfferGlobal,
+        windowBridge: telemetry?.windowBridge || null,
+        hostPlatform: telemetry?.hostPlatform || 'win32',
+      });
+      patchAttr(bannerSlotEl, 'hidden', globalBridgeNotice.el.hasAttribute('hidden'));
+    }
+
     const viewMap = {
       overview: overviewView.el,
       consumption: consumptionView.el,
@@ -19021,6 +19189,7 @@ const App = defineComponent({
 
     const shellEl = h('main', { className: 'app-shell' }, [
       h('div', { className: 'top-deck' }, [sessionHeader.el, topPillNav.el]),
+      bannerSlotEl,
       stageEl,
     ]);
 
@@ -19060,6 +19229,7 @@ const App = defineComponent({
           settingsView.refs?.viewScrollbar?.refresh();
         }
         syncStepsBadge();
+        syncGlobalBridgeBanner();
       }
     );
 
@@ -19068,8 +19238,15 @@ const App = defineComponent({
         stepCount: st.telemetry?.activeConversation?.stepCount ?? 0,
         totalStepsAllAgents: st.telemetry?.activeConversation?.totalStepsAllAgents ?? 0,
         subagentCount: st.telemetry?.activeConversation?.subagentCount ?? 0,
+        windowMountMode: st.telemetry?.settings?.windowMountMode,
+        enableWindowOverlay: st.telemetry?.settings?.enableWindowOverlay,
+        windowBridge: st.telemetry?.windowBridge,
+        hostPlatform: st.telemetry?.hostPlatform,
       }),
-      () => syncStepsBadge()
+      () => {
+        syncStepsBadge();
+        syncGlobalBridgeBanner();
+      }
     );
 
     const unsubScopeBadge = uiStore.subscribe(
@@ -19079,7 +19256,11 @@ const App = defineComponent({
 
     const unsubI18n = i18nStore.subscribe(
       (st) => st.locale,
-      () => syncStepsBadge()
+      () => {
+        syncStepsBadge();
+        globalBridgeNotice.refs.refreshLabels();
+        patchAttr(bannerSlotEl, 'hidden', globalBridgeNotice.el.hasAttribute('hidden'));
+      }
     );
 
     onCleanup(() => {
@@ -19087,6 +19268,7 @@ const App = defineComponent({
       unsubStepCount();
       unsubScopeBadge();
       unsubI18n();
+      globalBridgeNotice.destroy();
       sessionHeader.destroy();
       topPillNav.destroy();
       overviewView.destroy();
@@ -19100,6 +19282,7 @@ const App = defineComponent({
       refs: {
         sessionHeader,
         topPillNav,
+        globalBridgeNotice,
         overviewView,
         consumptionView,
         stepsView,

@@ -31,6 +31,10 @@ import {
   saveJson,
 } from './config.mjs';
 import { createContextWindowSyncExpression } from './context-windows.mjs';
+import {
+  ensureDesktopLaunchEntriesConfigured,
+  resolveDesktopHostExecutable,
+} from './desktop-launcher-config.mjs';
 
 const windowBridgeRef = `window[${JSON.stringify(WINDOW_BRIDGE_KEY)}]`;
 const windowOverlayRef = `window[${JSON.stringify(WINDOW_OVERLAY_KEY)}]`;
@@ -100,56 +104,6 @@ export function resolveIdeArgvPath(env = process.env, homeDir = homedir()) {
     return join(portableRoot, 'argv.json');
   }
   return join(homeDir, '.antigravity-ide', 'argv.json');
-}
-
-/**
- * 解析 Antigravity Desktop 2.0 各平台可能的启动参数文件 `argv.json` 候选路径。
- *
- * @param {Record<string, string|undefined>} [env=process.env]
- * @param {string} [platform=process.platform]
- * @param {string} [homeDir=homedir()]
- * @returns {{ dotAntigravityArgv: string, userDataArgvPaths: string[], geminiArgvPath: string }}
- */
-export function resolveDesktopArgvCandidates(
-  env = process.env,
-  platform = process.platform,
-  homeDir = homedir()
-) {
-  const dotAntigravityArgv = join(homeDir, '.antigravity', 'argv.json');
-  const geminiBase = String(env?.ANTIGRAVITY_GEMINI_DIR || '').trim() || join(homeDir, '.gemini');
-  const geminiArgvPath = join(geminiBase, 'antigravity', 'argv.json');
-
-  let userDataDirs = [];
-  if (platform === 'win32') {
-    const appData = env?.APPDATA || join(homeDir, 'AppData', 'Roaming');
-    const localAppData = env?.LOCALAPPDATA || join(homeDir, 'AppData', 'Local');
-    userDataDirs = [join(appData, 'Antigravity'), join(localAppData, 'Antigravity')];
-  } else if (platform === 'darwin') {
-    userDataDirs = [
-      join(homeDir, 'Library', 'Application Support', 'Antigravity'),
-      join(homeDir, '.config', 'Antigravity'),
-    ];
-  } else {
-    const configHome = env?.XDG_CONFIG_HOME || join(homeDir, '.config');
-    userDataDirs = [join(configHome, 'Antigravity')];
-  }
-
-  const seen = new Set();
-  const userDataArgvPaths = [];
-  for (const dir of userDataDirs) {
-    const argvPath = join(dir, 'argv.json');
-    const key = platform === 'win32' ? argvPath.toLowerCase() : argvPath;
-    if (!seen.has(key)) {
-      seen.add(key);
-      userDataArgvPaths.push(argvPath);
-    }
-  }
-
-  return {
-    dotAntigravityArgv,
-    userDataArgvPaths,
-    geminiArgvPath,
-  };
 }
 
 /**
@@ -462,111 +416,6 @@ export function ensureIdeRemoteDebuggingArgv({
 }
 
 /**
- * 当检测到本机已安装 Antigravity Desktop 2.0（存在 `~/.antigravity`、`~/.gemini/antigravity` 或系统 `Antigravity` 数据目录）时，
- * 同步参照 IDE 方案自动补齐 `~/.antigravity/argv.json` 与已有桌面端数据目录下的 `argv.json` (`"remote-debugging-port": "0"`)。
- *
- * @param {{ env?: Record<string, string|undefined>, platform?: string, homeDir?: string, enabled?: boolean }} [options]
- */
-export function ensureDesktopRemoteDebuggingArgv({
-  env = process.env,
-  platform = process.platform,
-  homeDir = homedir(),
-  enabled = true,
-} = {}) {
-  if (!enabled) {
-    return { checked: false, updated: false, alreadyConfigured: false, reason: 'disabled', results: [] };
-  }
-  const candidates = resolveDesktopArgvCandidates(env, platform, homeDir);
-  const dotDir = dirname(candidates.dotAntigravityArgv);
-  const probeDirs = [
-    dotDir,
-    ...candidates.userDataArgvPaths.map((p) => dirname(p)),
-    dirname(candidates.geminiArgvPath),
-  ];
-  const hasDesktopInstall = probeDirs.some((dir) => {
-    try {
-      return existsSync(dir);
-    } catch {
-      return false;
-    }
-  });
-  if (!hasDesktopInstall) {
-    return {
-      checked: true,
-      updated: false,
-      alreadyConfigured: false,
-      reason: 'desktop_dir_missing',
-      results: [],
-    };
-  }
-
-  const results = [
-    patchSingleHostArgvFile(candidates.dotAntigravityArgv, {
-      createDir: true,
-      missingReason: 'desktop_dir_missing',
-    }),
-    ...candidates.userDataArgvPaths.map((argvPath) =>
-      patchSingleHostArgvFile(argvPath, {
-        createDir: false,
-        missingReason: 'desktop_dir_missing',
-      })
-    ),
-    patchSingleHostArgvFile(candidates.geminiArgvPath, {
-      createDir: false,
-      missingReason: 'desktop_dir_missing',
-    }),
-  ];
-
-  const updatedPaths = results.filter((r) => r.updated).map((r) => r.argvPath);
-  const configuredPaths = results
-    .filter((r) => r.updated || r.alreadyConfigured)
-    .map((r) => r.argvPath);
-  return {
-    checked: true,
-    updated: updatedPaths.length > 0,
-    alreadyConfigured: updatedPaths.length === 0 && configuredPaths.length > 0,
-    updatedPaths,
-    configuredPaths,
-    results,
-  };
-}
-
-/**
- * 统一补齐本机 Antigravity IDE 与 Antigravity Desktop 的 `argv.json` 调试端口参数。
- *
- * @param {{ env?: Record<string, string|undefined>, platform?: string, homeDir?: string, enabled?: boolean }} [options]
- */
-export function ensureHostRemoteDebuggingArgv({
-  env = process.env,
-  platform = process.platform,
-  homeDir = homedir(),
-  enabled = true,
-} = {}) {
-  if (!enabled) {
-    return { checked: false, updated: false, alreadyConfigured: false, reason: 'disabled' };
-  }
-  const ide = ensureIdeRemoteDebuggingArgv({ env, homeDir, enabled: true });
-  const desktop = ensureDesktopRemoteDebuggingArgv({ env, platform, homeDir, enabled: true });
-  const updatedPaths = [
-    ...(ide.updated && ide.argvPath ? [ide.argvPath] : []),
-    ...(desktop.updatedPaths || []),
-  ];
-  const configuredPaths = [
-    ...((ide.updated || ide.alreadyConfigured) && ide.argvPath ? [ide.argvPath] : []),
-    ...(desktop.configuredPaths || []),
-  ];
-  return {
-    checked: true,
-    updated: updatedPaths.length > 0,
-    alreadyConfigured: updatedPaths.length === 0 && configuredPaths.length > 0,
-    updatedPaths,
-    configuredPaths,
-    ide,
-    desktop,
-  };
-}
-
-/**
  * 从 `DevToolsActivePort` 文件文本首行提取合法的本地调试端口号。
  *
  * @param {string} rawText
@@ -860,6 +709,10 @@ export function createWindowBridgeController(options) {
     onVersionDrift = null,
     leaseFilePath = '',
     autoConfigureIdeArgv = options?.env === undefined && options?.homeDir === undefined,
+    launcherExecFileFn = null,
+    launcherFsOps = null,
+    allowDesktopLauncherInTest = false,
+    existsHostFn = existsSync,
     WebSocketImpl = globalThis.WebSocket,
   } = options || {};
 
@@ -886,8 +739,21 @@ export function createWindowBridgeController(options) {
   let hadInjectedChatFrames = false;
   let cdpFallbackActive = false;
   let ideArgvProvisioned = false;
+  let hostLauncherPromise = null;
   let argvUpdatedThisBoot = false;
   let argvConfigured = false;
+  let launcherConfigured = false;
+  const hostExecInfo = resolveDesktopHostExecutable({
+    env,
+    platform,
+    homeDir,
+    existsFn: existsHostFn,
+  });
+  // Windows / macOS 支持从运行中宿主进程动态反查任意盘符路径，因此桌面端环境下即使自定义安装路径不在默认盘符也可一键重拉
+  const canRelaunch = Boolean(
+    hostExecInfo.found ||
+      ((platform === 'win32' || platform === 'darwin') && options?.existsHostFn === undefined)
+  );
   let lastPersistedLeaseSig = '';
   let lastBridgeStatus = {
     state: 'pending',
@@ -896,6 +762,8 @@ export function createWindowBridgeController(options) {
     targets: 0,
     argvUpdatedThisBoot: false,
     argvConfigured: false,
+    launcherConfigured: false,
+    canRelaunch,
     updatedAtMs: 0,
   };
   let hadContextWindows = false;
@@ -1333,11 +1201,13 @@ export function createWindowBridgeController(options) {
       aliveCount: Number(aliveCount || 0),
       targets: Number(targets || 0),
       argvUpdatedThisBoot: Boolean(argvUpdatedThisBoot),
-      argvConfigured: Boolean(argvConfigured),
+      argvConfigured: Boolean(argvConfigured || launcherConfigured),
+      launcherConfigured: Boolean(launcherConfigured || argvConfigured),
+      canRelaunch: Boolean(canRelaunch),
       updatedAtMs: Date.now(),
     };
     if (leasedBySelf && leaseFilePath) {
-      const sig = `${nextState}:${lastBridgeStatus.aliveCount}:${lastBridgeStatus.targets}:${argvUpdatedThisBoot ? 1 : 0}:${argvConfigured ? 1 : 0}`;
+      const sig = `${nextState}:${lastBridgeStatus.aliveCount}:${lastBridgeStatus.targets}:${lastBridgeStatus.argvUpdatedThisBoot ? 1 : 0}:${lastBridgeStatus.launcherConfigured ? 1 : 0}:${lastBridgeStatus.canRelaunch ? 1 : 0}`;
       if (sig !== lastPersistedLeaseSig) {
         lastPersistedLeaseSig = sig;
         saveJson(leaseFilePath, {
@@ -1350,10 +1220,42 @@ export function createWindowBridgeController(options) {
           targets: lastBridgeStatus.targets,
           argvUpdatedThisBoot: lastBridgeStatus.argvUpdatedThisBoot,
           argvConfigured: lastBridgeStatus.argvConfigured,
+          launcherConfigured: lastBridgeStatus.launcherConfigured,
+          canRelaunch: lastBridgeStatus.canRelaunch,
           updatedAtMs: Date.now(),
         });
       }
     }
+  }
+
+  function provisionHostLaunchersOnce() {
+    if (ideArgvProvisioned) return Promise.resolve();
+    if (hostLauncherPromise) return hostLauncherPromise;
+    hostLauncherPromise = (async () => {
+      const ideRes = ensureIdeRemoteDebuggingArgv({ env, homeDir, enabled: true });
+      const desktopRes = await ensureDesktopLaunchEntriesConfigured({
+        enabled: true,
+        env,
+        platform,
+        homeDir,
+        execFileFn: launcherExecFileFn,
+        fsOps: launcherFsOps,
+        allowInTest: allowDesktopLauncherInTest,
+      });
+      if (ideRes.updated || desktopRes.updated) {
+        argvUpdatedThisBoot = true;
+      }
+      if (ideRes.updated || ideRes.alreadyConfigured) {
+        argvConfigured = true;
+      }
+      if (desktopRes.updated || desktopRes.alreadyConfigured || desktopRes.configured) {
+        launcherConfigured = true;
+      }
+      ideArgvProvisioned = true;
+    })().finally(() => {
+      hostLauncherPromise = null;
+    });
+    return hostLauncherPromise;
   }
 
   async function runSyncInternal({ forceReinject = false } = {}) {
@@ -1372,20 +1274,10 @@ export function createWindowBridgeController(options) {
     const enabled = Boolean(curSettings.enableWindowOverlay !== false && mountMode !== 'sidebar');
     const contextWindows = curSettings.modelContextWindows || {};
     const hasContextWindows = Object.keys(contextWindows).length > 0;
-    if ((enabled || hasContextWindows) && autoConfigureIdeArgv && !ideArgvProvisioned) {
-      const prov = ensureHostRemoteDebuggingArgv({ env, platform, homeDir, enabled: true });
-      if (prov.updated) {
-        argvUpdatedThisBoot = true;
-        argvConfigured = true;
-      } else if (prov.alreadyConfigured) {
-        argvConfigured = true;
-      }
-      const noInstallDirs =
-        prov.ide?.reason === 'ide_dir_missing' && prov.desktop?.reason === 'desktop_dir_missing';
-      if (prov.updated || prov.alreadyConfigured || noInstallDirs) {
-        ideArgvProvisioned = true;
-      }
-    }
+    const provPending =
+      (enabled || hasContextWindows) && autoConfigureIdeArgv && !ideArgvProvisioned
+        ? provisionHostLaunchersOnce()
+        : hostLauncherPromise;
 
     let leasedBySelf = false;
     let currentLease = null;
@@ -1402,13 +1294,18 @@ export function createWindowBridgeController(options) {
           return { ok: false, enabled: true, reason: 'older_than_leader', injected: 0 };
         }
         if (leaseVerNum === myVerNum || String(lease?.bundleVersion || '') === bundleVersion) {
+          const mergedConfigured = Boolean(
+            lease?.launcherConfigured || lease?.argvConfigured || launcherConfigured || argvConfigured
+          );
           lastBridgeStatus = {
             state: String(lease?.syncState || 'active'),
             enabled: Boolean(enabled),
             aliveCount: Number(lease?.aliveCount || 0),
             targets: Number(lease?.targets || 0),
             argvUpdatedThisBoot: Boolean(lease?.argvUpdatedThisBoot || argvUpdatedThisBoot),
-            argvConfigured: Boolean(lease?.argvConfigured || argvConfigured),
+            argvConfigured: mergedConfigured,
+            launcherConfigured: mergedConfigured,
+            canRelaunch: Boolean(lease?.canRelaunch ?? canRelaunch),
             updatedAtMs: Date.now(),
           };
           return { ok: true, enabled: true, reason: 'follower_yield', leaderPid: leasePid, injected: 0 };
@@ -1425,13 +1322,18 @@ export function createWindowBridgeController(options) {
         aliveCount: lastBridgeStatus.aliveCount,
         targets: lastBridgeStatus.targets,
         argvUpdatedThisBoot: Boolean(argvUpdatedThisBoot),
-        argvConfigured: Boolean(argvConfigured),
+        argvConfigured: Boolean(argvConfigured || launcherConfigured),
+        launcherConfigured: Boolean(launcherConfigured || argvConfigured),
+        canRelaunch: Boolean(canRelaunch),
         updatedAtMs: Date.now(),
       });
     }
 
     const cdpPorts = findActiveDevToolsPorts();
     if (!cdpPorts.length) {
+      if (provPending) {
+        await provPending.catch(() => {});
+      }
       updateBridgeStatus(enabled || hasContextWindows ? 'no_devtools_port' : 'disabled', {
         enabled,
         leasedBySelf,
@@ -1443,6 +1345,9 @@ export function createWindowBridgeController(options) {
 
     const { reachableCount, targets } = await collectAllMainWindowTargets(cdpPorts);
     if (reachableCount === 0) {
+      if (provPending) {
+        await provPending.catch(() => {});
+      }
       updateBridgeStatus(enabled || hasContextWindows ? 'cdp_unreachable' : 'disabled', {
         enabled,
         leasedBySelf,
@@ -1896,6 +1801,20 @@ export function createWindowBridgeController(options) {
     if (!enabled) {
       hadInjectedTargets = true;
       hadInjectedChatFrames = true;
+      const cur = getSettingsFn() || {};
+      const hasCtx = Object.keys(cur.modelContextWindows || {}).length > 0;
+      if (!hasCtx && autoConfigureIdeArgv) {
+        launcherConfigured = false;
+        void ensureDesktopLaunchEntriesConfigured({
+          enabled: false,
+          env,
+          platform,
+          homeDir,
+          execFileFn: launcherExecFileFn,
+          fsOps: launcherFsOps,
+          allowInTest: allowDesktopLauncherInTest,
+        }).catch(() => {});
+      }
     } else {
       ideArgvProvisioned = false;
       hadInjectedChatFrames = true;
@@ -1928,6 +1847,8 @@ export function getDefaultWindowBridgeStatus() {
       targets: 0,
       argvUpdatedThisBoot: false,
       argvConfigured: false,
+      launcherConfigured: false,
+      canRelaunch: false,
       updatedAtMs: 0,
     };
   }

@@ -1126,7 +1126,8 @@ test('P1 audit fixes: shared third-party pool & route single-source, pure frozen
 
   assert.equal(normalizeI18nLanguage('system'), 'auto');
   assert.equal(typeof isEquivalentTelemetry, 'function');
-  assert.equal(BRIDGE_API_ROUTE_DEFS.length, 9);
+  assert.equal(BRIDGE_API_ROUTE_DEFS.length, 10);
+  assert.ok(BRIDGE_API_ROUTE_DEFS.some((r) => r.path === '/api/bridge/relaunch'));
 
   // 1. Third-party pool parity across backend, CLI statusline, and frontend metricRegistry
   const h = backendHarness();

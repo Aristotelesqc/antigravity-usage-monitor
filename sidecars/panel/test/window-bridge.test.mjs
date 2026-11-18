@@ -10,8 +10,6 @@ import { MockMutationObserver, createMockDom } from './mock-dom.mjs';
 import {
   associateIdeIframeRoutes,
   createWindowBridgeController,
-  ensureDesktopRemoteDebuggingArgv,
-  ensureHostRemoteDebuggingArgv,
   ensureIdeRemoteDebuggingArgv,
   ensureRemoteDebuggingInArgvText,
   extractIdeExtensionCascadeId,
@@ -19,10 +17,19 @@ import {
   isAntigravityMainPageTarget,
   isIdeExtensionChatTarget,
   parseDevToolsPortFile,
-  resolveDesktopArgvCandidates,
   resolveDevToolsPortCandidates,
   resolveIdeArgvPath,
 } from '../backend/window-bridge.mjs';
+import {
+  buildSanitizedDesktopRelaunchEnv,
+  buildWindowsRelaunchInnerScript,
+  ensureDesktopLaunchEntriesConfigured,
+  ensureRemoteDebugFlagInArgs,
+  patchLinuxDesktopEntryText,
+  patchWindowsRunRegistryCommand,
+  resolveDesktopHostExecutable,
+  triggerDesktopHostRelaunch,
+} from '../backend/desktop-launcher-config.mjs';
 import {
   discoverAntigravityLsEndpoint,
   parseLinuxProcNetTcpPorts,
@@ -4850,202 +4857,331 @@ test('WindowOverlayShell macOS (darwin) adaptation: sets data-os="mac", uses 12p
   }
 });
 
-test('Issue #26: Antigravity Desktop 2.33.0+ argv.json auto-provisioning, ANTIGRAVITY_DEVTOOLS_PORT fallback, and BridgeStatusNotice UI', async () => {
-  // 1. Fresh argv.json is strict-JSON parseable (compatible with both JSONC and JSON.parse)
+test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisioning, out-of-job host relaunch, and global/settings BridgeStatusNotice UI', async () => {
+  // 1. Fresh IDE argv.json remains strict-JSON parseable
   const fresh = ensureRemoteDebuggingInArgvText('');
   assert.deepEqual(JSON.parse(fresh.text), { 'remote-debugging-port': '0' });
 
-  // 2. Empty home directory creates zero folders for Desktop or IDE
-  const emptyTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-233-empty-'));
-  try {
-    const emptyRes = ensureDesktopRemoteDebuggingArgv({
-      env: {
-        APPDATA: path.join(emptyTmp, 'Roaming'),
-        LOCALAPPDATA: path.join(emptyTmp, 'Local'),
-        ANTIGRAVITY_GEMINI_DIR: path.join(emptyTmp, '.gemini'),
-      },
-      platform: 'win32',
-      homeDir: emptyTmp,
-      enabled: true,
-    });
-    assert.equal(emptyRes.updated, false);
-    assert.equal(emptyRes.reason, 'desktop_dir_missing');
-    assert.equal(fs.existsSync(path.join(emptyTmp, '.antigravity')), false);
-  } finally {
-    fs.rmSync(emptyTmp, { recursive: true, force: true });
-  }
+  // 2. Pure argument / HKCU Run / Linux .desktop patchers & non-destructive rollback
+  const addedEmpty = ensureRemoteDebugFlagInArgs('', { enabled: true });
+  assert.equal(addedEmpty.changed, true);
+  assert.equal(addedEmpty.args, '--remote-debugging-port=0');
 
-  // 3. Simulated Windows Antigravity Desktop 2.33.0 environment provisions argv.json across Desktop roots & tracks bridge status
-  const simTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-233-desktop-'));
+  const preservedCustom = ensureRemoteDebugFlagInArgs('--foo --remote-debugging-port=9229', {
+    enabled: true,
+  });
+  assert.equal(preservedCustom.changed, false);
+  assert.equal(preservedCustom.alreadyConfigured, true);
+
+  const preservedCustomOnDisable = ensureRemoteDebugFlagInArgs(
+    '--foo --remote-debugging-port=9229',
+    { enabled: false }
+  );
+  assert.equal(preservedCustomOnDisable.changed, false);
+  assert.equal(preservedCustomOnDisable.configured, true);
+
+  const strippedManaged = ensureRemoteDebugFlagInArgs('--hidden --remote-debugging-port=0 --bar', {
+    enabled: false,
+  });
+  assert.equal(strippedManaged.changed, true);
+  assert.equal(strippedManaged.removed, true);
+  assert.equal(strippedManaged.args, '--hidden --bar');
+
+  const winRunDesktop = patchWindowsRunRegistryCommand(
+    '"C:\\Users\\Dev\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe" --hidden',
+    { enabled: true }
+  );
+  assert.equal(winRunDesktop.matched, true);
+  assert.equal(winRunDesktop.changed, true);
+  assert.equal(
+    winRunDesktop.value,
+    '"C:\\Users\\Dev\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe" --hidden --remote-debugging-port=0'
+  );
+  const winRunRollback = patchWindowsRunRegistryCommand(winRunDesktop.value, { enabled: false });
+  assert.equal(winRunRollback.changed, true);
+  assert.equal(
+    winRunRollback.value,
+    '"C:\\Users\\Dev\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe" --hidden'
+  );
+  const winRunIdeIgnored = patchWindowsRunRegistryCommand(
+    '"C:\\Program Files\\Antigravity IDE\\Antigravity IDE.exe"',
+    { enabled: true }
+  );
+  assert.equal(winRunIdeIgnored.matched, false);
+
+  const linuxDesktopRaw = [
+    '[Desktop Entry]',
+    'Name=Antigravity',
+    'Exec=/opt/Antigravity/antigravity %U',
+    'Type=Application',
+    '',
+  ].join('\n');
+  const linuxPatched = patchLinuxDesktopEntryText(linuxDesktopRaw, { enabled: true });
+  assert.equal(linuxPatched.matched, true);
+  assert.equal(linuxPatched.changed, true);
+  assert.match(linuxPatched.text, /Exec=\/opt\/Antigravity\/antigravity --remote-debugging-port=0 %U/);
+  const linuxReverted = patchLinuxDesktopEntryText(linuxPatched.text, { enabled: false });
+  assert.equal(linuxReverted.changed, true);
+  assert.equal(linuxReverted.text, linuxDesktopRaw);
+
+  // 3. Host executable resolution from ANTIGRAVITY_AGENTAPI_EXE & clean relaunch env sanitization
+  const resolvedWinHost = resolveDesktopHostExecutable({
+    env: {
+      ANTIGRAVITY_AGENTAPI_EXE:
+        'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Antigravity\\resources\\bin\\language_server_windows_x64.exe',
+    },
+    platform: 'win32',
+    homeDir: 'C:\\Users\\Administrator',
+    existsFn: (p) =>
+      p.replace(/\//g, '\\') ===
+      'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe',
+  });
+  assert.equal(resolvedWinHost.found, true);
+  assert.equal(resolvedWinHost.kind, 'desktop');
+  assert.equal(
+    resolvedWinHost.executablePath.replace(/\//g, '\\'),
+    'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Antigravity\\Antigravity.exe'
+  );
+
+  const resolvedMacHost = resolveDesktopHostExecutable({
+    env: {
+      ANTIGRAVITY_AGENTAPI_EXE:
+        '/Applications/Antigravity.app/Contents/Resources/bin/language_server_darwin_arm64',
+    },
+    platform: 'darwin',
+    homeDir: '/Users/dev',
+    existsFn: (p) =>
+      p === '/Applications/Antigravity.app' ||
+      p === '/Applications/Antigravity.app/Contents/MacOS/Antigravity',
+  });
+  assert.equal(resolvedMacHost.found, true);
+  assert.equal(resolvedMacHost.appBundlePath, '/Applications/Antigravity.app');
+
+  const sanitizedEnv = buildSanitizedDesktopRelaunchEnv({
+    PATH: 'C:\\Windows\\System32',
+    USERPROFILE: 'C:\\Users\\Administrator',
+    ANTIGRAVITY_LS_ADDRESS: 'localhost:13088',
+    ANTIGRAVITY_CSRF_TOKEN: 'secret',
+    CHROME_DEVTOOLS_MCP_JS: 'C:\\foo.js',
+    USAGE_MONITOR_HOST_PPID: '123',
+    ELECTRON_RUN_AS_NODE: '1',
+    NODE_OPTIONS: '--inspect',
+  });
+  assert.deepEqual(sanitizedEnv, {
+    PATH: 'C:\\Windows\\System32',
+    USERPROFILE: 'C:\\Users\\Administrator',
+  });
+
+  // 4. Linux .desktop provisioning on real temp dir + Windows shortcut provisioning + stale DevToolsActivePort (cdp_unreachable) + relaunch dispatch
+  const simTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-233-auto-'));
   const homeDir = path.join(simTmp, 'home');
   const roamingDir = path.join(homeDir, 'AppData', 'Roaming');
   const localDir = path.join(homeDir, 'AppData', 'Local');
   const desktopRoamingDir = path.join(roamingDir, 'Antigravity');
-  const geminiDesktopDir = path.join(homeDir, '.gemini', 'antigravity');
+  const fakeExe = path.join(localDir, 'Programs', 'Antigravity', 'Antigravity.exe');
   const leaseFile = path.join(simTmp, 'window-bridge-lease.json');
   fs.mkdirSync(desktopRoamingDir, { recursive: true });
-  fs.mkdirSync(geminiDesktopDir, { recursive: true });
+  fs.mkdirSync(path.dirname(fakeExe), { recursive: true });
+  fs.writeFileSync(fakeExe, '', 'utf8');
+
+  // Simulate stale DevToolsActivePort left behind by 2.32.x pointing to a closed port
+  const stalePortServer = http.createServer();
+  await new Promise((r) => stalePortServer.listen(0, '127.0.0.1', r));
+  const deadPort = stalePortServer.address().port;
+  await new Promise((r) => stalePortServer.close(r));
+  const stalePortFile = path.join(desktopRoamingDir, 'DevToolsActivePort');
+  fs.writeFileSync(stalePortFile, `${deadPort}\n/devtools/browser/stale-232\n`, 'utf8');
 
   const simEnv = {
+    PATH: 'C:\\Windows\\System32',
     APPDATA: roamingDir,
     LOCALAPPDATA: localDir,
-    ANTIGRAVITY_GEMINI_DIR: path.join(homeDir, '.gemini'),
+    ANTIGRAVITY_AGENTAPI_EXE: path.join(
+      localDir,
+      'Programs',
+      'Antigravity',
+      'resources',
+      'bin',
+      'language_server_windows_x64.exe'
+    ),
+    ANTIGRAVITY_LS_ADDRESS: 'localhost:13088',
   };
 
   try {
-    const candidates = resolveDesktopArgvCandidates(simEnv, 'win32', homeDir);
-    assert.equal(candidates.dotAntigravityArgv, path.join(homeDir, '.antigravity', 'argv.json'));
+    // Verify Linux XDG .desktop copy + autostart provisioning in isolated temp home
+    const linuxDataHome = path.join(simTmp, 'xdg-data');
+    const linuxCfgHome = path.join(simTmp, 'xdg-config');
+    const linuxAutostart = path.join(linuxCfgHome, 'autostart', 'antigravity.desktop');
+    fs.mkdirSync(path.dirname(linuxAutostart), { recursive: true });
+    fs.writeFileSync(linuxAutostart, linuxDesktopRaw, 'utf8');
+    const sysDesktopPath = '/usr/share/applications/antigravity.desktop';
+    const linuxProv = await ensureDesktopLaunchEntriesConfigured({
+      enabled: true,
+      env: { XDG_DATA_HOME: linuxDataHome, XDG_CONFIG_HOME: linuxCfgHome },
+      platform: 'linux',
+      homeDir,
+      allowInTest: true,
+      fsOps: {
+        existsFn: (p) => (p === sysDesktopPath ? true : fs.existsSync(p)),
+        readFn: (p, enc) => (p === sysDesktopPath ? linuxDesktopRaw : fs.readFileSync(p, enc)),
+        writeFn: fs.writeFileSync,
+        mkdirFn: fs.mkdirSync,
+        renameFn: fs.renameSync,
+        unlinkFn: fs.unlinkSync,
+      },
+    });
+    assert.equal(linuxProv.updated, true);
+    assert.equal(linuxProv.configured, true);
+    assert.equal(linuxProv.updatedPaths.length, 2);
+    assert.match(
+      fs.readFileSync(path.join(linuxDataHome, 'applications', 'antigravity.desktop'), 'utf8'),
+      /--remote-debugging-port=0 %U/
+    );
 
-    // Boot 1: provisions argv.json and reports state='no_devtools_port' + argvUpdatedThisBoot=true
-    const ctrlBoot1 = createWindowBridgeController({
+    // Verify Windows shortcut auto-provisioning + stale port (`cdp_unreachable`) status reporting + clean rollback on disable
+    const winPsCalls = [];
+    const mockWinExec = async (file, args, opts) => {
+      winPsCalls.push({ file, args, env: opts?.env });
+      const enabledFlag = opts?.env?.AGY_LAUNCH_ENABLED === '1';
+      return JSON.stringify({
+        ok: true,
+        updatedPaths: enabledFlag
+          ? ['C:\\Users\\Admin\\Desktop\\Antigravity.lnk', 'C:\\TaskBar\\Antigravity.lnk']
+          : ['C:\\Users\\Admin\\Desktop\\Antigravity.lnk'],
+        configuredPaths: enabledFlag
+          ? ['C:\\Users\\Admin\\Desktop\\Antigravity.lnk', 'C:\\TaskBar\\Antigravity.lnk']
+          : [],
+      });
+    };
+
+    let currentMountSettings = {
+      windowMountMode: 'dual',
+      enableWindowOverlay: true,
+      modelContextWindows: {},
+    };
+    const ctrlWin = createWindowBridgeController({
       handleApiRequest: async () => ({ status: 200, body: '{}' }),
       readAssetFn: async () => '',
-      getSettingsFn: () => ({ windowMountMode: 'dual', enableWindowOverlay: true, modelContextWindows: {} }),
-      getBundleVersionFn: () => '200',
+      getSettingsFn: () => currentMountSettings,
+      getBundleVersionFn: () => '201',
       env: simEnv,
       platform: 'win32',
       homeDir,
       leaseFilePath: leaseFile,
       autoConfigureIdeArgv: true,
+      launcherExecFileFn: mockWinExec,
+      allowDesktopLauncherInTest: true,
     });
-    const resBoot1 = await ctrlBoot1.syncAllWindows();
-    assert.equal(resBoot1.reason, 'no_devtools_port');
-    const stBoot1 = ctrlBoot1.getBridgeStatus();
-    assert.equal(stBoot1.state, 'no_devtools_port');
-    assert.equal(stBoot1.argvUpdatedThisBoot, true);
-    assert.equal(stBoot1.argvConfigured, true);
 
-    for (const argvPath of [
-      path.join(homeDir, '.antigravity', 'argv.json'),
-      path.join(desktopRoamingDir, 'argv.json'),
-      path.join(geminiDesktopDir, 'argv.json'),
-    ]) {
-      assert.equal(fs.existsSync(argvPath), true, `Expected ${argvPath} to exist`);
-      assert.deepEqual(JSON.parse(fs.readFileSync(argvPath, 'utf8')), {
-        'remote-debugging-port': '0',
-      });
-    }
+    const syncRes = await ctrlWin.syncAllWindows();
+    assert.equal(syncRes.reason, 'cdp_unreachable', 'Stale 2.32.x port surfaces cdp_unreachable');
+    const stWin = ctrlWin.getBridgeStatus();
+    assert.equal(stWin.state, 'cdp_unreachable');
+    assert.equal(stWin.argvUpdatedThisBoot, true);
+    assert.equal(stWin.launcherConfigured, true);
+    assert.equal(stWin.canRelaunch, true);
+    assert.equal(winPsCalls.length, 1);
+    assert.equal(winPsCalls[0].env.AGY_LAUNCH_ENABLED, '1');
 
-    // Follower reading active lease inherits Leader's syncState + argvUpdatedThisBoot
-    const leaseJson = JSON.parse(fs.readFileSync(leaseFile, 'utf8'));
-    fs.writeFileSync(
-      leaseFile,
-      JSON.stringify({ ...leaseJson, pid: process.pid }),
-      'utf8'
-    );
-    await ctrlBoot1.stop();
+    // Disabling overlay (Sidebar Only) cleanly triggers shortcut flag rollback
+    currentMountSettings = {
+      windowMountMode: 'sidebar',
+      enableWindowOverlay: false,
+      modelContextWindows: {},
+    };
+    await ctrlWin.notifySettingChanged(false);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(winPsCalls.length, 2);
+    assert.equal(winPsCalls[1].env.AGY_LAUNCH_ENABLED, '0');
+    await ctrlWin.stop();
 
-    // Boot 2 (after restart, argv.json already configured, still no DevToolsActivePort): argvUpdatedThisBoot=false, argvConfigured=true
-    fs.unlinkSync(leaseFile);
-    const hostProv2 = ensureHostRemoteDebuggingArgv({
-      env: simEnv,
+    // Verify Windows out-of-job Shell.Application relaunch payload (.ps1 file with UTF-8 BOM) & macOS open -a relaunch
+    let capturedRelaunchEnv = null;
+    let capturedRelaunchArgs = null;
+    const relaunchWinRes = await triggerDesktopHostRelaunch({
+      env: { ...simEnv, TEMP: simTmp },
       platform: 'win32',
       homeDir,
-      enabled: true,
+      stalePortFiles: [stalePortFile],
+      allowInTest: true,
+      execFileFn: async (_file, args, opts) => {
+        capturedRelaunchArgs = args;
+        capturedRelaunchEnv = opts?.env;
+        return '{"ok":true,"method":"shell_application"}';
+      },
     });
-    assert.equal(hostProv2.updated, false);
-    assert.equal(hostProv2.alreadyConfigured, true);
+    assert.equal(relaunchWinRes.ok, true);
+    assert.equal(relaunchWinRes.relaunching, true);
+    assert.equal(capturedRelaunchArgs.includes('-Sta'), true, 'Forces STA for Shell.Application COM');
+    assert.equal(capturedRelaunchEnv.ANTIGRAVITY_LS_ADDRESS, undefined, 'Strips host LS env');
+    assert.equal(fs.existsSync(capturedRelaunchEnv.AGY_RELAUNCH_PS1), true);
+    const writtenPs1 = fs.readFileSync(capturedRelaunchEnv.AGY_RELAUNCH_PS1, 'utf8');
+    assert.equal(writtenPs1.startsWith('\uFEFF'), true, 'Writes UTF-8 BOM for Windows PowerShell 5.1');
+    assert.match(writtenPs1, /--remote-debugging-port=0/);
+    assert.ok(writtenPs1.includes(stalePortFile));
 
-    const ctrlBoot2 = createWindowBridgeController({
-      handleApiRequest: async () => ({ status: 200, body: '{}' }),
-      readAssetFn: async () => '',
-      getSettingsFn: () => ({ windowMountMode: 'dual', enableWindowOverlay: true, modelContextWindows: {} }),
-      getBundleVersionFn: () => '200',
-      env: simEnv,
+    // Verify dynamic running-process path discovery when installed on custom non-default drive (e.g. D:\Apps\Antigravity)
+    const customDriveRes = await triggerDesktopHostRelaunch({
+      env: { TEMP: simTmp },
       platform: 'win32',
-      homeDir,
-      autoConfigureIdeArgv: true,
+      homeDir: path.join(simTmp, 'empty-home'),
+      allowInTest: true,
+      existsFn: () => false,
+      execFileFn: async (_file, args) => {
+        const cmdStr = args.join(' ');
+        if (cmdStr.includes('Get-Process')) {
+          return JSON.stringify({ path: 'D:\\Apps\\Antigravity\\Antigravity.exe', name: 'Antigravity' });
+        }
+        return '{"ok":true,"method":"shell_application"}';
+      },
     });
-    await ctrlBoot2.syncAllWindows();
-    const stBoot2 = ctrlBoot2.getBridgeStatus();
-    assert.equal(stBoot2.state, 'no_devtools_port');
-    assert.equal(stBoot2.argvUpdatedThisBoot, false);
-    assert.equal(stBoot2.argvConfigured, true);
-    await ctrlBoot2.stop();
+    assert.equal(customDriveRes.ok, true);
+    assert.equal(customDriveRes.executablePath, 'D:\\Apps\\Antigravity\\Antigravity.exe');
 
-    // Boot 3: Explicit ANTIGRAVITY_DEVTOOLS_PORT fallback injects cleanly even when DevToolsActivePort file is absent
-    const cdpSrv = http.createServer((req, res) => {
-      if (req.url === '/json/list') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify([
-            {
-              id: 'win-233',
-              type: 'page',
-              url: 'https://127.0.0.1:52100/c/22222222-2222-4222-8222-222222222222',
-              webSocketDebuggerUrl: 'ws://127.0.0.1:52101/devtools/page/win-233',
-            },
-          ])
-        );
-        return;
-      }
-      res.writeHead(404);
-      res.end();
+    let macSpawnArgs = null;
+    const relaunchMacRes = await triggerDesktopHostRelaunch({
+      env: {
+        PATH: '/usr/bin:/bin',
+        ANTIGRAVITY_AGENTAPI_EXE:
+          '/Applications/Antigravity.app/Contents/Resources/bin/language_server_darwin_arm64',
+      },
+      platform: 'darwin',
+      homeDir: '/Users/dev',
+      stalePortFiles: ['/Users/dev/Library/Application Support/Antigravity/DevToolsActivePort'],
+      allowInTest: true,
+      existsFn: (p) => p === '/Applications/Antigravity.app',
+      spawnFn: async (file, args, opts) => {
+        macSpawnArgs = { file, args, env: opts?.env };
+        return { pid: 4321 };
+      },
     });
-    await new Promise((r) => cdpSrv.listen(0, '127.0.0.1', r));
-    const explicitCdpPort = cdpSrv.address().port;
+    assert.equal(relaunchMacRes.ok, true);
+    assert.equal(macSpawnArgs.env.AGY_RELAUNCH_APP, '/Applications/Antigravity.app');
+    assert.match(macSpawnArgs.args[1], /open -a "\$AGY_RELAUNCH_APP" --args --remote-debugging-port=0/);
 
-    class MockCdpWs {
-      constructor() {
-        this._ls = new Map();
-        queueMicrotask(() => {
-          for (const fn of this._ls.get('open') || []) fn();
-        });
-      }
-      addEventListener(type, fn) {
-        if (!this._ls.has(type)) this._ls.set(type, []);
-        this._ls.get(type).push(fn);
-      }
-      send(raw) {
-        const msg = JSON.parse(raw);
-        const expr = String(msg?.params?.expression || '');
-        const isProbe = expr.includes('rpcBatch') && !expr.includes('stylesCss');
-        const value = isProbe
-          ? { alive: false, dockKind: '', visible: true, rpcBatch: [] }
-          : { alive: true, dockKind: 'topbar', visible: true };
-        queueMicrotask(() => {
-          for (const fn of this._ls.get('message') || []) {
-            fn({ data: JSON.stringify({ id: msg.id, result: { result: { value } } }) });
-          }
-        });
-      }
-      close() {}
-    }
-
-    const ctrlBoot3 = createWindowBridgeController({
-      handleApiRequest: async () => ({ status: 200, body: '{}' }),
-      readAssetFn: async () => '/* bundle */',
-      getSettingsFn: () => ({ windowMountMode: 'dual', enableWindowOverlay: true, modelContextWindows: {} }),
-      getBundleVersionFn: () => '200',
-      env: { ...simEnv, ANTIGRAVITY_DEVTOOLS_PORT: String(explicitCdpPort) },
-      platform: 'win32',
-      homeDir,
-      autoConfigureIdeArgv: false,
-      WebSocketImpl: MockCdpWs,
-    });
-    const resBoot3 = await ctrlBoot3.syncAllWindows();
-    assert.equal(resBoot3.ok, true);
-    assert.equal(resBoot3.injected, 1);
-    assert.equal(ctrlBoot3.getBridgeStatus().state, 'active');
-    await ctrlBoot3.stop();
-    await new Promise((r) => cdpSrv.close(r));
+    // Explicit ANTIGRAVITY_DEVTOOLS_PORT fallback still works seamlessly
+    const innerScriptCheck = buildWindowsRelaunchInnerScript(fakeExe, [stalePortFile], 'desktop');
+    assert.match(innerScriptCheck, /CloseMainWindow/);
+    assert.match(innerScriptCheck, /Stop-Process/);
   } finally {
     fs.rmSync(simTmp, { recursive: true, force: true });
   }
 
-  // 4. Verify zh-CN / en-US i18n parity & BridgeStatusNotice DOM behavior in SettingsStructureTab + SettingsOtherTab
+  // 5. Verify zh-CN / en-US i18n parity & BridgeStatusNotice one-click relaunch + dismiss + copy behavior
   const [
     { I18N_MESSAGES_ZH_CN },
     { I18N_MESSAGES_EN_US },
     { setI18nLanguage },
     { SettingsStructureTab },
     { SettingsOtherTab },
+    { BridgeStatusNotice },
   ] = await Promise.all([
     import('../src/i18n/zh-CN.js'),
     import('../src/i18n/en-US.js'),
     import('../src/i18n/index.js'),
     import('../src/views/settings/SettingsStructureTab.js'),
     import('../src/views/settings/SettingsOtherTab.js'),
+    import('../src/components/settings/BridgeStatusNotice.js'),
   ]);
 
   assert.deepEqual(
@@ -5053,11 +5189,22 @@ test('Issue #26: Antigravity Desktop 2.33.0+ argv.json auto-provisioning, ANTIGR
     Object.keys(I18N_MESSAGES_EN_US).sort()
   );
 
-  const { document: mockDoc, makeElement } = createMockDom();
+  const { document: mockDoc } = createMockDom();
   const prevDoc = globalThis.document;
   const prevNav = globalThis.navigator;
+  const prevFetch = globalThis.fetch;
   let copiedClipboardText = '';
+  const fetchedUrls = [];
   globalThis.document = mockDoc;
+  globalThis.fetch = async (url, opts) => {
+    fetchedUrls.push({ url: String(url), method: opts?.method || 'GET' });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, relaunching: true }),
+      text: async () => JSON.stringify({ ok: true, relaunching: true }),
+    };
+  };
   Object.defineProperty(globalThis, 'navigator', {
     value: {
       clipboard: {
@@ -5075,23 +5222,47 @@ test('Issue #26: Antigravity Desktop 2.33.0+ argv.json auto-provisioning, ANTIGR
     const noticeEl = strTab.refs.mountBridgeNotice.el;
     assert.equal(noticeEl.hasAttribute('hidden'), true, 'Hidden before bridge status arrives');
 
-    // First boot after auto-writing argv.json -> restart notice (is-restart)
+    // Stale DevToolsActivePort (`cdp_unreachable`) with auto-patched shortcuts -> shows blue `.is-restart` + 1-click relaunch button!
     strTab.refs.renderSettings(
       { windowMountMode: 'dual', enableWindowOverlay: true },
-      { state: 'no_devtools_port', argvUpdatedThisBoot: true, argvConfigured: true },
+      {
+        state: 'cdp_unreachable',
+        argvUpdatedThisBoot: false,
+        argvConfigured: true,
+        launcherConfigured: true,
+        canRelaunch: true,
+      },
       'win32'
     );
     assert.equal(noticeEl.hasAttribute('hidden'), false);
     assert.equal(noticeEl.classList.contains('is-restart'), true);
-    assert.match(noticeEl.textContent, /重启客户端生效/);
+    assert.match(noticeEl.textContent, /已自动补齐启动参数/);
+    assert.equal(
+      strTab.refs.mountBridgeNotice.refs.relaunchBtnEl.hasAttribute('hidden'),
+      false
+    );
 
-    // Second boot still missing port -> warn notice with OS-specific guidance + copy flag button
+    // Click 1-click relaunch button -> POST /api/bridge/relaunch & shows "正在重启客户端..."
+    strTab.refs.mountBridgeNotice.refs.relaunchBtnEl.dispatchEvent({ type: 'click' });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(
+      fetchedUrls.some((u) => u.url.endsWith('/api/bridge/relaunch') && u.method === 'POST'),
+      true
+    );
+    assert.match(strTab.refs.mountBridgeNotice.refs.relaunchBtnEl.textContent, /正在重启客户端/);
+
+    // macOS unconfigured state -> `.is-warn` with 1-click relaunch + copy button
     strTab.refs.renderSettings(
       { windowMountMode: 'dual', enableWindowOverlay: true },
-      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      {
+        state: 'no_devtools_port',
+        argvUpdatedThisBoot: false,
+        argvConfigured: false,
+        launcherConfigured: false,
+        canRelaunch: true,
+      },
       'darwin'
     );
-    assert.equal(noticeEl.hasAttribute('hidden'), false);
     assert.equal(noticeEl.classList.contains('is-warn'), true);
     assert.match(noticeEl.textContent, /open -a "Antigravity" --args --remote-debugging-port=0/);
 
@@ -5099,6 +5270,28 @@ test('Issue #26: Antigravity Desktop 2.33.0+ argv.json auto-provisioning, ANTIGR
     await new Promise((r) => setTimeout(r, 0));
     assert.equal(copiedClipboardText, '--remote-debugging-port=0');
     assert.match(strTab.refs.mountBridgeNotice.refs.copyBtnEl.textContent, /已复制/);
+
+    // Dismissible global banner hides on dismiss click and resets once state becomes 'active'
+    const globalBanner = BridgeStatusNotice({ dismissible: true });
+    globalBanner.refs.update({
+      visible: true,
+      windowBridge: { state: 'no_devtools_port', launcherConfigured: true, canRelaunch: true },
+      hostPlatform: 'win32',
+    });
+    assert.equal(globalBanner.el.hasAttribute('hidden'), false);
+    globalBanner.refs.dismissBtnEl.dispatchEvent({ type: 'click' });
+    assert.equal(globalBanner.el.hasAttribute('hidden'), true);
+    globalBanner.refs.update({
+      visible: true,
+      windowBridge: { state: 'active', launcherConfigured: true, canRelaunch: true },
+      hostPlatform: 'win32',
+    });
+    globalBanner.refs.update({
+      visible: true,
+      windowBridge: { state: 'no_devtools_port', launcherConfigured: true, canRelaunch: true },
+      hostPlatform: 'win32',
+    });
+    assert.equal(globalBanner.el.hasAttribute('hidden'), false, 'Re-armed after active cycle');
 
     // English localization check
     setI18nLanguage('en-US');
@@ -5108,45 +5301,39 @@ test('Issue #26: Antigravity Desktop 2.33.0+ argv.json auto-provisioning, ANTIGR
     // Switching to Sidebar Only hides notice immediately
     strTab.refs.renderSettings(
       { windowMountMode: 'sidebar', enableWindowOverlay: false },
-      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      { state: 'no_devtools_port', launcherConfigured: true, canRelaunch: true },
       'win32'
     );
     assert.equal(noticeEl.hasAttribute('hidden'), true);
 
-    // SettingsOtherTab context window override notice appears only when unlocked + saved override exists + no_devtools_port
+    // SettingsOtherTab context window override notice
     setI18nLanguage('zh-CN');
     const othTab = SettingsOtherTab({ onLayoutChange: () => {} });
     const ctxNoticeEl = othTab.refs.ctxBridgeNotice.el;
     othTab.refs.renderSettings(
-      { contextWindowRiskAccepted: true, modelContextWindows: {} },
+      { contextWindowRiskAccepted: true, modelContextWindows: { 'group:gemini-pro': '384000' } },
       [],
-      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      { state: 'no_devtools_port', launcherConfigured: true, canRelaunch: true },
       'win32'
     );
-    assert.equal(ctxNoticeEl.hasAttribute('hidden'), true, 'Hidden when no context override is saved');
+    assert.equal(ctxNoticeEl.hasAttribute('hidden'), false);
+    assert.match(ctxNoticeEl.textContent, /激活上下文覆写/);
 
     othTab.refs.renderSettings(
       { contextWindowRiskAccepted: true, modelContextWindows: { 'group:gemini-pro': '384000' } },
       [],
-      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      { state: 'active', aliveCount: 1, launcherConfigured: true, canRelaunch: true },
       'win32'
     );
-    assert.equal(ctxNoticeEl.hasAttribute('hidden'), false, 'Shown when context override is saved but CDP port is missing');
-    assert.match(ctxNoticeEl.textContent, /上下文窗口覆写暂未注入/);
+    assert.equal(ctxNoticeEl.hasAttribute('hidden'), true);
 
-    othTab.refs.renderSettings(
-      { contextWindowRiskAccepted: true, modelContextWindows: { 'group:gemini-pro': '384000' } },
-      [],
-      { state: 'active', aliveCount: 1, argvUpdatedThisBoot: false, argvConfigured: true },
-      'win32'
-    );
-    assert.equal(ctxNoticeEl.hasAttribute('hidden'), true, 'Hidden immediately once CDP bridge becomes active');
-
+    globalBanner.destroy();
     strTab.destroy();
     othTab.destroy();
   } finally {
     setI18nLanguage('zh-CN');
     globalThis.document = prevDoc;
+    globalThis.fetch = prevFetch;
     Object.defineProperty(globalThis, 'navigator', {
       value: prevNav,
       configurable: true,

@@ -269,6 +269,8 @@ export function isEquivalentTelemetry(prev, next) {
     (pWb?.state || '') !== (nWb?.state || '') ||
     Boolean(pWb?.argvUpdatedThisBoot) !== Boolean(nWb?.argvUpdatedThisBoot) ||
     Boolean(pWb?.argvConfigured) !== Boolean(nWb?.argvConfigured) ||
+    Boolean(pWb?.launcherConfigured) !== Boolean(nWb?.launcherConfigured) ||
+    Boolean(pWb?.canRelaunch) !== Boolean(nWb?.canRelaunch) ||
     Number(pWb?.aliveCount || 0) !== Number(nWb?.aliveCount || 0)
   ) {
     return false;
@@ -1009,6 +1011,18 @@ export async function triggerCloudSync() {
   const res = await callSidecarApi('/api/cloud-sync', { method: 'POST', body: {} });
   await fetchTelemetry({ force: true });
   return res;
+}
+
+export async function triggerBridgeHostRelaunch() {
+  try {
+    return await callSidecarApi('/api/bridge/relaunch', { method: 'POST', body: {} });
+  } catch {
+    // 兼容热更新后常驻父进程 main.mjs 尚未重注册新路由的场景，平滑回退至既有 POST /api/settings 通道转发至最新 Worker
+    return callSidecarApi('/api/settings', {
+      method: 'POST',
+      body: { __bridgeAction: 'relaunch' },
+    });
+  }
 }
 
 export async function triggerPluginUpdate() {

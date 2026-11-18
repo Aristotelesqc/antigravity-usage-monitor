@@ -45,8 +45,14 @@ import {
 import { getCloudStatus } from './pricing-catalog.mjs';
 import { buildTelemetryPayload } from './telemetry-builder.mjs';
 import {
+  ensureDesktopLaunchEntriesConfigured,
+  triggerDesktopHostRelaunch,
+} from './desktop-launcher-config.mjs';
+import {
+  ensureIdeRemoteDebuggingArgv,
   notifyModelContextWindowsChanged,
   notifyWindowOverlaySetting,
+  resolveDevToolsPortCandidates,
   startDefaultWindowBridge,
 } from './window-bridge.mjs';
 import { ensureCliStatusLineConfigured } from './cli-statusline-config.mjs';
@@ -452,6 +458,20 @@ export async function executeAccountCredentialAction(data) {
   };
 }
 
+export async function executeBridgeRelaunchAction() {
+  ensureIdeRemoteDebuggingArgv({ enabled: true });
+  await ensureDesktopLaunchEntriesConfigured({ enabled: true }).catch(() => {});
+  const result = await triggerDesktopHostRelaunch({
+    stalePortFiles: resolveDevToolsPortCandidates(),
+  });
+  return {
+    status: result.ok ? 200 : Number(result.status || 500),
+    contentType: 'application/json',
+    headers: { 'Cache-Control': 'no-store' },
+    body: JSON.stringify(result),
+  };
+}
+
 const BRIDGE_ROUTE_LOOKUP = new Map(
   BRIDGE_API_ROUTE_DEFS.map((r) => [`${r.method}:${r.path}`, r.action])
 );
@@ -462,6 +482,9 @@ export async function dispatchBridgeApiRequest(pathname, method, data, opts = un
     case 'telemetry':
       return executeTelemetryAction(data, opts);
     case 'settings':
+      if (isPlainObject(data) && data.__bridgeAction === 'relaunch') {
+        return executeBridgeRelaunchAction();
+      }
       return executeSettingsAction(data);
     case 'accounts_get':
       return executeAccountCredentialAction();
@@ -477,6 +500,8 @@ export async function dispatchBridgeApiRequest(pathname, method, data, opts = un
       return executeCloudSyncAction();
     case 'plugin_update':
       return executePluginUpdateAction();
+    case 'bridge_relaunch':
+      return executeBridgeRelaunchAction();
     default:
       return {
         status: 404,
