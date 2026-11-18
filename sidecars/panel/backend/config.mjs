@@ -359,21 +359,21 @@ export function computeRuntimeCodeVersion() {
     join(HERE, 'mcp-entry.mjs'),
     join(HERE, 'cli-statusline.mjs'),
     join(HERE, 'trajectory-metrics.mjs'),
-    join(HERE, 'shared', 'settings-normalization.mjs'),
-    join(HERE, 'shared', 'window-bridge-protocol.mjs'),
     LOCAL_CATALOG_FILE,
   ];
-  const backendDir = join(HERE, 'backend');
-  try {
-    if (existsSync(backendDir)) {
-      for (const name of readdirSync(backendDir)) {
-        if (name.endsWith('.mjs') || name.endsWith('.js')) {
-          candidates.push(join(backendDir, name));
+  for (const subDir of ['shared', 'backend']) {
+    const absDir = join(HERE, subDir);
+    try {
+      if (existsSync(absDir)) {
+        for (const name of readdirSync(absDir)) {
+          if (name.endsWith('.mjs') || name.endsWith('.js')) {
+            candidates.push(join(absDir, name));
+          }
         }
       }
+    } catch {
+      // 忽略目录列举异常
     }
-  } catch {
-    // 忽略目录列举异常
   }
   for (const file of candidates) {
     try {

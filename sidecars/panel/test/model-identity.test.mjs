@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import vm from 'node:vm';
-import { normalizeClientWindowMountMode } from '../src/store/telemetryStore.js';
+import { isEquivalentTelemetry } from '../src/store/telemetryStore.js';
 import { extractModelSteps, normalizeCachedStep, MODEL_IDENTITY_VERSION } from '../trajectory-metrics.mjs';
 import {
   formatUsd,
@@ -194,12 +192,9 @@ test('custom cost budget cannot claim a complete remaining percentage when price
 });
 
 test('frontend considers a model-only correction a real telemetry update', () => {
-  const source = fs.readFileSync(new URL('../src/store/telemetryStore.js',import.meta.url),'utf8');
-  const fn = source.slice(source.indexOf('function isEquivalentTelemetry'),source.indexOf('export async function fetchTelemetry'));
-  const ctx = { normalizeClientWindowMountMode }; vm.runInNewContext(fn+'\nglobalThis.compare=isEquivalentTelemetry;',ctx);
   const a={activeConversation:{recentSteps:[{modelKey:'unknown',modelShort:'模型未知',costUsd:null}]}};
   const b=structuredClone(a); b.activeConversation.recentSteps[0].modelShort='new-model';
-  assert.equal(ctx.compare(a,b),false); assert.equal(ctx.compare(a,structuredClone(a)),true);
+  assert.equal(isEquivalentTelemetry(a,b),false); assert.equal(isEquivalentTelemetry(a,structuredClone(a)),true);
 });
 
 const ORCH_CARBON = 'MODEL_PLACEHOLDER_M667';

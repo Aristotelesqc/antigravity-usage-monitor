@@ -588,7 +588,7 @@ test('bundle validation rejects incompatible imports and duplicate bindings befo
     ["import { SVG_NS /* comment */ as ns } from './SvgIcon.js';", /svgRegistry\.js.*without aliases/],
     ["import { SVG_NS } from './SvgIcon.js';", /svgRegistry\.js.*SvgIcon\.js.*earlier in jsOrder/],
     ["import './missing.js';", /svgRegistry\.js.*missing\.js.*earlier in jsOrder/],
-    ['const SVG_NS = "duplicate";', /Identifier 'SVG_NS' has already been declared/],
+    ['export const SVG_NS = "duplicate";', /Identifier 'SVG_NS' has already been declared/],
   ]) {
     fs.writeFileSync(iconSource, `${prefix}\n${original}`);
     assert.throws(() => buildBundle(tempDir), error);
@@ -596,6 +596,10 @@ test('bundle validation rejects incompatible imports and duplicate bindings befo
       assert.equal(fs.readFileSync(join(tempDir, file), 'utf8'), file);
     }
   }
+
+  // Per-module closure isolation: unexported private identifiers never collide across modules
+  fs.writeFileSync(iconSource, `const SVG_NS = "private_local";\n${original}`);
+  assert.doesNotThrow(() => buildBundle(tempDir));
 });
 
 test('Compaction liveActivity: detects in-progress & completed CHECKPOINT over pre-compaction tool operations across RPC and transcript.jsonl', async () => {
@@ -1107,4 +1111,75 @@ test('P0 audit fixes: main/bridge-daemon import isolation, standalone lsAddr, du
     headerSrc.indexOf('const unsubTelemetry =')
   );
   assert.doesNotMatch(renderBody, /\buiStore\.setState\b/);
+});
+
+test('P1 audit fixes: shared third-party pool & route single-source, pure frozen resolveScopedConversation, mock schema alignment, and dead SettingsAccountTab exclusion', async () => {
+  const { normalizeI18nLanguage } = await import('../src/i18n/index.js');
+  const { resolveSpecificQuotaSlotSummary } = await import('../src/registries/metricRegistry.js');
+  const { resolveScopedConversation, isEquivalentTelemetry } = await import(
+    '../src/store/telemetryStore.js'
+  );
+  const { buildStructurePreviewTelemetry } = await import(
+    '../src/components/settings/structurePreviewMock.js'
+  );
+  const { BRIDGE_API_ROUTE_DEFS } = await import('../shared/window-bridge-protocol.mjs');
+
+  assert.equal(normalizeI18nLanguage('system'), 'auto');
+  assert.equal(typeof isEquivalentTelemetry, 'function');
+  assert.equal(BRIDGE_API_ROUTE_DEFS.length, 9);
+
+  // 1. Third-party pool parity across backend, CLI statusline, and frontend metricRegistry
+  const h = backendHarness();
+  const poolSample = 'Fable / OSS Third-Party Pool';
+  assert.equal(h.classifyQuotaPoolIdentity({ groupName: poolSample }).poolKey, 'Claude & GPT');
+  const quotasFixture = {
+    pools: [
+      {
+        poolKey: poolSample,
+        poolLabel: poolSample,
+        family: poolSample,
+        remainingPct: 37,
+        weeklyRemainingPct: 68,
+      },
+    ],
+  };
+  assert.equal(resolveSpecificQuotaSlotSummary(quotasFixture, 'claude_5h')?.roundedPct, 37);
+  assert.match(
+    h.formatCliStatusLineCapsule({ quotas: quotasFixture }, { slots: ['claude_5h'], terminalWidth: 120 }),
+    /37%/
+  );
+
+  // 2. Pure resolveScopedConversation never mutates deeply frozen telemetry
+  const deepFreeze = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    Object.freeze(obj);
+    for (const v of Object.values(obj)) deepFreeze(v);
+    return obj;
+  };
+  const frozenTelemetry = deepFreeze({
+    activeConversation: {
+      cascadeId: 'frozen-conv',
+      hasSubagents: true,
+      recentSteps: [{ stepIndex: 1, createdAtMs: 100 }],
+      agents: [
+        { agentId: 'main', isMain: true, index: 0 },
+        { agentId: 'sub-1', isMain: false, index: 1, recentSteps: [{ stepIndex: 2, createdAtMs: 200 }] },
+      ],
+      aggregated: { activeAgentId: 'main' },
+    },
+  });
+  const scoped = resolveScopedConversation(frozenTelemetry, 'all', 'auto', true);
+  assert.equal(scoped.aggregated.recentSteps.length, 2);
+  assert.equal(scoped.mainAgent.recentSteps.length, 1);
+
+  // 3. structurePreviewMock schema completeness & dead SettingsAccountTab exclusion from app.js
+  const mock = buildStructurePreviewTelemetry();
+  assert.equal(typeof mock.activeConversation.context.compactionUsedTokens, 'number');
+  assert.equal(mock.activeConversation.aggregated.agentId, 'all');
+  assert.equal(Array.isArray(mock.activeConversation.agents[0].modelBreakdown), true);
+  assert.equal(mock.quotas.meta.hasOfficialData, true);
+
+  const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  assert.equal(appJs.includes('SettingsAccountTab.js'), false);
+  assert.equal(appJs.includes('function renderQuotaRows('), false);
 });

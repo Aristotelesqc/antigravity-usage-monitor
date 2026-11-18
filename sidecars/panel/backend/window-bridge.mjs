@@ -14,6 +14,8 @@ import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  BRIDGE_API_PATHS,
+  CONTEXT_WINDOWS_GLOBAL_KEY,
   WINDOW_BRIDGE_KEY,
   WINDOW_BRIDGE_ROUTE_KEY,
   WINDOW_OVERLAY_KEY,
@@ -32,23 +34,14 @@ import { createContextWindowSyncExpression } from './context-windows.mjs';
 
 const windowBridgeRef = `window[${JSON.stringify(WINDOW_BRIDGE_KEY)}]`;
 const windowOverlayRef = `window[${JSON.stringify(WINDOW_OVERLAY_KEY)}]`;
+const windowContextWindowsRef = `window[${JSON.stringify(CONTEXT_WINDOWS_GLOBAL_KEY)}]`;
 const windowBridgeRouteKey = JSON.stringify(WINDOW_BRIDGE_ROUTE_KEY);
 const overlayMethods = Object.fromEntries(
   Object.entries(WINDOW_OVERLAY_METHODS).map(([method, key]) => [method, JSON.stringify(key)])
 );
 
 const BRIDGE_MAX_BODY_BYTES = 64 * 1024;
-const ALLOWED_BRIDGE_PATHS = new Set([
-  '/api/telemetry',
-  '/api/settings',
-  '/api/settings/reset',
-  '/api/cache/rebuild',
-  '/api/accounts',
-  '/api/accounts/update',
-  '/api/context-window',
-  '/api/cloud-sync',
-  '/api/plugin-update',
-]);
+const ALLOWED_BRIDGE_PATHS = new Set(BRIDGE_API_PATHS);
 
 /**
  * 解析各操作系统下 Antigravity 2.0 与 Antigravity IDE 写入 `DevToolsActivePort` 的候选路径列表。
@@ -1581,7 +1574,7 @@ export function createWindowBridgeController(options) {
           }));
           const disposeExpr = `(() => {
             try {
-              window.__AGUsageMonitorContextWindows?.dispose?.();
+              ${windowContextWindowsRef}?.dispose?.();
               ${windowOverlayRef}?.[${overlayMethods.dispose}]?.();
               delete ${windowOverlayRef};
               delete ${windowBridgeRef};

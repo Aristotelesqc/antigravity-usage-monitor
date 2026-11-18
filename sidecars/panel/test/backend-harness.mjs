@@ -17,11 +17,12 @@ const DEFAULT_BUNDLED_CATALOG = {
 };
 
 const BACKEND_MODULE_FILES = [
+  '../shared/settings-normalization.mjs',
+  '../shared/telemetry-display-rules.mjs',
+  '../shared/window-bridge-protocol.mjs',
   '../backend/context-windows.mjs',
   '../backend/account-oauth.mjs',
   '../backend/account-switch.mjs',
-  '../shared/settings-normalization.mjs',
-  '../shared/window-bridge-protocol.mjs',
   '../backend/http-helpers.mjs',
   '../backend/settings-schema.mjs',
   '../backend/config.mjs',

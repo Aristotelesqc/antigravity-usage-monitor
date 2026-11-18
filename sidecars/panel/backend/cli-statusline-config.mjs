@@ -16,8 +16,16 @@ import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { HERE, lsRuntimeEndpoint, normalizeLanguageSetting, normalizeTopbarCapsuleSlots } from './config.mjs';
-
-const CLI_STATUS_THIRD_PARTY_FAMILY_RE = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i;
+import {
+  classifyCacheTier,
+  classifySpeedTier,
+  classifyStepCostTier,
+  classifyTtftTier,
+  formatCompactCapsuleCost,
+  formatCompactCapsuleTtft,
+  formatCompactTokens,
+  resolveCapsuleQuotaSlotPct,
+} from '../shared/telemetry-display-rules.mjs';
 
 // 24-bit ANSI 前景 SGR 调色板（透明底色，与桌面端四档语义色阶及 CLI 原生底栏色调对齐，无任何背景填充或非 SGR 控制符）
 const SGR_RESET = '\x1b[0m';
@@ -388,165 +396,42 @@ export function ensureCliStatusLineConfigured({
 // ---------------------------------------------------------------------------
 
 function cliStatusSpeedSgr(tokPerSec) {
-  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
-    return SGR_FG_MUTED;
-  }
-  const v = Number(tokPerSec);
-  if (v >= 60) return SGR_FG_GOOD;
-  if (v >= 35) return SGR_FG_INFO;
-  if (v >= 20) return SGR_FG_WARN;
-  return SGR_FG_DANGER;
+  const tier = classifySpeedTier(tokPerSec);
+  if (tier === 'good') return SGR_FG_GOOD;
+  if (tier === 'info') return SGR_FG_INFO;
+  if (tier === 'warn') return SGR_FG_WARN;
+  if (tier === 'danger') return SGR_FG_DANGER;
+  return SGR_FG_MUTED;
 }
 
 function cliStatusCacheSgr(cacheHitPct, promptTokens = null) {
-  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) return SGR_FG_MUTED;
-  const v = Number(cacheHitPct);
-  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) return SGR_FG_MUTED;
-  if (v >= 85) return SGR_FG_GOOD;
-  if (v >= 65) return SGR_FG_INFO;
-  if (v >= 30) return SGR_FG_WARN;
-  return SGR_FG_DANGER;
+  const tier = classifyCacheTier(cacheHitPct, promptTokens);
+  if (tier === 'good') return SGR_FG_GOOD;
+  if (tier === 'info') return SGR_FG_INFO;
+  if (tier === 'warn') return SGR_FG_WARN;
+  if (tier === 'danger') return SGR_FG_DANGER;
+  return SGR_FG_MUTED;
 }
 
 function cliStatusCostSgr(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return SGR_FG_NORMAL;
-  const v = Number(costUsd);
-  if (v >= 0.3) return SGR_FG_DANGER;
-  if (v >= 0.15) return SGR_FG_WARN;
+  const tier = classifyStepCostTier(costUsd);
+  if (tier === 'danger') return SGR_FG_DANGER;
+  if (tier === 'warn') return SGR_FG_WARN;
   return SGR_FG_NORMAL;
 }
 
 function cliStatusTtftSgr(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) {
-    return SGR_FG_MUTED;
-  }
-  const v = Number(ttftSec);
-  if (v >= 30) return SGR_FG_DANGER;
-  if (v >= 18) return SGR_FG_WARN;
+  const tier = classifyTtftTier(ttftSec);
+  if (tier === 'muted') return SGR_FG_MUTED;
+  if (tier === 'danger') return SGR_FG_DANGER;
+  if (tier === 'warn') return SGR_FG_WARN;
   return SGR_FG_NORMAL;
 }
 
-function cliFormatCompactCost(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '--';
-  const val = Math.max(0, Number(costUsd));
-  if (val === 0) return '$0.00';
-  if (val < 0.001) return '<$0.001';
-  if (val < 1) return `$${val.toFixed(3)}`;
-  if (val < 100) return `$${val.toFixed(2)}`;
-  return `$${Math.round(val)}`;
-}
-
-function cliFormatCompactTtft(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '--s';
-  const val = Number(ttftSec);
-  if (val < 1) return `${val.toFixed(2)}s`;
-  if (val < 100) return `${val.toFixed(1)}s`;
-  return `${Math.round(val)}s`;
-}
-
-function cliFormatTokens(num) {
-  const n = Number(num || 0);
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(Math.round(n));
-}
-
-function cliResolveQuotaPct(quotas, slotKey) {
-  if (!quotas || typeof quotas !== 'object') return null;
-  const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
-  const activePool = quotas.activePool || null;
-  const weekly = quotas.weekly || null;
-
-  if (slotKey === 'quota_auto') {
-    const candidates = [];
-    if (activePool && Number.isFinite(Number(activePool.remainingPct))) {
-      candidates.push(Number(activePool.remainingPct));
-    }
-    if (activePool && Number.isFinite(Number(activePool.weeklyRemainingPct))) {
-      candidates.push(Number(activePool.weeklyRemainingPct));
-    }
-    if (!candidates.length && weekly && Number.isFinite(Number(weekly.remainingPct))) {
-      candidates.push(Number(weekly.remainingPct));
-    }
-    if (!candidates.length && pools.length > 0) {
-      for (const p of pools) {
-        if (p && Number.isFinite(Number(p.remainingPct))) candidates.push(Number(p.remainingPct));
-        if (p && Number.isFinite(Number(p.weeklyRemainingPct))) {
-          candidates.push(Number(p.weeklyRemainingPct));
-        }
-      }
-    }
-    if (!candidates.length) return null;
-    return Math.max(0, Math.min(100, Math.round(Math.min(...candidates))));
-  }
-
-  const isClaude = slotKey.startsWith('claude_');
-  const isWeekly = slotKey.endsWith('_weekly');
-  let rawPct = null;
-
-  if (isClaude) {
-    const claudePool =
-      pools.find((p) => p?.poolKey === 'Claude & GPT') ||
-      pools.find((p) =>
-        CLI_STATUS_THIRD_PARTY_FAMILY_RE.test(String(p?.poolKey || p?.poolLabel || ''))
-      );
-    const cand = isWeekly ? claudePool?.weeklyRemainingPct : claudePool?.remainingPct;
-    if (cand != null && Number.isFinite(Number(cand))) {
-      rawPct = Number(cand);
-    } else if (
-      activePool &&
-      CLI_STATUS_THIRD_PARTY_FAMILY_RE.test(String(activePool.family || activePool.poolLabel || ''))
-    ) {
-      const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-      if (fb != null && Number.isFinite(Number(fb))) rawPct = Number(fb);
-    }
-  } else {
-    const stdGemini =
-      pools.find((p) => p?.poolKey === 'Gemini') ||
-      pools.find(
-        (p) =>
-          /gemini/i.test(String(p?.poolKey || p?.poolLabel || '')) &&
-          !/carbon|argon/i.test(String(p?.poolKey || ''))
-      );
-    const geminiFamilyPools = pools.filter((p) =>
-      /gemini|carbon|argon/i.test(String(p?.poolKey || p?.poolLabel || ''))
-    );
-    const primaryCand = isWeekly ? stdGemini?.weeklyRemainingPct : stdGemini?.remainingPct;
-    if (primaryCand != null && Number.isFinite(Number(primaryCand))) {
-      rawPct = Number(primaryCand);
-    } else {
-      const familyVals = geminiFamilyPools
-        .map((p) => (isWeekly ? p?.weeklyRemainingPct : p?.remainingPct))
-        .filter((v) => v != null && Number.isFinite(Number(v)))
-        .map(Number);
-      if (familyVals.length > 0) {
-        rawPct = Math.min(...familyVals);
-      } else if (
-        activePool &&
-        !CLI_STATUS_THIRD_PARTY_FAMILY_RE.test(
-          String(activePool.family || activePool.poolLabel || '')
-        )
-      ) {
-        const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-        if (fb != null && Number.isFinite(Number(fb))) rawPct = Number(fb);
-      }
-      if (
-        rawPct == null &&
-        isWeekly &&
-        weekly &&
-        !CLI_STATUS_THIRD_PARTY_FAMILY_RE.test(String(weekly.poolFamily || '')) &&
-        weekly.remainingPct != null &&
-        Number.isFinite(Number(weekly.remainingPct))
-      ) {
-        rawPct = Number(weekly.remainingPct);
-      }
-    }
-  }
-
-  if (rawPct == null || !Number.isFinite(rawPct)) return null;
-  return Math.max(0, Math.min(100, Math.round(rawPct)));
-}
+const cliFormatCompactCost = formatCompactCapsuleCost;
+const cliFormatCompactTtft = formatCompactCapsuleTtft;
+const cliFormatTokens = formatCompactTokens;
+const cliResolveQuotaPct = resolveCapsuleQuotaSlotPct;
 
 /**
  * 计算终端可见列宽（剥离 CSI SGR 转义序列，CJK 全角字符按 2 列、`●`/`◎`/`·` 与 ASCII 按 1 列计算）。

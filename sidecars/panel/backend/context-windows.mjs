@@ -1,5 +1,7 @@
 /** @fileoverview 宿主上报的模型上下文档位与逐次请求配置。 */
 
+import { CONTEXT_WINDOWS_GLOBAL_KEY } from '../shared/window-bridge-protocol.mjs';
+
 export function isContextWindowModelId(value) {
   return typeof value === 'string' && /^MODEL_[A-Z0-9_]{1,120}$/.test(value) &&
     value !== 'MODEL_UNSPECIFIED' && value !== 'MODEL_UNKNOWN';
@@ -115,8 +117,11 @@ export function resolveContextWindowRules(models, preferences) {
 }
 
 // 在宿主聊天窗口执行；只改发往当前 LS 的提交请求，模型 ID 必须完全匹配。
-export async function syncHostContextWindows(rules, bootId) {
-  const key = '__AGUsageMonitorContextWindows';
+export async function syncHostContextWindows(
+  rules,
+  bootId,
+  key = '__AGUsageMonitorContextWindows'
+) {
   let state = window[key];
   const appConfig = window.__APP_CONFIG__;
   const csrfToken = appConfig?.csrfToken;
@@ -280,6 +285,6 @@ export function createContextWindowSyncExpression(preferences, bootId) {
     ${getContextWindowGroups.toString()}
     ${resolveContextWindowOption.toString()}
     ${resolveContextWindowRules.toString()}
-    return (${syncHostContextWindows.toString()})(${JSON.stringify(preferences)}, ${JSON.stringify(bootId)});
+    return (${syncHostContextWindows.toString()})(${JSON.stringify(preferences)}, ${JSON.stringify(bootId)}, ${JSON.stringify(CONTEXT_WINDOWS_GLOBAL_KEY)});
   })()`;
 }

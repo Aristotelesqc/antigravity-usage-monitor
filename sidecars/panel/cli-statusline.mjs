@@ -39,6 +39,7 @@ import {
   loadSettings,
 } from './backend/config.mjs';
 import { computeStepCost, createStepModelResolver } from './backend/model-pricing.mjs';
+import { isThirdPartyPoolText } from './shared/telemetry-display-rules.mjs';
 
 const CLI_RUNNING_STALE_MS = 10 * 60 * 1000;
 const SNAPSHOT_LIVE_RUNNING_TTL_MS = 20 * 1000;
@@ -386,7 +387,7 @@ function buildStdinFallbackQuotas(stdinData) {
     const frac = Number(bucket.remaining_fraction);
     if (!Number.isFinite(frac)) continue;
     const remainingPct = Math.max(0, Math.min(100, Math.round(frac * 100)));
-    const isThirdParty = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i.test(key);
+    const isThirdParty = isThirdPartyPoolText(key);
     pools.push({
       poolKey: isThirdParty ? 'Claude & GPT' : 'Gemini',
       poolLabel: key,
@@ -396,7 +397,7 @@ function buildStdinFallbackQuotas(stdinData) {
   }
   if (pools.length === 0) return null;
   const modelStr = String(stdinData?.model?.id || stdinData?.model?.display_name || '');
-  const activeIsThirdParty = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i.test(modelStr);
+  const activeIsThirdParty = isThirdPartyPoolText(modelStr);
   const matchingPools = pools.filter((p) =>
     activeIsThirdParty ? p.poolKey === 'Claude & GPT' : p.poolKey === 'Gemini'
   );

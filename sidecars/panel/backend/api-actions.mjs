@@ -8,6 +8,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { BRIDGE_API_ROUTE_DEFS } from '../shared/window-bridge-protocol.mjs';
 import { handleAccountCredentialAction } from './account-switch.mjs';
 import { isLocalHostRequest, readLocalAsync } from './http-helpers.mjs';
 import { clearScannerRuntimeMemos } from './local-scanner.mjs';
@@ -451,39 +452,38 @@ export async function executeAccountCredentialAction(data) {
   };
 }
 
+const BRIDGE_ROUTE_LOOKUP = new Map(
+  BRIDGE_API_ROUTE_DEFS.map((r) => [`${r.method}:${r.path}`, r.action])
+);
+
 export async function dispatchBridgeApiRequest(pathname, method, data, opts = undefined) {
-  if (pathname === '/api/telemetry' && method === 'GET') {
-    return executeTelemetryAction(data, opts);
+  const action = BRIDGE_ROUTE_LOOKUP.get(`${String(method || '').toUpperCase()}:${pathname}`);
+  switch (action) {
+    case 'telemetry':
+      return executeTelemetryAction(data, opts);
+    case 'settings':
+      return executeSettingsAction(data);
+    case 'accounts_get':
+      return executeAccountCredentialAction();
+    case 'accounts_update':
+      return executeAccountCredentialAction(data);
+    case 'context_window':
+      return executeModelContextWindowAction(data);
+    case 'settings_reset':
+      return executeResetSettingsAction();
+    case 'cache_rebuild':
+      return executeRebuildCacheAction();
+    case 'cloud_sync':
+      return executeCloudSyncAction();
+    case 'plugin_update':
+      return executePluginUpdateAction();
+    default:
+      return {
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Not found' }),
+      };
   }
-  if (pathname === '/api/settings' && method === 'POST') {
-    return executeSettingsAction(data);
-  }
-  if (pathname === '/api/accounts' && method === 'GET') {
-    return executeAccountCredentialAction();
-  }
-  if (pathname === '/api/accounts/update' && method === 'POST') {
-    return executeAccountCredentialAction(data);
-  }
-  if (pathname === '/api/context-window' && method === 'POST') {
-    return executeModelContextWindowAction(data);
-  }
-  if (pathname === '/api/settings/reset' && method === 'POST') {
-    return executeResetSettingsAction();
-  }
-  if (pathname === '/api/cache/rebuild' && method === 'POST') {
-    return executeRebuildCacheAction();
-  }
-  if (pathname === '/api/cloud-sync' && method === 'POST') {
-    return executeCloudSyncAction();
-  }
-  if (pathname === '/api/plugin-update' && method === 'POST') {
-    return executePluginUpdateAction();
-  }
-  return {
-    status: 404,
-    contentType: 'application/json',
-    body: JSON.stringify({ error: 'Not found' }),
-  };
 }
 
 /**

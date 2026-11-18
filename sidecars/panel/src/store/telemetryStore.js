@@ -8,14 +8,33 @@ import { callSidecarApi, getWindowBridgeConfig, isWindowOverlayMode } from '../c
 import { isEnglishLocale, normalizeI18nLanguage, t } from '../i18n/index.js';
 import { normalizeClientFontScale, normalizeClientThemeAccent } from '../core/appearance.js';
 import {
+  DEFAULT_HOVER_MODULES,
   DEFAULT_OVERVIEW_METRICS,
+  DEFAULT_OVERVIEW_MODULES,
+  DEFAULT_POPOVER_WIDTH,
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_STEP_TOKEN_COMBO_FORMAT,
   DEFAULT_TOPBAR_SLOTS,
+  MAX_POPOVER_WIDTH,
+  MIN_POPOVER_WIDTH,
   OVERVIEW_METRIC_KEYS,
+  OVERVIEW_MODULE_KEYS,
+  STEP_TABLE_COLUMN_KEYS,
   TOPBAR_SLOT_KEYS,
+  normalizeHoverModules,
+  normalizeModelDisplayMode,
+  normalizeOrchestratorIdMode,
   normalizeOverviewMetrics,
+  normalizeOverviewModules,
+  normalizePluginUpdateMode,
+  normalizePopoverWidth,
+  normalizePopoverWidthMode,
+  normalizeStepTableColumns,
+  normalizeStepTokenComboFormat,
   normalizeTopbarCapsuleSlots,
   normalizeWeeklyLimitMode,
   normalizeWindowMountMode,
+  parseStepTokenComboSegments,
 } from '../../shared/settings-normalization.mjs';
 import { WINDOW_BRIDGE_ROUTE_KEY, readInjectedWindowBridge } from '../../shared/window-bridge-protocol.mjs';
 
@@ -119,265 +138,34 @@ let loopIntervalMs = 2000;
 let loopTickFn = null;
 
 export const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
-
 export const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
-
-export const CLIENT_OVERVIEW_MODULE_KEYS = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
-
-export const DEFAULT_CLIENT_OVERVIEW_MODULES = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
-
-export const DEFAULT_CLIENT_HOVER_MODULES = Object.freeze(['metrics', 'context', 'quotas']);
-
+export const CLIENT_OVERVIEW_MODULE_KEYS = OVERVIEW_MODULE_KEYS;
+export const DEFAULT_CLIENT_OVERVIEW_MODULES = DEFAULT_OVERVIEW_MODULES;
+export const DEFAULT_CLIENT_HOVER_MODULES = DEFAULT_HOVER_MODULES;
 export const CLIENT_OVERVIEW_METRIC_KEYS = OVERVIEW_METRIC_KEYS;
-
 export const DEFAULT_CLIENT_OVERVIEW_METRICS = DEFAULT_OVERVIEW_METRICS;
+export const CLIENT_STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
+export const DEFAULT_CLIENT_STEP_COLUMNS = DEFAULT_STEP_TABLE_COLUMNS;
+export const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+export const MIN_CLIENT_POPOVER_WIDTH = MIN_POPOVER_WIDTH;
+export const MAX_CLIENT_POPOVER_WIDTH = MAX_POPOVER_WIDTH;
+export const DEFAULT_CLIENT_POPOVER_WIDTH = DEFAULT_POPOVER_WIDTH;
 
-export const CLIENT_STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'time',
-  'model',
-  'tps',
-  'ttft',
-  'duration',
-  'tokens_combo',
-  'tokens_io_cache',
-  'tokens_custom',
-  'input_tokens',
-  'cache_tokens',
-  'output_tokens',
-  'cache',
-  'cost',
-]);
+export const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
+export const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
+export const normalizeClientPopoverWidthMode = normalizePopoverWidthMode;
+export const normalizeClientPopoverWidth = normalizePopoverWidth;
+export const normalizeClientModelDisplayMode = normalizeModelDisplayMode;
+export const normalizeClientTopbarSlots = normalizeTopbarCapsuleSlots;
+export const normalizeClientHoverModules = normalizeHoverModules;
+export const normalizeClientOverviewModules = normalizeOverviewModules;
+export const normalizeClientOverviewMetrics = normalizeOverviewMetrics;
+export const normalizeClientStepColumns = normalizeStepTableColumns;
+export const normalizeClientUpdateMode = normalizePluginUpdateMode;
+export const normalizeClientOrchestratorIdMode = normalizeOrchestratorIdMode;
+export const normalizeClientWindowMountMode = normalizeWindowMountMode;
 
-export const DEFAULT_CLIENT_STEP_COLUMNS = Object.freeze([
-  'step',
-  'model',
-  'tps',
-  'ttft',
-  'tokens_combo',
-  'cache',
-  'cost',
-]);
-
-export const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
-
-const CLIENT_STEP_TOKEN_ALIASES = Object.freeze({
-  context: 'context',
-  ctx: 'context',
-  '上下文': 'context',
-  in: 'in',
-  new: 'in',
-  input: 'in',
-  '输入': 'in',
-  '新输入': 'in',
-  out: 'out',
-  output: 'out',
-  '输出': 'out',
-  '总输出': 'out',
-  cache: 'cache',
-  cached: 'cache',
-  cache_read: 'cache',
-  cacheread: 'cache',
-  '缓存': 'cache',
-  '缓存读': 'cache',
-  think: 'think',
-  thinking: 'think',
-  '思考': 'think',
-  reply: 'reply',
-  body: 'reply',
-  resp: 'reply',
-  response: 'reply',
-  text: 'reply',
-  '正文': 'reply',
-  '回复': 'reply',
-  total: 'total',
-  all: 'total',
-  sum: 'total',
-  '总计': 'total',
-  '总token': 'total',
-});
-
-export function parseClientStepTokenComboSegments(raw) {
-  const str = String(raw ?? '').trim();
-  const out = [];
-  const seen = new Set();
-  if (str) {
-    for (const part of str.split(/[:/,|]+/)) {
-      const key = part.trim().toLowerCase();
-      if (!key) continue;
-      const mapped = Object.prototype.hasOwnProperty.call(CLIENT_STEP_TOKEN_ALIASES, key)
-        ? CLIENT_STEP_TOKEN_ALIASES[key]
-        : null;
-      if (!mapped || seen.has(mapped)) continue;
-      seen.add(mapped);
-      out.push(mapped);
-      if (out.length >= 4) break;
-    }
-  }
-  return out.length > 0 ? out : ['context', 'in', 'cache'];
-}
-
-export function normalizeClientStepTokenComboFormat(raw) {
-  return parseClientStepTokenComboSegments(raw).join(':');
-}
-
-export const MIN_CLIENT_POPOVER_WIDTH = 440;
-export const MAX_CLIENT_POPOVER_WIDTH = 1080;
-export const DEFAULT_CLIENT_POPOVER_WIDTH = 580;
-
-export function normalizeClientPopoverWidthMode(mode) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
-}
-
-export function normalizeClientPopoverWidth(width) {
-  const num = Number(width);
-  if (!Number.isFinite(num) || num <= 0) return DEFAULT_CLIENT_POPOVER_WIDTH;
-  return Math.max(MIN_CLIENT_POPOVER_WIDTH, Math.min(MAX_CLIENT_POPOVER_WIDTH, Math.round(num)));
-}
-
-export function normalizeClientModelDisplayMode(mode, legacyShowUpstream) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-    return 'upstream_compact';
-  }
-  if (m === 'short') return 'short';
-  if (legacyShowUpstream === true) return 'upstream';
-  return 'short';
-}
-
-function normalizeClientOrderedList(raw, { allowedKeys, defaultItems, minLen, maxLen }) {
-  if (!Array.isArray(raw)) {
-    return [...defaultItems];
-  }
-  const allowedSet = new Set(allowedKeys);
-  const seen = new Set();
-  const out = [];
-  for (const item of raw) {
-    const key = String(item ?? '').trim();
-    if (!key || key === 'none' || !allowedSet.has(key) || seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-    if (out.length >= maxLen) break;
-  }
-  if (out.length < minLen) {
-    for (const fallbackKey of [...defaultItems, ...allowedKeys]) {
-      if (!seen.has(fallbackKey) && allowedSet.has(fallbackKey)) {
-        seen.add(fallbackKey);
-        out.push(fallbackKey);
-        if (out.length >= minLen) break;
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * 归一化前端顶栏胶囊动态槽位配置数组（支持 1..5 项不重复指标，兼容迁移旧版 `'none'` 占位）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-export function normalizeClientTopbarSlots(raw) {
-  return normalizeTopbarCapsuleSlots(raw);
-}
-
-/**
- * 归一化鼠标悬浮速览窗展示模块列表（支持 0..4 项，`0` 项代表关闭悬浮窗）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-export function normalizeClientHoverModules(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
-    defaultItems: DEFAULT_CLIENT_HOVER_MODULES,
-    minLen: 0,
-    maxLen: 4,
-  });
-}
-
-/**
- * 归一化实时监控视图展示模块列表（支持 1..4 项）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-export function normalizeClientOverviewModules(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
-    defaultItems: DEFAULT_CLIENT_OVERVIEW_MODULES,
-    minLen: 1,
-    maxLen: 4,
-  });
-}
-
-/**
- * 归一化实时监控第一行指标矩阵配置（支持 1..4 项）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-export function normalizeClientOverviewMetrics(raw) {
-  return normalizeOverviewMetrics(raw);
-}
-
-/**
- * 归一化调用明细「按步查看」显示列配置（支持 2..12 列）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-export function normalizeClientStepColumns(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_STEP_COLUMN_KEYS,
-    defaultItems: DEFAULT_CLIENT_STEP_COLUMNS,
-    minLen: 2,
-    maxLen: CLIENT_STEP_COLUMN_KEYS.length,
-  });
-}
-
-/**
- * 归一化前端插件更新策略（`'off'` | `'manual'` | `'auto'`），兼容旧版布尔字段。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyAutoUpdate]
- * @returns {'off'|'manual'|'auto'}
- */
-export function normalizeClientUpdateMode(mode, legacyAutoUpdate) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'off' || m === 'manual' || m === 'auto') return m;
-  if (legacyAutoUpdate === true) return 'auto';
-  return 'manual';
-}
-
-export function normalizeClientOrchestratorIdMode(mode) {
-  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-}
-
-/**
- * 归一化前端面板挂载方式（`'dual'` | `'composer'` | `'sidebar'`），兼容旧版 `enableWindowOverlay` 布尔字段。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyEnableOverlay]
- * @returns {'dual'|'composer'|'sidebar'}
- */
-export function normalizeClientWindowMountMode(mode, legacyEnableOverlay) {
-  return normalizeWindowMountMode(mode, legacyEnableOverlay);
-}
-
-function isEquivalentTelemetry(prev, next) {
+export function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
   if (prev === next) return true;
 
@@ -409,51 +197,29 @@ function isEquivalentTelemetry(prev, next) {
   ) {
     return false;
   }
-  const normModelMode = (mode, legacyShowUpstream) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-    if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-      return 'upstream_compact';
-    }
-    if (m === 'short') return 'short';
-    return legacyShowUpstream === true ? 'upstream' : 'short';
-  };
-  const normPopMode = (mode) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
-  };
-  const normPopW = (w) => {
-    const n = Number(w);
-    return Number.isFinite(n) && n > 0 ? Math.max(440, Math.min(1080, Math.round(n))) : 580;
-  };
   if (
-    normModelMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
-    normModelMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
+    normalizeModelDisplayMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
+    normalizeModelDisplayMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
   ) {
     return false;
   }
   if (pSet?.showUpstreamModel !== nSet?.showUpstreamModel) return false;
-  if (normPopMode(pSet?.popoverWidthMode) !== normPopMode(nSet?.popoverWidthMode)) {
+  if (normalizePopoverWidthMode(pSet?.popoverWidthMode) !== normalizePopoverWidthMode(nSet?.popoverWidthMode)) {
     return false;
   }
-  if (normPopW(pSet?.popoverWidth) !== normPopW(nSet?.popoverWidth)) {
+  if (normalizePopoverWidth(pSet?.popoverWidth) !== normalizePopoverWidth(nSet?.popoverWidth)) {
     return false;
   }
   if (
-    String(pSet?.stepTokenComboFormat ?? 'context:in:cache').trim() !==
-    String(nSet?.stepTokenComboFormat ?? 'context:in:cache').trim()
+    String(pSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim() !==
+    String(nSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim()
   ) {
     return false;
   }
-  const prevOrchIdMode =
-    String(pSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
-      ? 'full'
-      : 'compact';
-  const nextOrchIdMode =
-    String(nSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
-      ? 'full'
-      : 'compact';
-  if (prevOrchIdMode !== nextOrchIdMode) {
+  if (
+    normalizeOrchestratorIdMode(pSet?.orchestratorIdMode) !==
+    normalizeOrchestratorIdMode(nSet?.orchestratorIdMode)
+  ) {
     return false;
   }
   if (pSet?.weeklyLimitMode !== nSet?.weeklyLimitMode) return false;
@@ -1392,46 +1158,73 @@ export function formatAgentLabel(agent) {
  * @param {string} [ctxInspectorAgentId='auto']
  * @param {boolean} [includeSteps=false] 是否组装调用明细所需的步骤列表
  */
+const scopedStepProjectionMemo = new WeakMap();
+
 export function resolveScopedConversation(
   telemetry,
   selectedAgentScope = 'all',
   ctxInspectorAgentId = 'auto',
   includeSteps = false
 ) {
-  const active = telemetry?.activeConversation || {};
+  const rawActive = telemetry?.activeConversation;
+  const active = rawActive || {};
   const agents = Array.isArray(active.agents) && active.agents.length > 0 ? active.agents : [];
   const hasSubagents = Boolean(active.hasSubagents && agents.length > 1);
   const subagents = agents.filter((a) => !a.isMain);
-  const mainAgent = agents.find((a) => a.isMain) || active;
-  if (includeSteps && !Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
-    mainAgent.recentSteps = active.recentSteps;
-  }
-  const aggregated = active.aggregated || active;
-  if (includeSteps && hasSubagents && !Array.isArray(aggregated.recentSteps)) {
-    const combined = [];
-    for (const ag of agents) {
-      const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
-      for (const step of steps) combined.push(step);
+  let mainAgent = agents.find((a) => a.isMain) || active;
+  let aggregated = active.aggregated || active;
+  let resolvedAgents = agents;
+
+  if (includeSteps) {
+    let cached = rawActive && typeof rawActive === 'object' ? scopedStepProjectionMemo.get(rawActive) : null;
+    if (!cached) {
+      let nextMain = mainAgent;
+      let nextAgents = agents;
+      if (!Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
+        nextMain = { ...mainAgent, recentSteps: active.recentSteps };
+        if (agents.includes(mainAgent)) {
+          nextAgents = agents.map((ag) => (ag === mainAgent ? nextMain : ag));
+        }
+      }
+      let nextAgg = aggregated;
+      if (hasSubagents && !Array.isArray(aggregated.recentSteps)) {
+        const combined = [];
+        for (const ag of nextAgents) {
+          const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
+          for (const step of steps) combined.push(step);
+        }
+        combined.sort(
+          (a, b) =>
+            (b.createdAtMs || 0) - (a.createdAtMs || 0) ||
+            (b.agentIndex || 0) - (a.agentIndex || 0) ||
+            (b.stepIndex || 0) - (a.stepIndex || 0)
+        );
+        nextAgg = { ...aggregated, recentSteps: combined };
+      }
+      cached = { mainAgent: nextMain, aggregated: nextAgg, agents: nextAgents };
+      if (rawActive && typeof rawActive === 'object') {
+        scopedStepProjectionMemo.set(rawActive, cached);
+      }
     }
-    combined.sort(
-      (a, b) =>
-        (b.createdAtMs || 0) - (a.createdAtMs || 0) ||
-        (b.agentIndex || 0) - (a.agentIndex || 0) ||
-        (b.stepIndex || 0) - (a.stepIndex || 0)
-    );
-    aggregated.recentSteps = combined;
+    mainAgent = cached.mainAgent;
+    aggregated = cached.aggregated;
+    resolvedAgents = cached.agents;
   }
 
   if (!hasSubagents) {
+    const singleScoped =
+      includeSteps && !Array.isArray(active.recentSteps) && Array.isArray(mainAgent.recentSteps)
+        ? { ...active, recentSteps: mainAgent.recentSteps }
+        : active;
     return {
       hasSubagents: false,
       effectiveScope: 'main',
       effectiveCtxScope: 'main',
-      agents,
+      agents: resolvedAgents,
       subagents: [],
       mainAgent,
       aggregated,
-      scopedConv: active,
+      scopedConv: singleScoped,
       ctxAgent: mainAgent,
     };
   }
@@ -1447,13 +1240,13 @@ export function resolveScopedConversation(
   const scopedConv =
     effectiveScope === 'all'
       ? aggregated
-      : agents.find((a) => a.agentId === effectiveScope) || mainAgent;
+      : resolvedAgents.find((a) => a.agentId === effectiveScope) || mainAgent;
 
   let ctxAgent = scopedConv;
   let effectiveCtxScope = effectiveScope;
   if (effectiveScope === 'all') {
     if (ctxInspectorAgentId && ctxInspectorAgentId !== 'auto') {
-      const matched = agents.find((a) => a.agentId === ctxInspectorAgentId);
+      const matched = resolvedAgents.find((a) => a.agentId === ctxInspectorAgentId);
       if (matched) {
         ctxAgent = matched;
         effectiveCtxScope = matched.agentId;
@@ -1465,8 +1258,8 @@ export function resolveScopedConversation(
     }
     if (effectiveCtxScope === 'auto') {
       ctxAgent =
-        agents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
-        agents.find((a) => !a.isSideQuestion && a.isRunning) ||
+        resolvedAgents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
+        resolvedAgents.find((a) => !a.isSideQuestion && a.isRunning) ||
         mainAgent;
     }
   }
@@ -1475,7 +1268,7 @@ export function resolveScopedConversation(
     hasSubagents: true,
     effectiveScope,
     effectiveCtxScope,
-    agents,
+    agents: resolvedAgents,
     subagents,
     mainAgent,
     aggregated,

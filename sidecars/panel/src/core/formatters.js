@@ -4,6 +4,17 @@
  */
 
 import { isEnglishLocale, t } from '../i18n/index.js';
+import {
+  normalizeModelDisplayMode,
+  normalizeOrchestratorIdMode,
+} from '../../shared/settings-normalization.mjs';
+import {
+  classifyCacheTier,
+  classifySpeedTier,
+  classifyStepCostTier,
+  classifyTtftTier,
+  formatCompactTokens,
+} from '../../shared/telemetry-display-rules.mjs';
 
 const EN_MONTH_SHORT = Object.freeze([
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -21,53 +32,24 @@ export function formatCachePct(value) {
 }
 
 export function getSpeedToneClass(tokPerSec) {
-  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
-    return 'tone-muted';
-  }
-  const v = Number(tokPerSec);
-  if (v >= 60) return 'tone-good';
-  if (v >= 35) return 'tone-info';
-  if (v >= 20) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifySpeedTier(tokPerSec)}`;
 }
 
 export function getCacheToneClass(cacheHitPct, promptTokens = null) {
-  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
-    return 'tone-muted';
-  }
-  const v = Number(cacheHitPct);
-  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
-    return 'tone-muted';
-  }
-  if (v >= 85) return 'tone-good';
-  if (v >= 65) return 'tone-info';
-  if (v >= 30) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifyCacheTier(cacheHitPct, promptTokens)}`;
 }
 
 export function getStepCostToneClass(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
-  const v = Number(costUsd);
-  if (v >= 0.3) return 'tone-danger';
-  if (v >= 0.15) return 'tone-warn';
-  return '';
+  const tier = classifyStepCostTier(costUsd);
+  return tier ? `tone-${tier}` : '';
 }
 
 export function getTtftToneClass(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '';
-  const v = Number(ttftSec);
-  if (v >= 30) return 'tone-danger';
-  if (v >= 18) return 'tone-warn';
-  return '';
+  const tier = classifyTtftTier(ttftSec);
+  return tier === 'warn' || tier === 'danger' ? `tone-${tier}` : '';
 }
 
-export function formatTokens(num) {
-  const n = Number(num || 0);
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(Math.round(n));
-}
+export const formatTokens = formatCompactTokens;
 
 export function formatTokensPrecise(num) {
   const n = Number(num || 0);
@@ -172,23 +154,7 @@ export function formatElapsedSec(seconds) {
   return `${h}h ${remM}m`;
 }
 
-/**
- * 归一化普通模型显示模式（`'short'` 精简代号 | `'upstream_compact'` 去厂商前缀原始 ID | `'upstream'` 完整原始 ID）。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyShowUpstream]
- * @returns {'short'|'upstream_compact'|'upstream'}
- */
-export function normalizeModelDisplayMode(mode, legacyShowUpstream) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-    return 'upstream_compact';
-  }
-  if (m === 'short') return 'short';
-  if (legacyShowUpstream === true) return 'upstream';
-  return 'short';
-}
+export { normalizeModelDisplayMode };
 
 /**
  * 隐藏原始模型 ID 开头的 `gemini-`、`claude-`、`gpt-` 厂商前缀以节省单行表格空间（确保剥离后非空）。
@@ -208,15 +174,7 @@ function stripCompactionMarker(rawText) {
     .trim();
 }
 
-/**
- * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
- *
- * @param {unknown} mode
- * @returns {'compact'|'full'}
- */
-export function normalizeOrchestratorIdDisplayMode(mode) {
-  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-}
+export const normalizeOrchestratorIdDisplayMode = normalizeOrchestratorIdMode;
 
 /**
  * 统一解析步骤、会话摘要或模型汇总行面向用户的模型显示文本与悬停提示。

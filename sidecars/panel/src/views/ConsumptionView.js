@@ -27,6 +27,7 @@ import {
   normalizeModelDisplayMode,
   normalizeOrchestratorIdDisplayMode,
 } from '../core/formatters.js';
+import { scaleBucketsExact } from '../../shared/telemetry-display-rules.mjs';
 import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
 import { fetchTelemetry, telemetryStore } from '../store/telemetryStore.js';
@@ -572,22 +573,14 @@ export const ConsumptionView = defineComponent({
       let cachePct = 0;
       let outPct = 0;
       if (totalTokens > 0) {
-        const rawTenths = [
-          (inputTokens / totalTokens) * 1000,
-          (cacheTokens / totalTokens) * 1000,
-          (outputTokens / totalTokens) * 1000,
-        ];
-        const floored = rawTenths.map((v) => Math.max(0, Math.floor(v)));
-        const rem = Math.max(0, 1000 - (floored[0] + floored[1] + floored[2]));
-        const order = [0, 1, 2].sort(
-          (a, b) => rawTenths[b] - floored[b] - (rawTenths[a] - floored[a])
+        const scaled = scaleBucketsExact(
+          { in: inputTokens, cache: cacheTokens, out: outputTokens },
+          ['in', 'cache', 'out'],
+          1000
         );
-        for (let k = 0; k < rem && k < 3; k++) {
-          floored[order[k]] += 1;
-        }
-        inPct = +(floored[0] / 10).toFixed(1);
-        cachePct = +(floored[1] / 10).toFixed(1);
-        outPct = +(floored[2] / 10).toFixed(1);
+        inPct = +(scaled.in / 10).toFixed(1);
+        cachePct = +(scaled.cache / 10).toFixed(1);
+        outPct = +(scaled.out / 10).toFixed(1);
       }
 
       patchText(inputSharePct, `${inPct}%`);

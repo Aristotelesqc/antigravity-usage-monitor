@@ -10,6 +10,7 @@
  */
 
 import { isDeepStrictEqual } from 'node:util';
+import { scaleBucketsExact } from '../shared/telemetry-display-rules.mjs';
 import {
   extractLiveActivity,
   parseIsoMs,
@@ -266,51 +267,6 @@ function resolveStepOutputTokens(st) {
   const explicitOut = Number(st?.outputTokens || 0);
   if (explicitOut > 0) return explicitOut;
   return Number(st?.thinkingTokens || 0) + Number(st?.responseTokens || 0);
-}
-
-/**
- * 使用最大余数法（Hamilton 方法）将各非零上下文分桶等比缩放至目标整数总和，
- * 保证 0 值通道绝不被凭空分配 Token，且缩放后各分桶之和精确等于 `targetTotal`。
- */
-function scaleBucketsExact(buckets, keys, targetTotal) {
-  const safeTarget = Math.max(0, Math.round(Number(targetTotal || 0)));
-  const out = {};
-  let currentSum = 0;
-  for (const k of keys) {
-    const val = Math.max(0, Number(buckets[k] || 0));
-    out[k] = val;
-    currentSum += val;
-  }
-  if (safeTarget === 0 || currentSum <= 0) {
-    for (const k of keys) out[k] = 0;
-    return out;
-  }
-  if (currentSum === safeTarget) {
-    for (const k of keys) out[k] = Math.round(out[k]);
-    return out;
-  }
-  const remainders = [];
-  let assigned = 0;
-  for (const k of keys) {
-    const rawVal = out[k];
-    if (rawVal <= 0) {
-      out[k] = 0;
-      continue;
-    }
-    const exact = (rawVal * safeTarget) / currentSum;
-    const floored = Math.floor(exact);
-    out[k] = floored;
-    assigned += floored;
-    remainders.push({ key: k, rem: exact - floored, orig: rawVal });
-  }
-  let diff = safeTarget - assigned;
-  if (diff > 0 && remainders.length > 0) {
-    remainders.sort((a, b) => b.rem - a.rem || b.orig - a.orig);
-    for (let i = 0; i < diff; i++) {
-      out[remainders[i % remainders.length].key] += 1;
-    }
-  }
-  return out;
 }
 
 function extractRawBreakdownChannels(breakdown) {

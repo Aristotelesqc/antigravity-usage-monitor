@@ -20,37 +20,18 @@ import {
 } from '../core/formatters.js';
 import { t } from '../i18n/index.js';
 import {
-  DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT,
-  normalizeClientStepTokenComboFormat,
-  parseClientStepTokenComboSegments,
-} from '../store/telemetryStore.js';
+  DEFAULT_STEP_TABLE_COLUMNS,
+  DEFAULT_STEP_TOKEN_COMBO_FORMAT,
+  STEP_TABLE_COLUMN_KEYS,
+  normalizeStepTokenComboFormat,
+  parseStepTokenComboSegments,
+} from '../../shared/settings-normalization.mjs';
 
-export const STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'time',
-  'model',
-  'tps',
-  'ttft',
-  'duration',
-  'tokens_combo',
-  'tokens_io_cache',
-  'tokens_custom',
-  'input_tokens',
-  'cache_tokens',
-  'output_tokens',
-  'cache',
-  'cost',
-]);
-
-export const DEFAULT_STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'model',
-  'tps',
-  'ttft',
-  'tokens_combo',
-  'cache',
-  'cost',
-]);
+export const STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
+export const DEFAULT_STEP_COLUMN_KEYS = DEFAULT_STEP_TABLE_COLUMNS;
+const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
+const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
 
 function resolveStepTokenParts(st) {
   const inTok = Math.max(0, Number(st?.inputTokens || 0));

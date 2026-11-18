@@ -2,9 +2,24 @@
 'use strict';
 
 // --- shared/settings-normalization.mjs ---
+const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort } = (() => {
 /**
- * @fileoverview 前后端共用的偏好设置归一化规则。
+ * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
  */
+
+const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'zh-CN', 'en-US']);
+
+const THEME_ACCENT_KEYS = Object.freeze([
+  'host',
+  'blue',
+  'emerald',
+  'amber',
+  'violet',
+  'cyan',
+  'rose',
+]);
+
+const FONT_SCALE_KEYS = Object.freeze(['sm', 'md', 'lg', 'xl']);
 
 const TOPBAR_SLOT_KEYS = Object.freeze([
   'context',
@@ -26,6 +41,22 @@ const DEFAULT_TOPBAR_SLOTS = Object.freeze(['tps', 'ttft', 'context']);
 const MIN_TOPBAR_SLOTS = 1;
 const MAX_TOPBAR_SLOTS = 5;
 
+const OVERVIEW_MODULE_KEYS = Object.freeze([
+  'metrics',
+  'context',
+  'quotas',
+  'live_tasks',
+]);
+
+const DEFAULT_OVERVIEW_MODULES = Object.freeze([
+  'metrics',
+  'context',
+  'quotas',
+  'live_tasks',
+]);
+
+const DEFAULT_HOVER_MODULES = Object.freeze(['metrics', 'context', 'quotas']);
+
 const OVERVIEW_METRIC_KEYS = Object.freeze([
   'tps',
   'ttft',
@@ -45,9 +76,217 @@ const DEFAULT_OVERVIEW_METRICS = Object.freeze([
   'step_cost',
 ]);
 
+const STEP_TABLE_COLUMN_KEYS = Object.freeze([
+  'step',
+  'time',
+  'model',
+  'tps',
+  'ttft',
+  'duration',
+  'tokens_combo',
+  'tokens_io_cache',
+  'tokens_custom',
+  'input_tokens',
+  'cache_tokens',
+  'output_tokens',
+  'cache',
+  'cost',
+]);
+
+const DEFAULT_STEP_TABLE_COLUMNS = Object.freeze([
+  'step',
+  'model',
+  'tps',
+  'ttft',
+  'tokens_combo',
+  'cache',
+  'cost',
+]);
+
+const DEFAULT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
+
+const STEP_TOKEN_SEGMENT_ALIASES = Object.freeze({
+  context: 'context',
+  ctx: 'context',
+  '上下文': 'context',
+  in: 'in',
+  new: 'in',
+  input: 'in',
+  '输入': 'in',
+  '新输入': 'in',
+  out: 'out',
+  output: 'out',
+  '输出': 'out',
+  '总输出': 'out',
+  cache: 'cache',
+  cached: 'cache',
+  cache_read: 'cache',
+  cacheread: 'cache',
+  '缓存': 'cache',
+  '缓存读': 'cache',
+  think: 'think',
+  thinking: 'think',
+  '思考': 'think',
+  reply: 'reply',
+  body: 'reply',
+  resp: 'reply',
+  response: 'reply',
+  text: 'reply',
+  '正文': 'reply',
+  '回复': 'reply',
+  total: 'total',
+  all: 'total',
+  sum: 'total',
+  '总计': 'total',
+  '总token': 'total',
+});
+
+const POPOVER_WIDTH_MODES = Object.freeze(['auto', 'custom']);
+const MIN_POPOVER_WIDTH = 440;
+const MAX_POPOVER_WIDTH = 1080;
+const DEFAULT_POPOVER_WIDTH = 580;
+
 /**
- * 归一化面板挂载方式枚举（`'dual'` 顶部栏+侧边栏 | `'composer'` 输入框+侧边栏 | `'sidebar'` 仅侧边栏），
- * 兼容历史 `enableWindowOverlay` 布尔开关，默认 `'dual'`。
+ * 归一化界面语言枚举（默认 `'zh-CN'`，支持 `'auto'`/`'system'` 与 `'en-US'`）。
+ *
+ * @param {unknown} lang
+ * @returns {'auto'|'zh-CN'|'en-US'}
+ */
+function normalizeLanguageSetting(lang) {
+  const raw = String(lang ?? '').trim();
+  if (!raw) return 'zh-CN';
+  const lower = raw.toLowerCase();
+  if (lower === 'auto' || lower === 'system') return 'auto';
+  if (lower === 'en' || lower === 'en-us' || lower.startsWith('en-')) return 'en-US';
+  if (lower === 'zh' || lower === 'zh-cn' || lower.startsWith('zh')) return 'zh-CN';
+  return 'zh-CN';
+}
+
+/**
+ * 归一化主题强调色预设键（默认 `'host'` 跟随宿主原生主题）。
+ *
+ * @param {unknown} accent
+ * @returns {'host'|'blue'|'emerald'|'amber'|'violet'|'cyan'|'rose'}
+ */
+function normalizeThemeAccent(accent) {
+  const clean = String(accent ?? '').trim().toLowerCase();
+  return THEME_ACCENT_KEYS.includes(clean) ? /** @type {any} */ (clean) : 'host';
+}
+
+/**
+ * 归一化面板字号档位（默认 `'md'` 标准 100%）。
+ *
+ * @param {unknown} scale
+ * @returns {'sm'|'md'|'lg'|'xl'}
+ */
+function normalizeFontScale(scale) {
+  const clean = String(scale ?? '').trim().toLowerCase();
+  return FONT_SCALE_KEYS.includes(clean) ? /** @type {any} */ (clean) : 'md';
+}
+
+/**
+ * 归一化模型名称展示模式（`'short'` | `'upstream_compact'` | `'upstream'`），兼容历史 `showUpstreamModel`。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyShowUpstream]
+ * @returns {'short'|'upstream_compact'|'upstream'}
+ */
+function normalizeModelDisplayMode(mode, legacyShowUpstream) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
+  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
+    return 'upstream_compact';
+  }
+  if (m === 'short') return 'short';
+  if (legacyShowUpstream === true) return 'upstream';
+  return 'short';
+}
+
+/**
+ * 归一化 Orchestrator 系列模型 ID 显示风格（`'compact'` vs `'full'`，默认 `'compact'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'compact'|'full'}
+ */
+function normalizeOrchestratorIdMode(mode) {
+  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
+}
+
+/**
+ * 归一化悬浮主面板宽度模式（`'auto'` | `'custom'`，默认 `'auto'`）。
+ *
+ * @param {unknown} mode
+ * @returns {'auto'|'custom'}
+ */
+function normalizePopoverWidthMode(mode) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
+}
+
+/**
+ * 归一化悬浮主面板自定义宽度像素值（范围 `440..1080`，默认 `580`）。
+ *
+ * @param {unknown} width
+ * @returns {number}
+ */
+function normalizePopoverWidth(width) {
+  const num = Number(width);
+  if (!Number.isFinite(num) || num <= 0) return DEFAULT_POPOVER_WIDTH;
+  return Math.max(MIN_POPOVER_WIDTH, Math.min(MAX_POPOVER_WIDTH, Math.round(num)));
+}
+
+/**
+ * 解析步骤表自定义 Token 组合表达式，支持 `:`、`/`、`,`、`|` 分隔与中英文别名（1~4 项不重复）。
+ *
+ * @param {unknown} raw
+ * @returns {Array<'context'|'in'|'out'|'cache'|'think'|'reply'|'total'>}
+ */
+function parseStepTokenComboSegments(raw) {
+  const str = String(raw ?? '').trim();
+  const out = [];
+  const seen = new Set();
+  if (str) {
+    for (const part of str.split(/[:/,|]+/)) {
+      const key = part.trim().toLowerCase();
+      if (!key) continue;
+      const mapped = Object.prototype.hasOwnProperty.call(STEP_TOKEN_SEGMENT_ALIASES, key)
+        ? STEP_TOKEN_SEGMENT_ALIASES[key]
+        : null;
+      if (!mapped || seen.has(mapped)) continue;
+      seen.add(mapped);
+      out.push(/** @type {any} */ (mapped));
+      if (out.length >= 4) break;
+    }
+  }
+  return out.length > 0 ? out : ['context', 'in', 'cache'];
+}
+
+/**
+ * 归一化步骤表自定义 Token 组合格式字符串（如 `'context:new:cache'` -> `'context:in:cache'`）。
+ *
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function normalizeStepTokenComboFormat(raw) {
+  return parseStepTokenComboSegments(raw).join(':');
+}
+
+/**
+ * 归一化插件更新策略枚举（兼容历史 `autoUpdatePlugin` 布尔开关，默认 `'manual'`）。
+ *
+ * @param {unknown} mode
+ * @param {unknown} [legacyAutoUpdate]
+ * @returns {'off'|'manual'|'auto'}
+ */
+function normalizePluginUpdateMode(mode, legacyAutoUpdate) {
+  const m = String(mode ?? '').trim().toLowerCase();
+  if (m === 'off' || m === 'manual' || m === 'auto') return m;
+  if (legacyAutoUpdate === true) return 'auto';
+  return 'manual';
+}
+
+/**
+ * 归一化面板挂载方式枚举（`'dual'` | `'composer'` | `'sidebar'`），兼容历史 `enableWindowOverlay`。
  *
  * @param {unknown} mode
  * @param {unknown} [legacyEnableOverlay]
@@ -63,7 +302,7 @@ function normalizeWindowMountMode(mode, legacyEnableOverlay) {
 }
 
 /**
- * 归一化每周额度统计模式枚举（兼容历史简写 `'tokens'` / `'cost'` 与标准枚举 `'custom_tokens'` / `'custom_cost'`）。
+ * 归一化每周额度统计模式枚举（`'official'` | `'custom_tokens'` | `'custom_cost'`）。
  *
  * @param {unknown} mode
  * @returns {'official'|'custom_tokens'|'custom_cost'}
@@ -125,10 +364,350 @@ function normalizeOverviewMetrics(raw) {
   return out.length > 0 ? out : ['tps'];
 }
 
+/**
+ * 归一化实时监控视图展示的模块及上下顺序（1~4 项，默认 4 项全开）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeOverviewModules(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_OVERVIEW_MODULES];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const val = String(item ?? '').trim();
+    if (!OVERVIEW_MODULE_KEYS.includes(val) || seen.has(val)) continue;
+    seen.add(val);
+    out.push(val);
+    if (out.length >= OVERVIEW_MODULE_KEYS.length) break;
+  }
+  return out.length > 0 ? out : ['metrics'];
+}
+
+/**
+ * 归一化鼠标悬停速览窗展示的模块及上下顺序（0~4 项，默认 3 项；显式空数组 `[]` 表示禁用悬停弹窗）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeHoverModules(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_HOVER_MODULES];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const val = String(item ?? '').trim();
+    if (!OVERVIEW_MODULE_KEYS.includes(val) || seen.has(val)) continue;
+    seen.add(val);
+    out.push(val);
+    if (out.length >= OVERVIEW_MODULE_KEYS.length) break;
+  }
+  return out;
+}
+
+/**
+ * 归一化调用明细「按步查看」表格列配置与左右顺序（2~14 列，默认保留现有 7 列）。
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function normalizeStepTableColumns(raw) {
+  if (!Array.isArray(raw)) {
+    return [...DEFAULT_STEP_TABLE_COLUMNS];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of raw) {
+    const val = String(item ?? '').trim();
+    if (!STEP_TABLE_COLUMN_KEYS.includes(val) || seen.has(val)) continue;
+    seen.add(val);
+    out.push(val);
+    if (out.length >= STEP_TABLE_COLUMN_KEYS.length) break;
+  }
+  if (out.length < 2) {
+    for (const fallbackCol of ['step', 'model', 'tps']) {
+      if (!seen.has(fallbackCol)) {
+        seen.add(fallbackCol);
+        out.push(fallbackCol);
+      }
+      if (out.length >= 2) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * 归一化独立 Web 服务自动托管端口（`0` 表示关闭自动拉起，合法监听端口范围 `1024..65535`）。
+ *
+ * @param {unknown} port
+ * @returns {number}
+ */
+function normalizeStandalonePort(port) {
+  const num = Number(port);
+  if (!Number.isInteger(num) || num <= 0) return 0;
+  if (num >= 1024 && num <= 65535) return num;
+  return 0;
+}
+return { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort };
+})();
+
+// --- shared/telemetry-display-rules.mjs ---
+const { THIRD_PARTY_POOL_RE, isThirdPartyPoolText, classifySpeedTier, classifyCacheTier, classifyStepCostTier, classifyTtftTier, formatCompactTokens, formatCompactCapsuleCost, formatCompactCapsuleTtft, resolveCapsuleQuotaSlotPct, scaleBucketsExact } = (() => {
+/**
+ * @fileoverview 跨 Backend / Frontend / CLI 共用的纯展示阈值、紧凑格式化、第三方配额分池与精确整数缩放规则。
+ */
+
+const THIRD_PARTY_POOL_RE =
+  /3p|claude|anthropic|fable|gpt|openai|oss|sonnet|opus|haiku|third[-_\s]?party/i;
+
+/**
+ * 判断模型或配额桶文本是否归属第三方模型池（Claude & GPT / OSS / 3P）。
+ *
+ * @param {unknown} text
+ * @returns {boolean}
+ */
+function isThirdPartyPoolText(text) {
+  return THIRD_PARTY_POOL_RE.test(String(text || ''));
+}
+
+/**
+ * 输出速度四档语义色阶分类（`'muted'|'good'|'info'|'warn'|'danger'`）。
+ */
+function classifySpeedTier(tokPerSec) {
+  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
+    return 'muted';
+  }
+  const v = Number(tokPerSec);
+  if (v >= 60) return 'good';
+  if (v >= 35) return 'info';
+  if (v >= 20) return 'warn';
+  return 'danger';
+}
+
+/**
+ * 缓存命中率四档语义色阶分类（`'muted'|'good'|'info'|'warn'|'danger'`）。
+ */
+function classifyCacheTier(cacheHitPct, promptTokens = null) {
+  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
+    return 'muted';
+  }
+  const v = Number(cacheHitPct);
+  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
+    return 'muted';
+  }
+  if (v >= 85) return 'good';
+  if (v >= 65) return 'info';
+  if (v >= 30) return 'warn';
+  return 'danger';
+}
+
+/**
+ * 单步费用告警色阶分类（`''|'warn'|'danger'`）。
+ */
+function classifyStepCostTier(costUsd) {
+  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
+  const v = Number(costUsd);
+  if (v >= 0.3) return 'danger';
+  if (v >= 0.15) return 'warn';
+  return '';
+}
+
+/**
+ * 首字延迟告警色阶分类（`'muted'|''|'warn'|'danger'`）。
+ */
+function classifyTtftTier(ttftSec) {
+  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) {
+    return 'muted';
+  }
+  const v = Number(ttftSec);
+  if (v >= 30) return 'danger';
+  if (v >= 18) return 'warn';
+  return '';
+}
+
+function formatCompactTokens(num) {
+  const n = Number(num || 0);
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function formatCompactCapsuleCost(costUsd) {
+  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '--';
+  const val = Math.max(0, Number(costUsd));
+  if (val === 0) return '$0.00';
+  if (val < 0.001) return '<$0.001';
+  if (val < 1) return `$${val.toFixed(3)}`;
+  if (val < 100) return `$${val.toFixed(2)}`;
+  return `$${Math.round(val)}`;
+}
+
+function formatCompactCapsuleTtft(ttftSec) {
+  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '--s';
+  const val = Number(ttftSec);
+  if (val < 1) return `${val.toFixed(2)}s`;
+  if (val < 100) return `${val.toFixed(1)}s`;
+  return `${Math.round(val)}s`;
+}
+
+/**
+ * 解析胶囊指定配额槽位（`quota_auto` / `gemini_5h` / `gemini_weekly` / `claude_5h` / `claude_weekly`）的整数剩余百分比。
+ *
+ * @param {object|null|undefined} quotas
+ * @param {string} slotKey
+ * @returns {number|null}
+ */
+function resolveCapsuleQuotaSlotPct(quotas, slotKey) {
+  if (!quotas || typeof quotas !== 'object') return null;
+  const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
+  const activePool = quotas.activePool || null;
+  const weekly = quotas.weekly || null;
+
+  if (slotKey === 'quota_auto') {
+    const candidates = [];
+    if (activePool && Number.isFinite(Number(activePool.remainingPct))) {
+      candidates.push(Number(activePool.remainingPct));
+    }
+    if (activePool && Number.isFinite(Number(activePool.weeklyRemainingPct))) {
+      candidates.push(Number(activePool.weeklyRemainingPct));
+    }
+    if (!candidates.length && weekly && Number.isFinite(Number(weekly.remainingPct))) {
+      candidates.push(Number(weekly.remainingPct));
+    }
+    if (!candidates.length && pools.length > 0) {
+      for (const p of pools) {
+        if (p && Number.isFinite(Number(p.remainingPct))) candidates.push(Number(p.remainingPct));
+        if (p && Number.isFinite(Number(p.weeklyRemainingPct))) {
+          candidates.push(Number(p.weeklyRemainingPct));
+        }
+      }
+    }
+    if (!candidates.length) return null;
+    return Math.max(0, Math.min(100, Math.round(Math.min(...candidates))));
+  }
+
+  const isClaude = slotKey.startsWith('claude_');
+  const isWeekly = slotKey.endsWith('_weekly');
+  let rawPct = null;
+
+  if (isClaude) {
+    const claudePool =
+      pools.find((p) => p?.poolKey === 'Claude & GPT') ||
+      pools.find((p) => isThirdPartyPoolText(p?.poolKey || p?.poolLabel || ''));
+    const cand = isWeekly ? claudePool?.weeklyRemainingPct : claudePool?.remainingPct;
+    if (cand != null && Number.isFinite(Number(cand))) {
+      rawPct = Number(cand);
+    } else if (activePool && isThirdPartyPoolText(activePool.family || activePool.poolLabel || '')) {
+      const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
+      if (fb != null && Number.isFinite(Number(fb))) rawPct = Number(fb);
+    }
+  } else {
+    const stdGemini =
+      pools.find((p) => p?.poolKey === 'Gemini') ||
+      pools.find(
+        (p) =>
+          /gemini/i.test(String(p?.poolKey || p?.poolLabel || '')) &&
+          !/carbon|argon/i.test(String(p?.poolKey || ''))
+      );
+    const geminiFamilyPools = pools.filter((p) =>
+      /gemini|carbon|argon/i.test(String(p?.poolKey || p?.poolLabel || ''))
+    );
+    const primaryCand = isWeekly ? stdGemini?.weeklyRemainingPct : stdGemini?.remainingPct;
+    if (primaryCand != null && Number.isFinite(Number(primaryCand))) {
+      rawPct = Number(primaryCand);
+    } else {
+      const familyVals = geminiFamilyPools
+        .map((p) => (isWeekly ? p?.weeklyRemainingPct : p?.remainingPct))
+        .filter((v) => v != null && Number.isFinite(Number(v)))
+        .map(Number);
+      if (familyVals.length > 0) {
+        rawPct = Math.min(...familyVals);
+      } else if (
+        activePool &&
+        !isThirdPartyPoolText(activePool.family || activePool.poolLabel || '')
+      ) {
+        const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
+        if (fb != null && Number.isFinite(Number(fb))) rawPct = Number(fb);
+      }
+      if (
+        rawPct == null &&
+        isWeekly &&
+        weekly &&
+        !isThirdPartyPoolText(weekly.poolFamily || '') &&
+        weekly.remainingPct != null &&
+        Number.isFinite(Number(weekly.remainingPct))
+      ) {
+        rawPct = Number(weekly.remainingPct);
+      }
+    }
+  }
+
+  if (rawPct == null || !Number.isFinite(rawPct)) return null;
+  return Math.max(0, Math.min(100, Math.round(rawPct)));
+}
+
+/**
+ * 使用最大余数法（Hamilton 方法）将各非零分桶等比缩放至目标整数总和，
+ * 保证 0 值通道绝不被凭空分配余数，且缩放后各分桶之和精确等于 `targetTotal`。
+ *
+ * @param {Record<string, number>} buckets
+ * @param {readonly string[]} keys
+ * @param {number} targetTotal
+ * @returns {Record<string, number>}
+ */
+function scaleBucketsExact(buckets, keys, targetTotal) {
+  const safeTarget = Math.max(0, Math.round(Number(targetTotal || 0)));
+  const out = {};
+  let currentSum = 0;
+  for (const k of keys) {
+    const val = Math.max(0, Number(buckets[k] || 0));
+    out[k] = val;
+    currentSum += val;
+  }
+  if (safeTarget === 0 || currentSum <= 0) {
+    for (const k of keys) out[k] = 0;
+    return out;
+  }
+  if (currentSum === safeTarget) {
+    for (const k of keys) out[k] = Math.round(out[k]);
+    return out;
+  }
+  const remainders = [];
+  let assigned = 0;
+  for (const k of keys) {
+    const rawVal = out[k];
+    if (rawVal <= 0) {
+      out[k] = 0;
+      continue;
+    }
+    const exact = (rawVal * safeTarget) / currentSum;
+    const floored = Math.floor(exact);
+    out[k] = floored;
+    assigned += floored;
+    remainders.push({ key: k, rem: exact - floored, orig: rawVal });
+  }
+  const diff = safeTarget - assigned;
+  if (diff > 0 && remainders.length > 0) {
+    remainders.sort((a, b) => b.rem - a.rem || b.orig - a.orig);
+    for (let i = 0; i < diff; i++) {
+      out[remainders[i % remainders.length].key] += 1;
+    }
+  }
+  return out;
+}
+return { THIRD_PARTY_POOL_RE, isThirdPartyPoolText, classifySpeedTier, classifyCacheTier, classifyStepCostTier, classifyTtftTier, formatCompactTokens, formatCompactCapsuleCost, formatCompactCapsuleTtft, resolveCapsuleQuotaSlotPct, scaleBucketsExact };
+})();
+
 // --- shared/window-bridge-protocol.mjs ---
+const { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_OVERLAY_KEY, CONTEXT_WINDOWS_GLOBAL_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge } = (() => {
 const WINDOW_BRIDGE_KEY = '__AGUsageMonitorBridge';
 const WINDOW_BRIDGE_ROUTE_KEY = 'hostRouteCascadeId';
 const WINDOW_OVERLAY_KEY = '__AGUsageMonitorOverlay';
+const CONTEXT_WINDOWS_GLOBAL_KEY = '__AGUsageMonitorContextWindows';
 
 const WINDOW_OVERLAY_METHODS = Object.freeze({
   ensureAlive: 'ensureAlive',
@@ -141,11 +720,28 @@ const WINDOW_OVERLAY_METHODS = Object.freeze({
   dispose: 'dispose',
 });
 
+const BRIDGE_API_ROUTE_DEFS = Object.freeze([
+  Object.freeze({ path: '/api/telemetry', method: 'GET', action: 'telemetry' }),
+  Object.freeze({ path: '/api/settings', method: 'POST', action: 'settings' }),
+  Object.freeze({ path: '/api/accounts', method: 'GET', action: 'accounts_get' }),
+  Object.freeze({ path: '/api/accounts/update', method: 'POST', action: 'accounts_update' }),
+  Object.freeze({ path: '/api/context-window', method: 'POST', action: 'context_window' }),
+  Object.freeze({ path: '/api/settings/reset', method: 'POST', action: 'settings_reset' }),
+  Object.freeze({ path: '/api/cache/rebuild', method: 'POST', action: 'cache_rebuild' }),
+  Object.freeze({ path: '/api/cloud-sync', method: 'POST', action: 'cloud_sync' }),
+  Object.freeze({ path: '/api/plugin-update', method: 'POST', action: 'plugin_update' }),
+]);
+
+const BRIDGE_API_PATHS = Object.freeze(BRIDGE_API_ROUTE_DEFS.map((r) => r.path));
+
 function readInjectedWindowBridge() {
   return typeof window === 'undefined' ? undefined : window[WINDOW_BRIDGE_KEY];
 }
+return { WINDOW_BRIDGE_KEY, WINDOW_BRIDGE_ROUTE_KEY, WINDOW_OVERLAY_KEY, CONTEXT_WINDOWS_GLOBAL_KEY, WINDOW_OVERLAY_METHODS, BRIDGE_API_ROUTE_DEFS, BRIDGE_API_PATHS, readInjectedWindowBridge };
+})();
 
 // --- src/icons/svgRegistry.js ---
+const { SVG_ICON_DEFS } = (() => {
 /**
  * @fileoverview Pure vector SVG icon registry (16x16 grid).
  * Strictly zero emoji characters anywhere in the codebase.
@@ -246,8 +842,11 @@ const SVG_ICON_DEFS = Object.freeze({
     { tag: 'circle', attrs: { cx: '10', cy: '12', r: '1.05', fill: 'currentColor', stroke: 'none' } },
   ],
 });
+return { SVG_ICON_DEFS };
+})();
 
 // --- src/icons/SvgIcon.js ---
+const { SVG_NS, createSvgIcon, patchSvgIcon } = (() => {
 /**
  * @fileoverview Dynamic SVG icon component and incremental icon patcher.
  */
@@ -293,8 +892,11 @@ function patchSvgIcon(svgEl, name) {
   }
   return true;
 }
+return { SVG_NS, createSvgIcon, patchSvgIcon };
+})();
 
 // --- src/core/reactive.js ---
+const { createReactiveStore } = (() => {
 /**
  * @fileoverview Fine-grained reactive store with async microtask batching
  * and structural slice comparison to prevent full-page re-renders.
@@ -412,8 +1014,11 @@ function createReactiveStore(initialState) {
     subscribe,
   };
 }
+return { createReactiveStore };
+})();
 
 // --- src/i18n/zh-CN.js ---
+const { I18N_MESSAGES_ZH_CN } = (() => {
 /**
  * @fileoverview Simplified Chinese (zh-CN) dictionary for Antigravity Usage & Speed Monitor.
  * Matches 100% of the existing out-of-the-box UI copy. Zero emoji characters.
@@ -940,8 +1545,11 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.resettingBtn': '重置中…',
   'settings.oth.resetAllDone': '已恢复全部默认设置',
 });
+return { I18N_MESSAGES_ZH_CN };
+})();
 
 // --- src/i18n/en-US.js ---
+const { I18N_MESSAGES_EN_US } = (() => {
 /**
  * @fileoverview English (en-US) dictionary for Antigravity Usage & Speed Monitor.
  * Zero emoji characters.
@@ -1468,8 +2076,11 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.resettingBtn': 'Resetting…',
   'settings.oth.resetAllDone': 'All preferences restored to defaults',
 });
+return { I18N_MESSAGES_EN_US };
+})();
 
 // --- src/i18n/index.js ---
+const { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t } = (() => {
 /**
  * @fileoverview Reactive lightweight i18n engine (`zh-CN` / `en-US` / `auto`).
  * Default language is `'zh-CN'` so out-of-the-box UI matches existing behavior 100%.
@@ -1482,11 +2093,7 @@ const I18N_DICTIONARIES = Object.freeze({
 });
 
 function normalizeI18nLanguage(raw) {
-  const val = String(raw ?? '').trim();
-  if (val === 'auto') return 'auto';
-  if (/^en(?:-|$)/i.test(val)) return 'en-US';
-  if (/^zh(?:-|$)/i.test(val)) return 'zh-CN';
-  return 'zh-CN';
+  return normalizeLanguageSetting(raw);
 }
 
 function detectHostSystemLocale() {
@@ -1539,8 +2146,11 @@ function t(key, vars = undefined) {
     vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : ''
   );
 }
+return { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t };
+})();
 
 // --- src/core/appearance.js ---
+const { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, applyAppearanceToRoot } = (() => {
 /**
  * @fileoverview Theme accent palette & panel font-scale appearance engine.
  * Applies CSS custom properties cleanly to Sidebar `:root` and Shadow DOM hosts,
@@ -1632,8 +2242,11 @@ function applyAppearanceToRoot(targetEl, settings, { includeFontScale = true } =
     }
   }
 }
+return { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, applyAppearanceToRoot };
+})();
 
 // --- src/core/domPatch.js ---
+const { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList } = (() => {
 /**
  * @fileoverview Incremental DOM patching utilities and keyed list reconciler.
  * Prevents full innerHTML replacements and preserves active DOM element state.
@@ -1833,8 +2446,11 @@ function patchKeyedList(container, items, { keyFn, sigFn, createRow, updateRow }
     }
   }
 }
+return { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList };
+})();
 
 // --- src/core/component.js ---
+const { defineComponent } = (() => {
 /**
  * @fileoverview Vue-inspired lightweight component kernel supporting
  * props, custom v-model value transmission (emit('update:modelValue', val)),
@@ -1909,8 +2525,11 @@ function defineComponent({ name, setup }) {
     };
   };
 }
+return { defineComponent };
+})();
 
 // --- src/core/formatters.js ---
+const { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName } = (() => {
 /**
  * @fileoverview Pure formatting utilities for speed metrics, token counts,
  * USD estimates, countdown timers, and custom datetime displays.
@@ -1933,53 +2552,24 @@ function formatCachePct(value) {
 }
 
 function getSpeedToneClass(tokPerSec) {
-  if (tokPerSec == null || !Number.isFinite(Number(tokPerSec)) || Number(tokPerSec) <= 0) {
-    return 'tone-muted';
-  }
-  const v = Number(tokPerSec);
-  if (v >= 60) return 'tone-good';
-  if (v >= 35) return 'tone-info';
-  if (v >= 20) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifySpeedTier(tokPerSec)}`;
 }
 
 function getCacheToneClass(cacheHitPct, promptTokens = null) {
-  if (cacheHitPct == null || !Number.isFinite(Number(cacheHitPct))) {
-    return 'tone-muted';
-  }
-  const v = Number(cacheHitPct);
-  if (promptTokens != null && Number(promptTokens) <= 0 && v <= 0) {
-    return 'tone-muted';
-  }
-  if (v >= 85) return 'tone-good';
-  if (v >= 65) return 'tone-info';
-  if (v >= 30) return 'tone-warn';
-  return 'tone-danger';
+  return `tone-${classifyCacheTier(cacheHitPct, promptTokens)}`;
 }
 
 function getStepCostToneClass(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '';
-  const v = Number(costUsd);
-  if (v >= 0.3) return 'tone-danger';
-  if (v >= 0.15) return 'tone-warn';
-  return '';
+  const tier = classifyStepCostTier(costUsd);
+  return tier ? `tone-${tier}` : '';
 }
 
 function getTtftToneClass(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '';
-  const v = Number(ttftSec);
-  if (v >= 30) return 'tone-danger';
-  if (v >= 18) return 'tone-warn';
-  return '';
+  const tier = classifyTtftTier(ttftSec);
+  return tier === 'warn' || tier === 'danger' ? `tone-${tier}` : '';
 }
 
-function formatTokens(num) {
-  const n = Number(num || 0);
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(Math.round(n));
-}
+const formatTokens = formatCompactTokens;
 
 function formatTokensPrecise(num) {
   const n = Number(num || 0);
@@ -2084,23 +2674,6 @@ function formatElapsedSec(seconds) {
   return `${h}h ${remM}m`;
 }
 
-/**
- * 归一化普通模型显示模式（`'short'` 精简代号 | `'upstream_compact'` 去厂商前缀原始 ID | `'upstream'` 完整原始 ID）。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyShowUpstream]
- * @returns {'short'|'upstream_compact'|'upstream'}
- */
-function normalizeModelDisplayMode(mode, legacyShowUpstream) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-    return 'upstream_compact';
-  }
-  if (m === 'short') return 'short';
-  if (legacyShowUpstream === true) return 'upstream';
-  return 'short';
-}
 
 /**
  * 隐藏原始模型 ID 开头的 `gemini-`、`claude-`、`gpt-` 厂商前缀以节省单行表格空间（确保剥离后非空）。
@@ -2120,15 +2693,7 @@ function stripCompactionMarker(rawText) {
     .trim();
 }
 
-/**
- * 归一化 Orchestrator 系列 ID 显示格式枚举（`'compact'` 精简代号 vs `'full'` 原始完整 ID，默认 `'compact'`）。
- *
- * @param {unknown} mode
- * @returns {'compact'|'full'}
- */
-function normalizeOrchestratorIdDisplayMode(mode) {
-  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-}
+const normalizeOrchestratorIdDisplayMode = normalizeOrchestratorIdMode;
 
 /**
  * 统一解析步骤、会话摘要或模型汇总行面向用户的模型显示文本与悬停提示。
@@ -2424,8 +2989,11 @@ function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
     };
   });
 }
+return { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName };
+})();
 
 // --- src/core/httpClient.js ---
+const { getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi } = (() => {
 /**
  * @fileoverview Async HTTP client with AbortController cancellation for stale
  * polling requests, concurrent GET deduplication, and dual-mode transport
@@ -2669,8 +3237,11 @@ async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTi
   }
   return promise;
 }
+return { getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi };
+})();
 
 // --- src/store/uiStore.js ---
+const { getViewTabs, uiStore, getVisibleMonitorView } = (() => {
 /**
  * @fileoverview UI navigation and view state store.
  */
@@ -2698,8 +3269,11 @@ const uiStore = createReactiveStore({
 function getVisibleMonitorView(state = uiStore.getState()) {
   return state.monitorVisible ? state.activeView : null;
 }
+return { getViewTabs, uiStore, getVisibleMonitorView };
+})();
 
 // --- src/store/telemetryStore.js ---
+const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -2806,263 +3380,32 @@ let loopIntervalMs = 2000;
 let loopTickFn = null;
 
 const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
-
 const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
-
-const CLIENT_OVERVIEW_MODULE_KEYS = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
-
-const DEFAULT_CLIENT_OVERVIEW_MODULES = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
-
-const DEFAULT_CLIENT_HOVER_MODULES = Object.freeze(['metrics', 'context', 'quotas']);
-
+const CLIENT_OVERVIEW_MODULE_KEYS = OVERVIEW_MODULE_KEYS;
+const DEFAULT_CLIENT_OVERVIEW_MODULES = DEFAULT_OVERVIEW_MODULES;
+const DEFAULT_CLIENT_HOVER_MODULES = DEFAULT_HOVER_MODULES;
 const CLIENT_OVERVIEW_METRIC_KEYS = OVERVIEW_METRIC_KEYS;
-
 const DEFAULT_CLIENT_OVERVIEW_METRICS = DEFAULT_OVERVIEW_METRICS;
+const CLIENT_STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
+const DEFAULT_CLIENT_STEP_COLUMNS = DEFAULT_STEP_TABLE_COLUMNS;
+const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+const MIN_CLIENT_POPOVER_WIDTH = MIN_POPOVER_WIDTH;
+const MAX_CLIENT_POPOVER_WIDTH = MAX_POPOVER_WIDTH;
+const DEFAULT_CLIENT_POPOVER_WIDTH = DEFAULT_POPOVER_WIDTH;
 
-const CLIENT_STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'time',
-  'model',
-  'tps',
-  'ttft',
-  'duration',
-  'tokens_combo',
-  'tokens_io_cache',
-  'tokens_custom',
-  'input_tokens',
-  'cache_tokens',
-  'output_tokens',
-  'cache',
-  'cost',
-]);
-
-const DEFAULT_CLIENT_STEP_COLUMNS = Object.freeze([
-  'step',
-  'model',
-  'tps',
-  'ttft',
-  'tokens_combo',
-  'cache',
-  'cost',
-]);
-
-const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = 'context:in:cache';
-
-const CLIENT_STEP_TOKEN_ALIASES = Object.freeze({
-  context: 'context',
-  ctx: 'context',
-  '上下文': 'context',
-  in: 'in',
-  new: 'in',
-  input: 'in',
-  '输入': 'in',
-  '新输入': 'in',
-  out: 'out',
-  output: 'out',
-  '输出': 'out',
-  '总输出': 'out',
-  cache: 'cache',
-  cached: 'cache',
-  cache_read: 'cache',
-  cacheread: 'cache',
-  '缓存': 'cache',
-  '缓存读': 'cache',
-  think: 'think',
-  thinking: 'think',
-  '思考': 'think',
-  reply: 'reply',
-  body: 'reply',
-  resp: 'reply',
-  response: 'reply',
-  text: 'reply',
-  '正文': 'reply',
-  '回复': 'reply',
-  total: 'total',
-  all: 'total',
-  sum: 'total',
-  '总计': 'total',
-  '总token': 'total',
-});
-
-function parseClientStepTokenComboSegments(raw) {
-  const str = String(raw ?? '').trim();
-  const out = [];
-  const seen = new Set();
-  if (str) {
-    for (const part of str.split(/[:/,|]+/)) {
-      const key = part.trim().toLowerCase();
-      if (!key) continue;
-      const mapped = Object.prototype.hasOwnProperty.call(CLIENT_STEP_TOKEN_ALIASES, key)
-        ? CLIENT_STEP_TOKEN_ALIASES[key]
-        : null;
-      if (!mapped || seen.has(mapped)) continue;
-      seen.add(mapped);
-      out.push(mapped);
-      if (out.length >= 4) break;
-    }
-  }
-  return out.length > 0 ? out : ['context', 'in', 'cache'];
-}
-
-function normalizeClientStepTokenComboFormat(raw) {
-  return parseClientStepTokenComboSegments(raw).join(':');
-}
-
-const MIN_CLIENT_POPOVER_WIDTH = 440;
-const MAX_CLIENT_POPOVER_WIDTH = 1080;
-const DEFAULT_CLIENT_POPOVER_WIDTH = 580;
-
-function normalizeClientPopoverWidthMode(mode) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
-}
-
-function normalizeClientPopoverWidth(width) {
-  const num = Number(width);
-  if (!Number.isFinite(num) || num <= 0) return DEFAULT_CLIENT_POPOVER_WIDTH;
-  return Math.max(MIN_CLIENT_POPOVER_WIDTH, Math.min(MAX_CLIENT_POPOVER_WIDTH, Math.round(num)));
-}
-
-function normalizeClientModelDisplayMode(mode, legacyShowUpstream) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-  if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-    return 'upstream_compact';
-  }
-  if (m === 'short') return 'short';
-  if (legacyShowUpstream === true) return 'upstream';
-  return 'short';
-}
-
-function normalizeClientOrderedList(raw, { allowedKeys, defaultItems, minLen, maxLen }) {
-  if (!Array.isArray(raw)) {
-    return [...defaultItems];
-  }
-  const allowedSet = new Set(allowedKeys);
-  const seen = new Set();
-  const out = [];
-  for (const item of raw) {
-    const key = String(item ?? '').trim();
-    if (!key || key === 'none' || !allowedSet.has(key) || seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-    if (out.length >= maxLen) break;
-  }
-  if (out.length < minLen) {
-    for (const fallbackKey of [...defaultItems, ...allowedKeys]) {
-      if (!seen.has(fallbackKey) && allowedSet.has(fallbackKey)) {
-        seen.add(fallbackKey);
-        out.push(fallbackKey);
-        if (out.length >= minLen) break;
-      }
-    }
-  }
-  return out;
-}
-
-/**
- * 归一化前端顶栏胶囊动态槽位配置数组（支持 1..5 项不重复指标，兼容迁移旧版 `'none'` 占位）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientTopbarSlots(raw) {
-  return normalizeTopbarCapsuleSlots(raw);
-}
-
-/**
- * 归一化鼠标悬浮速览窗展示模块列表（支持 0..4 项，`0` 项代表关闭悬浮窗）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientHoverModules(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
-    defaultItems: DEFAULT_CLIENT_HOVER_MODULES,
-    minLen: 0,
-    maxLen: 4,
-  });
-}
-
-/**
- * 归一化实时监控视图展示模块列表（支持 1..4 项）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientOverviewModules(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_OVERVIEW_MODULE_KEYS,
-    defaultItems: DEFAULT_CLIENT_OVERVIEW_MODULES,
-    minLen: 1,
-    maxLen: 4,
-  });
-}
-
-/**
- * 归一化实时监控第一行指标矩阵配置（支持 1..4 项）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientOverviewMetrics(raw) {
-  return normalizeOverviewMetrics(raw);
-}
-
-/**
- * 归一化调用明细「按步查看」显示列配置（支持 2..12 列）。
- *
- * @param {unknown} raw
- * @returns {string[]}
- */
-function normalizeClientStepColumns(raw) {
-  return normalizeClientOrderedList(raw, {
-    allowedKeys: CLIENT_STEP_COLUMN_KEYS,
-    defaultItems: DEFAULT_CLIENT_STEP_COLUMNS,
-    minLen: 2,
-    maxLen: CLIENT_STEP_COLUMN_KEYS.length,
-  });
-}
-
-/**
- * 归一化前端插件更新策略（`'off'` | `'manual'` | `'auto'`），兼容旧版布尔字段。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyAutoUpdate]
- * @returns {'off'|'manual'|'auto'}
- */
-function normalizeClientUpdateMode(mode, legacyAutoUpdate) {
-  const m = String(mode ?? '').trim().toLowerCase();
-  if (m === 'off' || m === 'manual' || m === 'auto') return m;
-  if (legacyAutoUpdate === true) return 'auto';
-  return 'manual';
-}
-
-function normalizeClientOrchestratorIdMode(mode) {
-  return String(mode ?? '').trim().toLowerCase() === 'full' ? 'full' : 'compact';
-}
-
-/**
- * 归一化前端面板挂载方式（`'dual'` | `'composer'` | `'sidebar'`），兼容旧版 `enableWindowOverlay` 布尔字段。
- *
- * @param {unknown} mode
- * @param {unknown} [legacyEnableOverlay]
- * @returns {'dual'|'composer'|'sidebar'}
- */
-function normalizeClientWindowMountMode(mode, legacyEnableOverlay) {
-  return normalizeWindowMountMode(mode, legacyEnableOverlay);
-}
+const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
+const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
+const normalizeClientPopoverWidthMode = normalizePopoverWidthMode;
+const normalizeClientPopoverWidth = normalizePopoverWidth;
+const normalizeClientModelDisplayMode = normalizeModelDisplayMode;
+const normalizeClientTopbarSlots = normalizeTopbarCapsuleSlots;
+const normalizeClientHoverModules = normalizeHoverModules;
+const normalizeClientOverviewModules = normalizeOverviewModules;
+const normalizeClientOverviewMetrics = normalizeOverviewMetrics;
+const normalizeClientStepColumns = normalizeStepTableColumns;
+const normalizeClientUpdateMode = normalizePluginUpdateMode;
+const normalizeClientOrchestratorIdMode = normalizeOrchestratorIdMode;
+const normalizeClientWindowMountMode = normalizeWindowMountMode;
 
 function isEquivalentTelemetry(prev, next) {
   if (!prev || !next) return false;
@@ -3096,51 +3439,29 @@ function isEquivalentTelemetry(prev, next) {
   ) {
     return false;
   }
-  const normModelMode = (mode, legacyShowUpstream) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    if (m === 'upstream' || m === 'raw' || m === 'full') return 'upstream';
-    if (m === 'upstream_compact' || m === 'compact_upstream' || m === 'trimmed') {
-      return 'upstream_compact';
-    }
-    if (m === 'short') return 'short';
-    return legacyShowUpstream === true ? 'upstream' : 'short';
-  };
-  const normPopMode = (mode) => {
-    const m = String(mode ?? '').trim().toLowerCase();
-    return m === 'custom' || m === 'fixed' ? 'custom' : 'auto';
-  };
-  const normPopW = (w) => {
-    const n = Number(w);
-    return Number.isFinite(n) && n > 0 ? Math.max(440, Math.min(1080, Math.round(n))) : 580;
-  };
   if (
-    normModelMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
-    normModelMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
+    normalizeModelDisplayMode(pSet?.modelDisplayMode, pSet?.showUpstreamModel) !==
+    normalizeModelDisplayMode(nSet?.modelDisplayMode, nSet?.showUpstreamModel)
   ) {
     return false;
   }
   if (pSet?.showUpstreamModel !== nSet?.showUpstreamModel) return false;
-  if (normPopMode(pSet?.popoverWidthMode) !== normPopMode(nSet?.popoverWidthMode)) {
+  if (normalizePopoverWidthMode(pSet?.popoverWidthMode) !== normalizePopoverWidthMode(nSet?.popoverWidthMode)) {
     return false;
   }
-  if (normPopW(pSet?.popoverWidth) !== normPopW(nSet?.popoverWidth)) {
+  if (normalizePopoverWidth(pSet?.popoverWidth) !== normalizePopoverWidth(nSet?.popoverWidth)) {
     return false;
   }
   if (
-    String(pSet?.stepTokenComboFormat ?? 'context:in:cache').trim() !==
-    String(nSet?.stepTokenComboFormat ?? 'context:in:cache').trim()
+    String(pSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim() !==
+    String(nSet?.stepTokenComboFormat ?? DEFAULT_STEP_TOKEN_COMBO_FORMAT).trim()
   ) {
     return false;
   }
-  const prevOrchIdMode =
-    String(pSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
-      ? 'full'
-      : 'compact';
-  const nextOrchIdMode =
-    String(nSet?.orchestratorIdMode ?? 'compact').trim().toLowerCase() === 'full'
-      ? 'full'
-      : 'compact';
-  if (prevOrchIdMode !== nextOrchIdMode) {
+  if (
+    normalizeOrchestratorIdMode(pSet?.orchestratorIdMode) !==
+    normalizeOrchestratorIdMode(nSet?.orchestratorIdMode)
+  ) {
     return false;
   }
   if (pSet?.weeklyLimitMode !== nSet?.weeklyLimitMode) return false;
@@ -4079,46 +4400,73 @@ function formatAgentLabel(agent) {
  * @param {string} [ctxInspectorAgentId='auto']
  * @param {boolean} [includeSteps=false] 是否组装调用明细所需的步骤列表
  */
+const scopedStepProjectionMemo = new WeakMap();
+
 function resolveScopedConversation(
   telemetry,
   selectedAgentScope = 'all',
   ctxInspectorAgentId = 'auto',
   includeSteps = false
 ) {
-  const active = telemetry?.activeConversation || {};
+  const rawActive = telemetry?.activeConversation;
+  const active = rawActive || {};
   const agents = Array.isArray(active.agents) && active.agents.length > 0 ? active.agents : [];
   const hasSubagents = Boolean(active.hasSubagents && agents.length > 1);
   const subagents = agents.filter((a) => !a.isMain);
-  const mainAgent = agents.find((a) => a.isMain) || active;
-  if (includeSteps && !Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
-    mainAgent.recentSteps = active.recentSteps;
-  }
-  const aggregated = active.aggregated || active;
-  if (includeSteps && hasSubagents && !Array.isArray(aggregated.recentSteps)) {
-    const combined = [];
-    for (const ag of agents) {
-      const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
-      for (const step of steps) combined.push(step);
+  let mainAgent = agents.find((a) => a.isMain) || active;
+  let aggregated = active.aggregated || active;
+  let resolvedAgents = agents;
+
+  if (includeSteps) {
+    let cached = rawActive && typeof rawActive === 'object' ? scopedStepProjectionMemo.get(rawActive) : null;
+    if (!cached) {
+      let nextMain = mainAgent;
+      let nextAgents = agents;
+      if (!Array.isArray(mainAgent.recentSteps) && Array.isArray(active.recentSteps)) {
+        nextMain = { ...mainAgent, recentSteps: active.recentSteps };
+        if (agents.includes(mainAgent)) {
+          nextAgents = agents.map((ag) => (ag === mainAgent ? nextMain : ag));
+        }
+      }
+      let nextAgg = aggregated;
+      if (hasSubagents && !Array.isArray(aggregated.recentSteps)) {
+        const combined = [];
+        for (const ag of nextAgents) {
+          const steps = ag.isMain ? ag.recentSteps || active.recentSteps || [] : ag.recentSteps || [];
+          for (const step of steps) combined.push(step);
+        }
+        combined.sort(
+          (a, b) =>
+            (b.createdAtMs || 0) - (a.createdAtMs || 0) ||
+            (b.agentIndex || 0) - (a.agentIndex || 0) ||
+            (b.stepIndex || 0) - (a.stepIndex || 0)
+        );
+        nextAgg = { ...aggregated, recentSteps: combined };
+      }
+      cached = { mainAgent: nextMain, aggregated: nextAgg, agents: nextAgents };
+      if (rawActive && typeof rawActive === 'object') {
+        scopedStepProjectionMemo.set(rawActive, cached);
+      }
     }
-    combined.sort(
-      (a, b) =>
-        (b.createdAtMs || 0) - (a.createdAtMs || 0) ||
-        (b.agentIndex || 0) - (a.agentIndex || 0) ||
-        (b.stepIndex || 0) - (a.stepIndex || 0)
-    );
-    aggregated.recentSteps = combined;
+    mainAgent = cached.mainAgent;
+    aggregated = cached.aggregated;
+    resolvedAgents = cached.agents;
   }
 
   if (!hasSubagents) {
+    const singleScoped =
+      includeSteps && !Array.isArray(active.recentSteps) && Array.isArray(mainAgent.recentSteps)
+        ? { ...active, recentSteps: mainAgent.recentSteps }
+        : active;
     return {
       hasSubagents: false,
       effectiveScope: 'main',
       effectiveCtxScope: 'main',
-      agents,
+      agents: resolvedAgents,
       subagents: [],
       mainAgent,
       aggregated,
-      scopedConv: active,
+      scopedConv: singleScoped,
       ctxAgent: mainAgent,
     };
   }
@@ -4134,13 +4482,13 @@ function resolveScopedConversation(
   const scopedConv =
     effectiveScope === 'all'
       ? aggregated
-      : agents.find((a) => a.agentId === effectiveScope) || mainAgent;
+      : resolvedAgents.find((a) => a.agentId === effectiveScope) || mainAgent;
 
   let ctxAgent = scopedConv;
   let effectiveCtxScope = effectiveScope;
   if (effectiveScope === 'all') {
     if (ctxInspectorAgentId && ctxInspectorAgentId !== 'auto') {
-      const matched = agents.find((a) => a.agentId === ctxInspectorAgentId);
+      const matched = resolvedAgents.find((a) => a.agentId === ctxInspectorAgentId);
       if (matched) {
         ctxAgent = matched;
         effectiveCtxScope = matched.agentId;
@@ -4152,8 +4500,8 @@ function resolveScopedConversation(
     }
     if (effectiveCtxScope === 'auto') {
       ctxAgent =
-        agents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
-        agents.find((a) => !a.isSideQuestion && a.isRunning) ||
+        resolvedAgents.find((a) => !a.isSideQuestion && a.agentId === aggregated.activeAgentId) ||
+        resolvedAgents.find((a) => !a.isSideQuestion && a.isRunning) ||
         mainAgent;
     }
   }
@@ -4162,7 +4510,7 @@ function resolveScopedConversation(
     hasSubagents: true,
     effectiveScope,
     effectiveCtxScope,
-    agents,
+    agents: resolvedAgents,
     subagents,
     mainAgent,
     aggregated,
@@ -4188,8 +4536,11 @@ function isMacHostPlatform(telemetry) {
   }
   return false;
 }
+return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, resolveScopedConversation, isMacHostPlatform };
+})();
 
 // --- src/components/ui/TopLongPillNav.js ---
+const { TopLongPillNav } = (() => {
 /**
  * @fileoverview Top Long-Pill Navigation Bar (顶部唯一长药丸功能分割栏).
  * Splits the application into focused single-viewport views and animates
@@ -4307,8 +4658,11 @@ const TopLongPillNav = defineComponent({
     };
   },
 });
+return { TopLongPillNav };
+})();
 
 // --- src/components/ui/CustomSelect.js ---
+const { CustomSelect } = (() => {
 /**
  * @fileoverview Bespoke CustomSelect dropdown component replacing native <select> / <option>.
  * Supports both single-select and multi-select (`multiple: true`) modes, with incremental
@@ -4633,8 +4987,11 @@ const CustomSelect = defineComponent({
     };
   },
 });
+return { CustomSelect };
+})();
 
 // --- src/components/ui/CustomNumberInput.js ---
+const { CustomNumberInput } = (() => {
 /**
  * @fileoverview Bespoke CustomNumberInput spinbutton & precision stepper.
  * Replaces native <input type="number"> with custom SVG step controls,
@@ -4761,8 +5118,11 @@ const CustomNumberInput = defineComponent({
     };
   },
 });
+return { CustomNumberInput };
+})();
 
 // --- src/components/ui/CustomDateTimePicker.js ---
+const { CustomDateTimePicker } = (() => {
 /**
  * @fileoverview Bespoke CustomDateTimePicker calendar matrix and hour/minute stepper.
  * Replaces native <input type="datetime-local"> and emits Unix epoch ms.
@@ -5031,8 +5391,11 @@ const CustomDateTimePicker = defineComponent({
     };
   },
 });
+return { CustomDateTimePicker };
+})();
 
 // --- src/components/ui/CustomScrollbar.js ---
+const { CustomScrollbar } = (() => {
 /**
  * @fileoverview Bespoke custom scrollbar component (零原生滚动条).
  * Hides native OS scrollbars completely and renders a precision 4px floating
@@ -5195,8 +5558,11 @@ const CustomScrollbar = defineComponent({
     };
   },
 });
+return { CustomScrollbar };
+})();
 
 // --- src/components/ui/SegmentedControl.js ---
+const { SegmentedControl } = (() => {
 /**
  * @fileoverview Micro-bezel (2px radius) SegmentedControl switcher
  * for time-range filtering, context limit selection, and sub-table switching.
@@ -5251,8 +5617,11 @@ const SegmentedControl = defineComponent({
     };
   },
 });
+return { SegmentedControl };
+})();
 
 // --- src/components/ui/ContextSegmentMeter.js ---
+const { ContextSegmentMeter } = (() => {
 /**
  * @fileoverview 10-channel segmented context window progress bar updated via
  * CSS custom variables against the current model's automatic compaction baseline,
@@ -5339,8 +5708,11 @@ const ContextSegmentMeter = defineComponent({
     };
   },
 });
+return { ContextSegmentMeter };
+})();
 
 // --- src/components/ui/FourSegmentBar.js ---
+const { createFourSegmentBar } = (() => {
 /**
  * @fileoverview 通用 4 段式 Token 构成比例条组件 (FourSegmentBar).
  * 用于在消费概览、热门模型明细及数据来源明细中直观展示：
@@ -5387,8 +5759,11 @@ function createFourSegmentBar() {
 
   return { el, update };
 }
+return { createFourSegmentBar };
+})();
 
 // --- src/components/charts/TrendAreaChart.js ---
+const { HEATMAP_DAYS_THRESHOLD, createTrendAreaChart } = (() => {
 /**
  * @fileoverview 交互式历史用量趋势图组件 (TrendAreaChart).
  * 支持双模式自适应切换：
@@ -6323,8 +6698,11 @@ function createTrendAreaChart() {
 
   return { el: chartWrap, update, destroy };
 }
+return { HEATMAP_DAYS_THRESHOLD, createTrendAreaChart };
+})();
 
 // --- src/components/charts/SessionStepCharts.js ---
+const { MODEL_COLOR_VARS, getStepModelGroupKey, toChronologicalSteps, computeLinearFit, computePublicationFit, createSessionLineChart, createModelFitChart } = (() => {
 /**
  * @fileoverview 当前会话步骤级线性走势图与模型趋势拟合图组件 (SessionStepCharts).
  *
@@ -8553,8 +8931,11 @@ function createModelFitChart() {
 
   return { el: rootEl, update, destroy };
 }
+return { MODEL_COLOR_VARS, getStepModelGroupKey, toChronologicalSteps, computeLinearFit, computePublicationFit, createSessionLineChart, createModelFitChart };
+})();
 
 // --- src/registries/metricRegistry.js ---
+const { CAPSULE_METRIC_KEYS, getCapsuleMetricOptions, getOverviewMetricOptions, resolveQuotaCapsuleSummary, resolveSpecificQuotaSlotSummary, resolveCapsuleMetricPresentation, resolveOverviewMetricCell } = (() => {
 /**
  * @fileoverview Decoupled Metric Registry (`metricRegistry.js`).
  * Centralizes presentation & option metadata for:
@@ -8563,10 +8944,7 @@ function createModelFitChart() {
  */
 
 
-
 const CAPSULE_METRIC_KEYS = TOPBAR_SLOT_KEYS;
-
-const THIRD_PARTY_FAMILY_RE = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i;
 
 function getCapsuleMetricOptions() {
   return CAPSULE_METRIC_KEYS.map((key) => ({
@@ -8655,96 +9033,12 @@ function resolveQuotaCapsuleSummary(quotas) {
  * @returns {{ roundedPct: number, shortText: string } | null}
  */
 function resolveSpecificQuotaSlotSummary(quotas, slotKey) {
-  if (!quotas) return null;
-  const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
-  const activePool = quotas.activePool || null;
-  const isClaude = slotKey.startsWith('claude_');
-  const isWeekly = slotKey.endsWith('_weekly');
-  let rawPct = null;
-
-  if (isClaude) {
-    const claudePool =
-      pools.find((p) => p?.poolKey === 'Claude & GPT') ||
-      pools.find((p) => THIRD_PARTY_FAMILY_RE.test(String(p?.poolKey || p?.poolLabel || '')));
-    const cand = isWeekly ? claudePool?.weeklyRemainingPct : claudePool?.remainingPct;
-    if (cand != null && Number.isFinite(Number(cand))) {
-      rawPct = Number(cand);
-    } else if (
-      activePool &&
-      THIRD_PARTY_FAMILY_RE.test(String(activePool.family || activePool.poolLabel || ''))
-    ) {
-      const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-      if (fb != null && Number.isFinite(Number(fb))) {
-        rawPct = Number(fb);
-      }
-    }
-  } else {
-    const stdGemini =
-      pools.find((p) => p?.poolKey === 'Gemini') ||
-      pools.find(
-        (p) =>
-          /gemini/i.test(String(p?.poolKey || p?.poolLabel || '')) &&
-          !/carbon|argon/i.test(String(p?.poolKey || ''))
-      );
-    const geminiFamilyPools = pools.filter((p) =>
-      /gemini|carbon|argon/i.test(String(p?.poolKey || p?.poolLabel || ''))
-    );
-    const primaryCand = isWeekly ? stdGemini?.weeklyRemainingPct : stdGemini?.remainingPct;
-    if (primaryCand != null && Number.isFinite(Number(primaryCand))) {
-      rawPct = Number(primaryCand);
-    } else {
-      const familyVals = geminiFamilyPools
-        .map((p) => (isWeekly ? p?.weeklyRemainingPct : p?.remainingPct))
-        .filter((v) => v != null && Number.isFinite(Number(v)))
-        .map(Number);
-      if (familyVals.length > 0) {
-        rawPct = Math.min(...familyVals);
-      } else if (
-        activePool &&
-        !THIRD_PARTY_FAMILY_RE.test(String(activePool.family || activePool.poolLabel || ''))
-      ) {
-        const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-        if (fb != null && Number.isFinite(Number(fb))) {
-          rawPct = Number(fb);
-        }
-      }
-      if (
-        rawPct == null &&
-        isWeekly &&
-        quotas.weekly &&
-        !THIRD_PARTY_FAMILY_RE.test(String(quotas.weekly.poolFamily || '')) &&
-        quotas.weekly.remainingPct != null &&
-        Number.isFinite(Number(quotas.weekly.remainingPct))
-      ) {
-        rawPct = Number(quotas.weekly.remainingPct);
-      }
-    }
-  }
-
-  if (rawPct == null || !Number.isFinite(rawPct)) return null;
-  const rounded = Math.max(0, Math.min(100, Math.round(rawPct)));
+  const rounded = resolveCapsuleQuotaSlotPct(quotas, slotKey);
+  if (rounded == null) return null;
   return {
     roundedPct: rounded,
     shortText: t('capsule.quotaLeft', { pct: rounded }),
   };
-}
-
-function formatCompactCapsuleCost(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '--';
-  const val = Math.max(0, Number(costUsd));
-  if (val === 0) return '$0.00';
-  if (val < 0.001) return '<$0.001';
-  if (val < 1) return `$${val.toFixed(3)}`;
-  if (val < 100) return `$${val.toFixed(2)}`;
-  return `$${Math.round(val)}`;
-}
-
-function formatCompactCapsuleTtft(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '--s';
-  const val = Number(ttftSec);
-  if (val < 1) return `${val.toFixed(2)}s`;
-  if (val < 100) return `${val.toFixed(1)}s`;
-  return `${Math.round(val)}s`;
 }
 
 /**
@@ -9188,8 +9482,11 @@ function resolveOverviewMetricCell(metricKey, cellCtx = {}) {
     subClass: 'cell-sub',
   };
 }
+return { CAPSULE_METRIC_KEYS, getCapsuleMetricOptions, getOverviewMetricOptions, resolveQuotaCapsuleSummary, resolveSpecificQuotaSlotSummary, resolveCapsuleMetricPresentation, resolveOverviewMetricCell };
+})();
 
 // --- src/components/widgets/MetricMatrixWidget.js ---
+const { MetricMatrixWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Metric Matrix Widget (`MetricMatrixWidget.js`).
  * Renders 1..4 user-selected telemetry cells dynamically via `metricRegistry.js`.
@@ -9282,8 +9579,11 @@ const MetricMatrixWidget = defineComponent({
     };
   },
 });
+return { MetricMatrixWidget };
+})();
 
 // --- src/components/widgets/ContextWindowWidget.js ---
+const { CTX_CHANNEL_DEFS, ContextWindowWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Context Window Widget (`ContextWindowWidget.js`).
  * Supports both interactive multi-agent inspector mode (`LiveOverviewView`)
@@ -9774,8 +10074,11 @@ const ContextWindowWidget = defineComponent({
     };
   },
 });
+return { CTX_CHANNEL_DEFS, ContextWindowWidget };
+})();
 
 // --- src/components/widgets/QuotaPoolsWidget.js ---
+const { buildQuotaPoolItems, createPoolQuotaRow, formatQuotaSummaryFooter, syncPoolQuotaRow, quotaPoolRowSig, QuotaPoolsWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Quota Pools Widget (`QuotaPoolsWidget.js`).
  * Renders dynamic multi-pool quota bars (Gemini, Argon/Carbon, Claude & GPT)
@@ -10123,8 +10426,11 @@ const QuotaPoolsWidget = defineComponent({
     };
   },
 });
+return { buildQuotaPoolItems, createPoolQuotaRow, formatQuotaSummaryFooter, syncPoolQuotaRow, quotaPoolRowSig, QuotaPoolsWidget };
+})();
 
 // --- src/components/widgets/LiveActivityWidget.js ---
+const { LiveActivityWidget } = (() => {
 /**
  * @fileoverview Standalone decoupled Live Running Tasks Widget (`LiveActivityWidget.js`).
  * Displays active multi-session running conversations & collapsible subagent activity
@@ -10588,8 +10894,11 @@ const LiveActivityWidget = defineComponent({
     };
   },
 });
+return { LiveActivityWidget };
+})();
 
 // --- src/registries/widgetRegistry.js ---
+const { OVERVIEW_WIDGET_KEYS, OVERVIEW_WIDGET_REGISTRY, getOverviewModuleOptions, createDynamicWidgetHost } = (() => {
 /**
  * @fileoverview Decoupled Overview & Hover Widget Registry (`widgetRegistry.js`).
  * Maps module keys (`metrics`, `context`, `quotas`, `live_tasks`) to standalone
@@ -10598,12 +10907,7 @@ const LiveActivityWidget = defineComponent({
  */
 
 
-const OVERVIEW_WIDGET_KEYS = Object.freeze([
-  'metrics',
-  'context',
-  'quotas',
-  'live_tasks',
-]);
+const OVERVIEW_WIDGET_KEYS = OVERVIEW_MODULE_KEYS;
 
 const OVERVIEW_WIDGET_REGISTRY = Object.freeze({
   metrics: {
@@ -10799,8 +11103,11 @@ function createDynamicWidgetHost({
     destroy,
   };
 }
+return { OVERVIEW_WIDGET_KEYS, OVERVIEW_WIDGET_REGISTRY, getOverviewModuleOptions, createDynamicWidgetHost };
+})();
 
 // --- src/registries/stepColumnRegistry.js ---
+const { STEP_COLUMN_KEYS, DEFAULT_STEP_COLUMN_KEYS, formatCustomTokenComboHeader, STEP_COLUMN_REGISTRY, getStepColumnOptions } = (() => {
 /**
  * @fileoverview Decoupled Step Table Column Registry (`stepColumnRegistry.js`).
  * Defines all 12 customizable columns for `StepsDetailView` ("按步查看"),
@@ -10809,32 +11116,11 @@ function createDynamicWidgetHost({
  */
 
 
-const STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'time',
-  'model',
-  'tps',
-  'ttft',
-  'duration',
-  'tokens_combo',
-  'tokens_io_cache',
-  'tokens_custom',
-  'input_tokens',
-  'cache_tokens',
-  'output_tokens',
-  'cache',
-  'cost',
-]);
-
-const DEFAULT_STEP_COLUMN_KEYS = Object.freeze([
-  'step',
-  'model',
-  'tps',
-  'ttft',
-  'tokens_combo',
-  'cache',
-  'cost',
-]);
+const STEP_COLUMN_KEYS = STEP_TABLE_COLUMN_KEYS;
+const DEFAULT_STEP_COLUMN_KEYS = DEFAULT_STEP_TABLE_COLUMNS;
+const DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT = DEFAULT_STEP_TOKEN_COMBO_FORMAT;
+const normalizeClientStepTokenComboFormat = normalizeStepTokenComboFormat;
+const parseClientStepTokenComboSegments = parseStepTokenComboSegments;
 
 function resolveStepTokenParts(st) {
   const inTok = Math.max(0, Number(st?.inputTokens || 0));
@@ -11238,8 +11524,11 @@ function getStepColumnOptions(
     label: STEP_COLUMN_REGISTRY[key].optLabel(ctx),
   }));
 }
+return { STEP_COLUMN_KEYS, DEFAULT_STEP_COLUMN_KEYS, formatCustomTokenComboHeader, STEP_COLUMN_REGISTRY, getStepColumnOptions };
+})();
 
 // --- src/components/widgets/CapsuleBarWidget.js ---
+const { RING_RADIUS, RING_CIRCUMFERENCE, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget } = (() => {
 /**
  * @fileoverview Shared Decoupled Capsule Bar Primitives & Widget (`CapsuleBarWidget.js`).
  * Powers both the live host window capsule (`WindowOverlayShell.js`) and the
@@ -11590,8 +11879,11 @@ const CapsuleBarWidget = defineComponent({
     };
   },
 });
+return { RING_RADIUS, RING_CIRCUMFERENCE, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget };
+})();
 
 // --- src/components/widgets/StepTableWidget.js ---
+const { formatTurnPromptText, StepTableWidget } = (() => {
 /**
  * @fileoverview Reusable Decoupled Step Table Widget (`StepTableWidget.js`).
  * Powers both `StepsDetailView` ("按步查看") and `SettingsStructureTab` live preview,
@@ -12008,8 +12300,11 @@ const StepTableWidget = defineComponent({
     };
   },
 });
+return { formatTurnPromptText, StepTableWidget };
+})();
 
 // --- src/components/settings/structurePreviewMock.js ---
+const { buildStructurePreviewTelemetry } = (() => {
 /**
  * @fileoverview Realistic Simulated Telemetry Builder (`structurePreviewMock.js`)
  * for `SettingsStructureTab` real-UI live previews.
@@ -12038,7 +12333,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     totalTokens: 142800,
     limitTokens: 256000,
     compactionLimitTokens: 256000,
+    compactionUsedTokens: 142800,
     usedPct: 55.8,
+    messagesTokens: 119660,
     toolResultsTokens: 86400,
     assistantTokens: 24200,
     systemToolsTokens: 11800,
@@ -12055,7 +12352,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     totalTokens: 72704,
     limitTokens: 256000,
     compactionLimitTokens: 256000,
+    compactionUsedTokens: 72704,
     usedPct: 28.4,
+    messagesTokens: 63704,
     toolResultsTokens: 51200,
     assistantTokens: 11400,
     systemToolsTokens: 5600,
@@ -12209,6 +12508,9 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       responseTokens: 260,
       cacheHitPct: 0,
       costUsd: 0.198,
+      inCostUsd: 0.19,
+      cacheCostUsd: 0,
+      outCostUsd: 0.008,
       createdAtMs: anchorMinMs - 215_000,
       turnIndex: 1,
       rootTurnIndex: 1,
@@ -12252,6 +12554,24 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     latestUpstreamModel: 'gemini-4-carbon-high',
     activeModelLabel: 'Gemini 4 Carbon (High)',
     activeModelShort: 'gemini-4-carbon',
+    activeModelUpstream: 'gemini-4-carbon-high',
+    sessionUnpricedCalls: 0,
+    modelBreakdown: [
+      {
+        modelKey: 'MODEL_PLACEHOLDER_M37',
+        modelShort: 'gemini-4-carbon',
+        modelLabel: 'Gemini 4 Carbon (High)',
+        upstreamModel: 'gemini-4-carbon-high',
+        calls: 16,
+        inputTokens: 152400,
+        cacheReadTokens: 1260000,
+        outputTokens: 22100,
+        thinkingTokens: 14200,
+        totalTokens: 1434500,
+        costUsd: 1.16,
+        sharePct: 100,
+      },
+    ],
     context: mainContext,
     recentSteps: mockSteps.filter((s) => !s.isSubagent),
   };
@@ -12288,12 +12608,34 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     latestUpstreamModel: 'gemini-3.8-flash-n',
     activeModelLabel: 'Gemini 3.8 Flash',
     activeModelShort: 'gemini-3.8-flash',
+    activeModelUpstream: 'gemini-3.8-flash-n',
+    sessionUnpricedCalls: 0,
+    modelBreakdown: [
+      {
+        modelKey: 'MODEL_PLACEHOLDER_M42',
+        modelShort: 'gemini-3.8-flash',
+        modelLabel: 'Gemini 3.8 Flash',
+        upstreamModel: 'gemini-3.8-flash-n',
+        calls: 8,
+        inputTokens: 34000,
+        cacheReadTokens: 280000,
+        outputTokens: 6300,
+        thinkingTokens: 2100,
+        totalTokens: 320300,
+        costUsd: 0.12,
+        sharePct: 100,
+      },
+    ],
     context: subContext,
     recentSteps: mockSteps.filter((s) => s.isSubagent),
   };
 
   const aggregated = {
     ...mainAgent,
+    agentId: 'all',
+    isMain: false,
+    badgeText: '全部',
+    activeAgentId: 'main',
     stepCount: 24,
     speedSampleCount: 23,
     speedSummary: { sampleCount: 23, excludedCount: 1 },
@@ -12301,12 +12643,14 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     avgTtftSec: 1.38,
     ttftSummary: { avgSec: 1.38, sampleCount: 23 },
     sessionCostUsd: 1.28,
+    sessionUnpricedCalls: 0,
     sessionCacheHitPct: 88.9,
     inputTokens: 186400,
     cacheReadTokens: 1540000,
     outputTokens: 28400,
     totalTokens: 1754800,
     activeAgentBadge: '主',
+    modelBreakdown: [...mainAgent.modelBreakdown, ...subAgent1.modelBreakdown],
     recentSteps: mockSteps,
   };
 
@@ -12318,6 +12662,11 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
       aiCredits: 0,
     },
     quotas: {
+      meta: {
+        hasOfficialData: true,
+        isStale: false,
+        refreshFailed: false,
+      },
       activePool: {
         family: 'Gemini',
         poolKey: 'Gemini',
@@ -12419,8 +12768,11 @@ function buildStructurePreviewTelemetry(baseSettings = {}, draftOverrides = {}) 
     },
   };
 }
+return { buildStructurePreviewTelemetry };
+})();
 
 // --- src/components/settings/CollapsibleSection.js ---
+const { CollapsibleSection } = (() => {
 /**
  * @fileoverview Reusable Section Card (`CollapsibleSection.js`)
  * for `SettingsStructureTab` — supports both accordion mode (`collapsible: true`)
@@ -12589,8 +12941,11 @@ const CollapsibleSection = defineComponent({
     };
   },
 });
+return { CollapsibleSection };
+})();
 
 // --- src/components/settings/EditableSlotList.js ---
+const { EditableSlotList } = (() => {
 /**
  * @fileoverview Reusable Drag-Sortable & `+` / `-` / `↑` / `↓` Dynamic Slot List (`EditableSlotList.js`).
  * Powers Topbar Capsule Slots (1..5), Hover Popup Modules (0..4),
@@ -13032,8 +13387,11 @@ const EditableSlotList = defineComponent({
     };
   },
 });
+return { EditableSlotList };
+})();
 
 // --- src/components/settings/ThemeColorPicker.js ---
+const { ThemeColorPicker } = (() => {
 /**
  * @fileoverview Host-aware Theme Accent Swatch Picker (`ThemeColorPicker.js`).
  * Provides the default "跟随宿主" (`host`) pill plus 6 curated color swatches.
@@ -13134,8 +13492,11 @@ const ThemeColorPicker = defineComponent({
     };
   },
 });
+return { ThemeColorPicker };
+})();
 
 // --- src/views/settings/SettingsGeneralTab.js ---
+const { SettingsGeneralTab } = (() => {
 /**
  * @fileoverview Preferences Tab 1: `SettingsGeneralTab.js` ("常规").
  * Manages UI Language (`zh-CN` / `en-US` / `auto`), Theme Accent (`host` + 6 swatches),
@@ -13598,8 +13959,11 @@ const SettingsGeneralTab = defineComponent({
     };
   },
 });
+return { SettingsGeneralTab };
+})();
 
 // --- src/views/settings/SettingsStructureTab.js ---
+const { SettingsStructureTab } = (() => {
 /**
  * @fileoverview Preferences Tab 2: `SettingsStructureTab.js` ("结构").
  * Organizes the 4 structure settings panes under a dedicated 3rd-level menu bar,
@@ -14698,240 +15062,11 @@ const SettingsStructureTab = defineComponent({
     };
   },
 });
-
-// --- src/views/settings/SettingsAccountTab.js ---
-/** @fileoverview Saved account credentials and the host's active account quota. */
-
-
-const key = (name) => `settings.account.${name}`;
-const errors = new Set([
-  'unsupported', 'invalidEmail', 'invalidCredential', 'credentialTooLarge', 'notFound',
-  'noCurrentCredential', 'busy', 'storeFailed', 'rollbackFailed', 'credentialAccessDenied',
-  'credentialChanged', 'credentialRejected', 'identityMismatch', 'oauthClientUnavailable',
-  'oauthUnavailable', 'quotaUnavailable',
-]);
-
-function renderQuotaRows(container, quotaPools) {
-  const locale = getEffectiveLocale();
-  const pools = quotaPools.filter((pool) => Number.isFinite(pool.remainingPct) || Number.isFinite(pool.weeklyRemainingPct));
-  patchKeyedList(container, pools, {
-    keyFn: (pool) => pool.poolKey || pool.poolLabel,
-    sigFn: (pool) => JSON.stringify([locale, pool.poolLabel, pool.remainingPct, pool.weeklyRemainingPct]),
-    createRow: () => {
-      const label = h('span');
-      const remaining = h('span', { className: 'settings-account-quota' });
-      return { el: h('div', { className: 'settings-action-block' }, [label, remaining]), refs: { label, remaining } };
-    },
-    updateRow: ({ label, remaining }, pool) => {
-      patchText(label, pool.poolLabel || pool.poolKey);
-      const values = [];
-      if (Number.isFinite(pool.remainingPct)) values.push(t(key('quota5h'), { percent: pool.remainingPct }));
-      if (Number.isFinite(pool.weeklyRemainingPct)) values.push(t(key('quotaWeekly'), { percent: pool.weeklyRemainingPct }));
-      patchText(remaining, values.join(' · '));
-    },
-  });
-  return pools.length;
-}
-
-const SettingsAccountTab = defineComponent({
-  name: 'SettingsAccountTab',
-  setup({ props, onCleanup }) {
-    let account = null;
-    let quotas = null;
-    let accounts = [];
-    let selectedEmail = '';
-    let supported = null;
-    let operation = '';
-    let status = '';
-    let disposed = false;
-    const savedQuotas = new Map();
-
-    const title = h('span', { className: 'panel-title' });
-    const identityLabel = h('div', { className: 'settings-action-title' });
-    const identity = h('div', { className: 'settings-action-desc settings-account-identity' });
-    const plan = h('div', { className: 'settings-action-desc' });
-    const quotaTitle = h('div', { className: 'settings-action-title' });
-    const quotaRows = h('div', { className: 'settings-account-list' });
-    const quotaMessage = h('div', { className: 'settings-action-desc' });
-    const savedTitle = h('span', { className: 'panel-title' });
-    const savedRows = h('div', { className: 'settings-account-list' });
-    const savedMessage = h('div', { className: 'settings-action-desc' });
-    const pending = h('div', { className: 'settings-action-desc', role: 'status' });
-    const feedback = h('div', { className: 'settings-action-desc', role: 'status' });
-    const capture = h('button', { type: 'button', className: 'btn-secondary', onClick: () => request('capture') });
-    const reload = h('button', { type: 'button', className: 'btn-secondary', onClick: () => request('list') });
-    const credentialLabel = h('span');
-    const importHint = h('div', { className: 'settings-action-desc' });
-    const credential = h('input', { type: 'password', required: true, autocomplete: 'off', spellcheck: 'false', maxlength: 16384 });
-    const save = h('button', { type: 'submit', className: 'btn-secondary' });
-    const form = h('form', { className: 'settings-account-form', autocomplete: 'off', onSubmit: importCredential }, [
-      h('label', {}, [credentialLabel, credential]),
-      importHint,
-      save,
-    ]);
-
-    function render() {
-      const signedIn = account?.status === 'signedIn';
-      const activeEmail = signedIn ? account.email?.trim().toLowerCase() : '';
-      const canWrite = supported === true && !operation;
-      const locale = getEffectiveLocale();
-      patchText(title, t(key('current')));
-      patchText(identityLabel, t(key('email')));
-      patchText(identity, signedIn ? account.email || account.name :
-        t(key(account?.status === 'signedOut' ? 'signedOut' : 'unknown')));
-      patchText(plan, signedIn ? account.tierName || account.planName || '' : '');
-      patchAttr(plan, 'hidden', !plan.textContent);
-
-      patchText(quotaTitle, t(key('quota')));
-      const poolCount = renderQuotaRows(quotaRows, signedIn ? quotas?.pools || [] : []);
-      patchText(quotaMessage, t(key(poolCount ? 'quotaStale' : 'noQuota')));
-      patchAttr(quotaMessage, 'hidden', poolCount > 0 && !quotas?.meta?.isStale);
-
-      patchText(savedTitle, t(key('savedCredentials')));
-      patchText(capture, t(key('capture')));
-      patchText(reload, t(key('reload')));
-      patchText(save, t(key('save')));
-      patchText(credentialLabel, t(key('credential')));
-      patchText(importHint, t(key('importHint')));
-      patchAttr(capture, 'disabled', !canWrite || !activeEmail);
-      patchAttr(reload, 'disabled', Boolean(operation));
-      patchAttr(form, 'hidden', supported === false);
-      patchAttr(save, 'disabled', !canWrite);
-      patchAttr(credential, 'disabled', !canWrite);
-      patchText(savedMessage, t(key(supported === null ? 'loading' : 'empty')));
-      patchAttr(savedMessage, 'hidden', accounts.length > 0 || supported === false || Boolean(status));
-      const message = status || (operation === 'switch' ? 'switching' : operation === 'quota' ? 'loadingQuota' :
-        operation === 'save' || operation === 'capture' ? 'verifying' : '');
-      patchText(feedback, message ? t(key(message)) : '');
-      patchAttr(feedback, 'hidden', !message);
-      const waiting = selectedEmail && activeEmail !== selectedEmail;
-      patchText(pending, waiting ? t(key('pending'), { email: selectedEmail }) : '');
-      patchAttr(pending, 'hidden', !waiting);
-
-      patchKeyedList(savedRows, accounts, {
-        keyFn: (addr) => addr,
-        sigFn: (addr) => JSON.stringify([locale, activeEmail, selectedEmail, canWrite, savedQuotas.get(addr)]),
-        createRow: (addr) => {
-          const state = h('div', { className: 'settings-action-desc' });
-          const select = h('button', {
-            type: 'button', className: 'btn-secondary settings-account-switch', onClick: () => request('switch', { email: addr }),
-          });
-          const remove = h('button', {
-            type: 'button', className: 'btn-secondary', onClick: () => request('remove', { email: addr }),
-          });
-          const loadQuota = h('button', {
-            type: 'button', className: 'btn-secondary settings-account-load-quota', onClick: () => request('quota', { email: addr }),
-          });
-          const rows = h('div', { className: 'settings-account-list' });
-          const empty = h('div', { className: 'settings-action-desc' });
-          return {
-            el: h('div', { className: 'settings-account-entry' }, [
-              h('div', { className: 'settings-action-block' }, [
-                h('div', { className: 'settings-action-info' }, [h('div', { className: 'settings-account-identity', text: addr }), state]),
-                h('div', { className: 'settings-account-buttons' }, [loadQuota, select, remove]),
-              ]), rows, empty,
-            ]),
-            refs: { state, select, remove, loadQuota, rows, empty },
-          };
-        },
-        updateRow: (row, addr) => {
-          const active = addr === activeEmail;
-          const written = addr === selectedEmail && !active;
-          patchText(row.state, active ? t(key('active')) : written ? t(key('written')) : '');
-          patchAttr(row.state, 'hidden', !active && !written);
-          patchText(row.select, t(key('switch')));
-          patchText(row.remove, t(key('remove')));
-          patchText(row.loadQuota, t(key('loadQuota')));
-          patchAttr(row.select, 'disabled', !canWrite);
-          patchAttr(row.remove, 'disabled', !canWrite);
-          patchAttr(row.loadQuota, 'disabled', !canWrite);
-          const cached = savedQuotas.get(addr);
-          const count = renderQuotaRows(row.rows, cached || []);
-          patchText(row.empty, t(key('emptyCredentialQuota')));
-          patchAttr(row.empty, 'hidden', !cached || count > 0);
-        },
-      });
-      props.onLayoutChange?.();
-    }
-
-    async function request(action, fields) {
-      if (operation) return;
-      operation = action;
-      status = '';
-      render();
-      try {
-        const result = action === 'list'
-          ? await callSidecarApi('/api/accounts')
-          : await callSidecarApi('/api/accounts/update', { method: 'POST', body: { action, ...fields }, cdpTimeoutMs: 40000 });
-        if (disposed) return;
-        if (result?.error) {
-          if (result.error === 'unsupported') supported = false;
-          status = errors.has(result.error) ? result.error : 'storeFailed';
-          return;
-        }
-        if (action === 'quota') {
-          savedQuotas.set(result.email, result.pools);
-          return;
-        }
-        supported = result?.supported === true;
-        accounts = result?.accounts || [];
-        selectedEmail = result?.selectedEmail || '';
-        if (action === 'save' || action === 'capture') status = 'saved';
-        if (action === 'remove') {
-          savedQuotas.delete(fields.email);
-          status = 'removed';
-        }
-        if (action === 'switch') {
-          status = result.confirmed ? 'switched' : '';
-          void fetchTelemetry({ force: true }).catch(() => {});
-        }
-      } catch {
-        status = 'storeFailed';
-      } finally {
-        operation = '';
-        if (!disposed) render();
-      }
-    }
-
-    function importCredential(event) {
-      event.preventDefault();
-      if (operation) return;
-      const input = credential.value;
-      credential.value = '';
-      void request('save', { credential: input });
-    }
-
-    function renderAccount(value, quotaData) {
-      if (account === value && quotas === quotaData) return;
-      account = value;
-      quotas = quotaData;
-      render();
-    }
-
-    const root = h('div', { className: 'settings-tab-stack' }, [
-      h('section', { className: 'panel' }, [
-        h('div', { className: 'panel-header' }, [title]),
-        h('div', { className: 'settings-action-block' }, [
-          h('div', { className: 'settings-action-info' }, [identityLabel, identity, plan]),
-        ]),
-        quotaTitle, quotaRows, quotaMessage, pending,
-      ]),
-      h('section', { className: 'panel' }, [
-        h('div', { className: 'panel-header' }, [savedTitle]),
-        h('div', { className: 'settings-account-buttons' }, [capture, reload]),
-        savedRows, savedMessage, form, feedback,
-      ]),
-    ]);
-    render();
-    onCleanup(() => {
-      disposed = true;
-      credential.value = '';
-    });
-    return { el: root, refs: { renderAccount, refreshLabels: render, load: () => request('list') } };
-  },
-});
+return { SettingsStructureTab };
+})();
 
 // --- src/views/settings/SettingsOtherTab.js ---
+const { SettingsOtherTab } = (() => {
 /**
  * @fileoverview Preferences Tab 3: `SettingsOtherTab.js` ("其他").
  * Houses Model Identifier Formatting, Per-Model Context Windows,
@@ -15484,8 +15619,11 @@ const SettingsOtherTab = defineComponent({
     };
   },
 });
+return { SettingsOtherTab };
+})();
 
 // --- src/components/layout/TopSessionHeader.js ---
+const { TopSessionHeader } = (() => {
 /**
  * @fileoverview Row 1 of the compact top bar:
  * Bespoke CustomSelect for session switching, SVG live status indicator,
@@ -15788,8 +15926,11 @@ const TopSessionHeader = defineComponent({
     };
   },
 });
+return { TopSessionHeader };
+})();
 
 // --- src/views/LiveOverviewView.js ---
+const { LiveOverviewView } = (() => {
 /**
  * @fileoverview View 1: Decoupled `LiveOverviewView.js` (实时监控视图).
  * Acts as a lightweight host container delegating all telemetry cards
@@ -15945,8 +16086,11 @@ const LiveOverviewView = defineComponent({
     };
   },
 });
+return { LiveOverviewView };
+})();
 
 // --- src/views/ConsumptionView.js ---
+const { ConsumptionView } = (() => {
 /**
  * @fileoverview View 2: ConsumptionView (全景消耗统计视图).
  * 采用 5 段式分析布局展示指定时间窗口内的全量 Token 与费用消耗：
@@ -16491,22 +16635,14 @@ const ConsumptionView = defineComponent({
       let cachePct = 0;
       let outPct = 0;
       if (totalTokens > 0) {
-        const rawTenths = [
-          (inputTokens / totalTokens) * 1000,
-          (cacheTokens / totalTokens) * 1000,
-          (outputTokens / totalTokens) * 1000,
-        ];
-        const floored = rawTenths.map((v) => Math.max(0, Math.floor(v)));
-        const rem = Math.max(0, 1000 - (floored[0] + floored[1] + floored[2]));
-        const order = [0, 1, 2].sort(
-          (a, b) => rawTenths[b] - floored[b] - (rawTenths[a] - floored[a])
+        const scaled = scaleBucketsExact(
+          { in: inputTokens, cache: cacheTokens, out: outputTokens },
+          ['in', 'cache', 'out'],
+          1000
         );
-        for (let k = 0; k < rem && k < 3; k++) {
-          floored[order[k]] += 1;
-        }
-        inPct = +(floored[0] / 10).toFixed(1);
-        cachePct = +(floored[1] / 10).toFixed(1);
-        outPct = +(floored[2] / 10).toFixed(1);
+        inPct = +(scaled.in / 10).toFixed(1);
+        cachePct = +(scaled.cache / 10).toFixed(1);
+        outPct = +(scaled.out / 10).toFixed(1);
       }
 
       patchText(inputSharePct, `${inPct}%`);
@@ -16742,8 +16878,11 @@ const ConsumptionView = defineComponent({
     };
   },
 });
+return { ConsumptionView };
+})();
 
 // --- src/views/StepsDetailView.js ---
+const { StepsDetailView } = (() => {
 /**
  * @fileoverview View 3: StepsDetailView (步骤明细与总汇总分析视图).
  * 提供“按步查看”与“总汇总”双子视图切换：
@@ -17871,8 +18010,11 @@ const StepsDetailView = defineComponent({
     };
   },
 });
+return { StepsDetailView };
+})();
 
 // --- src/views/SettingsView.js ---
+const { SHOW_ACCOUNT_TAB, SettingsView } = (() => {
 /**
  * @fileoverview View 4: Modular preferences ("常规" / "结构" / "账号" / "其他").
  * Orchestrates the four preference tabs
@@ -17916,7 +18058,7 @@ const SettingsView = defineComponent({
 
     const generalTab = SettingsGeneralTab({ onLayoutChange: refreshScroll });
     const structureTab = SettingsStructureTab({ onLayoutChange: refreshScroll });
-    const accountTab = SHOW_ACCOUNT_TAB ? SettingsAccountTab({ onLayoutChange: refreshScroll }) : null;
+    const accountTab = null; // SettingsAccountTab kept in src/views/settings/ for future opt-in
     const otherTab = SettingsOtherTab({ onLayoutChange: refreshScroll });
 
     let showingAccount = false;
@@ -18049,8 +18191,11 @@ const SettingsView = defineComponent({
     };
   },
 });
+return { SHOW_ACCOUNT_TAB, SettingsView };
+})();
 
 // --- src/App.js ---
+const { App } = (() => {
 /**
  * @fileoverview Root Application Shell (App.js).
  * Combines the compact dual-layer header (TopSessionHeader + TopLongPillNav)
@@ -18178,8 +18323,11 @@ const App = defineComponent({
     };
   },
 });
+return { App };
+})();
 
 // --- src/components/layout/WindowOverlayShell.js ---
+const { computeCapsuleLayoutMode, mountWindowOverlay } = (() => {
 /**
  * @fileoverview 主窗口双栖挂载外壳 (WindowOverlayShell.js).
  *
@@ -21394,8 +21542,11 @@ function mountWindowOverlay() {
   window[WINDOW_OVERLAY_KEY] = handle;
   return handle;
 }
+return { computeCapsuleLayoutMode, mountWindowOverlay };
+})();
 
 // --- src/main.js ---
+(() => {
 /**
  * @fileoverview Async entry point for Antigravity Usage & Speed Monitor.
  * Automatically branches between Auxiliary Sidebar Webview mode (`#app-root`)
@@ -21459,4 +21610,5 @@ function init() {
 }
 
 init();
+})();
 })();

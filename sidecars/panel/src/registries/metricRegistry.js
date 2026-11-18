@@ -19,13 +19,15 @@ import {
   speedReasonText,
 } from '../core/formatters.js';
 import { isEnglishLocale, t } from '../i18n/index.js';
-
 import { OVERVIEW_METRIC_KEYS, TOPBAR_SLOT_KEYS } from '../../shared/settings-normalization.mjs';
+import {
+  formatCompactCapsuleCost,
+  formatCompactCapsuleTtft,
+  resolveCapsuleQuotaSlotPct,
+} from '../../shared/telemetry-display-rules.mjs';
 
-export { OVERVIEW_METRIC_KEYS };
+export { OVERVIEW_METRIC_KEYS, formatCompactCapsuleCost, formatCompactCapsuleTtft };
 export const CAPSULE_METRIC_KEYS = TOPBAR_SLOT_KEYS;
-
-const THIRD_PARTY_FAMILY_RE = /claude|gpt|anthropic|openai|3p|sonnet|opus|haiku/i;
 
 export function getCapsuleMetricOptions() {
   return CAPSULE_METRIC_KEYS.map((key) => ({
@@ -114,96 +116,12 @@ export function resolveQuotaCapsuleSummary(quotas) {
  * @returns {{ roundedPct: number, shortText: string } | null}
  */
 export function resolveSpecificQuotaSlotSummary(quotas, slotKey) {
-  if (!quotas) return null;
-  const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
-  const activePool = quotas.activePool || null;
-  const isClaude = slotKey.startsWith('claude_');
-  const isWeekly = slotKey.endsWith('_weekly');
-  let rawPct = null;
-
-  if (isClaude) {
-    const claudePool =
-      pools.find((p) => p?.poolKey === 'Claude & GPT') ||
-      pools.find((p) => THIRD_PARTY_FAMILY_RE.test(String(p?.poolKey || p?.poolLabel || '')));
-    const cand = isWeekly ? claudePool?.weeklyRemainingPct : claudePool?.remainingPct;
-    if (cand != null && Number.isFinite(Number(cand))) {
-      rawPct = Number(cand);
-    } else if (
-      activePool &&
-      THIRD_PARTY_FAMILY_RE.test(String(activePool.family || activePool.poolLabel || ''))
-    ) {
-      const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-      if (fb != null && Number.isFinite(Number(fb))) {
-        rawPct = Number(fb);
-      }
-    }
-  } else {
-    const stdGemini =
-      pools.find((p) => p?.poolKey === 'Gemini') ||
-      pools.find(
-        (p) =>
-          /gemini/i.test(String(p?.poolKey || p?.poolLabel || '')) &&
-          !/carbon|argon/i.test(String(p?.poolKey || ''))
-      );
-    const geminiFamilyPools = pools.filter((p) =>
-      /gemini|carbon|argon/i.test(String(p?.poolKey || p?.poolLabel || ''))
-    );
-    const primaryCand = isWeekly ? stdGemini?.weeklyRemainingPct : stdGemini?.remainingPct;
-    if (primaryCand != null && Number.isFinite(Number(primaryCand))) {
-      rawPct = Number(primaryCand);
-    } else {
-      const familyVals = geminiFamilyPools
-        .map((p) => (isWeekly ? p?.weeklyRemainingPct : p?.remainingPct))
-        .filter((v) => v != null && Number.isFinite(Number(v)))
-        .map(Number);
-      if (familyVals.length > 0) {
-        rawPct = Math.min(...familyVals);
-      } else if (
-        activePool &&
-        !THIRD_PARTY_FAMILY_RE.test(String(activePool.family || activePool.poolLabel || ''))
-      ) {
-        const fb = isWeekly ? activePool.weeklyRemainingPct : activePool.remainingPct;
-        if (fb != null && Number.isFinite(Number(fb))) {
-          rawPct = Number(fb);
-        }
-      }
-      if (
-        rawPct == null &&
-        isWeekly &&
-        quotas.weekly &&
-        !THIRD_PARTY_FAMILY_RE.test(String(quotas.weekly.poolFamily || '')) &&
-        quotas.weekly.remainingPct != null &&
-        Number.isFinite(Number(quotas.weekly.remainingPct))
-      ) {
-        rawPct = Number(quotas.weekly.remainingPct);
-      }
-    }
-  }
-
-  if (rawPct == null || !Number.isFinite(rawPct)) return null;
-  const rounded = Math.max(0, Math.min(100, Math.round(rawPct)));
+  const rounded = resolveCapsuleQuotaSlotPct(quotas, slotKey);
+  if (rounded == null) return null;
   return {
     roundedPct: rounded,
     shortText: t('capsule.quotaLeft', { pct: rounded }),
   };
-}
-
-export function formatCompactCapsuleCost(costUsd) {
-  if (costUsd == null || !Number.isFinite(Number(costUsd))) return '--';
-  const val = Math.max(0, Number(costUsd));
-  if (val === 0) return '$0.00';
-  if (val < 0.001) return '<$0.001';
-  if (val < 1) return `$${val.toFixed(3)}`;
-  if (val < 100) return `$${val.toFixed(2)}`;
-  return `$${Math.round(val)}`;
-}
-
-export function formatCompactCapsuleTtft(ttftSec) {
-  if (ttftSec == null || !Number.isFinite(Number(ttftSec)) || Number(ttftSec) < 0) return '--s';
-  const val = Number(ttftSec);
-  if (val < 1) return `${val.toFixed(2)}s`;
-  if (val < 100) return `${val.toFixed(1)}s`;
-  return `${Math.round(val)}s`;
 }
 
 /**
