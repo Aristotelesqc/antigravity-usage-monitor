@@ -120,14 +120,21 @@ export function resolveContextWindowRules(models, preferences) {
 export async function syncHostContextWindows(
   rules,
   bootId,
-  key = '__AGUsageMonitorContextWindows'
+  key = '__AGUsageMonitorContextWindows',
+  fallbackRules = {}
 ) {
   let state = window[key];
   const appConfig = window.__APP_CONFIG__;
   const csrfToken = appConfig?.csrfToken;
-  if (!Object.keys(rules).length || !csrfToken || appConfig.isRemoteControl) {
+  const hasPrefs = Boolean(rules && Object.keys(rules).length > 0);
+  const safeFallback =
+    fallbackRules && typeof fallbackRules === 'object' && !Array.isArray(fallbackRules)
+      ? fallbackRules
+      : {};
+  const hasFallback = Object.keys(safeFallback).length > 0;
+  if (!hasPrefs || appConfig?.isRemoteControl || (!csrfToken && !hasFallback)) {
     state?.dispose();
-    return;
+    return { attached: false, ruleCount: 0 };
   }
   if (state && (state.bootId !== bootId || !state.isAttached?.())) {
     state.dispose();
@@ -136,6 +143,8 @@ export async function syncHostContextWindows(
   if (!state) {
     const servicePath = '/exa.language_server_pb.LanguageServerService/';
     const sendPath = servicePath + 'SendUserCascadeMessage';
+    const startPath = servicePath + 'StartCascade';
+    const isTargetProcedure = (p) => p === sendPath || p === startPath;
     const nativeFetch = window.fetch;
     const wsProto = window.WebSocket?.prototype;
     const nativeSend = wsProto?.send;
@@ -160,11 +169,20 @@ export async function syncHostContextWindows(
     }
 
     function rewriteBody(body, contentType) {
-      if (contentType === 'application/json' && typeof body === 'string') {
-        const json = JSON.parse(body);
-        if (updatePayload(json)) return JSON.stringify(json);
-      } else if (contentType === 'application/grpc-web+json' && body instanceof Uint8Array &&
-          body.length >= 5 && body[0] === 0) {
+      if (contentType === 'application/json') {
+        if (typeof body === 'string') {
+          const json = JSON.parse(body);
+          if (updatePayload(json)) return JSON.stringify(json);
+        } else if (body instanceof Uint8Array) {
+          const json = JSON.parse(decoder.decode(body));
+          if (updatePayload(json)) return encoder.encode(JSON.stringify(json));
+        }
+      } else if (
+        (contentType === 'application/grpc-web+json' || contentType === 'application/connect+json') &&
+        body instanceof Uint8Array &&
+        body.length >= 5 &&
+        body[0] === 0
+      ) {
         const header = new DataView(body.buffer, body.byteOffset, body.byteLength);
         if (header.getUint32(1) !== body.length - 5) return body;
         const json = JSON.parse(decoder.decode(body.subarray(5)));
@@ -181,9 +199,15 @@ export async function syncHostContextWindows(
     function fetchWithContextWindow(input, init) {
       let nextInit = init;
       try {
-        if (typeof input === 'string' && init?.method === 'POST') {
-          const url = new URL(input, window.location.href);
-          if (url.origin === window.location.origin && url.pathname === sendPath) {
+        const rawUrl =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : '';
+        if (rawUrl && init?.method === 'POST') {
+          const url = new URL(rawUrl, window.location.href);
+          if (url.origin === window.location.origin && isTargetProcedure(url.pathname)) {
             const type = new Headers(init.headers).get('content-type')?.split(';')[0].trim();
             const body = rewriteBody(init.body, type);
             if (body !== init.body) nextInit = { ...init, body };
@@ -200,13 +224,13 @@ export async function syncHostContextWindows(
     function sendWithContextWindow(data) {
       let nextData = data;
       try {
-        if (typeof data === 'string' && data.includes(sendPath)) {
+        if (typeof data === 'string' && (data.includes(sendPath) || data.includes(startPath))) {
           const url = new URL(this.url);
           const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
           if (url.protocol === protocol && url.host === window.location.host &&
               url.pathname === '/connect-websocket') {
             const frame = JSON.parse(data);
-            if (frame.type === 'start' && frame.stream === false && frame.procedure === sendPath &&
+            if (frame.type === 'start' && frame.stream === false && isTargetProcedure(frame.procedure) &&
                 updatePayload(frame.payload)) {
               nextData = JSON.stringify(frame);
             }
@@ -220,7 +244,7 @@ export async function syncHostContextWindows(
 
     state = window[key] = {
       bootId,
-      rules: {},
+      rules: { ...safeFallback },
       serviceUrl: window.location.origin + servicePath,
       isAttached() {
         return (typeof nativeFetch !== 'function' || window.fetch === fetchWithContextWindow) &&
@@ -238,12 +262,18 @@ export async function syncHostContextWindows(
     if (typeof nativeSend === 'function') wsProto.send = sendWithContextWindow;
   }
   state.preferences = rules;
+  state.fallbackRules = safeFallback;
   clearTimeout(state.timer);
   state.timer = setTimeout(() => state.dispose(), 15000);
 
-  // App 和 IDE 同时打开时，各窗口只使用自身宿主上报的档位。
+  if (!csrfToken) {
+    state.rules = { ...safeFallback };
+    return { attached: Boolean(state.isAttached?.()), ruleCount: Object.keys(state.rules).length };
+  }
+
+  // App 和 IDE 同时打开时，各窗口优先使用自身宿主上报的档位；若窗口内查询异常则回退后端预解析规则。
   if (state.csrfToken !== csrfToken || Date.now() >= state.refreshAt) {
-    if (state.csrfToken !== csrfToken) state.rules = {};
+    if (state.csrfToken !== csrfToken) state.rules = { ...safeFallback };
     state.csrfToken = csrfToken;
     state.refreshAt = Date.now() + 10000;
     state.status = (async () => {
@@ -264,19 +294,25 @@ export async function syncHostContextWindows(
         ]);
         const userStatus = status?.userStatus;
         const configs = userStatus?.cascadeModelConfigData?.clientModelConfigs;
+        if (!Array.isArray(configs)) return null;
         return getContextWindowModels(configs, catalog?.response?.models);
       } catch {
-        return [];
+        return null;
       }
     })();
   }
   const status = state.status;
   const models = await status;
-  if (window[key] !== state || state.status !== status) return;
-  state.rules = resolveContextWindowRules(models, state.preferences);
+  if (window[key] !== state || state.status !== status) {
+    return { attached: Boolean(state?.isAttached?.()), ruleCount: Object.keys(state?.rules || {}).length };
+  }
+  state.rules = Array.isArray(models)
+    ? resolveContextWindowRules(models, state.preferences)
+    : { ...state.fallbackRules };
+  return { attached: Boolean(state.isAttached?.()), ruleCount: Object.keys(state.rules).length };
 }
 
-export function createContextWindowSyncExpression(preferences, bootId) {
+export function createContextWindowSyncExpression(preferences, bootId, fallbackRules = {}) {
   return `(() => {
     ${isContextWindowModelId.toString()}
     ${isContextWindowSettingId.toString()}
@@ -285,6 +321,6 @@ export function createContextWindowSyncExpression(preferences, bootId) {
     ${getContextWindowGroups.toString()}
     ${resolveContextWindowOption.toString()}
     ${resolveContextWindowRules.toString()}
-    return (${syncHostContextWindows.toString()})(${JSON.stringify(preferences)}, ${JSON.stringify(bootId)}, ${JSON.stringify(CONTEXT_WINDOWS_GLOBAL_KEY)});
+    return (${syncHostContextWindows.toString()})(${JSON.stringify(preferences)}, ${JSON.stringify(bootId)}, ${JSON.stringify(CONTEXT_WINDOWS_GLOBAL_KEY)}, ${JSON.stringify(fallbackRules || {})});
   })()`;
 }

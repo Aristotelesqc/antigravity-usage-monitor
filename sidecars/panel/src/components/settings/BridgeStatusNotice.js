@@ -41,7 +41,7 @@ async function copyTextToClipboard(text) {
 export const BridgeStatusNotice = defineComponent({
   name: 'BridgeStatusNotice',
   setup({ props, onCleanup }) {
-    const contextMode = Boolean(props?.contextMode);
+    let contextMode = Boolean(props?.contextMode);
     const dismissible = Boolean(props?.dismissible);
     let lastPayload = {
       visible: false,
@@ -267,6 +267,9 @@ export const BridgeStatusNotice = defineComponent({
     }
 
     function update(next = {}) {
+      if (typeof next.contextMode === 'boolean') {
+        contextMode = next.contextMode;
+      }
       lastPayload = {
         ...lastPayload,
         ...next,

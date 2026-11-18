@@ -274,8 +274,10 @@ export const SettingsOtherTab = defineComponent({
       patchAttr(ctxRiskAcceptBtn, 'disabled', acceptingContextRisk);
 
       const saved = latestSettings?.modelContextWindows || {};
+      const wbState = String(latestWindowBridge?.state || '').trim();
+      const isBridgeMissing = wbState === 'no_devtools_port' || wbState === 'cdp_unreachable';
       ctxBridgeNotice.refs.update({
-        visible: unlocked && Object.keys(saved).length > 0,
+        visible: unlocked,
         windowBridge: latestWindowBridge,
         hostPlatform: latestHostPlatform,
       });
@@ -323,6 +325,7 @@ export const SettingsOtherTab = defineComponent({
             else if (value) {
               const name = formatLimit(value);
               if (!isAvailable(model, value)) meta = t('settings.oth.ctxUnavailable', { name });
+              else if (isBridgeMissing) meta = t('settings.oth.ctxPendingBridge', { name });
               else if (/^\d+$/.test(value) && model.reportedLimitTokens && Number(value) !== model.reportedLimitTokens) {
                 meta = t('settings.oth.ctxConfiguredReported', {
                   name,

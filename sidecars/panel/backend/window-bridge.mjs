@@ -30,11 +30,16 @@ import {
   normalizeWindowMountMode,
   saveJson,
 } from './config.mjs';
-import { createContextWindowSyncExpression } from './context-windows.mjs';
+import {
+  createContextWindowSyncExpression,
+  getContextWindowModels,
+  resolveContextWindowRules,
+} from './context-windows.mjs';
 import {
   ensureDesktopLaunchEntriesConfigured,
   resolveDesktopHostExecutable,
 } from './desktop-launcher-config.mjs';
+import { callLsRpc, getContextModelCatalog } from './ls-rpc.mjs';
 
 const windowBridgeRef = `window[${JSON.stringify(WINDOW_BRIDGE_KEY)}]`;
 const windowOverlayRef = `window[${JSON.stringify(WINDOW_OVERLAY_KEY)}]`;
@@ -768,6 +773,7 @@ export function createWindowBridgeController(options) {
   };
   let hadContextWindows = false;
   let contextWindowBootId = `${process.pid}:${Date.now()}`;
+  let cachedBackendCtxModels = { expiresAt: 0, models: [] };
   let nodeDepsPromise = null;
   const allowedDynamicOrigins = new Set();
 
@@ -1367,11 +1373,42 @@ export function createWindowBridgeController(options) {
     }
 
     if (hasContextWindows || hadContextWindows) {
+      let fallbackRules = {};
+      if (
+        hasContextWindows &&
+        lsRuntimeEndpoint.baseUrl &&
+        lsRuntimeEndpoint.addr !== 'test.invalid'
+      ) {
+        if (Date.now() >= cachedBackendCtxModels.expiresAt) {
+          try {
+            const [stRes, cat] = await Promise.all([
+              callLsRpc('GetUserStatus', {}, 1500),
+              getContextModelCatalog(),
+            ]);
+            const cfgs = stRes?.userStatus?.cascadeModelConfigData?.clientModelConfigs;
+            if (Array.isArray(cfgs)) {
+              cachedBackendCtxModels = {
+                expiresAt: Date.now() + 10_000,
+                models: getContextWindowModels(cfgs, cat),
+              };
+            }
+          } catch {
+            // 忽略瞬态 LS 查询失败，保留上次缓存或交由窗口端解析
+          }
+        }
+        if (cachedBackendCtxModels.models.length > 0) {
+          fallbackRules = resolveContextWindowRules(cachedBackendCtxModels.models, contextWindows);
+        }
+      }
       const chatUrls = [
         ...targets.filter((target) => !target.isIdeWorkbench).map((target) => target.webSocketDebuggerUrl),
         ...collectAllChatDebuggerUrls(targets),
       ];
-      const expression = createContextWindowSyncExpression(contextWindows, contextWindowBootId);
+      const expression = createContextWindowSyncExpression(
+        contextWindows,
+        contextWindowBootId,
+        fallbackRules
+      );
       await Promise.allSettled([...new Set(chatUrls)].map((url) => evaluateOnTarget(url, expression)));
       hadContextWindows = hasContextWindows;
     }
@@ -1822,10 +1859,33 @@ export function createWindowBridgeController(options) {
     return syncAllWindows({ forceReinject: false }).catch(() => ({ ok: false }));
   }
 
+  function notifyContextWindowsChanged() {
+    const cur = getSettingsFn() || {};
+    const mountMode = normalizeWindowMountMode(cur.windowMountMode, cur.enableWindowOverlay);
+    const overlayOn = Boolean(cur.enableWindowOverlay !== false && mountMode !== 'sidebar');
+    const hasCtx = Object.keys(cur.modelContextWindows || {}).length > 0;
+    if (hasCtx) {
+      ideArgvProvisioned = false;
+    } else if (!overlayOn && autoConfigureIdeArgv) {
+      launcherConfigured = false;
+      void ensureDesktopLaunchEntriesConfigured({
+        enabled: false,
+        env,
+        platform,
+        homeDir,
+        execFileFn: launcherExecFileFn,
+        fsOps: launcherFsOps,
+        allowInTest: allowDesktopLauncherInTest,
+      }).catch(() => {});
+    }
+    return syncAllWindows({ forceReinject: false }).catch(() => ({ ok: false }));
+  }
+
   return {
     ensureBridgeServer,
     syncAllWindows,
     notifySettingChanged,
+    notifyContextWindowsChanged,
     start,
     stop,
     getBridgeInfo: () => ({ port: bridgePort, token: bridgeToken, running: Boolean(server) }),
@@ -1882,5 +1942,6 @@ export function notifyWindowOverlaySetting(enabled) {
 }
 
 export function notifyModelContextWindowsChanged() {
-  return defaultBridgeController?.syncAllWindows().catch(() => {});
+  if (!defaultBridgeController) return Promise.resolve({ ok: false });
+  return defaultBridgeController.notifyContextWindowsChanged();
 }

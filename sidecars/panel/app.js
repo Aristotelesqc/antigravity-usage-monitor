@@ -1544,6 +1544,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.ctxUnavailable': '{name}（当前不可用）',
   'settings.oth.ctxConfigured': '{name} · 已设置',
   'settings.oth.ctxConfiguredReported': '{name} · 已设置 / 最近 {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · 待重启生效',
   'settings.oth.ctxDefaultReported': '默认 · 最近 {name}',
   'settings.oth.ctxReported': '最近一次请求由宿主报告为 {name}。',
   'settings.oth.ctxMixed': '各推理档设置不同',
@@ -2173,6 +2174,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.ctxUnavailable': '{name} (currently unavailable)',
   'settings.oth.ctxConfigured': '{name} · Set',
   'settings.oth.ctxConfiguredReported': '{name} · Set / Last seen {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · Pending Restart',
   'settings.oth.ctxDefaultReported': 'Default · Last seen {name}',
   'settings.oth.ctxReported': 'The host reported {name} on the latest request.',
   'settings.oth.ctxMixed': 'Different limits by thinking level',
@@ -14110,7 +14112,7 @@ async function copyTextToClipboard(text) {
 const BridgeStatusNotice = defineComponent({
   name: 'BridgeStatusNotice',
   setup({ props, onCleanup }) {
-    const contextMode = Boolean(props?.contextMode);
+    let contextMode = Boolean(props?.contextMode);
     const dismissible = Boolean(props?.dismissible);
     let lastPayload = {
       visible: false,
@@ -14336,6 +14338,9 @@ const BridgeStatusNotice = defineComponent({
     }
 
     function update(next = {}) {
+      if (typeof next.contextMode === 'boolean') {
+        contextMode = next.contextMode;
+      }
       lastPayload = {
         ...lastPayload,
         ...next,
@@ -16222,8 +16227,10 @@ const SettingsOtherTab = defineComponent({
       patchAttr(ctxRiskAcceptBtn, 'disabled', acceptingContextRisk);
 
       const saved = latestSettings?.modelContextWindows || {};
+      const wbState = String(latestWindowBridge?.state || '').trim();
+      const isBridgeMissing = wbState === 'no_devtools_port' || wbState === 'cdp_unreachable';
       ctxBridgeNotice.refs.update({
-        visible: unlocked && Object.keys(saved).length > 0,
+        visible: unlocked,
         windowBridge: latestWindowBridge,
         hostPlatform: latestHostPlatform,
       });
@@ -16271,6 +16278,7 @@ const SettingsOtherTab = defineComponent({
             else if (value) {
               const name = formatLimit(value);
               if (!isAvailable(model, value)) meta = t('settings.oth.ctxUnavailable', { name });
+              else if (isBridgeMissing) meta = t('settings.oth.ctxPendingBridge', { name });
               else if (/^\d+$/.test(value) && model.reportedLimitTokens && Number(value) !== model.reportedLimitTokens) {
                 meta = t('settings.oth.ctxConfiguredReported', {
                   name,
@@ -19163,10 +19171,16 @@ const App = defineComponent({
       const mountMode = settings
         ? normalizeClientWindowMountMode(settings.windowMountMode, settings.enableWindowOverlay)
         : 'sidebar';
+      const hasCtxOverrides = Boolean(
+        settings?.modelContextWindows && Object.keys(settings.modelContextWindows).length > 0
+      );
       const shouldOfferGlobal =
-        !isWindowOverlayMode() && activeView !== 'settings' && mountMode !== 'sidebar';
+        !isWindowOverlayMode() &&
+        activeView !== 'settings' &&
+        (mountMode !== 'sidebar' || hasCtxOverrides);
       globalBridgeNotice.refs.update({
         visible: shouldOfferGlobal,
+        contextMode: mountMode === 'sidebar' && hasCtxOverrides,
         windowBridge: telemetry?.windowBridge || null,
         hostPlatform: telemetry?.hostPlatform || 'win32',
       });
@@ -19240,6 +19254,7 @@ const App = defineComponent({
         subagentCount: st.telemetry?.activeConversation?.subagentCount ?? 0,
         windowMountMode: st.telemetry?.settings?.windowMountMode,
         enableWindowOverlay: st.telemetry?.settings?.enableWindowOverlay,
+        modelContextWindows: st.telemetry?.settings?.modelContextWindows,
         windowBridge: st.telemetry?.windowBridge,
         hostPlatform: st.telemetry?.hostPlatform,
       }),

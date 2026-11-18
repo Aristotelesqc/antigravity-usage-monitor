@@ -518,6 +518,7 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.oth.ctxUnavailable': '{name} (currently unavailable)',
   'settings.oth.ctxConfigured': '{name} · Set',
   'settings.oth.ctxConfiguredReported': '{name} · Set / Last seen {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · Pending Restart',
   'settings.oth.ctxDefaultReported': 'Default · Last seen {name}',
   'settings.oth.ctxReported': 'The host reported {name} on the latest request.',
   'settings.oth.ctxMixed': 'Different limits by thinking level',

@@ -5306,26 +5306,61 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     );
     assert.equal(noticeEl.hasAttribute('hidden'), true);
 
-    // SettingsOtherTab context window override notice
+    // SettingsOtherTab context window override notice & pending-restart meta state (Issue #27)
     setI18nLanguage('zh-CN');
     const othTab = SettingsOtherTab({ onLayoutChange: () => {} });
     const ctxNoticeEl = othTab.refs.ctxBridgeNotice.el;
+    const mockCtxModels = [
+      {
+        id: 'model:gemini-4-carbon',
+        label: 'Gemini 4 Carbon',
+        capacity: 786432,
+        members: ['MODEL_PLACEHOLDER_M427'],
+        options: [{ name: '256000', tokens: 256000 }, { name: '512000', tokens: 512000 }],
+      },
+    ];
+
+    // Locked risk mask -> notice stays hidden
     othTab.refs.renderSettings(
-      { contextWindowRiskAccepted: true, modelContextWindows: { 'group:gemini-pro': '384000' } },
-      [],
+      { contextWindowRiskAccepted: false, modelContextWindows: {} },
+      mockCtxModels,
+      { state: 'no_devtools_port', launcherConfigured: true, canRelaunch: true },
+      'win32'
+    );
+    assert.equal(ctxNoticeEl.hasAttribute('hidden'), true);
+
+    // Unlocked + no_devtools_port -> notice immediately visible AND saved option meta shows "待重启生效" instead of "已设置"
+    othTab.refs.renderSettings(
+      {
+        contextWindowRiskAccepted: true,
+        modelContextWindows: { 'model:gemini-4-carbon': '256000' },
+      },
+      mockCtxModels,
       { state: 'no_devtools_port', launcherConfigured: true, canRelaunch: true },
       'win32'
     );
     assert.equal(ctxNoticeEl.hasAttribute('hidden'), false);
     assert.match(ctxNoticeEl.textContent, /激活上下文覆写/);
+    othTab.refs.ctxModelSelect.refs.triggerBtn.dispatchEvent({
+      type: 'click',
+      stopPropagation() {},
+    });
+    assert.match(
+      othTab.refs.ctxModelSelect.refs.menuEl.textContent,
+      /256,000 token · 待重启生效/
+    );
 
     othTab.refs.renderSettings(
-      { contextWindowRiskAccepted: true, modelContextWindows: { 'group:gemini-pro': '384000' } },
-      [],
+      {
+        contextWindowRiskAccepted: true,
+        modelContextWindows: { 'model:gemini-4-carbon': '256000' },
+      },
+      mockCtxModels,
       { state: 'active', aliveCount: 1, launcherConfigured: true, canRelaunch: true },
       'win32'
     );
     assert.equal(ctxNoticeEl.hasAttribute('hidden'), true);
+    assert.match(othTab.refs.ctxModelSelect.refs.menuEl.textContent, /256,000 token · 已设置/);
 
     globalBanner.destroy();
     strTab.destroy();

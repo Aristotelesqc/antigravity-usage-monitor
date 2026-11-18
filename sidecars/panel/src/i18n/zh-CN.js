@@ -518,6 +518,7 @@ export const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.oth.ctxUnavailable': '{name}（当前不可用）',
   'settings.oth.ctxConfigured': '{name} · 已设置',
   'settings.oth.ctxConfiguredReported': '{name} · 已设置 / 最近 {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · 待重启生效',
   'settings.oth.ctxDefaultReported': '默认 · 最近 {name}',
   'settings.oth.ctxReported': '最近一次请求由宿主报告为 {name}。',
   'settings.oth.ctxMixed': '各推理档设置不同',
