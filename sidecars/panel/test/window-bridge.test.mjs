@@ -10,6 +10,8 @@ import { MockMutationObserver, createMockDom } from './mock-dom.mjs';
 import {
   associateIdeIframeRoutes,
   createWindowBridgeController,
+  ensureDesktopRemoteDebuggingArgv,
+  ensureHostRemoteDebuggingArgv,
   ensureIdeRemoteDebuggingArgv,
   ensureRemoteDebuggingInArgvText,
   extractIdeExtensionCascadeId,
@@ -17,6 +19,7 @@ import {
   isAntigravityMainPageTarget,
   isIdeExtensionChatTarget,
   parseDevToolsPortFile,
+  resolveDesktopArgvCandidates,
   resolveDevToolsPortCandidates,
   resolveIdeArgvPath,
 } from '../backend/window-bridge.mjs';
@@ -4844,5 +4847,309 @@ test('WindowOverlayShell macOS (darwin) adaptation: sets data-os="mac", uses 12p
   } finally {
     macNarrowFlow.ov.dispose();
     winNarrowFlow.ov.dispose();
+  }
+});
+
+test('Issue #26: Antigravity Desktop 2.33.0+ argv.json auto-provisioning, ANTIGRAVITY_DEVTOOLS_PORT fallback, and BridgeStatusNotice UI', async () => {
+  // 1. Fresh argv.json is strict-JSON parseable (compatible with both JSONC and JSON.parse)
+  const fresh = ensureRemoteDebuggingInArgvText('');
+  assert.deepEqual(JSON.parse(fresh.text), { 'remote-debugging-port': '0' });
+
+  // 2. Empty home directory creates zero folders for Desktop or IDE
+  const emptyTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-233-empty-'));
+  try {
+    const emptyRes = ensureDesktopRemoteDebuggingArgv({
+      env: {
+        APPDATA: path.join(emptyTmp, 'Roaming'),
+        LOCALAPPDATA: path.join(emptyTmp, 'Local'),
+        ANTIGRAVITY_GEMINI_DIR: path.join(emptyTmp, '.gemini'),
+      },
+      platform: 'win32',
+      homeDir: emptyTmp,
+      enabled: true,
+    });
+    assert.equal(emptyRes.updated, false);
+    assert.equal(emptyRes.reason, 'desktop_dir_missing');
+    assert.equal(fs.existsSync(path.join(emptyTmp, '.antigravity')), false);
+  } finally {
+    fs.rmSync(emptyTmp, { recursive: true, force: true });
+  }
+
+  // 3. Simulated Windows Antigravity Desktop 2.33.0 environment provisions argv.json across Desktop roots & tracks bridge status
+  const simTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-233-desktop-'));
+  const homeDir = path.join(simTmp, 'home');
+  const roamingDir = path.join(homeDir, 'AppData', 'Roaming');
+  const localDir = path.join(homeDir, 'AppData', 'Local');
+  const desktopRoamingDir = path.join(roamingDir, 'Antigravity');
+  const geminiDesktopDir = path.join(homeDir, '.gemini', 'antigravity');
+  const leaseFile = path.join(simTmp, 'window-bridge-lease.json');
+  fs.mkdirSync(desktopRoamingDir, { recursive: true });
+  fs.mkdirSync(geminiDesktopDir, { recursive: true });
+
+  const simEnv = {
+    APPDATA: roamingDir,
+    LOCALAPPDATA: localDir,
+    ANTIGRAVITY_GEMINI_DIR: path.join(homeDir, '.gemini'),
+  };
+
+  try {
+    const candidates = resolveDesktopArgvCandidates(simEnv, 'win32', homeDir);
+    assert.equal(candidates.dotAntigravityArgv, path.join(homeDir, '.antigravity', 'argv.json'));
+
+    // Boot 1: provisions argv.json and reports state='no_devtools_port' + argvUpdatedThisBoot=true
+    const ctrlBoot1 = createWindowBridgeController({
+      handleApiRequest: async () => ({ status: 200, body: '{}' }),
+      readAssetFn: async () => '',
+      getSettingsFn: () => ({ windowMountMode: 'dual', enableWindowOverlay: true, modelContextWindows: {} }),
+      getBundleVersionFn: () => '200',
+      env: simEnv,
+      platform: 'win32',
+      homeDir,
+      leaseFilePath: leaseFile,
+      autoConfigureIdeArgv: true,
+    });
+    const resBoot1 = await ctrlBoot1.syncAllWindows();
+    assert.equal(resBoot1.reason, 'no_devtools_port');
+    const stBoot1 = ctrlBoot1.getBridgeStatus();
+    assert.equal(stBoot1.state, 'no_devtools_port');
+    assert.equal(stBoot1.argvUpdatedThisBoot, true);
+    assert.equal(stBoot1.argvConfigured, true);
+
+    for (const argvPath of [
+      path.join(homeDir, '.antigravity', 'argv.json'),
+      path.join(desktopRoamingDir, 'argv.json'),
+      path.join(geminiDesktopDir, 'argv.json'),
+    ]) {
+      assert.equal(fs.existsSync(argvPath), true, `Expected ${argvPath} to exist`);
+      assert.deepEqual(JSON.parse(fs.readFileSync(argvPath, 'utf8')), {
+        'remote-debugging-port': '0',
+      });
+    }
+
+    // Follower reading active lease inherits Leader's syncState + argvUpdatedThisBoot
+    const leaseJson = JSON.parse(fs.readFileSync(leaseFile, 'utf8'));
+    fs.writeFileSync(
+      leaseFile,
+      JSON.stringify({ ...leaseJson, pid: process.pid }),
+      'utf8'
+    );
+    await ctrlBoot1.stop();
+
+    // Boot 2 (after restart, argv.json already configured, still no DevToolsActivePort): argvUpdatedThisBoot=false, argvConfigured=true
+    fs.unlinkSync(leaseFile);
+    const hostProv2 = ensureHostRemoteDebuggingArgv({
+      env: simEnv,
+      platform: 'win32',
+      homeDir,
+      enabled: true,
+    });
+    assert.equal(hostProv2.updated, false);
+    assert.equal(hostProv2.alreadyConfigured, true);
+
+    const ctrlBoot2 = createWindowBridgeController({
+      handleApiRequest: async () => ({ status: 200, body: '{}' }),
+      readAssetFn: async () => '',
+      getSettingsFn: () => ({ windowMountMode: 'dual', enableWindowOverlay: true, modelContextWindows: {} }),
+      getBundleVersionFn: () => '200',
+      env: simEnv,
+      platform: 'win32',
+      homeDir,
+      autoConfigureIdeArgv: true,
+    });
+    await ctrlBoot2.syncAllWindows();
+    const stBoot2 = ctrlBoot2.getBridgeStatus();
+    assert.equal(stBoot2.state, 'no_devtools_port');
+    assert.equal(stBoot2.argvUpdatedThisBoot, false);
+    assert.equal(stBoot2.argvConfigured, true);
+    await ctrlBoot2.stop();
+
+    // Boot 3: Explicit ANTIGRAVITY_DEVTOOLS_PORT fallback injects cleanly even when DevToolsActivePort file is absent
+    const cdpSrv = http.createServer((req, res) => {
+      if (req.url === '/json/list') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify([
+            {
+              id: 'win-233',
+              type: 'page',
+              url: 'https://127.0.0.1:52100/c/22222222-2222-4222-8222-222222222222',
+              webSocketDebuggerUrl: 'ws://127.0.0.1:52101/devtools/page/win-233',
+            },
+          ])
+        );
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    await new Promise((r) => cdpSrv.listen(0, '127.0.0.1', r));
+    const explicitCdpPort = cdpSrv.address().port;
+
+    class MockCdpWs {
+      constructor() {
+        this._ls = new Map();
+        queueMicrotask(() => {
+          for (const fn of this._ls.get('open') || []) fn();
+        });
+      }
+      addEventListener(type, fn) {
+        if (!this._ls.has(type)) this._ls.set(type, []);
+        this._ls.get(type).push(fn);
+      }
+      send(raw) {
+        const msg = JSON.parse(raw);
+        const expr = String(msg?.params?.expression || '');
+        const isProbe = expr.includes('rpcBatch') && !expr.includes('stylesCss');
+        const value = isProbe
+          ? { alive: false, dockKind: '', visible: true, rpcBatch: [] }
+          : { alive: true, dockKind: 'topbar', visible: true };
+        queueMicrotask(() => {
+          for (const fn of this._ls.get('message') || []) {
+            fn({ data: JSON.stringify({ id: msg.id, result: { result: { value } } }) });
+          }
+        });
+      }
+      close() {}
+    }
+
+    const ctrlBoot3 = createWindowBridgeController({
+      handleApiRequest: async () => ({ status: 200, body: '{}' }),
+      readAssetFn: async () => '/* bundle */',
+      getSettingsFn: () => ({ windowMountMode: 'dual', enableWindowOverlay: true, modelContextWindows: {} }),
+      getBundleVersionFn: () => '200',
+      env: { ...simEnv, ANTIGRAVITY_DEVTOOLS_PORT: String(explicitCdpPort) },
+      platform: 'win32',
+      homeDir,
+      autoConfigureIdeArgv: false,
+      WebSocketImpl: MockCdpWs,
+    });
+    const resBoot3 = await ctrlBoot3.syncAllWindows();
+    assert.equal(resBoot3.ok, true);
+    assert.equal(resBoot3.injected, 1);
+    assert.equal(ctrlBoot3.getBridgeStatus().state, 'active');
+    await ctrlBoot3.stop();
+    await new Promise((r) => cdpSrv.close(r));
+  } finally {
+    fs.rmSync(simTmp, { recursive: true, force: true });
+  }
+
+  // 4. Verify zh-CN / en-US i18n parity & BridgeStatusNotice DOM behavior in SettingsStructureTab + SettingsOtherTab
+  const [
+    { I18N_MESSAGES_ZH_CN },
+    { I18N_MESSAGES_EN_US },
+    { setI18nLanguage },
+    { SettingsStructureTab },
+    { SettingsOtherTab },
+  ] = await Promise.all([
+    import('../src/i18n/zh-CN.js'),
+    import('../src/i18n/en-US.js'),
+    import('../src/i18n/index.js'),
+    import('../src/views/settings/SettingsStructureTab.js'),
+    import('../src/views/settings/SettingsOtherTab.js'),
+  ]);
+
+  assert.deepEqual(
+    Object.keys(I18N_MESSAGES_ZH_CN).sort(),
+    Object.keys(I18N_MESSAGES_EN_US).sort()
+  );
+
+  const { document: mockDoc, makeElement } = createMockDom();
+  const prevDoc = globalThis.document;
+  const prevNav = globalThis.navigator;
+  let copiedClipboardText = '';
+  globalThis.document = mockDoc;
+  Object.defineProperty(globalThis, 'navigator', {
+    value: {
+      clipboard: {
+        writeText: async (txt) => {
+          copiedClipboardText = txt;
+        },
+      },
+    },
+    configurable: true,
+  });
+
+  try {
+    setI18nLanguage('zh-CN');
+    const strTab = SettingsStructureTab({});
+    const noticeEl = strTab.refs.mountBridgeNotice.el;
+    assert.equal(noticeEl.hasAttribute('hidden'), true, 'Hidden before bridge status arrives');
+
+    // First boot after auto-writing argv.json -> restart notice (is-restart)
+    strTab.refs.renderSettings(
+      { windowMountMode: 'dual', enableWindowOverlay: true },
+      { state: 'no_devtools_port', argvUpdatedThisBoot: true, argvConfigured: true },
+      'win32'
+    );
+    assert.equal(noticeEl.hasAttribute('hidden'), false);
+    assert.equal(noticeEl.classList.contains('is-restart'), true);
+    assert.match(noticeEl.textContent, /重启客户端生效/);
+
+    // Second boot still missing port -> warn notice with OS-specific guidance + copy flag button
+    strTab.refs.renderSettings(
+      { windowMountMode: 'dual', enableWindowOverlay: true },
+      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      'darwin'
+    );
+    assert.equal(noticeEl.hasAttribute('hidden'), false);
+    assert.equal(noticeEl.classList.contains('is-warn'), true);
+    assert.match(noticeEl.textContent, /open -a "Antigravity" --args --remote-debugging-port=0/);
+
+    strTab.refs.mountBridgeNotice.refs.copyBtnEl.dispatchEvent({ type: 'click' });
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(copiedClipboardText, '--remote-debugging-port=0');
+    assert.match(strTab.refs.mountBridgeNotice.refs.copyBtnEl.textContent, /已复制/);
+
+    // English localization check
+    setI18nLanguage('en-US');
+    strTab.refs.refreshLabels();
+    assert.match(noticeEl.textContent, /Local Debug Port Missing/);
+
+    // Switching to Sidebar Only hides notice immediately
+    strTab.refs.renderSettings(
+      { windowMountMode: 'sidebar', enableWindowOverlay: false },
+      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      'win32'
+    );
+    assert.equal(noticeEl.hasAttribute('hidden'), true);
+
+    // SettingsOtherTab context window override notice appears only when unlocked + saved override exists + no_devtools_port
+    setI18nLanguage('zh-CN');
+    const othTab = SettingsOtherTab({ onLayoutChange: () => {} });
+    const ctxNoticeEl = othTab.refs.ctxBridgeNotice.el;
+    othTab.refs.renderSettings(
+      { contextWindowRiskAccepted: true, modelContextWindows: {} },
+      [],
+      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      'win32'
+    );
+    assert.equal(ctxNoticeEl.hasAttribute('hidden'), true, 'Hidden when no context override is saved');
+
+    othTab.refs.renderSettings(
+      { contextWindowRiskAccepted: true, modelContextWindows: { 'group:gemini-pro': '384000' } },
+      [],
+      { state: 'no_devtools_port', argvUpdatedThisBoot: false, argvConfigured: true },
+      'win32'
+    );
+    assert.equal(ctxNoticeEl.hasAttribute('hidden'), false, 'Shown when context override is saved but CDP port is missing');
+    assert.match(ctxNoticeEl.textContent, /上下文窗口覆写暂未注入/);
+
+    othTab.refs.renderSettings(
+      { contextWindowRiskAccepted: true, modelContextWindows: { 'group:gemini-pro': '384000' } },
+      [],
+      { state: 'active', aliveCount: 1, argvUpdatedThisBoot: false, argvConfigured: true },
+      'win32'
+    );
+    assert.equal(ctxNoticeEl.hasAttribute('hidden'), true, 'Hidden immediately once CDP bridge becomes active');
+
+    strTab.destroy();
+    othTab.destroy();
+  } finally {
+    setI18nLanguage('zh-CN');
+    globalThis.document = prevDoc;
+    Object.defineProperty(globalThis, 'navigator', {
+      value: prevNav,
+      configurable: true,
+    });
   }
 });

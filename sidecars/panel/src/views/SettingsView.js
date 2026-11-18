@@ -103,9 +103,22 @@ export const SettingsView = defineComponent({
       const telemetry = telemetryStore.getState().telemetry;
       const settings = telemetry?.settings;
       if (settingsSubTab === 'structure') {
-        if (settings) structureTab.refs.renderSettings(settings);
+        if (settings) {
+          structureTab.refs.renderSettings(
+            settings,
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
       } else if (settingsSubTab === 'other') {
-        if (settings) otherTab.refs.renderSettings(settings, telemetry.contextWindowModels || []);
+        if (settings) {
+          otherTab.refs.renderSettings(
+            settings,
+            telemetry.contextWindowModels || [],
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
       } else if (accountTab && settingsSubTab === 'account') {
         accountTab.refs.renderAccount(telemetry?.account, telemetry?.quotas);
       } else {
@@ -118,6 +131,8 @@ export const SettingsView = defineComponent({
     const unsubTelemetry = telemetryStore.subscribe(
       (st) => ({
         settings: st.telemetry?.settings,
+        windowBridge: st.telemetry?.windowBridge,
+        hostPlatform: st.telemetry?.hostPlatform,
         cloudStatus: st.telemetry?.cloudStatus,
         contextWindowModels: st.telemetry?.contextWindowModels,
         account: st.telemetry?.account,

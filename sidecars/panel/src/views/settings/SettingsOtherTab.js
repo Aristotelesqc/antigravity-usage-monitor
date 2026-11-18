@@ -17,6 +17,7 @@ import {
   saveSettingsPatch,
 } from '../../store/telemetryStore.js';
 import { CustomSelect } from '../../components/ui/CustomSelect.js';
+import { BridgeStatusNotice } from '../../components/settings/BridgeStatusNotice.js';
 
 function getStepModelDisplayOptions() {
   return [
@@ -41,6 +42,8 @@ export const SettingsOtherTab = defineComponent({
     let draftContextRiskAccepted = false;
     let acceptingContextRisk = false;
     let latestSettings = null;
+    let latestWindowBridge = null;
+    let latestHostPlatform = 'win32';
     let contextWindowModels = [];
     let contextModelId = '';
     let savingContextWindow = false;
@@ -190,9 +193,11 @@ export const SettingsOtherTab = defineComponent({
         }
       },
     });
+    const ctxBridgeNotice = BridgeStatusNotice({ contextMode: true });
     const ctxModelRow = h('div', { className: 'form-row' }, [ctxModelLabel, ctxModelSelect.el]);
     const ctxWindowRow = h('div', { className: 'form-row' }, [ctxWindowLabel, ctxWindowSelect.el]);
     const ctxControlsBody = h('div', { className: 'ctx-controls-body is-locked' }, [
+      ctxBridgeNotice.el,
       ctxModelRow,
       ctxWindowRow,
       h('div', { className: 'form-row' }, [ctxHint]),
@@ -269,6 +274,11 @@ export const SettingsOtherTab = defineComponent({
       patchAttr(ctxRiskAcceptBtn, 'disabled', acceptingContextRisk);
 
       const saved = latestSettings?.modelContextWindows || {};
+      ctxBridgeNotice.refs.update({
+        visible: unlocked && Object.keys(saved).length > 0,
+        windowBridge: latestWindowBridge,
+        hostPlatform: latestHostPlatform,
+      });
       const models = new Map(contextWindowModels.map((model) => [model.id, model]));
       const knownIds = new Set(contextWindowModels.flatMap(({ id, members = [] }) => [id, ...members]));
       for (const id of Object.keys(saved)) {
@@ -483,10 +493,17 @@ export const SettingsOtherTab = defineComponent({
       maintPanel,
     ]);
 
-    function renderSettings(settings, models = contextWindowModels) {
+    function renderSettings(
+      settings,
+      models = contextWindowModels,
+      windowBridge = latestWindowBridge,
+      hostPlatform = latestHostPlatform
+    ) {
       if (!settings) return;
       latestSettings = settings;
       contextWindowModels = models;
+      if (windowBridge !== undefined) latestWindowBridge = windowBridge;
+      if (hostPlatform) latestHostPlatform = hostPlatform;
       draftModelDisplayMode = normalizeClientModelDisplayMode(
         settings.modelDisplayMode,
         settings.showUpstreamModel
@@ -544,6 +561,7 @@ export const SettingsOtherTab = defineComponent({
       if (resetConfirmTimer) clearTimeout(resetConfirmTimer);
       stepModelSelect.destroy();
       orchestratorIdSelect.destroy();
+      ctxBridgeNotice.destroy();
       ctxModelSelect.destroy();
       ctxWindowSelect.destroy();
     });
@@ -553,6 +571,7 @@ export const SettingsOtherTab = defineComponent({
       refs: {
         stepModelSelect,
         orchestratorIdSelect,
+        ctxBridgeNotice,
         ctxModelSelect,
         ctxWindowSelect,
         rebuildCacheBtn,

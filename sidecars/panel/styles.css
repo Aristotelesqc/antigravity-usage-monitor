@@ -4181,6 +4181,76 @@ html[data-standalone="true"] .app-shell {
   font-size: var(--fs-md);
 }
 
+/* --- CDP / 双栖桥接端口诊断与引导卡片 (.settings-bridge-notice) --- */
+.settings-bridge-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xs);
+  border: 1px solid color-mix(in srgb, var(--metric-warn) 42%, var(--border-hairline));
+  background: color-mix(in srgb, var(--surface-panel) 89%, var(--metric-warn) 7%);
+}
+
+.settings-bridge-notice.is-restart {
+  border-color: color-mix(in srgb, var(--metric-info) 42%, var(--border-hairline));
+  background: color-mix(in srgb, var(--surface-panel) 89%, var(--metric-info) 7%);
+}
+
+.settings-bridge-notice[hidden] {
+  display: none !important;
+}
+
+.settings-bridge-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--metric-warn);
+}
+
+.settings-bridge-notice.is-restart .settings-bridge-head,
+.settings-bridge-notice.is-restart .settings-bridge-icon,
+.settings-bridge-notice.is-restart .settings-bridge-title {
+  color: var(--metric-info);
+}
+
+.settings-bridge-icon {
+  color: var(--metric-warn);
+  flex-shrink: 0;
+}
+
+.settings-bridge-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--metric-warn);
+}
+
+.settings-bridge-desc {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.48;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.settings-bridge-copy-btn {
+  margin-top: 2px;
+  min-height: calc(24px * var(--ui-font-scale, 1));
+  padding: 2px var(--space-3);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  max-width: 100%;
+}
+
+.settings-bridge-copy-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* --- src/styles/overlay.css --- */
 /*
  * 双栖模式顶栏胶囊与悬浮面板样式表 (overlay.css).

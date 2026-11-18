@@ -833,6 +833,10 @@ const SVG_ICON_DEFS = Object.freeze({
   close: [
     { tag: 'path', attrs: { d: 'M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6' } },
   ],
+  copy: [
+    { tag: 'rect', attrs: { x: '5.2', y: '5.2', width: '8.3', height: '8.3', rx: '1.3' } },
+    { tag: 'path', attrs: { d: 'M3.5 10.8H2.8a1.3 1.3 0 0 1-1.3-1.3V3.3A1.3 1.3 0 0 1 2.8 2h6.2a1.3 1.3 0 0 1 1.3 1.3v.7' } },
+  ],
   grip: [
     { tag: 'circle', attrs: { cx: '6', cy: '4', r: '1.05', fill: 'currentColor', stroke: 'none' } },
     { tag: 'circle', attrs: { cx: '10', cy: '4', r: '1.05', fill: 'currentColor', stroke: 'none' } },
@@ -1456,6 +1460,16 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.str.mountDual': '双栖挂载 (顶部栏 + 侧边栏)',
   'settings.str.mountComposer': '输入框挂载 (输入框 + 侧边栏)',
   'settings.str.mountSidebar': '仅侧边栏',
+  'settings.bridge.restartTitle': '已自动补齐调试端口参数，请重启客户端生效',
+  'settings.bridge.restartBody': '已参照 IDE 方案向本地 argv.json 自动写入 "remote-debugging-port": "0"。请完全退出客户端（含系统托盘后台）后重新启动；若 Antigravity 2.33.0+ 桌面端重启后仍未生效，可在启动时追加下方参数。',
+  'settings.bridge.noPortTitle': '未检测到本地调试端口，主窗口挂载暂未生效',
+  'settings.bridge.unreachableTitle': '本地调试端口不可达，主窗口挂载暂未生效',
+  'settings.bridge.ctxTitle': '未连通本地调试通道，上下文窗口覆写暂未注入',
+  'settings.bridge.guideWin': 'Antigravity 2.33.0+ 默认不再开启调试端口（本地 argv.json 已写入配置）。请先从系统托盘完全退出并重启；若桌面端仍未生效，请在快捷方式「目标」末尾追加 --remote-debugging-port=0 后启动。',
+  'settings.bridge.guideMac': 'Antigravity 2.33.0+ 默认不再开启调试端口（本地 argv.json 已写入配置）。请先完全退出（Cmd+Q）并重启；若桌面端仍未生效，可通过终端执行 open -a "Antigravity" --args --remote-debugging-port=0 启动。',
+  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ 默认不再开启调试端口（本地 argv.json 已写入配置）。请先完全退出并重启；若桌面端仍未生效，请在启动器 .desktop 的 Exec= 末尾追加 --remote-debugging-port=0 后启动。',
+  'settings.bridge.copyFlagBtn': '复制 {cmd}',
+  'settings.bridge.copiedBtn': '已复制启动参数',
   'settings.str.popoverWidthLabel': '悬浮面板宽度',
   'settings.str.popoverWidthAuto': '自适应',
   'settings.str.popoverWidthCustom': '指定宽度',
@@ -2070,6 +2084,16 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.str.mountDual': 'Dual Mount (Titlebar + Sidebar)',
   'settings.str.mountComposer': 'Composer Mount (Input Box + Sidebar)',
   'settings.str.mountSidebar': 'Sidebar Only',
+  'settings.bridge.restartTitle': 'Debug Port Configured — Restart Required',
+  'settings.bridge.restartBody': 'Automatically added "remote-debugging-port": "0" to local argv.json. Quit Antigravity completely (including any tray process) and relaunch; if Desktop 2.33.0+ still has no port after restart, launch with the flag below.',
+  'settings.bridge.noPortTitle': 'Local Debug Port Missing — Window Mount Inactive',
+  'settings.bridge.unreachableTitle': 'Local Debug Port Unreachable — Window Mount Inactive',
+  'settings.bridge.ctxTitle': 'Local Debug Port Inactive — Context Override Pending',
+  'settings.bridge.guideWin': 'Antigravity 2.33.0+ no longer opens a debug port by default (argv.json is already configured). Fully quit from the system tray and relaunch first; if Desktop still fails, append --remote-debugging-port=0 to your shortcut Target.',
+  'settings.bridge.guideMac': 'Antigravity 2.33.0+ no longer opens a debug port by default (argv.json is already configured). Fully quit (Cmd+Q) and relaunch first; if Desktop still fails, launch via open -a "Antigravity" --args --remote-debugging-port=0.',
+  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ no longer opens a debug port by default (argv.json is already configured). Fully quit and relaunch first; if Desktop still fails, append --remote-debugging-port=0 to Exec= in your .desktop launcher.',
+  'settings.bridge.copyFlagBtn': 'Copy {cmd}',
+  'settings.bridge.copiedBtn': 'Copied to Clipboard',
   'settings.str.popoverWidthLabel': 'Popover Width',
   'settings.str.popoverWidthAuto': 'Auto Fit',
   'settings.str.popoverWidthCustom': 'Custom',
@@ -3803,7 +3827,17 @@ function isEquivalentTelemetry(prev, next) {
   if (!sameArr(pSet?.overviewMetrics, nSet?.overviewMetrics)) return false;
   if (!sameArr(pSet?.stepTableColumns, nSet?.stepTableColumns)) return false;
 
-  // 2. 比对云端状态
+  // 2. 比对云端状态与桥接健康度
+  const pWb = prev.windowBridge;
+  const nWb = next.windowBridge;
+  if (
+    (pWb?.state || '') !== (nWb?.state || '') ||
+    Boolean(pWb?.argvUpdatedThisBoot) !== Boolean(nWb?.argvUpdatedThisBoot) ||
+    Boolean(pWb?.argvConfigured) !== Boolean(nWb?.argvConfigured) ||
+    Number(pWb?.aliveCount || 0) !== Number(nWb?.aliveCount || 0)
+  ) {
+    return false;
+  }
   const pCloud = prev.cloudStatus;
   const nCloud = next.cloudStatus;
   if (
@@ -14012,6 +14046,186 @@ const ThemeColorPicker = defineComponent({
 return { ThemeColorPicker };
 })();
 
+// --- src/components/settings/BridgeStatusNotice.js ---
+const { BridgeStatusNotice } = (() => {
+/**
+ * @fileoverview Shared CDP / Window Bridge diagnostic notice card (`BridgeStatusNotice.js`).
+ * Surfaces actionable restart or `--remote-debugging-port=0` guidance when Antigravity 2.33.0+
+ * runs without an active `DevToolsActivePort` (`no_devtools_port` / `cdp_unreachable`).
+ */
+
+
+const LAUNCH_FLAG_TEXT = '--remote-debugging-port=0';
+
+async function copyTextToClipboard(text) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fallback to temporary textarea inside restricted webview contexts
+  }
+  try {
+    if (typeof document === 'undefined' || !document.body) return false;
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', 'true');
+    area.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;';
+    document.body.appendChild(area);
+    area.select?.();
+    const ok = Boolean(document.execCommand?.('copy'));
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+const BridgeStatusNotice = defineComponent({
+  name: 'BridgeStatusNotice',
+  setup({ props, onCleanup }) {
+    const contextMode = Boolean(props?.contextMode);
+    let lastPayload = {
+      visible: false,
+      windowBridge: null,
+      hostPlatform: 'win32',
+    };
+    let copied = false;
+    let copiedTimer = null;
+    let destroyed = false;
+
+    const headIconEl = createSvgIcon('warning', { size: 13, className: 'settings-bridge-icon' });
+    const titleEl = h('strong', { className: 'settings-bridge-title', text: '' });
+    const bodyEl = h('p', { className: 'settings-bridge-desc', text: '' });
+
+    const copyBtnIconEl = createSvgIcon('copy', { size: 11 });
+    const copyBtnTextEl = h('span', {
+      className: 'settings-bridge-copy-text',
+      text: t('settings.bridge.copyFlagBtn', { cmd: LAUNCH_FLAG_TEXT }),
+    });
+    const copyBtnEl = h(
+      'button',
+      {
+        type: 'button',
+        className: 'btn-ghost-sm settings-bridge-copy-btn',
+        onClick: async () => {
+          await copyTextToClipboard(LAUNCH_FLAG_TEXT);
+          if (destroyed) return;
+          copied = true;
+          if (copiedTimer) clearTimeout(copiedTimer);
+          syncCopyBtn();
+          copiedTimer = setTimeout(() => {
+            copiedTimer = null;
+            if (destroyed) return;
+            copied = false;
+            syncCopyBtn();
+          }, 1800);
+          copiedTimer?.unref?.();
+        },
+      },
+      [copyBtnIconEl, copyBtnTextEl]
+    );
+
+    const rootEl = h(
+      'div',
+      {
+        className: 'settings-bridge-notice',
+        role: 'status',
+        hidden: true,
+      },
+      [
+        h('div', { className: 'settings-bridge-head' }, [headIconEl, titleEl]),
+        bodyEl,
+        copyBtnEl,
+      ]
+    );
+
+    function syncCopyBtn() {
+      patchSvgIcon(copyBtnIconEl, copied ? 'check' : 'copy');
+      patchText(
+        copyBtnTextEl,
+        copied
+          ? t('settings.bridge.copiedBtn')
+          : t('settings.bridge.copyFlagBtn', { cmd: LAUNCH_FLAG_TEXT })
+      );
+    }
+
+    function render() {
+      const wb = lastPayload.windowBridge;
+      const state = String(wb?.state || '').trim();
+      const shouldShow =
+        Boolean(lastPayload.visible) &&
+        !isWindowOverlayMode() &&
+        (state === 'no_devtools_port' || state === 'cdp_unreachable');
+
+      patchAttr(rootEl, 'hidden', !shouldShow);
+      if (!shouldShow) return;
+
+      const isRestartPending = state === 'no_devtools_port' && Boolean(wb?.argvUpdatedThisBoot);
+      patchClasses(rootEl, {
+        'is-restart': isRestartPending,
+        'is-warn': !isRestartPending,
+      });
+      patchSvgIcon(headIconEl, isRestartPending ? 'refresh' : 'warning');
+
+      let titleText = '';
+      if (isRestartPending) {
+        titleText = t('settings.bridge.restartTitle');
+      } else if (contextMode) {
+        titleText = t('settings.bridge.ctxTitle');
+      } else if (state === 'cdp_unreachable') {
+        titleText = t('settings.bridge.unreachableTitle');
+      } else {
+        titleText = t('settings.bridge.noPortTitle');
+      }
+
+      const plat = String(lastPayload.hostPlatform || '').trim().toLowerCase();
+      let bodyText = '';
+      if (isRestartPending) {
+        bodyText = t('settings.bridge.restartBody');
+      } else if (plat === 'darwin') {
+        bodyText = t('settings.bridge.guideMac');
+      } else if (plat === 'linux') {
+        bodyText = t('settings.bridge.guideLinux');
+      } else {
+        bodyText = t('settings.bridge.guideWin');
+      }
+
+      patchText(titleEl, titleText);
+      patchText(bodyEl, bodyText);
+      syncCopyBtn();
+    }
+
+    function update(next = {}) {
+      lastPayload = {
+        ...lastPayload,
+        ...next,
+      };
+      render();
+    }
+
+    onCleanup(() => {
+      destroyed = true;
+      if (copiedTimer) {
+        clearTimeout(copiedTimer);
+        copiedTimer = null;
+      }
+    });
+
+    return {
+      el: rootEl,
+      refs: {
+        update,
+        refreshLabels: render,
+        copyBtnEl,
+      },
+    };
+  },
+});
+return { BridgeStatusNotice };
+})();
+
 // --- src/views/settings/SettingsGeneralTab.js ---
 const { SettingsGeneralTab } = (() => {
 /**
@@ -14559,6 +14773,8 @@ const SettingsStructureTab = defineComponent({
     let rawStepTokenComboText = DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT;
     let draftStepColumns = [...DEFAULT_CLIENT_STEP_COLUMNS];
     let latestSettings = null;
+    let latestWindowBridge = null;
+    let latestHostPlatform = 'win32';
 
     function isStructureVisible() {
       const st = uiStore.getState();
@@ -14769,6 +14985,8 @@ const SettingsStructureTab = defineComponent({
       },
     });
 
+    const mountBridgeNotice = BridgeStatusNotice({});
+
     const mountSection = CollapsibleSection({
       collapsible: false,
       icon: 'dock',
@@ -14802,6 +15020,7 @@ const SettingsStructureTab = defineComponent({
         mountPreviewCanvas,
         h('div', { className: 'settings-divider' }),
         h('div', { className: 'form-row' }, [mountModeLabelEl, windowMountSelect.el]),
+        mountBridgeNotice.el,
         h('div', { className: 'form-row' }, [
           h('div', { className: 'settings-inline-row' }, [
             popoverWidthLabelEl,
@@ -14833,6 +15052,11 @@ const SettingsStructureTab = defineComponent({
       windowMountSelect.setProps({
         modelValue: draftWindowMountMode,
         options: getMountModeOptions(),
+      });
+      mountBridgeNotice.refs.update({
+        visible: draftWindowMountMode !== 'sidebar',
+        windowBridge: latestWindowBridge,
+        hostPlatform: latestHostPlatform,
       });
       popoverWidthModeToggle.setProps({
         modelValue: draftPopoverWidthMode,
@@ -15423,9 +15647,15 @@ const SettingsStructureTab = defineComponent({
       stepsSection.el,
     ]);
 
-    function renderSettings(settings) {
+    function renderSettings(
+      settings,
+      windowBridge = latestWindowBridge,
+      hostPlatform = latestHostPlatform
+    ) {
       if (!settings) return;
       latestSettings = settings;
+      if (windowBridge !== undefined) latestWindowBridge = windowBridge;
+      if (hostPlatform) latestHostPlatform = hostPlatform;
       draftWindowMountMode = normalizeClientWindowMountMode(
         settings.windowMountMode,
         settings.enableWindowOverlay
@@ -15527,6 +15757,7 @@ const SettingsStructureTab = defineComponent({
 
     onCleanup(() => {
       unsubUi();
+      mountBridgeNotice.destroy();
       capsulePreviewWidget.destroy();
       hoverPreviewHost.destroy();
       overviewPreviewHost.destroy();
@@ -15555,6 +15786,7 @@ const SettingsStructureTab = defineComponent({
       refs: {
         thirdNavBar,
         capsulePreviewWidget,
+        mountBridgeNotice,
         hoverPreviewHost,
         overviewPreviewHost,
         stepTablePreview,
@@ -15614,6 +15846,8 @@ const SettingsOtherTab = defineComponent({
     let draftContextRiskAccepted = false;
     let acceptingContextRisk = false;
     let latestSettings = null;
+    let latestWindowBridge = null;
+    let latestHostPlatform = 'win32';
     let contextWindowModels = [];
     let contextModelId = '';
     let savingContextWindow = false;
@@ -15763,9 +15997,11 @@ const SettingsOtherTab = defineComponent({
         }
       },
     });
+    const ctxBridgeNotice = BridgeStatusNotice({ contextMode: true });
     const ctxModelRow = h('div', { className: 'form-row' }, [ctxModelLabel, ctxModelSelect.el]);
     const ctxWindowRow = h('div', { className: 'form-row' }, [ctxWindowLabel, ctxWindowSelect.el]);
     const ctxControlsBody = h('div', { className: 'ctx-controls-body is-locked' }, [
+      ctxBridgeNotice.el,
       ctxModelRow,
       ctxWindowRow,
       h('div', { className: 'form-row' }, [ctxHint]),
@@ -15842,6 +16078,11 @@ const SettingsOtherTab = defineComponent({
       patchAttr(ctxRiskAcceptBtn, 'disabled', acceptingContextRisk);
 
       const saved = latestSettings?.modelContextWindows || {};
+      ctxBridgeNotice.refs.update({
+        visible: unlocked && Object.keys(saved).length > 0,
+        windowBridge: latestWindowBridge,
+        hostPlatform: latestHostPlatform,
+      });
       const models = new Map(contextWindowModels.map((model) => [model.id, model]));
       const knownIds = new Set(contextWindowModels.flatMap(({ id, members = [] }) => [id, ...members]));
       for (const id of Object.keys(saved)) {
@@ -16056,10 +16297,17 @@ const SettingsOtherTab = defineComponent({
       maintPanel,
     ]);
 
-    function renderSettings(settings, models = contextWindowModels) {
+    function renderSettings(
+      settings,
+      models = contextWindowModels,
+      windowBridge = latestWindowBridge,
+      hostPlatform = latestHostPlatform
+    ) {
       if (!settings) return;
       latestSettings = settings;
       contextWindowModels = models;
+      if (windowBridge !== undefined) latestWindowBridge = windowBridge;
+      if (hostPlatform) latestHostPlatform = hostPlatform;
       draftModelDisplayMode = normalizeClientModelDisplayMode(
         settings.modelDisplayMode,
         settings.showUpstreamModel
@@ -16117,6 +16365,7 @@ const SettingsOtherTab = defineComponent({
       if (resetConfirmTimer) clearTimeout(resetConfirmTimer);
       stepModelSelect.destroy();
       orchestratorIdSelect.destroy();
+      ctxBridgeNotice.destroy();
       ctxModelSelect.destroy();
       ctxWindowSelect.destroy();
     });
@@ -16126,6 +16375,7 @@ const SettingsOtherTab = defineComponent({
       refs: {
         stepModelSelect,
         orchestratorIdSelect,
+        ctxBridgeNotice,
         ctxModelSelect,
         ctxWindowSelect,
         rebuildCacheBtn,
@@ -18630,9 +18880,22 @@ const SettingsView = defineComponent({
       const telemetry = telemetryStore.getState().telemetry;
       const settings = telemetry?.settings;
       if (settingsSubTab === 'structure') {
-        if (settings) structureTab.refs.renderSettings(settings);
+        if (settings) {
+          structureTab.refs.renderSettings(
+            settings,
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
       } else if (settingsSubTab === 'other') {
-        if (settings) otherTab.refs.renderSettings(settings, telemetry.contextWindowModels || []);
+        if (settings) {
+          otherTab.refs.renderSettings(
+            settings,
+            telemetry.contextWindowModels || [],
+            telemetry?.windowBridge,
+            telemetry?.hostPlatform
+          );
+        }
       } else if (accountTab && settingsSubTab === 'account') {
         accountTab.refs.renderAccount(telemetry?.account, telemetry?.quotas);
       } else {
@@ -18645,6 +18908,8 @@ const SettingsView = defineComponent({
     const unsubTelemetry = telemetryStore.subscribe(
       (st) => ({
         settings: st.telemetry?.settings,
+        windowBridge: st.telemetry?.windowBridge,
+        hostPlatform: st.telemetry?.hostPlatform,
         cloudStatus: st.telemetry?.cloudStatus,
         contextWindowModels: st.telemetry?.contextWindowModels,
         account: st.telemetry?.account,

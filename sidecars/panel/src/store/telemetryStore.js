@@ -262,7 +262,17 @@ export function isEquivalentTelemetry(prev, next) {
   if (!sameArr(pSet?.overviewMetrics, nSet?.overviewMetrics)) return false;
   if (!sameArr(pSet?.stepTableColumns, nSet?.stepTableColumns)) return false;
 
-  // 2. 比对云端状态
+  // 2. 比对云端状态与桥接健康度
+  const pWb = prev.windowBridge;
+  const nWb = next.windowBridge;
+  if (
+    (pWb?.state || '') !== (nWb?.state || '') ||
+    Boolean(pWb?.argvUpdatedThisBoot) !== Boolean(nWb?.argvUpdatedThisBoot) ||
+    Boolean(pWb?.argvConfigured) !== Boolean(nWb?.argvConfigured) ||
+    Number(pWb?.aliveCount || 0) !== Number(nWb?.aliveCount || 0)
+  ) {
+    return false;
+  }
   const pCloud = prev.cloudStatus;
   const nCloud = next.cloudStatus;
   if (

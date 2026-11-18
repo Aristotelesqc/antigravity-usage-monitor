@@ -43,6 +43,7 @@ import {
 } from './model-pricing.mjs';
 import { getCloudStatus, getPricingPhaseEpoch, pricingCatalogRevision } from './pricing-catalog.mjs';
 import { buildOfficialQuotaPools } from './quota-pools.mjs';
+import { getDefaultWindowBridgeStatus } from './window-bridge.mjs';
 import {
   aggregateMultiWindowUsage,
   buildScopedModelBreakdown,
@@ -1581,6 +1582,7 @@ export async function buildTelemetryPayloadInternal(
     timestamp: new Date().toISOString(),
     hostPlatform: process.platform || 'unknown',
     uiBundleVersion,
+    windowBridge: getDefaultWindowBridgeStatus(),
     settings,
     contextWindowModels: getContextWindowGroups(getContextWindowModels(clientConfigs, contextModelCatalog)).map((group) => {
       const latest = group.members.reduce((previous, id) => {

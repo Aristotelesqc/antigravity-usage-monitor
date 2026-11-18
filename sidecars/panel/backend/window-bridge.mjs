@@ -10,7 +10,7 @@
  * 3. 完全不触碰宿主 `app.asar` 文件，客户端升级或无调试端口时静默回退至右侧辅助栏。
  */
 
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -100,6 +100,56 @@ export function resolveIdeArgvPath(env = process.env, homeDir = homedir()) {
     return join(portableRoot, 'argv.json');
   }
   return join(homeDir, '.antigravity-ide', 'argv.json');
+}
+
+/**
+ * 解析 Antigravity Desktop 2.0 各平台可能的启动参数文件 `argv.json` 候选路径。
+ *
+ * @param {Record<string, string|undefined>} [env=process.env]
+ * @param {string} [platform=process.platform]
+ * @param {string} [homeDir=homedir()]
+ * @returns {{ dotAntigravityArgv: string, userDataArgvPaths: string[], geminiArgvPath: string }}
+ */
+export function resolveDesktopArgvCandidates(
+  env = process.env,
+  platform = process.platform,
+  homeDir = homedir()
+) {
+  const dotAntigravityArgv = join(homeDir, '.antigravity', 'argv.json');
+  const geminiBase = String(env?.ANTIGRAVITY_GEMINI_DIR || '').trim() || join(homeDir, '.gemini');
+  const geminiArgvPath = join(geminiBase, 'antigravity', 'argv.json');
+
+  let userDataDirs = [];
+  if (platform === 'win32') {
+    const appData = env?.APPDATA || join(homeDir, 'AppData', 'Roaming');
+    const localAppData = env?.LOCALAPPDATA || join(homeDir, 'AppData', 'Local');
+    userDataDirs = [join(appData, 'Antigravity'), join(localAppData, 'Antigravity')];
+  } else if (platform === 'darwin') {
+    userDataDirs = [
+      join(homeDir, 'Library', 'Application Support', 'Antigravity'),
+      join(homeDir, '.config', 'Antigravity'),
+    ];
+  } else {
+    const configHome = env?.XDG_CONFIG_HOME || join(homeDir, '.config');
+    userDataDirs = [join(configHome, 'Antigravity')];
+  }
+
+  const seen = new Set();
+  const userDataArgvPaths = [];
+  for (const dir of userDataDirs) {
+    const argvPath = join(dir, 'argv.json');
+    const key = platform === 'win32' ? argvPath.toLowerCase() : argvPath;
+    if (!seen.has(key)) {
+      seen.add(key);
+      userDataArgvPaths.push(argvPath);
+    }
+  }
+
+  return {
+    dotAntigravityArgv,
+    userDataArgvPaths,
+    geminiArgvPath,
+  };
 }
 
 /**
@@ -266,8 +316,8 @@ function scanJsoncObject(rawText) {
  */
 export function ensureRemoteDebuggingInArgvText(rawText) {
   if (typeof rawText !== 'string' || !rawText.trim()) {
-    const fresh =
-      '{\n\t// Automatically configured by Antigravity Usage & Speed Monitor for topbar overlay support.\n\t"remote-debugging-port": "0"\n}\n';
+    // 新建文件使用纯 JSON（无注释），同时兼容 VS Code/IDE JSONC 解析器与 Electron 严格 JSON.parse()
+    const fresh = '{\n\t"remote-debugging-port": "0"\n}\n';
     return { changed: true, valid: true, portValue: '0', text: fresh };
   }
 
@@ -339,25 +389,14 @@ export function ensureRemoteDebuggingInArgvText(rawText) {
   };
 }
 
-/**
- * 当本机存在 `~/.antigravity-ide` 配置目录且开启双栖模式时，自动补齐 `argv.json` 中的
- * `"remote-debugging-port": "0"`，使 Antigravity IDE 下次启动时自动生成 `DevToolsActivePort`。
- *
- * @param {{ env?: Record<string, string|undefined>, homeDir?: string, enabled?: boolean }} [options]
- */
-export function ensureIdeRemoteDebuggingArgv({
-  env = process.env,
-  homeDir = homedir(),
-  enabled = true,
-} = {}) {
-  if (!enabled) {
-    return { checked: false, updated: false, reason: 'disabled' };
-  }
-  const argvPath = resolveIdeArgvPath(env, homeDir);
+function patchSingleHostArgvFile(argvPath, { createDir = false, missingReason = 'dir_missing' } = {}) {
   try {
     const dirPath = dirname(argvPath);
     if (!existsSync(dirPath)) {
-      return { checked: true, updated: false, reason: 'ide_dir_missing', argvPath };
+      if (!createDir) {
+        return { checked: true, updated: false, reason: missingReason, argvPath };
+      }
+      mkdirSync(dirPath, { recursive: true });
     }
     const rawText = existsSync(argvPath) ? readFileSync(argvPath, 'utf8') : '';
     const patched = ensureRemoteDebuggingInArgvText(rawText);
@@ -399,6 +438,132 @@ export function ensureIdeRemoteDebuggingArgv({
       argvPath,
     };
   }
+}
+
+/**
+ * 当本机存在 `~/.antigravity-ide` 配置目录且开启双栖模式时，自动补齐 `argv.json` 中的
+ * `"remote-debugging-port": "0"`，使 Antigravity IDE 下次启动时自动生成 `DevToolsActivePort`。
+ *
+ * @param {{ env?: Record<string, string|undefined>, homeDir?: string, enabled?: boolean }} [options]
+ */
+export function ensureIdeRemoteDebuggingArgv({
+  env = process.env,
+  homeDir = homedir(),
+  enabled = true,
+} = {}) {
+  if (!enabled) {
+    return { checked: false, updated: false, reason: 'disabled' };
+  }
+  const argvPath = resolveIdeArgvPath(env, homeDir);
+  return patchSingleHostArgvFile(argvPath, {
+    createDir: false,
+    missingReason: 'ide_dir_missing',
+  });
+}
+
+/**
+ * 当检测到本机已安装 Antigravity Desktop 2.0（存在 `~/.antigravity`、`~/.gemini/antigravity` 或系统 `Antigravity` 数据目录）时，
+ * 同步参照 IDE 方案自动补齐 `~/.antigravity/argv.json` 与已有桌面端数据目录下的 `argv.json` (`"remote-debugging-port": "0"`)。
+ *
+ * @param {{ env?: Record<string, string|undefined>, platform?: string, homeDir?: string, enabled?: boolean }} [options]
+ */
+export function ensureDesktopRemoteDebuggingArgv({
+  env = process.env,
+  platform = process.platform,
+  homeDir = homedir(),
+  enabled = true,
+} = {}) {
+  if (!enabled) {
+    return { checked: false, updated: false, alreadyConfigured: false, reason: 'disabled', results: [] };
+  }
+  const candidates = resolveDesktopArgvCandidates(env, platform, homeDir);
+  const dotDir = dirname(candidates.dotAntigravityArgv);
+  const probeDirs = [
+    dotDir,
+    ...candidates.userDataArgvPaths.map((p) => dirname(p)),
+    dirname(candidates.geminiArgvPath),
+  ];
+  const hasDesktopInstall = probeDirs.some((dir) => {
+    try {
+      return existsSync(dir);
+    } catch {
+      return false;
+    }
+  });
+  if (!hasDesktopInstall) {
+    return {
+      checked: true,
+      updated: false,
+      alreadyConfigured: false,
+      reason: 'desktop_dir_missing',
+      results: [],
+    };
+  }
+
+  const results = [
+    patchSingleHostArgvFile(candidates.dotAntigravityArgv, {
+      createDir: true,
+      missingReason: 'desktop_dir_missing',
+    }),
+    ...candidates.userDataArgvPaths.map((argvPath) =>
+      patchSingleHostArgvFile(argvPath, {
+        createDir: false,
+        missingReason: 'desktop_dir_missing',
+      })
+    ),
+    patchSingleHostArgvFile(candidates.geminiArgvPath, {
+      createDir: false,
+      missingReason: 'desktop_dir_missing',
+    }),
+  ];
+
+  const updatedPaths = results.filter((r) => r.updated).map((r) => r.argvPath);
+  const configuredPaths = results
+    .filter((r) => r.updated || r.alreadyConfigured)
+    .map((r) => r.argvPath);
+  return {
+    checked: true,
+    updated: updatedPaths.length > 0,
+    alreadyConfigured: updatedPaths.length === 0 && configuredPaths.length > 0,
+    updatedPaths,
+    configuredPaths,
+    results,
+  };
+}
+
+/**
+ * 统一补齐本机 Antigravity IDE 与 Antigravity Desktop 的 `argv.json` 调试端口参数。
+ *
+ * @param {{ env?: Record<string, string|undefined>, platform?: string, homeDir?: string, enabled?: boolean }} [options]
+ */
+export function ensureHostRemoteDebuggingArgv({
+  env = process.env,
+  platform = process.platform,
+  homeDir = homedir(),
+  enabled = true,
+} = {}) {
+  if (!enabled) {
+    return { checked: false, updated: false, alreadyConfigured: false, reason: 'disabled' };
+  }
+  const ide = ensureIdeRemoteDebuggingArgv({ env, homeDir, enabled: true });
+  const desktop = ensureDesktopRemoteDebuggingArgv({ env, platform, homeDir, enabled: true });
+  const updatedPaths = [
+    ...(ide.updated && ide.argvPath ? [ide.argvPath] : []),
+    ...(desktop.updatedPaths || []),
+  ];
+  const configuredPaths = [
+    ...((ide.updated || ide.alreadyConfigured) && ide.argvPath ? [ide.argvPath] : []),
+    ...(desktop.configuredPaths || []),
+  ];
+  return {
+    checked: true,
+    updated: updatedPaths.length > 0,
+    alreadyConfigured: updatedPaths.length === 0 && configuredPaths.length > 0,
+    updatedPaths,
+    configuredPaths,
+    ide,
+    desktop,
+  };
 }
 
 /**
@@ -721,6 +886,18 @@ export function createWindowBridgeController(options) {
   let hadInjectedChatFrames = false;
   let cdpFallbackActive = false;
   let ideArgvProvisioned = false;
+  let argvUpdatedThisBoot = false;
+  let argvConfigured = false;
+  let lastPersistedLeaseSig = '';
+  let lastBridgeStatus = {
+    state: 'pending',
+    enabled: true,
+    aliveCount: 0,
+    targets: 0,
+    argvUpdatedThisBoot: false,
+    argvConfigured: false,
+    updatedAtMs: 0,
+  };
   let hadContextWindows = false;
   let contextWindowBootId = `${process.pid}:${Date.now()}`;
   let nodeDepsPromise = null;
@@ -996,6 +1173,17 @@ export function createWindowBridgeController(options) {
         // 忽略不可读候选文件
       }
     }
+    const rawExplicitPorts = String(env?.ANTIGRAVITY_DEVTOOLS_PORT || '').trim();
+    if (rawExplicitPorts) {
+      for (const token of rawExplicitPorts.split(/[\s,]+/)) {
+        if (!/^\d+$/.test(token)) continue;
+        const p = Number(token);
+        if (Number.isInteger(p) && p > 0 && p <= 65535 && !seen.has(p)) {
+          seen.add(p);
+          ports.push(p);
+        }
+      }
+    }
     return ports;
   }
 
@@ -1138,6 +1326,36 @@ export function createWindowBridgeController(options) {
     }
   }
 
+  function updateBridgeStatus(nextState, { enabled = true, aliveCount = 0, targets = 0, leasedBySelf = false, bundleVersion = '', prevLease = null } = {}) {
+    lastBridgeStatus = {
+      state: nextState,
+      enabled: Boolean(enabled),
+      aliveCount: Number(aliveCount || 0),
+      targets: Number(targets || 0),
+      argvUpdatedThisBoot: Boolean(argvUpdatedThisBoot),
+      argvConfigured: Boolean(argvConfigured),
+      updatedAtMs: Date.now(),
+    };
+    if (leasedBySelf && leaseFilePath) {
+      const sig = `${nextState}:${lastBridgeStatus.aliveCount}:${lastBridgeStatus.targets}:${argvUpdatedThisBoot ? 1 : 0}:${argvConfigured ? 1 : 0}`;
+      if (sig !== lastPersistedLeaseSig) {
+        lastPersistedLeaseSig = sig;
+        saveJson(leaseFilePath, {
+          pid: process.pid,
+          bundleVersion,
+          bridgePort: bridgePort > 0 ? bridgePort : Number(prevLease?.bridgePort || 0) || undefined,
+          bridgeToken: bridgeToken || String(prevLease?.bridgeToken || '') || undefined,
+          syncState: lastBridgeStatus.state,
+          aliveCount: lastBridgeStatus.aliveCount,
+          targets: lastBridgeStatus.targets,
+          argvUpdatedThisBoot: lastBridgeStatus.argvUpdatedThisBoot,
+          argvConfigured: lastBridgeStatus.argvConfigured,
+          updatedAtMs: Date.now(),
+        });
+      }
+    }
+  }
+
   async function runSyncInternal({ forceReinject = false } = {}) {
     if (stopped) return { ok: false, reason: 'stopped' };
     const bundleVersion = String(getBundleVersionFn() || '');
@@ -1155,14 +1373,25 @@ export function createWindowBridgeController(options) {
     const contextWindows = curSettings.modelContextWindows || {};
     const hasContextWindows = Object.keys(contextWindows).length > 0;
     if ((enabled || hasContextWindows) && autoConfigureIdeArgv && !ideArgvProvisioned) {
-      const prov = ensureIdeRemoteDebuggingArgv({ env, homeDir, enabled: true });
-      if (prov.updated || prov.alreadyConfigured || prov.reason === 'ide_dir_missing') {
+      const prov = ensureHostRemoteDebuggingArgv({ env, platform, homeDir, enabled: true });
+      if (prov.updated) {
+        argvUpdatedThisBoot = true;
+        argvConfigured = true;
+      } else if (prov.alreadyConfigured) {
+        argvConfigured = true;
+      }
+      const noInstallDirs =
+        prov.ide?.reason === 'ide_dir_missing' && prov.desktop?.reason === 'desktop_dir_missing';
+      if (prov.updated || prov.alreadyConfigured || noInstallDirs) {
         ideArgvProvisioned = true;
       }
     }
 
+    let leasedBySelf = false;
+    let currentLease = null;
     if ((enabled || hasContextWindows) && leaseFilePath && !forceReinject) {
       const lease = loadJson(leaseFilePath, null);
+      currentLease = lease;
       const leasePid = Number(lease?.pid || 0);
       const leaseAgeMs = Date.now() - Number(lease?.updatedAtMs || 0);
       if (leasePid > 0 && leasePid !== process.pid && leaseAgeMs >= 0 && leaseAgeMs < 9000 && isPidAlive(leasePid)) {
@@ -1173,28 +1402,62 @@ export function createWindowBridgeController(options) {
           return { ok: false, enabled: true, reason: 'older_than_leader', injected: 0 };
         }
         if (leaseVerNum === myVerNum || String(lease?.bundleVersion || '') === bundleVersion) {
+          lastBridgeStatus = {
+            state: String(lease?.syncState || 'active'),
+            enabled: Boolean(enabled),
+            aliveCount: Number(lease?.aliveCount || 0),
+            targets: Number(lease?.targets || 0),
+            argvUpdatedThisBoot: Boolean(lease?.argvUpdatedThisBoot || argvUpdatedThisBoot),
+            argvConfigured: Boolean(lease?.argvConfigured || argvConfigured),
+            updatedAtMs: Date.now(),
+          };
           return { ok: true, enabled: true, reason: 'follower_yield', leaderPid: leasePid, injected: 0 };
         }
       }
+      leasedBySelf = true;
+      lastPersistedLeaseSig = '';
       saveJson(leaseFilePath, {
         pid: process.pid,
         bundleVersion,
         bridgePort: bridgePort > 0 ? bridgePort : Number(lease?.bridgePort || 0) || undefined,
         bridgeToken: bridgeToken || String(lease?.bridgeToken || '') || undefined,
+        syncState: lastBridgeStatus.state,
+        aliveCount: lastBridgeStatus.aliveCount,
+        targets: lastBridgeStatus.targets,
+        argvUpdatedThisBoot: Boolean(argvUpdatedThisBoot),
+        argvConfigured: Boolean(argvConfigured),
         updatedAtMs: Date.now(),
       });
     }
 
     const cdpPorts = findActiveDevToolsPorts();
     if (!cdpPorts.length) {
+      updateBridgeStatus(enabled || hasContextWindows ? 'no_devtools_port' : 'disabled', {
+        enabled,
+        leasedBySelf,
+        bundleVersion,
+        prevLease: currentLease,
+      });
       return { ok: false, enabled, reason: 'no_devtools_port', injected: 0 };
     }
 
     const { reachableCount, targets } = await collectAllMainWindowTargets(cdpPorts);
     if (reachableCount === 0) {
+      updateBridgeStatus(enabled || hasContextWindows ? 'cdp_unreachable' : 'disabled', {
+        enabled,
+        leasedBySelf,
+        bundleVersion,
+        prevLease: currentLease,
+      });
       return { ok: false, enabled, reason: 'cdp_unreachable', injected: 0 };
     }
     if (!targets.length) {
+      updateBridgeStatus(enabled ? 'no_targets' : 'disabled', {
+        enabled,
+        leasedBySelf,
+        bundleVersion,
+        prevLease: currentLease,
+      });
       return { ok: true, enabled, reason: 'no_targets', injected: 0 };
     }
 
@@ -1232,6 +1495,13 @@ export function createWindowBridgeController(options) {
 
     if (!enabled) {
       if (!hadInjectedTargets && !hadInjectedChatFrames && !forceReinject) {
+        updateBridgeStatus('disabled', {
+          enabled: false,
+          targets: targets.length,
+          leasedBySelf,
+          bundleVersion,
+          prevLease: currentLease,
+        });
         return { ok: true, enabled: false, removed: 0 };
       }
       let removed = 0;
@@ -1244,6 +1514,13 @@ export function createWindowBridgeController(options) {
       }
       hadInjectedTargets = false;
       hadInjectedChatFrames = false;
+      updateBridgeStatus('disabled', {
+        enabled: false,
+        targets: targets.length,
+        leasedBySelf,
+        bundleVersion,
+        prevLease: currentLease,
+      });
       return { ok: true, enabled: false, removed };
     }
 
@@ -1490,6 +1767,14 @@ export function createWindowBridgeController(options) {
     }
 
     cdpFallbackActive = sawCdpTransport;
+    updateBridgeStatus(aliveCount > 0 ? 'active' : 'no_targets', {
+      enabled: true,
+      aliveCount,
+      targets: targets.length,
+      leasedBySelf,
+      bundleVersion,
+      prevLease: currentLease,
+    });
     return {
       ok: true,
       enabled: true,
@@ -1625,10 +1910,29 @@ export function createWindowBridgeController(options) {
     start,
     stop,
     getBridgeInfo: () => ({ port: bridgePort, token: bridgeToken, running: Boolean(server) }),
+    getBridgeStatus: () => ({ ...lastBridgeStatus }),
   };
 }
 
 let defaultBridgeController = null;
+
+/**
+ * 读取进程级默认双栖桥接器的最新同步健康度快照（供 `/api/telemetry` 与偏好设置面板诊断使用）。
+ */
+export function getDefaultWindowBridgeStatus() {
+  if (!defaultBridgeController) {
+    return {
+      state: 'pending',
+      enabled: true,
+      aliveCount: 0,
+      targets: 0,
+      argvUpdatedThisBoot: false,
+      argvConfigured: false,
+      updatedAtMs: 0,
+    };
+  }
+  return defaultBridgeController.getBridgeStatus();
+}
 
 /**
  * 启动进程级默认的双栖窗口桥接控制器（幂等）。
