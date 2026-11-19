@@ -18,7 +18,13 @@ import { SegmentedControl } from '../src/components/ui/SegmentedControl.js';
 import { ContextWindowWidget } from '../src/components/widgets/ContextWindowWidget.js';
 import { LiveActivityWidget } from '../src/components/widgets/LiveActivityWidget.js';
 import { StepTableWidget } from '../src/components/widgets/StepTableWidget.js';
-import { isEquivalentTelemetry, telemetryStore } from '../src/store/telemetryStore.js';
+import {
+  fetchTelemetry,
+  isEquivalentTelemetry,
+  saveSettingsPatch,
+  stopAsyncTelemetryLoop,
+  telemetryStore,
+} from '../src/store/telemetryStore.js';
 import { uiStore } from '../src/store/uiStore.js';
 import { i18nStore, setI18nLanguage } from '../src/i18n/index.js';
 import { ConsumptionView } from '../src/views/ConsumptionView.js';
@@ -624,4 +630,134 @@ test('SegmentedControl variable-width glider snaps cleanly on reveal and glides 
   assert.equal(liveScrollHost.classList.contains('is-sub-animating'), false);
   animLive.destroy();
   document.documentElement.removeAttribute('data-modern-ui');
+});
+
+test('saveSettingsPatch prevents stale in-flight telemetry polls from snapping settings back and commits UI preferences without blocking on forced telemetry', async (t) => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevTelState = { ...telemetryStore.getState() };
+
+  const { document } = createMockDom();
+  globalThis.document = document;
+
+  const baseSettings = {
+    language: 'zh-CN',
+    themeAccent: 'host',
+    fontScale: 'md',
+    experimentalModernUi: false,
+    windowMountMode: 'dual',
+    enableWindowOverlay: true,
+  };
+  const diskSettings = { ...baseSettings };
+  telemetryStore.setState(
+    { telemetry: { settings: { ...baseSettings }, activeConversation: { stepCount: 1 } } },
+    { sync: true }
+  );
+
+  let resolveStalePoll = null;
+  let resolveSlowPost = null;
+  let telemetryGetCalls = 0;
+  const postOrder = [];
+
+  globalThis.window = {
+    location: { pathname: '/' },
+    sidecar: {
+      fetch: async (url, opts = {}) => {
+        const method = String(opts.method || 'GET').toUpperCase();
+        if (method === 'GET' && String(url).startsWith('/api/telemetry')) {
+          telemetryGetCalls += 1;
+          if (telemetryGetCalls === 1) {
+            // Simulate a slow poll that started BEFORE the user changed any setting
+            return new Promise((resolve) => {
+              resolveStalePoll = () =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  json: async () => ({
+                    settings: { ...baseSettings },
+                    activeConversation: { stepCount: 2 },
+                  }),
+                });
+            });
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              settings: { ...diskSettings },
+              activeConversation: { stepCount: 3 },
+            }),
+          };
+        }
+        if (method === 'POST' && url === '/api/settings') {
+          const body = JSON.parse(opts.body);
+          postOrder.push(body);
+          if (postOrder.length === 1) {
+            return new Promise((resolve) => {
+              resolveSlowPost = () => {
+                Object.assign(diskSettings, body);
+                resolve({ ok: true, status: 200, json: async () => ({ ...diskSettings }) });
+              };
+            });
+          }
+          Object.assign(diskSettings, body);
+          return { ok: true, status: 200, json: async () => ({ ...diskSettings }) };
+        }
+        return { ok: true, status: 200, json: async () => ({}) };
+      },
+    },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  t.after(() => {
+    stopAsyncTelemetryLoop();
+    telemetryStore.setState(prevTelState, { sync: true });
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  });
+
+  // 1. Start background telemetry poll (capturing stale settings: experimentalModernUi=false, fontScale='md')
+  const stalePollPromise = fetchTelemetry({ force: false });
+  assert.equal(telemetryGetCalls, 1);
+
+  // 2. While poll is in flight, user toggles experimentalModernUi -> true AND rapidly switches fontScale -> 'lg'
+  const save1 = saveSettingsPatch({ experimentalModernUi: true });
+  const save2 = saveSettingsPatch({ fontScale: 'lg' });
+  assert.equal(telemetryStore.getState().telemetry.settings.experimentalModernUi, true);
+  assert.equal(telemetryStore.getState().telemetry.settings.fontScale, 'lg');
+
+  // 3. Stale poll returns BEFORE POST finishes -> live stepCount updates to 2, yet settings NEVER snap back!
+  resolveStalePoll();
+  await stalePollPromise;
+  assert.equal(telemetryStore.getState().telemetry.activeConversation.stepCount, 2);
+  assert.equal(
+    telemetryStore.getState().telemetry.settings.experimentalModernUi,
+    true,
+    'Stale in-flight poll must not revert pending experimentalModernUi'
+  );
+  assert.equal(
+    telemetryStore.getState().telemetry.settings.fontScale,
+    'lg',
+    'Stale in-flight poll must not revert pending fontScale'
+  );
+
+  // 4. First POST completes; second serialized POST executes right after -> both settle WITHOUT forcing extra telemetry GET
+  resolveSlowPost();
+  await Promise.all([save1, save2]);
+  assert.deepEqual(postOrder, [{ experimentalModernUi: true }, { fontScale: 'lg' }]);
+  assert.equal(
+    telemetryGetCalls,
+    1,
+    'Pure UI setting patches must not block on an unnecessary forced /api/telemetry reload'
+  );
+  assert.equal(telemetryStore.getState().telemetry.settings.experimentalModernUi, true);
+  assert.equal(telemetryStore.getState().telemetry.settings.fontScale, 'lg');
+
+  // 5. Subsequent fresh poll started after commit observes authoritative diskSettings and retires local overlay cleanly
+  await fetchTelemetry({ force: false });
+  assert.equal(telemetryGetCalls, 2);
+  assert.equal(telemetryStore.getState().telemetry.activeConversation.stepCount, 3);
+  assert.equal(telemetryStore.getState().telemetry.settings.experimentalModernUi, true);
+  assert.equal(telemetryStore.getState().telemetry.settings.fontScale, 'lg');
 });

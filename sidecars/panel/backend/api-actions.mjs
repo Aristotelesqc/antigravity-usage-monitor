@@ -18,6 +18,7 @@ import {
   cloudSyncState,
   computeRuntimeCodeVersion,
   createDefaultSettingsObject,
+  inFlightRequests,
   isPlainObject,
   loadSettings,
   lsRuntimeEndpoint,
@@ -294,6 +295,7 @@ export function executeSettingsAction(data) {
       body: JSON.stringify({ ok: false, error: 'Failed to persist settings' }),
     };
   }
+  inFlightRequests.clear();
   const prevMountMode = normalizeWindowMountMode(
     current.windowMountMode,
     current.enableWindowOverlay
@@ -361,6 +363,7 @@ export async function executeModelContextWindowAction(data) {
   if (!saveJson(SETTINGS_FILE, current)) {
     return respond(500, { error: 'Failed to persist model context window' });
   }
+  inFlightRequests.clear();
   void notifyModelContextWindowsChanged();
   return respond(200, { modelContextWindows: current.modelContextWindows });
 }
@@ -377,6 +380,7 @@ export function executeResetSettingsAction() {
       body: JSON.stringify({ ok: false, error: 'Failed to reset settings' }),
     };
   }
+  inFlightRequests.clear();
   const prevMountMode = normalizeWindowMountMode(
     current.windowMountMode,
     current.enableWindowOverlay

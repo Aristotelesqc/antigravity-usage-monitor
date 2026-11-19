@@ -12,6 +12,7 @@ import {
   normalizeClientThemeAccent,
 } from '../../core/appearance.js';
 import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
+import { isWindowOverlayMode } from '../../core/httpClient.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
 import { normalizeI18nLanguage, setI18nLanguage, t } from '../../i18n/index.js';
 import {
@@ -80,6 +81,7 @@ export const SettingsGeneralTab = defineComponent({
     let latestSettings = null;
     let latestCloudStatus = null;
     let appearanceTimer = null;
+    let appearanceSaveSeq = 0;
     let cloudTimer = null;
 
     const appearanceStatusText = h('span', {
@@ -151,13 +153,18 @@ export const SettingsGeneralTab = defineComponent({
         draftLanguage = nextLang;
         setI18nLanguage(nextLang);
         languageSwitch.setValue(nextLang);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ language: nextLang });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -168,13 +175,18 @@ export const SettingsGeneralTab = defineComponent({
         const nextAccent = normalizeClientThemeAccent(val);
         draftThemeAccent = nextAccent;
         themeColorPicker.refs.setValue(nextAccent);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ themeAccent: nextAccent });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -187,14 +199,19 @@ export const SettingsGeneralTab = defineComponent({
         const nextScale = normalizeClientFontScale(val);
         draftFontScale = nextScale;
         fontScaleSwitch.setValue(nextScale);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ fontScale: nextScale });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
           props.onLayoutChange?.();
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -207,7 +224,7 @@ export const SettingsGeneralTab = defineComponent({
         const nextModernUi = val === 'on';
         draftModernUi = nextModernUi;
         modernUiSwitch.setValue(nextModernUi ? 'on' : 'off');
-        if (typeof document !== 'undefined' && document.documentElement) {
+        if (!isWindowOverlayMode() && typeof document !== 'undefined' && document.documentElement) {
           applyAppearanceToRoot(
             document.documentElement,
             {
@@ -219,14 +236,19 @@ export const SettingsGeneralTab = defineComponent({
             { includeFontScale: true }
           );
         }
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ experimentalModernUi: nextModernUi });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
           props.onLayoutChange?.();
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });

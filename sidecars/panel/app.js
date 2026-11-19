@@ -4374,6 +4374,65 @@ let lastReceivedSteps = null;
 let loopActive = false;
 let loopIntervalMs = 2000;
 let loopTickFn = null;
+let settingsRevision = 0;
+let settingsWriteChain = Promise.resolve();
+const pendingSettingsMutations = new Map();
+const recentCommittedSettings = new Map();
+
+const TELEMETRY_RECOMPUTE_SETTING_KEYS = new Set([
+  'weeklyLimitMode',
+  'weeklyTokenBudget',
+  'weeklyCostBudget',
+  'windowMountMode',
+  'enableWindowOverlay',
+]);
+
+function enqueueSettingsWrite(task) {
+  const run = settingsWriteChain.then(task, task);
+  settingsWriteChain = run.catch(() => {});
+  return run;
+}
+
+function extractReturnedSettings(res) {
+  if (!res || typeof res !== 'object') return null;
+  if (res.settings && typeof res.settings === 'object' && !Array.isArray(res.settings)) {
+    return res.settings;
+  }
+  if (
+    typeof res.language === 'string' ||
+    typeof res.themeAccent === 'string' ||
+    typeof res.windowMountMode === 'string'
+  ) {
+    return res;
+  }
+  return null;
+}
+
+function reconcileIncomingTelemetrySettings(payload, reqSettingsRev) {
+  if (!payload?.settings || typeof payload.settings !== 'object') {
+    return payload;
+  }
+  for (const [k, entry] of [...recentCommittedSettings.entries()]) {
+    if (reqSettingsRev >= entry.rev) {
+      recentCommittedSettings.delete(k);
+    }
+  }
+  if (pendingSettingsMutations.size === 0 && recentCommittedSettings.size === 0) {
+    return payload;
+  }
+  let merged = null;
+  for (const [k, entry] of recentCommittedSettings.entries()) {
+    if (reqSettingsRev < entry.rev) {
+      merged ??= { ...payload.settings };
+      merged[k] = entry.value;
+    }
+  }
+  for (const [k, entry] of pendingSettingsMutations.entries()) {
+    merged ??= { ...payload.settings };
+    merged[k] = entry.value;
+  }
+  return merged ? { ...payload, settings: merged } : payload;
+}
 
 const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
 const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
@@ -5019,6 +5078,7 @@ function readDisplaySteps(payload) {
 
 async function requestTelemetry(params, force) {
   const reqSeq = ++latestRequestSeq;
+  const reqSettingsRev = settingsRevision;
   const startMs = Date.now();
 
   if (force) {
@@ -5069,6 +5129,7 @@ async function requestTelemetry(params, force) {
     }
     consecutivePollFailures = 0;
 
+    const resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
     const latestSt = telemetryStore.getState();
     if (force) {
       const elapsed = Date.now() - startMs;
@@ -5076,11 +5137,12 @@ async function requestTelemetry(params, force) {
         await new Promise((r) => setTimeout(r, 220 - elapsed));
       }
       if (reqSeq !== latestRequestSeq) {
-        return payload;
+        return resolvedPayload;
       }
+      const finalForcePayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
       if (feedbackTimer) clearTimeout(feedbackTimer);
       telemetryStore.setState({
-        telemetry: payload,
+        telemetry: finalForcePayload,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: 'synced',
       });
@@ -5088,16 +5150,17 @@ async function requestTelemetry(params, force) {
         feedbackTimer = null;
         telemetryStore.setState({ syncState: 'idle' });
       }, 1100);
+      return finalForcePayload;
     } else {
-      const isSame = isEquivalentTelemetry(latestSt.telemetry, payload);
-      const nextTelemetry = isSame ? latestSt.telemetry : payload;
+      const isSame = isEquivalentTelemetry(latestSt.telemetry, resolvedPayload);
+      const nextTelemetry = isSame ? latestSt.telemetry : resolvedPayload;
       telemetryStore.setState({
         telemetry: nextTelemetry,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
       });
+      return resolvedPayload;
     }
-    return payload;
   } catch (err) {
     if (err?.name === 'AbortError' || reqSeq !== latestRequestSeq) return null;
     consecutivePollFailures += 1;
@@ -5206,31 +5269,111 @@ async function saveSettingsPatch(patch) {
     safePatch.enableWindowOverlay = Boolean(safePatch.enableWindowOverlay);
     safePatch.windowMountMode = safePatch.enableWindowOverlay ? 'dual' : 'sidebar';
   }
+  const myRev = ++settingsRevision;
   const prevTelemetry = telemetryStore.getState().telemetry;
-  if (prevTelemetry?.settings) {
-    telemetryStore.setState({
-      telemetry: {
-        ...prevTelemetry,
-        settings: { ...prevTelemetry.settings, ...safePatch },
-      },
-    });
+  const patchKeys = Object.keys(safePatch);
+  const prevKeyValues = new Map();
+  for (const key of patchKeys) {
+    prevKeyValues.set(key, prevTelemetry?.settings?.[key]);
+    pendingSettingsMutations.set(key, { rev: myRev, value: safePatch[key] });
   }
+  let optimisticTelemetry = null;
+  if (prevTelemetry?.settings) {
+    optimisticTelemetry = {
+      ...prevTelemetry,
+      settings: { ...prevTelemetry.settings, ...safePatch },
+    };
+    telemetryStore.setState({ telemetry: optimisticTelemetry });
+  }
+  let res = null;
   try {
-    await callSidecarApi('/api/settings', { method: 'POST', body: safePatch });
+    res = await enqueueSettingsWrite(() =>
+      callSidecarApi('/api/settings', { method: 'POST', body: safePatch })
+    );
   } catch (err) {
-    if (prevTelemetry) {
-      telemetryStore.setState({ telemetry: prevTelemetry });
+    const rollbackKeys = [];
+    for (const key of patchKeys) {
+      const activeEntry = pendingSettingsMutations.get(key);
+      if (activeEntry?.rev === myRev) {
+        pendingSettingsMutations.delete(key);
+        rollbackKeys.push(key);
+      }
+    }
+    if (rollbackKeys.length > 0) {
+      const curTelemetry = telemetryStore.getState().telemetry;
+      if (prevTelemetry && optimisticTelemetry && curTelemetry === optimisticTelemetry) {
+        telemetryStore.setState({ telemetry: prevTelemetry });
+      } else if (curTelemetry?.settings) {
+        const rolledBackSettings = { ...curTelemetry.settings };
+        for (const key of rollbackKeys) {
+          if (recentCommittedSettings.has(key)) {
+            rolledBackSettings[key] = recentCommittedSettings.get(key).value;
+          } else {
+            rolledBackSettings[key] = prevKeyValues.get(key);
+          }
+        }
+        telemetryStore.setState({
+          telemetry: { ...curTelemetry, settings: rolledBackSettings },
+        });
+      }
     }
     throw err;
   }
-  await fetchTelemetry({ force: true });
+
+  const serverSettings = extractReturnedSettings(res);
+  const committedRev = ++settingsRevision;
+  for (const key of patchKeys) {
+    const activeEntry = pendingSettingsMutations.get(key);
+    const committedVal =
+      serverSettings && Object.prototype.hasOwnProperty.call(serverSettings, key)
+        ? serverSettings[key]
+        : safePatch[key];
+    if (activeEntry?.rev === myRev) {
+      pendingSettingsMutations.delete(key);
+      recentCommittedSettings.set(key, { rev: committedRev, value: committedVal });
+    }
+  }
+
+  const curTelemetry = telemetryStore.getState().telemetry;
+  if (curTelemetry?.settings) {
+    const nextSettings = serverSettings
+      ? { ...curTelemetry.settings, ...serverSettings }
+      : { ...curTelemetry.settings };
+    for (const [k, entry] of recentCommittedSettings.entries()) {
+      if (entry.rev > committedRev) {
+        nextSettings[k] = entry.value;
+      }
+    }
+    for (const [k, entry] of pendingSettingsMutations.entries()) {
+      nextSettings[k] = entry.value;
+    }
+    telemetryStore.setState({
+      telemetry: { ...curTelemetry, settings: nextSettings },
+    });
+  }
+
+  const needsTelemetryRecompute = patchKeys.some((k) => TELEMETRY_RECOMPUTE_SETTING_KEYS.has(k));
+  if (needsTelemetryRecompute) {
+    inFlightTelemetryPoll = null;
+    void fetchTelemetry({ force: false });
+  }
 }
 
 async function saveModelContextWindow(modelId, option) {
-  const result = await callSidecarApi('/api/context-window', {
-    method: 'POST',
-    body: { modelId, option },
-  });
+  const myRev = ++settingsRevision;
+  const result = await enqueueSettingsWrite(() =>
+    callSidecarApi('/api/context-window', {
+      method: 'POST',
+      body: { modelId, option },
+    })
+  );
+  const committedRev = ++settingsRevision;
+  if (result?.modelContextWindows) {
+    recentCommittedSettings.set('modelContextWindows', {
+      rev: Math.max(myRev, committedRev),
+      value: result.modelContextWindows,
+    });
+  }
   const telemetry = telemetryStore.getState().telemetry;
   if (telemetry?.settings) {
     telemetryStore.setState({
@@ -5244,17 +5387,36 @@ async function saveModelContextWindow(modelId, option) {
 }
 
 async function resetAllSettings() {
-  const res = await callSidecarApi('/api/settings/reset', { method: 'POST', body: {} });
+  const myRev = ++settingsRevision;
+  const res = await enqueueSettingsWrite(() =>
+    callSidecarApi('/api/settings/reset', { method: 'POST', body: {} })
+  );
+  const committedRev = ++settingsRevision;
+  const serverSettings = extractReturnedSettings(res);
+  if (serverSettings) {
+    for (const [key, val] of Object.entries(serverSettings)) {
+      const pending = pendingSettingsMutations.get(key);
+      if (!pending || pending.rev <= myRev) {
+        pendingSettingsMutations.delete(key);
+        recentCommittedSettings.set(key, { rev: committedRev, value: val });
+      }
+    }
+  }
   const prevTelemetry = telemetryStore.getState().telemetry;
-  if (res?.settings && prevTelemetry) {
+  if (serverSettings && prevTelemetry) {
+    const mergedSettings = { ...serverSettings };
+    for (const [k, entry] of pendingSettingsMutations.entries()) {
+      mergedSettings[k] = entry.value;
+    }
     telemetryStore.setState({
       telemetry: {
         ...prevTelemetry,
-        settings: { ...res.settings },
+        settings: mergedSettings,
       },
     });
   }
-  await fetchTelemetry({ force: true });
+  inFlightTelemetryPoll = null;
+  void fetchTelemetry({ force: false });
   return res;
 }
 
@@ -15958,6 +16120,7 @@ const SettingsGeneralTab = defineComponent({
     let latestSettings = null;
     let latestCloudStatus = null;
     let appearanceTimer = null;
+    let appearanceSaveSeq = 0;
     let cloudTimer = null;
 
     const appearanceStatusText = h('span', {
@@ -16029,13 +16192,18 @@ const SettingsGeneralTab = defineComponent({
         draftLanguage = nextLang;
         setI18nLanguage(nextLang);
         languageSwitch.setValue(nextLang);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ language: nextLang });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -16046,13 +16214,18 @@ const SettingsGeneralTab = defineComponent({
         const nextAccent = normalizeClientThemeAccent(val);
         draftThemeAccent = nextAccent;
         themeColorPicker.refs.setValue(nextAccent);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ themeAccent: nextAccent });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -16065,14 +16238,19 @@ const SettingsGeneralTab = defineComponent({
         const nextScale = normalizeClientFontScale(val);
         draftFontScale = nextScale;
         fontScaleSwitch.setValue(nextScale);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ fontScale: nextScale });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
           props.onLayoutChange?.();
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -16085,7 +16263,7 @@ const SettingsGeneralTab = defineComponent({
         const nextModernUi = val === 'on';
         draftModernUi = nextModernUi;
         modernUiSwitch.setValue(nextModernUi ? 'on' : 'off');
-        if (typeof document !== 'undefined' && document.documentElement) {
+        if (!isWindowOverlayMode() && typeof document !== 'undefined' && document.documentElement) {
           applyAppearanceToRoot(
             document.documentElement,
             {
@@ -16097,14 +16275,19 @@ const SettingsGeneralTab = defineComponent({
             { includeFontScale: true }
           );
         }
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ experimentalModernUi: nextModernUi });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
           props.onLayoutChange?.();
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });

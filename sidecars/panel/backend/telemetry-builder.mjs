@@ -1718,7 +1718,7 @@ export async function buildTelemetryPayloadInternal(
     hostPlatform: process.platform || 'unknown',
     uiBundleVersion,
     windowBridge: getDefaultWindowBridgeStatus(),
-    settings,
+    settings: loadSettings(),
     contextWindowModels: getContextWindowGroups(getContextWindowModels(clientConfigs, contextModelCatalog)).map((group) => {
       const latest = group.members.reduce((previous, id) => {
         const reported = reportedContextLimits.get(id);
