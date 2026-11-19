@@ -1364,7 +1364,10 @@ html[data-standalone="true"] .app-shell {
 }
 
 .panel-title > span:not(.agent-badge) {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -2103,6 +2106,16 @@ html[data-standalone="true"] .app-shell {
   border: none;
   border-radius: 0;
 }
+
+.cons-overview-head > .panel-title {
+  flex: 1 0 auto;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.cons-overview-head > .segmented {
+  flex-wrap: wrap;
+  max-width: 100%;
 
 .cons-badge {
   font-size: var(--fs-md);

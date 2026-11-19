@@ -7,7 +7,7 @@ const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEY
  * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
  */
 
-const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'zh-CN', 'en-US']);
+const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'fr-FR', 'en-US', 'zh-CN']);
 
 const THEME_ACCENT_KEYS = Object.freeze([
   'host',
@@ -154,12 +154,13 @@ const DEFAULT_POPOVER_WIDTH = 580;
  */
 function normalizeLanguageSetting(lang) {
   const raw = String(lang ?? '').trim();
-  if (!raw) return 'zh-CN';
+  if (!raw) return 'fr-FR';
   const lower = raw.toLowerCase();
   if (lower === 'auto' || lower === 'system') return 'auto';
+  if (lower === 'fr' || lower === 'fr-fr' || lower.startsWith('fr-')) return 'fr-FR';
   if (lower === 'en' || lower === 'en-us' || lower.startsWith('en-')) return 'en-US';
   if (lower === 'zh' || lower === 'zh-cn' || lower.startsWith('zh')) return 'zh-CN';
-  return 'zh-CN';
+  return 'fr-FR';
 }
 
 /**
@@ -1036,6 +1037,723 @@ function createReactiveStore(initialState) {
 return { createReactiveStore };
 })();
 
+// --- src/i18n/fr-FR.js ---
+const { I18N_MESSAGES_FR_FR } = (() => {
+/**
+ * @fileoverview French (fr-FR) dictionary for Antigravity Usage & Speed Monitor.
+ * Zero emoji characters.
+ */
+
+const I18N_MESSAGES_FR_FR = Object.freeze({
+  // Top Navigation
+  'nav.overview': 'En direct',
+  'nav.consumption': 'Utilisation',
+  'nav.steps': 'Étapes',
+  'nav.settings': 'Réglages',
+
+  // Top Session Header
+  'header.followLatest': 'Suivre la dernière session',
+  'header.currentWindowNamed': 'Actuelle ({title})',
+  'header.latestNamed': 'Dernière ({title})',
+  'header.lockedSession': 'Session épinglée ({id})',
+  'header.lockedMeta': 'Épinglée',
+  'header.convMetaWithSubs': 'Principal {main} · {subs} sous ({total} étapes)',
+  'header.convMetaSteps': '{count} étapes',
+  'header.hasUpdate': 'MàJ',
+  'header.upgradeToVer': 'MàJ v{ver}',
+  'header.upgrading': 'Mise à jour…',
+  'header.ariaUpdate': 'Nouvelle version disponible, cliquer pour mettre à jour',
+  'header.ariaRefresh': 'Actualiser la télémétrie',
+  'header.statusSyncing': 'Synchronisation',
+  'header.statusSynced': 'Synchronisé',
+  'header.statusRetrying': 'Nouvelle tentative',
+  'header.statusGenerating': 'En cours{suffix}',
+  'header.statusQuotaCached': 'Quota en cache',
+  'header.statusQuotaOffline': 'Quota hors ligne',
+  'header.statusLive': 'En direct 2s',
+
+  // Formatters & Common Labels
+  'fmt.pending': 'En attente',
+  'fmt.speedIncomplete': 'Mesure incomplète',
+  'fmt.speedCanceled': 'Annulé',
+  'fmt.speedCompactionTimingUnavailable': 'Compaction sans durée',
+  'fmt.speedInvalidOutput': 'Aucune sortie valide',
+  'fmt.speedInconsistent': 'Durée invalide',
+  'fmt.speedShort': 'Trop court (<0,5 s)',
+  'fmt.speedLegacy': 'Ancien cache',
+  'fmt.sampleSteps': '{valid}/{total} étapes',
+  'fmt.resetUnknown': 'Réinit. inconnue',
+  'fmt.resetSoon': 'Réinitialisation imminente',
+  'fmt.resetUnder1m': 'Réinit. dans <1m',
+  'fmt.resetDaysHours': 'Réinit. dans {d}j {h}h',
+  'fmt.resetHoursMins': 'Réinit. dans {h}h {m}m',
+  'fmt.resetMins': 'Réinit. dans {m}m',
+  'fmt.selectTime': 'Choisir l’heure',
+  'fmt.unknownModel': 'Modèle inconnu',
+  'fmt.compactionSuffix': '·compact',
+  'fmt.mainAgent': 'Agent principal',
+  'fmt.mainBadge': 'Princ.',
+  'fmt.subAgent': 'Sous-agent',
+  'fmt.subBadge': 'S{index}',
+  'fmt.subBadgeShort': 'Sous',
+  'fmt.sideQuestion': 'Question annexe',
+  'fmt.sideBadge': 'Q{index}',
+  'fmt.sideBadgeShort': 'Q',
+  'fmt.selectedCount': '{count} {unit} sélectionnés',
+  'fmt.selectedListTitle': 'Sélection ({count}) : {names}',
+  'fmt.selectPlaceholder': 'Sélectionner',
+
+  // Capsule & Multi-Session Overlay
+  'capsule.ariaMonitor': 'Moniteur d’utilisation et de vitesse',
+  'capsule.ariaMulti': 'Aperçu des sessions actives',
+  'capsule.multiZero': '0 actif',
+  'capsule.multiRunning': '{count} actif(s)',
+  'capsule.multiRunningWithSubs': '{count} actif(s) · {subs} sous',
+  'capsule.tpsRunning': 'En cours',
+  'capsule.tpsIdle': 'Inactif',
+  'capsule.quotaLeft': '{pct}% restant',
+  'capsule.quotaUnknown': '--% restant',
+  'capsule.newVersion': 'MàJ',
+  'capsule.updating': 'Mise à jour…',
+  'capsule.ariaUpdateTitle': 'Nouvelle version disponible, cliquer pour mettre à jour',
+  'capsule.hoverNewVer': 'Nouvelle version v{ver}',
+  'capsule.hoverNewVerGeneric': 'Nouvelle version disponible',
+  'capsule.hoverUpdateHintTopbar': 'Cliquer sur v{ver} dans la barre pour mettre à jour',
+  'capsule.hoverUpdateHintComposer': 'Cliquer sur le badge v{ver} pour mettre à jour',
+  'capsule.hoverUpdateHintTopbarGeneric': 'Cliquer sur le badge de mise à jour dans la barre',
+  'capsule.hoverUpdateHintComposerGeneric': 'Cliquer sur le badge pour installer la mise à jour',
+  'multi.title': 'Sessions actives',
+  'multi.ariaDialog': 'Panneau des sessions actives',
+  'multi.pinned': 'Épinglée',
+  'multi.loading': 'Chargement…',
+  'multi.empty': 'Aucune session active en cours',
+  'multi.allIdle': 'Tout est inactif',
+  'multi.metaWithSubs': '{main} princ. · {subs} sous-agents actifs',
+  'multi.metaMainOnly': '{main} sessions actives',
+  'multi.hereTag': 'Ici',
+  'multi.inspectSessionTitle': 'Inspecter la session dans le moniteur : {title}',
+
+  // Live Overview & Widgets
+  'module.metrics': 'Métriques en direct',
+  'module.context': 'Fenêtre de contexte',
+  'module.quotas': 'Quotas disponibles',
+  'module.live_tasks': 'Tâches en cours',
+
+  // Capsule Slot Metric Options
+  'capMetric.context': 'Contexte utilisé (%)',
+  'capMetric.tps': 'Vitesse de sortie (TPS)',
+  'capMetric.ttft': 'Latence 1er token (TTFT)',
+  'capMetric.avg_tps': 'Vitesse moyenne (Moy. TPS)',
+  'capMetric.cost': 'Coût de l’étape ($)',
+  'capMetric.session_cost': 'Coût de la session ($)',
+  'capMetric.cache_hit': 'Taux de cache (%)',
+  'capMetric.session_tokens': 'Tokens de session',
+  'capMetric.quota_auto': 'Quota auto le plus serré',
+  'capMetric.gemini_5h': 'Quota Gemini 5h',
+  'capMetric.gemini_weekly': 'Quota Gemini hebdo',
+  'capMetric.claude_5h': 'Quota Claude 5h',
+  'capMetric.claude_weekly': 'Quota Claude hebdo',
+
+  // Overview Matrix Metric Options & Cells
+  'ovMetric.tps': 'Vitesse',
+  'ovMetric.ttft': '1er token',
+  'ovMetric.avg_tps': 'Vitesse moy.',
+  'ovMetric.step_cost': 'Coût étape',
+  'ovMetric.session_cost': 'Coût session',
+  'ovMetric.cache_hit': 'Taux cache',
+  'ovMetric.session_tokens': 'Tokens session',
+  'ovMetric.context_usage': 'Contexte',
+  'ovMetric.quota_tightest': 'Quota serré',
+  'ovMetric.subAvgTtft': 'Moy. {val}',
+  'ovMetric.subAvgCache': 'Moy. {val}',
+  'ovMetric.subValidSamples': 'Valides {samples}',
+  'ovMetric.subTotalCost': 'Total {cost}',
+  'ovMetric.subStepCost': 'Étape {cost}',
+  'ovMetric.subInOutTokens': 'Entrée {inTok} · Sortie {outTok}',
+  'ovMetric.subCtxRatio': '{used} / {limit}',
+  'ovMetric.subQuotaPool': '{label}',
+  'ovMetric.subQuotaPending': 'En attente de synchro quota',
+
+  // Context Window Widget
+  'ctx.followActive': 'Suivre l’actif ({badge})',
+  'ctx.followActiveTitle': 'Inspecter automatiquement la fenêtre de contexte de l’agent actif',
+  'ctx.expandMore': '+{count} de plus ▾',
+  'ctx.expandMoreTitle': 'Afficher les {count} pastilles de sous-agents',
+  'ctx.collapse': 'Réduire ▴',
+  'ctx.collapseTitle': 'Masquer les pastilles supplémentaires',
+  'ctx.ch.assistant': 'Assistant',
+  'ctx.ch.assistantTitle': 'Raisonnement du modèle, réponses et arguments d’appels d’outils',
+  'ctx.ch.toolResults': 'Résultats d’outils',
+  'ctx.ch.toolResultsTitle': 'Lectures de fichiers, sorties terminal et retours d’outils',
+  'ctx.ch.userInput': 'Saisie utilisateur',
+  'ctx.ch.userInputTitle': 'Messages utilisateur et pièces jointes envoyées',
+  'ctx.ch.subagent': 'Sous-agent',
+  'ctx.ch.subagentTitle': 'Rapports de sous-agents et notifications de tâches en arrière-plan',
+  'ctx.ch.checkpoint': 'Point de reprise',
+  'ctx.ch.checkpointTitle': 'Résumés de compaction de la conversation',
+  'ctx.ch.systemPrompt': 'Prompt système',
+  'ctx.ch.systemPromptTitle': 'Instructions principales d’identité, sandbox, artefacts et environnement',
+  'ctx.ch.systemTools': 'Outils système',
+  'ctx.ch.systemToolsTitle': 'Déclarations des schémas d’outils intégrés',
+  'ctx.ch.mcpTools': 'Outils MCP',
+  'ctx.ch.mcpToolsTitle': 'Schémas d’outils et ressources des serveurs MCP externes',
+  'ctx.ch.skills': 'Compétences',
+  'ctx.ch.skillsTitle': 'Index et instructions des Skills installées',
+  'ctx.ch.userRules': 'Règles utilisateur',
+  'ctx.ch.userRulesTitle': 'Règles personnalisées globales et d’espace de travail',
+
+  // Quota Pools Widget
+  'quota.weeklyShort': 'Hebdo',
+  'quota.weeklyPool': 'Hebdo ({pool})',
+  'quota.loading': 'Chargement…',
+  'quota.failed': 'Indisponible (--%)',
+  'quota.usedAndLeft': '{reset} · Utilisé {used}% ({rem}% restant)',
+  'quota.cycle5hTitle': 'Cycle 5h actuel ({pool}) : {tok} tokens · {cost} · {calls} appels',
+  'quota.cycleWkCustomTitle': 'Semaine calendaire actuelle : {tok} tokens · {cost} · {calls} appels',
+  'quota.cycleWkPoolTitle': 'Cycle hebdo actuel ({pool}) : {tok} tokens · {cost} · {calls} appels',
+  'quota.footTokensCustom': 'Total semaine : {tok} ({cost})',
+  'quota.footTokensCycle': 'Total cycle : {tok} ({cost})',
+  'quota.footCredits': 'Crédits IA : {credits}',
+  'quota.footCallsCustom': 'Appels sem. : {calls}',
+  'quota.footCallsCycle': 'Appels cycle : {calls}',
+  'quota.footTipCustom': 'Comptabilisé depuis lundi 00:00 (heure locale)',
+  'quota.footTipCycle': 'Cumulé sur la fenêtre hebdomadaire de chaque pool de quota',
+
+  // Live Activity Widget
+  'live.currentSession': 'Session actuelle',
+  'live.switchSessionTitle': 'Basculer le moniteur sur la session : {title}',
+  'live.thinking': 'Réflexion',
+  'live.generating': 'Génération',
+  'live.running': 'En cours',
+  'live.done': 'Terminé',
+  'live.doneWithSteps': 'Terminé ({steps} étapes)',
+  'live.subToggleRunning': 'Sous-agents {run}/{total} {arrow}',
+  'live.subToggleIdle': 'Sous-agents ({total}) {arrow}',
+  'live.subCollapseTitle': 'Réduire la liste des sous-agents',
+  'live.subExpandTitle': 'Développer la liste des sous-agents',
+
+  // Consumption View
+  'cons.rangeToday': 'Auj.',
+  'cons.range24h': '24h',
+  'cons.range7d': '7j',
+  'cons.range14d': '14j',
+  'cons.range30d': '30j',
+  'cons.rangeAll': 'Tout',
+  'cons.rangeCustom': 'Perso',
+  'cons.rangeAria': 'Période des statistiques d’utilisation',
+  'cons.applyFilter': 'Appliquer',
+  'cons.rangeTo': 'au',
+  'cons.overviewTitle': 'Consommation',
+  'cons.totalTokens': 'Total des tokens',
+  'cons.estCost': 'Coût estimé',
+  'cons.cacheHitRate': 'Taux de cache',
+  'cons.callsCount': '{calls} appels',
+  'cons.cacheHitTokens': 'Cache {tokens}',
+  'cons.newInput': 'Nouvelle entrée',
+  'cons.uncachedInput': 'Entrée non mise en cache',
+  'cons.cacheRead': 'Lecture cache',
+  'cons.savedCost': 'Économisé {cost}',
+  'cons.outputUsage': 'Sortie',
+  'cons.replyAndThink': 'Réponse {resp} · Réflexion {think}',
+  'cons.trendTitle': 'Tendance d’utilisation',
+  'cons.allTime': 'Tout l’historique',
+  'cons.trendHeatmapHint': 'Par jour ({days}j) · Survoler pour les détails',
+  'cons.trendPointsHintHourly': 'Par heure ({points} pts) · Survoler pour les détails',
+  'cons.trendPointsHintDaily': 'Par jour ({points} pts) · Survoler pour les détails',
+  'cons.topModels': 'Modèles principaux',
+  'cons.clientSources': 'Sources clientes',
+  'cons.monthlyTitle': 'Répartition mensuelle',
+  'cons.monthLabel': 'M{m}',
+  'cons.legInput': 'Entrée',
+  'cons.legCache': 'Cache',
+  'cons.legOutput': 'Sortie',
+  'cons.legThinking': 'Réflexion',
+  'cons.footInput': 'Entrée ',
+  'cons.footCache': 'Cache ',
+  'cons.footOutput': 'Sortie ',
+  'cons.footThinking': 'Réfl. ',
+  'cons.footCalls': 'Appels ',
+
+  // Steps Detail View & Step Column Registry
+  'steps.title': 'Détails des étapes',
+  'steps.tabSteps': 'Étapes ({count})',
+  'steps.tabStepsFiltered': 'Étapes ({filtered}/{total})',
+  'steps.tabModels': 'Analytique',
+  'steps.allAgents': 'Tous les agents',
+  'steps.allModels': 'Tous les modèles',
+  'steps.selectModel': 'Choisir un modèle',
+  'steps.unitAgent': 'agents',
+  'steps.unitModel': 'modèles',
+  'steps.lineTitle': 'Chronologie de session',
+  'steps.fitTitle': 'Ajustement de tendance',
+  'steps.modelsTitle': 'Résumé par modèle',
+  'steps.modelsEmpty': 'Aucun appel de modèle dans ce périmètre',
+  'steps.metricTotalTokens': 'Tokens',
+  'steps.metricContext': 'Contexte',
+  'steps.metricTps': 'TPS',
+  'steps.metricTtft': 'TTFT',
+  'steps.metricCache': 'Cache',
+  'steps.metricCost': 'Coût',
+  'steps.badgeBackAll': 'Cliquer pour revenir à Tous les agents',
+  'steps.badgeFilterAgent': 'Cliquer pour filtrer {agent} (Ctrl/Maj+clic pour multi-sélection)',
+  'steps.ctxTitle': 'Contexte {ctx} · Réflexion {think} · Réponse {resp}',
+  'steps.ioCacheTitle': 'Nouvelle entrée {inPart} · Sortie {outPart} · Lecture cache {cachePart}',
+  'steps.tokSeg.context.th': 'Ctx',
+  'steps.tokSeg.context.tip': 'Contexte',
+  'steps.tokSeg.in.th': 'Ent.',
+  'steps.tokSeg.in.tip': 'Nouvelle entrée',
+  'steps.tokSeg.out.th': 'Sort.',
+  'steps.tokSeg.out.tip': 'Sortie',
+  'steps.tokSeg.cache.th': 'Cache',
+  'steps.tokSeg.cache.tip': 'Lecture cache',
+  'steps.tokSeg.think.th': 'Réfl.',
+  'steps.tokSeg.think.tip': 'Réflexion',
+  'steps.tokSeg.reply.th': 'Rép.',
+  'steps.tokSeg.reply.tip': 'Réponse',
+  'steps.tokSeg.total.th': 'Total',
+  'steps.tokSeg.total.tip': 'Total',
+  'steps.modelCallsShare': '{calls} appels · {pct}%',
+  'steps.modelCallsOnly': '{calls} appels',
+  'steps.modelsSummaryPrefix': '{count} modèles · ',
+  'steps.modelPerfFoot': 'Moy. {tps} · TTFT {ttft} · Cache {cache}%',
+  'steps.modelSplitFoot': 'Entrée {inTok} · Cache {cacheTok} · Réfl. {thinkTok} · Sortie {respTok}',
+  'steps.fitActiveCardTitle': '{title} (actif dans l’ajustement ; Ctrl/Maj+clic pour comparer)',
+  'steps.fitInactiveCardTitle': 'Cliquer pour inspecter {text} dans l’ajustement (Ctrl/Maj+clic pour comparer)',
+  'steps.turnMediaOnly': '[Pièce jointe média]',
+  'steps.turnMediaSuffix': '[Média]',
+
+  // Step Table Columns (Headers & Option Labels)
+  'stepCol.step.th': 'Étape',
+  'stepCol.step.opt': 'Numéro d’étape (#)',
+  'stepCol.time.th': 'Heure',
+  'stepCol.time.opt': 'Horodatage (HH:mm:ss)',
+  'stepCol.model.th': 'Modèle',
+  'stepCol.model.opt': 'Modèle',
+  'stepCol.tps.th': 'Vitesse',
+  'stepCol.tps.opt': 'Vitesse de sortie (TPS)',
+  'stepCol.ttft.th': 'TTFT',
+  'stepCol.ttft.opt': 'Premier token (TTFT)',
+  'stepCol.duration.th': 'Durée (s)',
+  'stepCol.duration.opt': 'Durée totale (s)',
+  'stepCol.tokens_combo.th': 'Ctx / Réfl. / Rép.',
+  'stepCol.tokens_combo.opt': 'Ctx / Réfl. / Rép. (Combo)',
+  'stepCol.tokens_io_cache.th': 'Ent. / Sort. / Cache',
+  'stepCol.tokens_io_cache.opt': 'Ent. / Sort. / Cache (Combo)',
+  'stepCol.tokens_custom.opt': 'Combo perso ({fmt})',
+  'stepCol.input_tokens.th': 'Entrée',
+  'stepCol.input_tokens.opt': 'Nouveaux tokens d’entrée',
+  'stepCol.cache_tokens.th': 'TokCache',
+  'stepCol.cache_tokens.opt': 'Tokens lus en cache',
+  'stepCol.output_tokens.th': 'Sortie',
+  'stepCol.output_tokens.opt': 'Total tokens en sortie',
+  'stepCol.cache.th': 'Cache',
+  'stepCol.cache.opt': 'Taux de cache (%)',
+  'stepCol.cost.th': 'Coût',
+  'stepCol.cost.opt': 'Coût de l’étape ($)',
+
+  // Preferences (Modular Settings)
+  'settings.subTab.general': 'Général',
+  'settings.subTab.structure': 'Structure',
+  'settings.subTab.account': 'Compte',
+  'settings.subTab.other': 'Autre',
+  'settings.account.current': 'Compte actuel',
+  'settings.account.signedOut': 'Déconnecté',
+  'settings.account.unknown': 'Statut du compte indisponible',
+  'settings.account.email': 'E-mail du compte',
+  'settings.account.credential': 'Identifiant OAuth',
+  'settings.account.importHint': 'Coller un refresh token Antigravity ou un JSON OAuth contenant un refresh_token. L’adresse e-mail est vérifiée et l’identifiant est chiffré localement.',
+  'settings.account.save': 'Importer l’identifiant',
+  'settings.account.capture': 'Enregistrer l’identifiant actuel',
+  'settings.account.reload': 'Actualiser la liste',
+  'settings.account.switch': 'Basculer',
+  'settings.account.remove': 'Supprimer',
+  'settings.account.active': 'Actif',
+  'settings.account.written': 'Identifiant écrit',
+  'settings.account.pending': 'L’identifiant pour {email} a été écrit. Si Antigravity reste sur le compte précédent, rouvrir l’application.',
+  'settings.account.savedCredentials': 'Identifiants enregistrés',
+  'settings.account.empty': 'Aucun identifiant enregistré.',
+  'settings.account.loading': 'Chargement des identifiants enregistrés…',
+  'settings.account.saved': 'Identifiant enregistré.',
+  'settings.account.removed': 'Identifiant supprimé.',
+  'settings.account.switched': 'Compte basculé. Actualisation du quota en cours.',
+  'settings.account.switching': 'Remplacement de l’identifiant et confirmation du compte actif…',
+  'settings.account.verifying': 'Vérification du titulaire de l’identifiant…',
+  'settings.account.loadQuota': 'Vérifier le quota',
+  'settings.account.loadingQuota': 'Vérification du quota pour cet identifiant…',
+  'settings.account.emptyCredentialQuota': 'Aucun pool de quota à afficher pour ce compte.',
+  'settings.account.quota': 'Quota restant par pool',
+  'settings.account.quota5h': '5 heures {percent}%',
+  'settings.account.quotaWeekly': 'Hebdo {percent}%',
+  'settings.account.noQuota': 'Les pools de quota sont indisponibles pour le compte actuel.',
+  'settings.account.quotaStale': 'Échec de l’actualisation du quota. Affichage des dernières données du compte actuel.',
+  'settings.account.unsupported': 'Le changement d’identifiant prend actuellement en charge la connexion partagée Antigravity sous Windows.',
+  'settings.account.invalidEmail': 'Sélectionner d’abord un compte enregistré.',
+  'settings.account.invalidCredential': 'Saisir un identifiant OAuth Antigravity valide pour un compte personnel.',
+  'settings.account.credentialTooLarge': 'L’identifiant dépasse la limite de 2560 octets du Gestionnaire d’identifiants Windows.',
+  'settings.account.notFound': 'Cet identifiant a été supprimé. Actualiser la liste.',
+  'settings.account.noCurrentCredential': 'L’identifiant partagé du compte actuel est indisponible.',
+  'settings.account.busy': 'Une autre fenêtre met à jour les identifiants. Réessayer sous peu.',
+  'settings.account.storeFailed': 'L’opération sur l’identifiant a échoué. Réessayer.',
+  'settings.account.rollbackFailed': 'L’écriture et la restauration de l’identifiant ont échoué. Vérifier le compte actif dans Antigravity avant de continuer.',
+  'settings.account.credentialAccessDenied': 'Windows a refusé l’accès au Gestionnaire d’identifiants. Ouvrir Antigravity dans la session utilisateur Windows et réessayer.',
+  'settings.account.credentialChanged': 'Cet identifiant a été modifié dans une autre fenêtre. Actualiser la liste et réessayer.',
+  'settings.account.credentialRejected': 'Google a rejeté cet identifiant. Vérifier que le refresh token Antigravity est toujours valide.',
+  'settings.account.identityMismatch': 'L’identifiant appartient à un autre compte. Réimporter l’identifiant.',
+  'settings.account.oauthClientUnavailable': 'Impossible de lire la configuration client OAuth Antigravity locale.',
+  'settings.account.oauthUnavailable': 'La vérification Google OAuth est indisponible. Vérifier la connexion réseau et réessayer.',
+  'settings.account.quotaUnavailable': 'Le quota pour ce compte est indisponible. Réessayer sous peu.',
+  'settings.subTab.aria': 'Onglets des préférences',
+  'settings.saving': 'Enregistrement…',
+  'settings.saved': 'Enregistré',
+  'settings.saveFailed': 'Échec de l’enregistrement',
+  'settings.resetDone': 'Réinitialisé par défaut',
+  'settings.resetBtn': 'Réinitialiser',
+
+  // Preferences -> General Tab
+  'settings.gen.appearanceTitle': 'Interface et apparence',
+  'settings.gen.language': 'Langue / Language',
+  'settings.gen.langFr': 'Français',
+  'settings.gen.langZh': '简体中文',
+  'settings.gen.langEn': 'English',
+  'settings.gen.langAuto': 'Système',
+  'settings.gen.themeAccent': 'Couleur d’accent',
+  'settings.gen.accentHost': 'Hôte',
+  'settings.gen.accentBlue': 'Bleu',
+  'settings.gen.accentEmerald': 'Émeraude',
+  'settings.gen.accentAmber': 'Ambre',
+  'settings.gen.accentViolet': 'Violet',
+  'settings.gen.accentCyan': 'Cyan',
+  'settings.gen.accentRose': 'Rose',
+  'settings.gen.fontScale': 'Taille de police',
+  'settings.gen.fontSm': 'Petite',
+  'settings.gen.fontMd': 'Standard',
+  'settings.gen.fontLg': 'Grande',
+  'settings.gen.fontXl': 'Très grande',
+  'settings.gen.fontHint': 'Adapte la typographie du panneau et des infobulles tout en gardant la capsule compacte',
+  'settings.gen.updateTitle': 'Mises à jour et tarifs',
+  'settings.gen.updateMode': 'Politique de mise à jour',
+  'settings.gen.updateManual': 'Notifier seulement, MàJ manuelle',
+  'settings.gen.updateAuto': 'Mise à jour automatique',
+  'settings.gen.updateOff': 'Désactiver les mises à jour',
+  'settings.gen.pricingLabel': 'Catalogue des tarifs',
+  'settings.gen.versionLabel': 'Version actuelle',
+  'settings.gen.modelCount': '{count} modèles',
+  'settings.gen.srcRemote': 'Synchro cloud',
+  'settings.gen.srcLocal': 'Fichier local',
+  'settings.gen.srcDefault': 'Intégré',
+  'settings.gen.syncAt': 'Synchro {time}',
+  'settings.gen.pubAt': 'Publié le {date}',
+  'settings.gen.defaultPricing': 'Catalogue par défaut',
+  'settings.gen.syncBtn': 'Synchro tarifs',
+  'settings.gen.syncingBtn': 'Synchro…',
+  'settings.gen.syncingMsg': 'Synchronisation du catalogue des tarifs…',
+  'settings.gen.syncedMsg': 'Tarifs mis à jour ({count} modèles)',
+  'settings.gen.syncFallbackMsg': 'Délai dépassé, utilisation du catalogue local',
+  'settings.gen.checkUpdateBtn': 'Vérifier les MàJ',
+  'settings.gen.checkingBtn': 'Vérification…',
+  'settings.gen.checkingMsg': 'Recherche de mises à jour…',
+  'settings.gen.checkFailedMsg': 'Échec de vérification : {err}',
+  'settings.gen.upToDateMsg': 'Déjà à jour (v{ver})',
+  'settings.gen.downloadingMsg': 'Téléchargement de la mise à jour…',
+  'settings.gen.updatedRestartMsg': 'Mise à jour terminée, redémarrage du panneau…',
+  'settings.gen.updateSkippedMsg': 'Mise à jour non appliquée',
+  'settings.gen.updateFailedMsg': 'Échec de la mise à jour',
+  'settings.gen.canUpgradeSub': 'v{ver} disponible ({mode})',
+  'settings.gen.upgradeToBtn': 'Passer à la v{ver}',
+  'settings.gen.manualUpgradeBtn': 'Mettre à jour v{ver}',
+  'settings.gen.updateOffSub': 'Notifications désactivées ({mode})',
+  'settings.gen.latestSub': 'À jour ({mode})',
+
+  // Preferences -> Structure Tab
+  'settings.str.thirdTabAria': 'Sections de structure',
+  'settings.str.tabMount': 'Ancrage et barre',
+  'settings.str.tabHover': 'Aperçu survol',
+  'settings.str.tabOverview': 'Vue en direct',
+  'settings.str.tabSteps': 'Tableau étapes',
+  'settings.str.previewMountSidebarHint': 'La capsule de fenêtre est désactivée en mode Panneau latéral uniquement ; revenir en Barre de titre ou Zone de saisie réactive la capsule ci-dessus',
+  'settings.str.mountSection': 'Ancrage et barre de capsule',
+  'settings.str.mountBadge': '{count}/5 emplacements',
+  'settings.str.mountMode': 'Mode d’ancrage du panneau',
+  'settings.str.mountDual': 'Double ancrage (Barre de titre + Panneau latéral)',
+  'settings.str.mountComposer': 'Ancrage saisie (Zone de saisie + Panneau latéral)',
+  'settings.str.mountSidebar': 'Panneau latéral uniquement',
+  'settings.bridge.restartTitle': 'Option de lancement configurée — Redémarrer une fois pour activer',
+  'settings.bridge.ctxRestartTitle': 'Option de lancement configurée — Redémarrer pour le dépassement de contexte',
+  'settings.bridge.restartBody': 'L’argument --remote-debugging-port=0 a été ajouté aux raccourcis et entrées de démarrage (les prochains lancements seront automatiques à 100 %). Cliquer ci-dessous pour fermer la zone de notification et relancer maintenant.',
+  'settings.bridge.noPortTitle': 'Port de débogage local manquant — Ancrage fenêtre inactif',
+  'settings.bridge.unreachableTitle': 'Port de débogage local indisponible — Ancrage fenêtre inactif',
+  'settings.bridge.ctxTitle': 'Port de débogage local inactif — Dépassement de contexte en attente',
+  'settings.bridge.guideWin': 'Antigravity 2.33.0+ n’ouvre plus de port de débogage par défaut. Cliquer sur « Relancer et activer l’ancrage » pour configurer les raccourcis, fermer les processus en arrière-plan et relancer.',
+  'settings.bridge.guideMac': 'Antigravity 2.33.0+ n’ouvre plus de port de débogage par défaut. Cliquer sur « Relancer et activer l’ancrage » en un clic ou exécuter open -a "Antigravity" --args --remote-debugging-port=0.',
+  'settings.bridge.guideLinux': 'Antigravity 2.33.0+ n’ouvre plus de port de débogage par défaut. Cliquer sur « Relancer et activer l’ancrage » pour mettre à jour le lanceur .desktop et relancer.',
+  'settings.bridge.relaunchBtn': 'Relancer et activer l’ancrage',
+  'settings.bridge.relaunchingBtn': 'Relancement de l’hôte…',
+  'settings.bridge.relaunchFailed': 'Échec du relancement auto — quitter depuis la barre des tâches et réessayer',
+  'settings.bridge.dismissAria': 'Masquer cet avis pour le moment',
+  'settings.bridge.copyFlagBtn': 'Copier {cmd}',
+  'settings.bridge.copiedBtn': 'Copié dans le presse-papiers',
+  'settings.str.popoverWidthLabel': 'Largeur du popover',
+  'settings.str.popoverWidthAuto': 'Ajustement auto',
+  'settings.str.popoverWidthCustom': 'Personnalisée',
+  'settings.str.popoverWidthHint': 'L’ajustement auto élargit les grands tableaux comme Étapes pour éviter le défilement horizontal ; Personnalisée accepte 440–1080 px',
+  'settings.str.multiToggle': 'Pastille des sessions actives',
+  'settings.str.cliCapsuleToggle': 'Capsule CLI en bas',
+  'settings.str.show': 'Afficher',
+  'settings.str.hide': 'Masquer',
+  'settings.str.on': 'Activé',
+  'settings.str.off': 'Désactivé',
+  'settings.str.capsuleSlotsLabel': 'Métriques et ordre de la capsule (Gauche → Droite, 1–5, glisser-déposer)',
+  'settings.str.addCapsuleSlot': 'Ajouter ({count}/{max})',
+  'settings.str.hoverSection': 'Aperçu rapide au survol',
+  'settings.str.hoverBadgeOff': 'Désactivé',
+  'settings.str.hoverBadgeCount': '{count} modules',
+  'settings.str.hoverModulesLabel': 'Modules du survol (Haut → Bas, 0–4, glisser-déposer)',
+  'settings.str.hoverEmptyHint': 'Aperçu au survol désactivé (cliquer sur la capsule pour ouvrir le panneau complet)',
+  'settings.str.addHoverModule': 'Ajouter un module ({count}/{max})',
+  'settings.str.overviewSection': 'Disposition de la vue en direct',
+  'settings.str.overviewBadge': '{modCount} mod · {metCount} cellules',
+  'settings.str.overviewModulesLabel': 'Modules de la vue en direct et ordre (Haut → Bas, min 1, glisser-déposer)',
+  'settings.str.addOverviewModule': 'Ajouter un module ({count}/{max})',
+  'settings.str.overviewMetricsLabel': 'Métriques de la 1re ligne (Gauche → Droite, 1–4, glisser-déposer)',
+  'settings.str.overviewMetricsInactiveHint': '« Métriques en direct » est masqué ici ; ces cellules restent actives dans l’aperçu au survol ou si réactivées',
+  'settings.str.addOverviewMetric': 'Ajouter une métrique ({count}/{max})',
+  'settings.str.stepsSection': 'Colonnes du tableau des étapes',
+  'settings.str.stepsBadge': '{count} col.',
+  'settings.str.stepTurnRailToggle': 'Fil de conversation et aperçu',
+  'settings.str.stepAgentBadgeToggle': 'Badge agent principal / sous-agent',
+  'settings.str.stepSpeedColorToggle': 'Couleurs sémantiques de vitesse',
+  'settings.str.stepTokenComboLabel': 'Format combo de tokens personnalisé',
+  'settings.str.stepTokenComboPlaceholder': 'ex. context:new:cache ou in:out:cache',
+  'settings.str.stepTokenComboHint': 'Tokens : context, in/new, out, cache, think, reply, total — séparés par : ou / (1–4 éléments)',
+  'settings.str.stepsColsLabel': 'Colonnes visibles dans « Étapes » (Gauche → Droite, min 2, glisser-déposer)',
+  'settings.str.addStepCol': 'Ajouter une colonne ({count}/{max})',
+  'settings.slot.dragHint': 'Glisser vers le haut ou le bas pour réordonner',
+  'settings.slot.moveUp': 'Monter',
+  'settings.slot.moveDown': 'Descendre',
+  'settings.slot.remove': 'Retirer l’élément',
+  'settings.slot.minReached': 'Conserver au moins {min}',
+  'settings.slot.alreadyAdded': 'Déjà ajouté',
+  'settings.mock.sessionTitle': 'Refactoriser le middleware Auth et le cache de session',
+  'settings.mock.subRole': 'Audit API',
+  'settings.mock.turnPromptLatest': 'Corriger la condition de concurrence du rafraîchissement de token et ajouter les tests',
+  'settings.mock.turnPromptPrev': 'Auditer les gardes de route et le nettoyage des sessions expirées',
+
+  // Preferences -> Other Tab
+  'settings.oth.modelTitle': 'Affichage des noms de modèles',
+  'settings.oth.modelFormat': 'Format du nom de modèle',
+  'settings.oth.modelShort': 'Alias court (ex. argon-4-high)',
+  'settings.oth.modelUpstream': 'ID amont brut (ex. gemini-3.8-flash-n)',
+  'settings.oth.modelUpstreamCompact': 'ID brut compact (masquer gemini- / claude- / gpt-)',
+  'settings.oth.orchFormat': 'ID de série Orchestrator',
+  'settings.oth.orchCompact': 'Alias compact (ex. orchestrator-argon)',
+  'settings.oth.orchFull': 'ID amont complet (ex. gemini-pro-orchestrator)',
+  'settings.oth.baselineTitle': 'Fenêtre de contexte par modèle',
+  'settings.oth.ctxRiskTitle': 'Avertissement de risque (dépassement non officiel)',
+  'settings.oth.ctxRiskBody': 'Google n’autorise pas la modification des limites de contexte des modèles dans Antigravity App / IDE. Modifier ces limites peut entraîner la désactivation ou le bannissement de votre accès Antigravity, de vos services GCP ou de votre compte Google ; activer cette option implique d’assumer l’entière responsabilité des risques associés.',
+  'settings.oth.ctxRiskAcceptBtn': 'J’ai compris les risques, déverrouiller',
+  'settings.oth.ctxModel': 'Modèle',
+  'settings.oth.ctxBaselineLabel': 'Limite de fenêtre de contexte',
+  'settings.oth.ctxChooseModel': 'Choisir un modèle',
+  'settings.oth.ctxDefault': 'Suivre les réglages de l’hôte',
+  'settings.oth.ctxExpensive': '{name} (consomme plus de quota)',
+  'settings.oth.ctxTokens': '{count} tokens',
+  'settings.oth.ctxUnavailable': '{name} (actuellement indisponible)',
+  'settings.oth.ctxConfigured': '{name} · Défini',
+  'settings.oth.ctxConfiguredReported': '{name} · Défini / Dernier vu {reported}',
+  'settings.oth.ctxPendingBridge': '{name} · Redémarrage requis',
+  'settings.oth.ctxDefaultReported': 'Par défaut · Dernier vu {name}',
+  'settings.oth.ctxReported': 'L’hôte a signalé {name} sur la dernière requête.',
+  'settings.oth.ctxMixed': 'Limites différentes selon le niveau de réflexion',
+  'settings.oth.ctxMixedHint': 'Les niveaux de réflexion de ce modèle ont des limites enregistrées différentes. Choisir une limite pour l’appliquer à tous les niveaux.',
+  'settings.oth.ctxBaselineHint': 'Les niveaux de réflexion d’un même modèle partagent une limite. Les limites enregistrées sont réappliquées au démarrage du plugin.',
+  'settings.oth.ctxNoModels': 'L’hôte n’a renvoyé aucun modèle disponible.',
+  'settings.oth.ctxNoOptions': 'L’hôte n’a fourni aucune option de contexte ni capacité pour ce modèle. Suivre l’hôte est la seule option.',
+  'settings.oth.maintTitle': 'Cache et réinitialisation',
+  'settings.oth.cacheLabel': 'Cache local des trajectoires',
+  'settings.oth.cacheDesc': 'Effacer le cache des étapes et analyser à nouveau toutes les conversations immédiatement',
+  'settings.oth.rebuildBtn': 'Reconstruire le cache',
+  'settings.oth.rebuildingBtn': 'Reconstruction…',
+  'settings.oth.rebuildDone': 'Cache des trajectoires reconstruit',
+  'settings.oth.rebuildFailed': 'Échec de reconstruction du cache',
+  'settings.oth.resetLabel': 'Paramètres d’usine',
+  'settings.oth.resetDesc': 'Restaurer par défaut tous les réglages des onglets Général, Structure et Autre',
+  'settings.oth.resetAllBtn': 'Tout réinitialiser',
+  'settings.oth.resetConfirmBtn': 'Cliquer encore pour confirmer',
+  'settings.oth.resettingBtn': 'Réinitialisation…',
+  'settings.oth.resetAllDone': 'Toutes les préférences ont été réinitialisées',
+
+  // Structured Live Activity Actions
+  'live.act.run_command': 'Exécuter une commande',
+  'live.act.read_file': 'Lire un fichier',
+  'live.act.edit_file': 'Modifier un fichier',
+  'live.act.write_file': 'Écrire un fichier',
+  'live.act.grep_search': 'Rechercher dans le code',
+  'live.act.find_file': 'Chercher des fichiers',
+  'live.act.read_url': 'Lire une page Web',
+  'live.act.search_web': 'Recherche Web',
+  'live.act.invoke_subagent': 'Lancer un sous-agent',
+  'live.act.send_message': 'Message au sous-agent',
+  'live.act.manage_subagents': 'Gérer les sous-agents',
+  'live.act.manage_task': 'Gérer une tâche',
+  'live.act.schedule': 'Planifier une tâche',
+  'live.act.ask_question': 'En attente du choix utilisateur',
+  'live.act.search_marketplace': 'Rechercher des plugins',
+  'live.act.mcp_tool': 'Appeler un outil MCP',
+  'live.act.tool_call': 'Appel d’outil',
+  'live.act.thinking': 'Réflexion',
+  'live.act.compacting': 'Compaction du contexte',
+  'live.act.responding': 'Rédaction de la réponse',
+  'live.act.waiting_subagent': 'En attente du sous-agent',
+  'live.act.starting': 'Démarrage',
+  'live.act.done': 'Terminé',
+  'live.act.awaitingApproval': 'Attente validation · {label}',
+  'live.act.compactionResuming': 'Compaction terminée, reprise du raisonnement',
+
+  // SVG Charts (SessionStepCharts & TrendAreaChart)
+  'chart.step.empty': 'Aucune étape traçable dans ce périmètre',
+  'chart.step.excluded': 'Exclu',
+  'chart.step.zeroSteps': '0 étape',
+  'chart.step.stepAdd': 'Étape +{tokens}',
+  'chart.step.ioSplit': 'Entrée {inTok} · Cache {cacheTok} · Sortie {outTok}',
+  'chart.step.cacheShort': 'Cache {pct}%',
+  'chart.step.compactionCheckpoint': 'Point de reprise (compaction auto)',
+  'chart.step.cacheHitOut': 'Cache {pct}% · Sortie +{outTok}',
+  'chart.step.ttftShort': 'TTFT {sec}s',
+  'chart.step.outAndCtx': 'Sortie {outTok} · Contexte {ctxTok}',
+  'chart.step.compactionStep': 'Étape de compaction',
+  'chart.step.noSpeedSample': 'Aucun échantillon de vitesse',
+  'chart.step.ctxAndCache': 'Contexte {ctxTok} · Cache {pct}%',
+  'chart.step.noTtftSample': 'Aucun échantillon TTFT',
+  'chart.step.cumCost': 'Total {cost}',
+  'chart.step.cacheAndStepTok': 'Cache {pct}% · Étape {tokens}',
+  'chart.step.noSamples': 'Aucun échantillon',
+  'chart.step.peakShort': 'Pic {val}',
+  'chart.step.peakPill': 'Pic {tag} · {val}',
+  'chart.step.stepsCount': '{count} étapes',
+  'chart.step.multiPrefix': '{count} modèles · ',
+  'chart.step.sumTokens': '{prefix}Total {tokens}',
+  'chart.step.peakTokens': '{prefix}Pic {tokens}',
+  'chart.step.currentCtx': 'Actuel {tokens}',
+  'chart.step.meanTps': '{prefix}Moy. {val} tok/s',
+  'chart.step.meanSec': '{prefix}Moy. {val}s',
+  'chart.step.noValidSamples': 'Aucun échantillon valide',
+  'chart.step.sumCost': '{prefix}Total {cost}',
+  'chart.fit.empty': 'Aucun échantillon de régression valide pour ce modèle',
+  'chart.fit.loess': 'Courbe LOESS',
+  'chart.fit.olsLinear': 'Rég. linéaire OLS',
+  'chart.fit.olsReg': 'Rég. OLS',
+  'chart.fit.observed': 'Observé',
+  'chart.fit.tipFit': 'Ajusté {val}',
+  'chart.fit.tipObs': 'Obs. {val}',
+  'chart.fit.zeroSamples': '0 échantillon',
+  'chart.fit.peerMean': '{label} Moy. {val}',
+  'chart.fit.peerCompare': 'Comparer : {peers}',
+  'chart.fit.curvesCount': '{count} courbes d’ajustement',
+  'chart.fit.multiBadge': '{steps} étapes · {models} modèles',
+  'chart.fit.singleBadge': '{steps} étapes · Moy. {mean}',
+  'chart.fit.olsTitle': 'OLS : y = {slope}x + {intercept} · Écart-type = ±{sd}',
+  'chart.trend.hmMonthYear': '{month}/{yy}',
+  'chart.trend.hmMonthOnly': 'M{month}',
+  'chart.trend.wdayMon': 'L',
+  'chart.trend.wdayWed': 'M',
+  'chart.trend.wdayFri': 'V',
+  'chart.trend.wdaySun': 'D',
+  'chart.trend.hmAria': 'Carte thermique d’utilisation quotidienne',
+  'chart.trend.hmLess': 'Moins',
+  'chart.trend.hmMore': 'Plus',
+  'chart.trend.hmActivePeak': 'Actif {active}/{total}j · Pic {label} · {tokens}',
+  'chart.trend.hmActiveZero': 'Actif 0/{total}j',
+  'chart.trend.peakPill': 'Pic {label} · {tokens}',
+
+  // DateTime Picker & UI Controls
+  'dt.weekdays': 'L,M,M,J,V,S,D',
+  'dt.prevMonth': 'Mois précédent',
+  'dt.nextMonth': 'Mois suivant',
+  'dt.timeLabel': 'H / Min',
+  'num.dec': 'Diminuer la valeur',
+  'num.inc': 'Augmenter la valeur',
+  'ctrl.segmented': 'Sélecteur',
+  'nav.mainAria': 'Navigation principale',
+// v1.5.2 Additions (Swarm, Cycle Range, Anomalies, Modern UI, Bridge Auth)
+  'header.convMetaWithSwarm': 'Principal {main} · {swarm} essaim ({total} étapes)',
+  'header.convMetaWithSwarmAndSubs': 'Principal {main} · {swarm} essaim · {subs} sous ({total} étapes)',
+  'fmt.speedError': 'Erreur d’appel',
+  'fmt.speedInterrupted': 'Interrompu',
+  'fmt.swarmAgent': 'Essaim',
+  'fmt.swarmBadge': 'E{index}',
+  'fmt.swarmBadgeShort': 'Essaim',
+  'fmt.swarmMonitorHint': 'Moniteur',
+  'fmt.swarmNarratorHint': 'Narrateur',
+  'capsule.multiRunningWithSwarm': '{count} actif(s) · {subs} essaim',
+  'multi.metaWithSwarm': '{main} princ. · {subs} essaim actif',
+  'live.waiting': 'En attente',
+  'live.killed': 'Arrêté',
+  'live.waitingWithSteps': 'En attente ({steps} étapes)',
+  'live.killedWithSteps': 'Arrêté ({steps} étapes)',
+  'live.swarmToggleRunning': 'Essaim {run}/{total}',
+  'live.swarmToggleIdle': 'Essaim ({total})',
+  'cons.rangeCycle': 'Cycle',
+  'cons.monthFullLabel': 'M{m} {year}',
+  'cons.hoverModelsHint': 'Survoler pour les modèles',
+  'cons.otherModelsCount': 'Autres ({count})',
+  'steps.anomalyTag.timeout': 'TO{n}',
+  'steps.anomalyTag.rate_limit': '429×{n}',
+  'steps.anomalyTag.capacity': '503×{n}',
+  'steps.anomalyTag.capacitySingle': '503',
+  'steps.anomalyTag.disconnect': 'Coup{n}',
+  'steps.anomalyTag.upstream': '500×{n}',
+  'steps.anomalyTag.upstreamSingle': '500',
+  'steps.anomalyTag.model_output': 'Corr{n}',
+  'steps.anomalyTag.safety': 'Séc{n}',
+  'steps.anomalyTag.auth_or_model': 'Err{n}',
+  'steps.anomalyTag.error': 'Err{n}',
+  'steps.anomalyTag.mixed': 'Av{n}',
+  'steps.anomalyKind.timeout': 'Délai dépassé / Flux inactif',
+  'steps.anomalyKind.rate_limit': '429 Limite de débit / Quota atteint',
+  'steps.anomalyKind.capacity': '503 Capacité indisponible',
+  'steps.anomalyKind.disconnect': 'Connexion réinitialisée / Flux coupé',
+  'steps.anomalyKind.upstream': 'Erreur interne amont 5xx',
+  'steps.anomalyKind.model_output': 'Sortie modèle / Appel d’outil invalide',
+  'steps.anomalyKind.safety': 'Filtre de sécurité du contenu',
+  'steps.anomalyKind.auth_or_model': 'Requête / Modèle rejeté',
+  'steps.anomalyKind.error': 'Erreur d’appel',
+  'steps.anomalyKind.canceled': 'Annulé par l’utilisateur',
+  'steps.anomalyStepTitle': '#{step} · {count} tentatives / erreurs',
+  'steps.anomalyDelayPart': 'Attente {sec}s',
+  'steps.anomalyTerminalTag': 'Interrompu',
+  'steps.anomalyModelTitle': '{model} · {count} tentatives / erreurs',
+  'steps.anomalyModelSub': '{steps} étapes concernées',
+  'steps.anomalyModelKindRow': '{kind} : {count}',
+  'steps.anomalyModelClickHint': 'Cliquer pour filtrer les étapes en anomalie',
+  'steps.anomalySummaryMeta': '{count} tentatives/erreurs ({steps} étapes)',
+  'steps.anomalyFilterLabel': 'Anomalies ({count})',
+  'steps.anomalyFilterAll': 'Tout afficher',
+  'settings.gen.modernUi': 'Interface moderne (Expérimental)',
+  'settings.gen.modernUiOff': 'Désactivée',
+  'settings.gen.modernUiOn': 'Activée',
+  'settings.gen.modernUiHint': 'Supprime la plupart des bordures au profit de surfaces douces et d’animations fluides',
+  'settings.bridge.readOnlyTitle': 'Raccourci public protégé — Autoriser et relancer pour activer',
+  'settings.bridge.ctxReadOnlyTitle': 'Raccourci public protégé — Autoriser pour le dépassement de contexte',
+  'settings.bridge.readOnlyBody': 'Les entrées personnelles sont configurées, mais les raccourcis publics nécessitent les droits administrateur. Cliquer ci-dessous pour autoriser la mise à jour unique et relancer.',
+  'settings.bridge.macTitle': 'Port de débogage inactif — Relancer en un clic pour activer l’ancrage',
+  'settings.bridge.ctxMacTitle': 'Port de débogage inactif — Relancer pour le dépassement de contexte',
+  'settings.bridge.relaunchAuthBtn': 'Autoriser et relancer',
+  'live.act.swarm_add': 'Créer un agent',
+  'live.act.swarm_title': 'Nommer l’essaim',
+  'live.act.swarm_kill': 'Arrêter l’agent',
+  'live.act.swarm_model': 'Changer le modèle',
+  'live.act.swarm_channel': 'Canal d’essaim',
+  'live.act.swarm_status': 'Vérifier l’essaim',
+  'live.act.post_message': 'Publier sur le tableau',
+  'live.act.read_board': 'Lire le tableau',
+  'live.act.swarm_wait': 'En pause sur le tableau',
+  'live.act.waiting_swarm': 'En attente de l’essaim',
+  'live.act.swarm_waiting': 'En attente',
+  'live.act.swarm_killed': 'Arrêté',
+});
+return { I18N_MESSAGES_FR_FR };
+})();
+
 // --- src/i18n/zh-CN.js ---
 const { I18N_MESSAGES_ZH_CN } = (() => {
 /**
@@ -1464,6 +2182,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   // Preferences -> General Tab
   'settings.gen.appearanceTitle': '界面与外观',
   'settings.gen.language': '界面语言',
+  'settings.gen.langFr': 'Français',
   'settings.gen.langZh': '简体中文',
   'settings.gen.langEn': 'English',
   'settings.gen.langAuto': '跟随系统',
@@ -1737,6 +2456,16 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'chart.trend.hmActivePeak': '活跃 {active}/{total} 天 · 峰值 {label} · {tokens}',
   'chart.trend.hmActiveZero': '活跃 0/{total} 天',
   'chart.trend.peakPill': '峰值 {label} · {tokens}',
+
+  // DateTime Picker & UI Controls
+  'dt.weekdays': '一,二,三,四,五,六,日',
+  'dt.prevMonth': '上个月',
+  'dt.nextMonth': '下个月',
+  'dt.timeLabel': '时 / 分',
+  'num.dec': '减少数值',
+  'num.inc': '增加数值',
+  'ctrl.segmented': '分段切换器',
+  'nav.mainAria': '主功能视图分割导航',
 });
 return { I18N_MESSAGES_ZH_CN };
 })();
@@ -2168,7 +2897,8 @@ const I18N_MESSAGES_EN_US = Object.freeze({
 
   // Preferences -> General Tab
   'settings.gen.appearanceTitle': 'Interface & Appearance',
-  'settings.gen.language': 'Language',
+  'settings.gen.language': 'Language / Langue',
+  'settings.gen.langFr': 'Français',
   'settings.gen.langZh': '简体中文',
   'settings.gen.langEn': 'English',
   'settings.gen.langAuto': 'Follow System',
@@ -2442,12 +3172,22 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'chart.trend.hmActivePeak': 'Active {active}/{total}d · Peak {label} · {tokens}',
   'chart.trend.hmActiveZero': 'Active 0/{total}d',
   'chart.trend.peakPill': 'Peak {label} · {tokens}',
+
+  // DateTime Picker & UI Controls
+  'dt.weekdays': 'M,T,W,T,F,S,S',
+  'dt.prevMonth': 'Previous month',
+  'dt.nextMonth': 'Next month',
+  'dt.timeLabel': 'Hr / Min',
+  'num.dec': 'Decrease value',
+  'num.inc': 'Increase value',
+  'ctrl.segmented': 'Segmented control',
+  'nav.mainAria': 'Main view navigation',
 });
 return { I18N_MESSAGES_EN_US };
 })();
 
 // --- src/i18n/index.js ---
-const { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t } = (() => {
+const { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isFrenchLocale, isEnglishLocale, t } = (() => {
 /**
  * @fileoverview Reactive lightweight i18n engine (`zh-CN` / `en-US` / `auto`).
  * Default language is `'zh-CN'` so out-of-the-box UI matches existing behavior 100%.
@@ -2455,8 +3195,9 @@ const { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nSt
 
 
 const I18N_DICTIONARIES = Object.freeze({
-  'zh-CN': I18N_MESSAGES_ZH_CN,
+  'fr-FR': I18N_MESSAGES_FR_FR,
   'en-US': I18N_MESSAGES_EN_US,
+  'zh-CN': I18N_MESSAGES_ZH_CN,
 });
 
 function normalizeI18nLanguage(raw) {
@@ -2466,17 +3207,20 @@ function normalizeI18nLanguage(raw) {
 function detectHostSystemLocale() {
   try {
     if (typeof navigator !== 'undefined' && navigator.language) {
-      return String(navigator.language).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en-US';
+      const nav = String(navigator.language).toLowerCase();
+      if (nav.startsWith('fr')) return 'fr-FR';
+      if (nav.startsWith('zh')) return 'zh-CN';
+      return 'en-US';
     }
   } catch {
     // Ignore environment navigator read errors
   }
-  return 'zh-CN';
+  return 'fr-FR';
 }
 
 const i18nStore = createReactiveStore({
-  language: 'zh-CN',
-  locale: 'zh-CN',
+  language: 'fr-FR',
+  locale: 'fr-FR',
 });
 
 function setI18nLanguage(rawLang) {
@@ -2490,7 +3234,11 @@ function setI18nLanguage(rawLang) {
 }
 
 function getEffectiveLocale() {
-  return i18nStore.getState().locale || 'zh-CN';
+  return i18nStore.getState().locale || 'fr-FR';
+}
+
+function isFrenchLocale() {
+  return getEffectiveLocale() === 'fr-FR';
 }
 
 function isEnglishLocale() {
@@ -2513,7 +3261,7 @@ function t(key, vars = undefined) {
     vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : ''
   );
 }
-return { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isEnglishLocale, t };
+return { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nStore, setI18nLanguage, getEffectiveLocale, isFrenchLocale, isEnglishLocale, t };
 })();
 
 // --- src/core/appearance.js ---
@@ -3419,12 +4167,16 @@ return { defineComponent };
 })();
 
 // --- src/core/formatters.js ---
-const { formatMetric, formatSpeedMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, formatAnomalyKindLabel, formatAnomalyTagText, resolveModelAnomalySummary, formatStepAnomalyInlineSummary, buildStepAnomalyDiagnostic, buildModelAnomalyDiagnostic, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap } = (() => {
+const { formatMetric, formatSpeedMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatTrendFullLabel, formatUsd, speedReasonText, formatAnomalyKindLabel, formatAnomalyTagText, resolveModelAnomalySummary, formatStepAnomalyInlineSummary, buildStepAnomalyDiagnostic, buildModelAnomalyDiagnostic, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap } = (() => {
 /**
  * @fileoverview Pure formatting utilities for speed metrics, token counts,
  * USD estimates, countdown timers, and custom datetime displays.
  */
 
+
+const FR_MONTH_SHORT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const EN_WDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const FR_WDAY_SHORT = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
 
 const EN_MONTH_SHORT = Object.freeze([
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -3486,6 +4238,14 @@ function formatCnyApprox(usdAmount, rate = 7.2) {
 function formatDateSpanBadge(startMs, endMs) {
   const s = startMs && Number.isFinite(startMs) ? new Date(startMs) : new Date();
   const e = endMs && Number.isFinite(endMs) ? new Date(endMs) : new Date();
+  if (isFrenchLocale()) {
+    const sMon = FR_MONTH_SHORT[s.getMonth()] || '';
+    const eMon = FR_MONTH_SHORT[e.getMonth()] || '';
+    if (s.getFullYear() !== e.getFullYear()) {
+      return `${s.getDate()} ${sMon} ${s.getFullYear()} ~ ${e.getDate()} ${eMon} ${e.getFullYear()}`;
+    }
+    return `${s.getDate()} ${sMon} ~ ${e.getDate()} ${eMon}`;
+  }
   if (isEnglishLocale()) {
     const sMon = EN_MONTH_SHORT[s.getMonth()] || '';
     const eMon = EN_MONTH_SHORT[e.getMonth()] || '';
@@ -3498,6 +4258,28 @@ function formatDateSpanBadge(startMs, endMs) {
     return `${s.getFullYear()}年${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getFullYear()}年${e.getMonth() + 1}月${e.getDate()}日`;
   }
   return `${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getMonth() + 1}月${e.getDate()}日`;
+}
+
+function formatTrendFullLabel(slot) {
+  if (!slot || typeof slot !== 'object') return '--';
+  const locale = getEffectiveLocale();
+  const sMs = Number(slot.startMs || 0);
+  if (locale === 'zh-CN' || !Number.isFinite(sMs) || sMs <= 0) {
+    return slot.fullLabel || slot.label || '--';
+  }
+  const sd = new Date(sMs);
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const mon = (locale === 'fr-FR' ? FR_MONTH_SHORT : EN_MONTH_SHORT)[sd.getMonth()] || '';
+  const dayPart = locale === 'fr-FR' ? `${sd.getDate()} ${mon}` : `${mon} ${sd.getDate()}`;
+  if (slot.granularity === 'hour') {
+    const eMs = Number(slot.endMs || 0);
+    const ed = Number.isFinite(eMs) && eMs > sMs ? new Date(eMs) : new Date(sMs + 3600000);
+    return `${dayPart} ${pad2(sd.getHours())}:00 - ${pad2(ed.getHours())}:00`;
+  }
+  const wday = (locale === 'fr-FR' ? FR_WDAY_SHORT : EN_WDAY_SHORT)[sd.getDay()] || '';
+  const hasYear = /\b\d{4}\b|\d{4}年/.test(String(slot.fullLabel || ''));
+  const yearSuffix = hasYear ? ` ${sd.getFullYear()}` : '';
+  return `${dayPart}${yearSuffix} (${wday})`;
 }
 
 function formatUsd(amount, { precise = false } = {}) {
@@ -4115,7 +4897,7 @@ function formatAgentBadgeText(agent) {
   if (kind === 'side_question') {
     const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
     if (ord > 0) return t('fmt.sideBadge', { index: ord });
-    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    if (getEffectiveLocale() === 'zh-CN' && agent.badgeText) return String(agent.badgeText);
     return t('fmt.sideBadgeShort');
   }
   if (kind === 'swarm_worker') {
@@ -4126,7 +4908,7 @@ function formatAgentBadgeText(agent) {
   }
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   if (ord > 0) return t('fmt.subBadge', { index: ord });
-  if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+  if (getEffectiveLocale() === 'zh-CN' && agent.badgeText) return String(agent.badgeText);
   return t('fmt.subBadgeShort');
 }
 
@@ -4407,7 +5189,7 @@ function buildDeterministicModelColorMap(models = []) {
 
   return colorMap;
 }
-return { formatMetric, formatSpeedMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, formatAnomalyKindLabel, formatAnomalyTagText, resolveModelAnomalySummary, formatStepAnomalyInlineSummary, buildStepAnomalyDiagnostic, buildModelAnomalyDiagnostic, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap };
+return { formatMetric, formatSpeedMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatTrendFullLabel, formatUsd, speedReasonText, formatAnomalyKindLabel, formatAnomalyTagText, resolveModelAnomalySummary, formatStepAnomalyInlineSummary, buildStepAnomalyDiagnostic, buildModelAnomalyDiagnostic, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap };
 })();
 
 // --- src/core/httpClient.js ---
@@ -6793,7 +7575,7 @@ const TopLongPillNav = defineComponent({
       {
         className: 'long-pill-nav',
         role: 'tablist',
-        'aria-label': '主功能视图分割导航',
+        'aria-label': t('nav.mainAria'),
       },
       [glider]
     );
@@ -7189,7 +7971,7 @@ const CustomSelect = defineComponent({
         icon,
         multiple = false,
         allValue = '',
-        multiUnit = isEnglishLocale() ? 'items' : '项',
+        multiUnit = isFrenchLocale() ? 'éléments' : isEnglishLocale() ? 'items' : '项',
       } = getProps();
       patchClasses(rootEl, { 'is-multi': Boolean(multiple) });
       patchAttr(leadIcon, 'hidden', !icon);
@@ -7215,7 +7997,7 @@ const CustomSelect = defineComponent({
           labelText = t('fmt.selectedCount', { count: vals.length, unit: multiUnit });
           titleText = t('fmt.selectedListTitle', {
             count: vals.length,
-            names: names.join(isEnglishLocale() ? ', ' : '、'),
+            names: names.join(getEffectiveLocale() === 'zh-CN' ? '、' : ', '),
           });
         }
       } else {
@@ -7305,7 +8087,7 @@ const CustomNumberInput = defineComponent({
       {
         type: 'button',
         className: 'num-step-btn',
-        'aria-label': '减少数值',
+        'aria-label': t('num.dec'),
         onClick: (e) => {
           e.preventDefault();
           applyStep(-1, e.shiftKey ? 10 : 1);
@@ -7319,7 +8101,7 @@ const CustomNumberInput = defineComponent({
       {
         type: 'button',
         className: 'num-step-btn',
-        'aria-label': '增加数值',
+        'aria-label': t('num.inc'),
         onClick: (e) => {
           e.preventDefault();
           applyStep(1, e.shiftKey ? 10 : 1);
@@ -7406,8 +8188,6 @@ const { CustomDateTimePicker } = (() => {
  */
 
 
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
-
 function buildCalendarDays(viewYear, viewMonth, selectedDate) {
   const firstDay = new Date(viewYear, viewMonth, 1);
   // Convert Sunday=0..Saturday=6 into Monday=0..Sunday=6
@@ -7467,7 +8247,7 @@ const CustomDateTimePicker = defineComponent({
       {
         type: 'button',
         className: 'icon-btn',
-        'aria-label': '上个月',
+        'aria-label': t('dt.prevMonth'),
         onClick: (e) => {
           e.stopPropagation();
           viewMonth -= 1;
@@ -7486,7 +8266,7 @@ const CustomDateTimePicker = defineComponent({
       {
         type: 'button',
         className: 'icon-btn',
-        'aria-label': '下个月',
+        'aria-label': t('dt.nextMonth'),
         onClick: (e) => {
           e.stopPropagation();
           viewMonth += 1;
@@ -7502,11 +8282,8 @@ const CustomDateTimePicker = defineComponent({
 
     const navBar = h('div', { className: 'dt-nav' }, [prevMonthBtn, monthTitle, nextMonthBtn]);
 
-    const weekdayRow = h(
-      'div',
-      { className: 'dt-weekdays' },
-      WEEKDAYS.map((w) => h('span', { className: 'dt-weekday', text: w }))
-    );
+    const weekdayEls = String(t('dt.weekdays')).split(',').map((w) => h('span', { className: 'dt-weekday', text: w }));
+    const weekdayRow = h('div', { className: 'dt-weekdays' }, weekdayEls);
 
     const daysGrid = h('div', { className: 'dt-days' });
 
@@ -7526,8 +8303,9 @@ const CustomDateTimePicker = defineComponent({
       emit('update:modelValue', nextMs);
     }
 
+    const timeLabelSpan = h('span', { className: 'text-muted', text: t('dt.timeLabel') });
     const timeRow = h('div', { className: 'dt-time-row' }, [
-      h('span', { className: 'text-muted', text: '时 / 分' }),
+      timeLabelSpan,
       h('div', { className: 'dt-time-controls' }, [
         h('div', { className: 'dt-mini-step' }, [
           h('button', {
@@ -7640,6 +8418,11 @@ const CustomDateTimePicker = defineComponent({
     }
 
     function renderCalendar() {
+      patchAttr(prevMonthBtn, 'aria-label', t('dt.prevMonth'));
+      patchAttr(nextMonthBtn, 'aria-label', t('dt.nextMonth'));
+      patchText(timeLabelSpan, t('dt.timeLabel'));
+      const wLabels = String(t('dt.weekdays')).split(',');
+      weekdayEls.forEach((el, idx) => patchText(el, wLabels[idx] || ''));
       const cur = new Date(getProps().modelValue || Date.now());
       const pad = (n) => String(n).padStart(2, '0');
       patchText(monthTitle, `${viewYear}-${pad(viewMonth + 1)}`);
@@ -7907,7 +8690,7 @@ const SegmentedControl = defineComponent({
       {
         className: 'segmented',
         role: 'group',
-        'aria-label': getProps().ariaLabel || '分段切换器',
+        'aria-label': getProps().ariaLabel || t('ctrl.segmented'),
       },
       [gliderEl]
     );
@@ -8705,7 +9488,7 @@ function createTrendAreaChart() {
   }
 
   function populateTooltipContent(slot) {
-    patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
+    patchText(tipTimeEl, formatTrendFullLabel(slot));
     patchText(
       tipCallsEl,
       t('cons.callsCount', { calls: Math.max(0, Math.floor(Number(slot.calls) || 0)) })
@@ -9316,7 +10099,7 @@ function createTrendAreaChart() {
         const tickEl = h('span', {
           className: `trend-x-tick text-mono${isFirst ? ' is-start' : isLast ? ' is-end' : ''}`,
           text: slot.label || '',
-          title: slot.fullLabel || slot.label || '',
+          title: formatTrendFullLabel(slot),
         });
         patchStyleVar(tickEl, '--tick-x', `${pct.toFixed(2)}%`);
         tickEl.onclick = () => showLineHoverAtIndex(tIdx);
@@ -11924,8 +12707,8 @@ function resolveQuotaCapsuleSummary(quotas) {
   const weekly = quotas.weekly;
   const pools = Array.isArray(quotas.pools) ? quotas.pools : [];
   const candidates = [];
-  const defaultPoolName = isEnglishLocale() ? 'Active Pool' : '当前池';
-  const wkTag = isEnglishLocale() ? 'Wk' : '周';
+  const defaultPoolName = isFrenchLocale() ? 'Pool actif' : isEnglishLocale() ? 'Active Pool' : '当前池';
+  const wkTag = isFrenchLocale() ? 'Hebdo' : isEnglishLocale() ? 'Wk' : '周';
 
   if (activePool && Number.isFinite(Number(activePool.remainingPct))) {
     candidates.push({
@@ -11944,7 +12727,7 @@ function resolveQuotaCapsuleSummary(quotas) {
   if (!candidates.length && weekly && Number.isFinite(Number(weekly.remainingPct))) {
     candidates.push({
       pct: Number(weekly.remainingPct),
-      label: weekly.poolFamily || (isEnglishLocale() ? 'Weekly' : '周限额'),
+      label: weekly.poolFamily || (isFrenchLocale() ? 'Hebdo' : isEnglishLocale() ? 'Weekly' : '周限额'),
       windowTag: wkTag,
     });
   }
@@ -14584,7 +15367,7 @@ function resolveStepTokenParts(st) {
 }
 
 function formatPartWithOptionalCost(tokCount, costVal) {
-  const countStr = Math.round(Number(tokCount || 0)).toLocaleString();
+  const countStr = Math.round(Number(tokCount || 0)).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US');
   if (costVal != null && Number.isFinite(Number(costVal))) {
     return `${countStr} (${formatUsd(Number(costVal), { precise: true })})`;
   }
@@ -14601,7 +15384,7 @@ function resolveSegmentDisplay(seg, parts, st) {
     case 'context':
       return {
         short: formatTokens(parts.ctxTok),
-        tip: `${t('steps.tokSeg.context.tip')} ${Math.round(parts.ctxTok).toLocaleString()}`,
+        tip: `${t('steps.tokSeg.context.tip')} ${Math.round(parts.ctxTok).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US')}`,
       };
     case 'in':
       return {
@@ -14621,12 +15404,12 @@ function resolveSegmentDisplay(seg, parts, st) {
     case 'think':
       return {
         short: formatTokens(parts.thinkTok),
-        tip: `${t('steps.tokSeg.think.tip')} ${Math.round(parts.thinkTok).toLocaleString()}`,
+        tip: `${t('steps.tokSeg.think.tip')} ${Math.round(parts.thinkTok).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US')}`,
       };
     case 'reply':
       return {
         short: formatTokens(parts.respTok),
-        tip: `${t('steps.tokSeg.reply.tip')} ${Math.round(parts.respTok).toLocaleString()}`,
+        tip: `${t('steps.tokSeg.reply.tip')} ${Math.round(parts.respTok).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US')}`,
       };
     case 'total':
     default:
@@ -18630,8 +19413,9 @@ const { SettingsGeneralTab } = (() => {
 
 function getLanguageOptions() {
   return [
-    { value: 'zh-CN', label: t('settings.gen.langZh') },
+    { value: 'fr-FR', label: t('settings.gen.langFr') },
     { value: 'en-US', label: t('settings.gen.langEn') },
+    { value: 'zh-CN', label: t('settings.gen.langZh') },
     { value: 'auto', label: t('settings.gen.langAuto') },
   ];
 }
@@ -18676,7 +19460,7 @@ function formatCloudSyncTimeText(tsMs, updatedAt) {
 const SettingsGeneralTab = defineComponent({
   name: 'SettingsGeneralTab',
   setup({ props, onCleanup }) {
-    let draftLanguage = 'zh-CN';
+    let draftLanguage = 'fr-FR';
     let draftThemeAccent = 'host';
     let draftFontScale = 'md';
     let draftModernUi = false;
@@ -20606,7 +21390,7 @@ const SettingsOtherTab = defineComponent({
         const legacy = new Set(members.map((member) => saved[member]).filter(Boolean));
         return saved[id] || (legacy.size > 1 ? mixed : legacy.values().next().value) || '';
       };
-      const formatLimit = (value) => /^\d+$/.test(value) ? t('settings.oth.ctxTokens', { count: Number(value).toLocaleString() }) : value;
+      const formatLimit = (value) => /^\d+$/.test(value) ? t('settings.oth.ctxTokens', { count: Number(value).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US') }) : value;
       const isAvailable = (model, value) => model.options.some(({ name }) => name === value) ||
         (/^[1-9]\d*$/.test(value) && Number(value) <= model.capacity);
       const current = models.get(contextModelId);
@@ -22507,7 +23291,7 @@ const ConsumptionView = defineComponent({
       ]);
 
       // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与悬停分模型浮层
-      const rangeBadgeText = isEnglishLocale()
+      const rangeBadgeText = getEffectiveLocale() !== 'zh-CN'
         ? getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
           t('cons.allTime')
         : preset?.label || rangeInfo.label || t('cons.allTime');
