@@ -411,6 +411,12 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
   background: var(--modern-progress-track);
 }
 
+[data-modern-ui="true"] .progress-track.ctx-segment-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--modern-progress-track);
+}
+
 /* --- 4. 用量统计矩阵、热力格与详情卡去边框且不叠内层背景 --- */
 [data-modern-ui="true"] .cons-box,
 [data-modern-ui="true"] .cons-custom-range-bar {

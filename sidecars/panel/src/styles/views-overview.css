@@ -458,6 +458,48 @@
     width var(--dur-normal) var(--ease-fast) 0.05s;
 }
 
+/* 块状微圆角风格上下文进度条（保持 6px 紧凑高度 + 色块间 2px 轻间隙 + 每段 2px 边缘圆润处理） */
+.progress-track.ctx-segment-meter {
+  height: 6px;
+  border-radius: 3px;
+  align-items: stretch;
+}
+
+.progress-track.ctx-segment-meter .progress-seg {
+  flex: 0 1 auto;
+  box-sizing: border-box;
+  width: 0%;
+  min-width: 0;
+  margin-left: 0;
+  border-radius: 2px;
+  transition:
+    background-color 0.08s ease,
+    width var(--dur-normal) var(--ease-fast),
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter.is-reordering .progress-seg {
+  transition:
+    background-color 0.05s ease,
+    width var(--dur-normal) var(--ease-fast) 0.05s,
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active {
+  width: var(--seg-w, 0%);
+  min-width: 3px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active.has-sep {
+  margin-left: 2px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active:hover {
+  filter: brightness(1.12);
+}
+
 .progress-seg.seg-assistant {
   background-color: var(--ctx-assistant);
 }

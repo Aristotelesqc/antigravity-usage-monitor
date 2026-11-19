@@ -11,6 +11,7 @@
 import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
 import {
   formatAgentBadgeText,
+  formatMetric,
   formatSpeedMetric,
   formatStepAnomalyInlineSummary,
   formatTokens,
@@ -645,7 +646,7 @@ function formatChartMetricValue(metric, val) {
     case 'tps':
       return formatSpeedMetric(val, ' tok/s');
     case 'ttft':
-      return `${val.toFixed(1)}s`;
+      return formatMetric(val, 's');
     case 'cache':
       return `${val.toFixed(1)}%`;
     case 'cost':
@@ -664,7 +665,7 @@ function formatChartMetricCompact(metric, val) {
     case 'tps':
       return formatSpeedMetric(val, ' tok/s');
     case 'ttft':
-      return `${val.toFixed(1)}s`;
+      return formatMetric(val, 's');
     case 'cache':
       return `${val.toFixed(1)}%`;
     case 'cost':
@@ -1133,7 +1134,7 @@ export function createSessionLineChart() {
         valid = !st.isCompactionStep && Number.isFinite(st.tokPerSec) && st.tokPerSec > 0;
         value = valid ? Number(st.tokPerSec) : 0;
         secondaryRight = Number.isFinite(st.ttftSec)
-          ? t('chart.step.ttftShort', { sec: st.ttftSec.toFixed(1) })
+          ? t('chart.step.ttftShort', { sec: formatMetric(st.ttftSec, '') })
           : '';
         subDetail = valid
           ? t('chart.step.outAndCtx', {

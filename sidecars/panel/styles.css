@@ -90,16 +90,16 @@
   --metric-danger-soft: color-mix(in srgb, var(--metric-danger) 14%, transparent);
 
   /* Context Window 10-Channel Palette */
-  --ctx-assistant: hsl(217 82% 54%);
-  --ctx-tool-results: hsl(192 82% 43%);
-  --ctx-user-input: hsl(245 72% 62%);
-  --ctx-subagent-msg: hsl(280 70% 58%);
-  --ctx-checkpoint: hsl(38 90% 50%);
-  --ctx-system-tools: hsl(22 86% 50%);
-  --ctx-mcp-tools: hsl(316 72% 54%);
-  --ctx-skills: hsl(145 64% 38%);
-  --ctx-system-prompt: hsl(168 72% 40%);
-  --ctx-user-rules: hsl(346 78% 54%);
+  --ctx-assistant: hsl(215 62% 52%);
+  --ctx-tool-results: hsl(172 68% 40%);
+  --ctx-user-input: hsl(256 76% 62%);
+  --ctx-subagent-msg: hsl(286 64% 58%);
+  --ctx-checkpoint: hsl(42 90% 49%);
+  --ctx-system-tools: hsl(24 86% 52%);
+  --ctx-mcp-tools: hsl(336 78% 58%);
+  --ctx-skills: hsl(150 60% 41%);
+  --ctx-system-prompt: hsl(214 26% 54%);
+  --ctx-user-rules: hsl(352 78% 56%);
 
   /* Legacy 4-Channel Palette (retained for compatibility) */
   --ctx-cached: hsl(217 82% 51%);
@@ -122,6 +122,21 @@
   --space-3: 8px;
   --space-4: 10px;
   --space-5: 12px;
+}
+
+:root[data-color-scheme="dark"],
+:host([data-color-scheme="dark"]),
+[data-color-scheme="dark"] {
+  --ctx-assistant: hsl(216 30% 58%);
+  --ctx-tool-results: hsl(168 72% 54%);
+  --ctx-user-input: hsl(258 86% 73%);
+  --ctx-subagent-msg: hsl(288 72% 70%);
+  --ctx-checkpoint: hsl(43 94% 58%);
+  --ctx-system-tools: hsl(24 90% 62%);
+  --ctx-mcp-tools: hsl(338 82% 69%);
+  --ctx-skills: hsl(150 64% 55%);
+  --ctx-system-prompt: hsl(214 28% 68%);
+  --ctx-user-rules: hsl(354 82% 66%);
 }
 
 :root[data-font-scale="sm"],
@@ -1766,6 +1781,48 @@ html[data-standalone="true"] .app-shell {
   transition:
     background-color 0.05s ease,
     width var(--dur-normal) var(--ease-fast) 0.05s;
+}
+
+/* 块状微圆角风格上下文进度条（保持 6px 紧凑高度 + 色块间 2px 轻间隙 + 每段 2px 边缘圆润处理） */
+.progress-track.ctx-segment-meter {
+  height: 6px;
+  border-radius: 3px;
+  align-items: stretch;
+}
+
+.progress-track.ctx-segment-meter .progress-seg {
+  flex: 0 1 auto;
+  box-sizing: border-box;
+  width: 0%;
+  min-width: 0;
+  margin-left: 0;
+  border-radius: 2px;
+  transition:
+    background-color 0.08s ease,
+    width var(--dur-normal) var(--ease-fast),
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter.is-reordering .progress-seg {
+  transition:
+    background-color 0.05s ease,
+    width var(--dur-normal) var(--ease-fast) 0.05s,
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active {
+  width: var(--seg-w, 0%);
+  min-width: 3px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active.has-sep {
+  margin-left: 2px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active:hover {
+  filter: brightness(1.12);
 }
 
 .progress-seg.seg-assistant {
@@ -6251,6 +6308,12 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 
 [data-modern-ui="true"] .progress-track {
   border-radius: var(--radius-pill);
+  background: var(--modern-progress-track);
+}
+
+[data-modern-ui="true"] .progress-track.ctx-segment-meter {
+  height: 6px;
+  border-radius: 3px;
   background: var(--modern-progress-track);
 }
 

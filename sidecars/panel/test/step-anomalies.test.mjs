@@ -12,8 +12,10 @@ import {
   buildModelAnomalyDiagnostic,
   buildStepAnomalyDiagnostic,
   formatAnomalyTagText,
+  formatMetric,
   formatSpeedMetric,
 } from '../src/core/formatters.js';
+import { ContextSegmentMeter } from '../src/components/ui/ContextSegmentMeter.js';
 import { STEP_COLUMN_REGISTRY } from '../src/registries/stepColumnRegistry.js';
 import { StepTableWidget } from '../src/components/widgets/StepTableWidget.js';
 import {
@@ -400,6 +402,43 @@ test('formatSpeedMetric drops decimals at >= 100 tok/s and STEP_COLUMN_REGISTRY.
     );
     assert.equal(fastCell.refs.speedMain.textContent, '—');
     assert.equal(fastCell.refs.speedReason.textContent, '调用报错');
+
+    // Seconds >= 100s also drop decimals in ttft & duration columns
+    assert.equal(formatMetric(100, 's'), '100s');
+    assert.equal(formatMetric(142.6, 's'), '143s');
+    assert.equal(formatMetric(99.9, 's'), '99.9s');
+
+    const ttftCell = STEP_COLUMN_REGISTRY.ttft.createCell();
+    STEP_COLUMN_REGISTRY.ttft.updateCell(ttftCell.refs, { ttftSec: 124.7 });
+    assert.equal(ttftCell.refs.valEl.textContent, '125s');
+    STEP_COLUMN_REGISTRY.ttft.updateCell(ttftCell.refs, { ttftSec: 14.2 });
+    assert.equal(ttftCell.refs.valEl.textContent, '14.2s');
+
+    const durCell = STEP_COLUMN_REGISTRY.duration.createCell();
+    STEP_COLUMN_REGISTRY.duration.updateCell(durCell.refs, { totalDurationSec: 108.4 });
+    assert.equal(durCell.refs.valEl.textContent, '108s');
+    STEP_COLUMN_REGISTRY.duration.updateCell(durCell.refs, { totalDurationSec: 42.3 });
+    assert.equal(durCell.refs.valEl.textContent, '42.3s');
+
+    // ContextSegmentMeter renders crisp separated blocks (.ctx-segment-meter + .is-active + .has-sep)
+    const meter = ContextSegmentMeter({
+      context: {
+        limitTokens: 200_000,
+        toolResultsTokens: 60_000,
+        assistantTokens: 20_000,
+        skillsTokens: 1_000,
+      },
+    });
+    assert.equal(meter.el.classList.contains('ctx-segment-meter'), true);
+    const activeSegs = meter.refs.segments.filter((s) => s.classList.contains('is-active'));
+    assert.equal(activeSegs.length, 3);
+    assert.equal(activeSegs[0].classList.contains('has-sep'), false, 'First active segment has no left cut gap');
+    assert.equal(activeSegs[1].classList.contains('has-sep'), true, 'Second active segment has 2px cut gap');
+    assert.equal(activeSegs[2].classList.contains('has-sep'), true, 'Third active segment has 2px cut gap');
+    assert.match(activeSegs[0].getAttribute('title') || '', /60\.0k/);
+    const inactiveSegs = meter.refs.segments.filter((s) => !s.classList.contains('is-active'));
+    assert.equal(inactiveSegs.length, 7);
+    assert.equal(inactiveSegs.every((s) => !s.classList.contains('has-sep') && !s.getAttribute('title')), true);
   } finally {
     env.restore();
   }
@@ -667,13 +706,16 @@ test('StepsDetailView total summary cards, session anomaly strip, click-to-filte
     assert.equal(flashBadge.hasAttribute('hidden'), true);
     assert.match(cards[1].querySelector('.smodel-perf').textContent, /88\.2 tok\/s/);
 
-    // Hovering model card anomaly badge opens diagnostic popover with click hint
+    // Hovering model card anomaly badge opens diagnostic popover with click hint AND suppresses parent card native title tooltip
     const modelDiag = buildModelAnomalyDiagnostic(modelBreakdown[0]);
     assert.ok(modelDiag && modelDiag.hint);
+    assert.ok(cards[0].getAttribute('title'), 'Model card has native fit-chart title before hovering anomaly badge');
     proBadge.onmouseenter();
+    assert.equal(cards[0].getAttribute('title'), null, 'Parent model card native title must be suppressed while hovering anomaly badge');
     assert.equal(view.refs.anomalyTipEl.hasAttribute('hidden'), false);
     assert.match(view.refs.anomalyTipEl.querySelector('.step-anomaly-tip-hint').textContent, /按步查看/);
     proBadge.onmouseleave();
+    assert.ok(cards[0].getAttribute('title'), 'Parent model card native title restores after leaving anomaly badge');
     assert.equal(view.refs.anomalyTipEl.hasAttribute('hidden'), true);
 
     // Clicking model card anomaly badge jumps to 'steps', activates anomaly filterbar, and filters to only anomaly step #10
@@ -779,4 +821,7 @@ test('Compiled styles.css centers odometer capsule slot text and ships both clas
   assert.match(builtCss, /\.sstep-anomaly-dot/);
   assert.match(builtCss, /\.trend-tip-anomaly/);
   assert.match(builtCss, /\[data-modern-ui="true"\]\s*\.step-anomaly-tip/);
+  assert.match(builtCss, /\.progress-track\.ctx-segment-meter\s*\{[\s\S]*?height:\s*6px;/);
+  assert.match(builtCss, /\.progress-track\.ctx-segment-meter\s+\.progress-seg\s*\{[\s\S]*?border-radius:\s*2px;/);
+  assert.match(builtCss, /\.progress-track\.ctx-segment-meter\s+\.progress-seg\.is-active\.has-sep\s*\{[\s\S]*?margin-left:\s*2px;/);
 });

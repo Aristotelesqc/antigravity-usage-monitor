@@ -22,13 +22,13 @@ const EN_MONTH_SHORT = Object.freeze([
 ]);
 
 export function formatMetric(value, unit = '') {
-  return Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : '—';
+  if (!Number.isFinite(value)) return '—';
+  const numStr = Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(1);
+  return `${numStr}${unit}`;
 }
 
 export function formatSpeedMetric(value, unit = ' tok/s') {
-  if (!Number.isFinite(value)) return '—';
-  const numStr = value >= 100 ? String(Math.round(value)) : value.toFixed(1);
-  return `${numStr}${unit}`;
+  return formatMetric(value, unit);
 }
 
 export function formatCachePct(value) {

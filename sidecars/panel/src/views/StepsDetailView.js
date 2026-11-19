@@ -1144,6 +1144,7 @@ export const StepsDetailView = defineComponent({
           const callsPillEl = h('span', { className: 'smodel-calls-pill text-mono' });
           const anomalyTagEl = h('span', {
             className: 'step-anomaly-tag smodel-anomaly-tag text-mono',
+            title: '',
             hidden: true,
           });
           const tokEl = h('span', { className: 'smodel-tok text-mono' });
@@ -1165,7 +1166,18 @@ export const StepsDetailView = defineComponent({
 
           return {
             el: cardEl,
-            refs: { nameEl, callsPillEl, anomalyTagEl, tokEl, costEl, segBar, perfEl, splitEl },
+            refs: {
+              nameEl,
+              callsPillEl,
+              anomalyTagEl,
+              tokEl,
+              costEl,
+              segBar,
+              perfEl,
+              splitEl,
+              cardTitle: '',
+              isHoveringAnomaly: false,
+            },
           };
         },
         updateRow: (refs, m, _idx, cardEl) => {
@@ -1196,11 +1208,21 @@ export const StepsDetailView = defineComponent({
           if (anomSum) {
             patchText(refs.anomalyTagEl, anomSum.tagText);
             patchClasses(refs.anomalyTagEl, { 'is-danger': anomSum.severity === 'danger' });
-            refs.anomalyTagEl.onmouseenter = () =>
+            patchAttr(refs.anomalyTagEl, 'title', '');
+            refs.anomalyTagEl.onmouseenter = () => {
+              refs.isHoveringAnomaly = true;
+              patchAttr(cardEl, 'title', null);
               showAnomalyTip(refs.anomalyTagEl, buildModelAnomalyDiagnostic(effM));
-            refs.anomalyTagEl.onmouseleave = hideAnomalyTip;
+            };
+            refs.anomalyTagEl.onmouseleave = () => {
+              refs.isHoveringAnomaly = false;
+              patchAttr(cardEl, 'title', refs.cardTitle || null);
+              hideAnomalyTip();
+            };
             refs.anomalyTagEl.onclick = (e) => {
               e?.stopPropagation?.();
+              refs.isHoveringAnomaly = false;
+              patchAttr(cardEl, 'title', refs.cardTitle || null);
               hideAnomalyTip();
               selectedTableModels = hasMultipleModels ? [...cardGroupKeys] : ['__all__'];
               onlyAnomalies = true;
@@ -1208,6 +1230,7 @@ export const StepsDetailView = defineComponent({
               uiStore.setState({ stepsSubTab: 'steps' });
             };
           } else {
+            refs.isHoveringAnomaly = false;
             refs.anomalyTagEl.onmouseenter = null;
             refs.anomalyTagEl.onmouseleave = null;
             refs.anomalyTagEl.onclick = null;
@@ -1274,15 +1297,12 @@ export const StepsDetailView = defineComponent({
           const isActiveFit =
             hasMultipleModels && cardGroupKeys.some((k) => fitActiveKeySet.has(k));
           patchClasses(cardEl, { 'is-fit-active': isActiveFit });
-          patchAttr(
-            cardEl,
-            'title',
-            !hasMultipleModels
-              ? dispTitle
-              : isActiveFit
-                ? t('steps.fitActiveCardTitle', { title: dispTitle })
-                : t('steps.fitInactiveCardTitle', { text: dispText })
-          );
+          refs.cardTitle = !hasMultipleModels
+            ? dispTitle
+            : isActiveFit
+              ? t('steps.fitActiveCardTitle', { title: dispTitle })
+              : t('steps.fitInactiveCardTitle', { text: dispText });
+          patchAttr(cardEl, 'title', refs.isHoveringAnomaly ? null : refs.cardTitle);
           cardEl.onclick = (e) => {
             if (!hasMultipleModels) return;
             if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && !isFitPooledAll) {
