@@ -157,20 +157,45 @@
   flex-shrink: 0;
 }
 
+:root,
+:host {
+  --cons-other-seg: color-mix(in srgb, var(--text-secondary) 46%, var(--surface-panel));
+}
+
 .dot-swatch.seg-input { background: var(--ctx-input); }
 .dot-swatch.seg-cached { background: var(--ctx-cached); }
 .dot-swatch.seg-output { background: var(--ctx-output); }
 .dot-swatch.seg-thinking { background: var(--ctx-thinking); }
+.dot-swatch.cons-model-dot { background: var(--dot-color, var(--accent-primary)); }
+
+.progress-seg.cons-model-seg,
+.month-seg.cons-model-seg {
+  background-color: var(--seg-color, var(--accent-primary));
+}
 
 /* --- 3. 热门模型与数据来源行头部对齐 (Popular Models & Sources Row Header) --- */
 .cons-row-title {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
   min-height: calc(20px * var(--ui-font-scale, 1));
   line-height: 1.3;
   font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.cons-row-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cons-title-model-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
 }
 
 .cons-row-metrics {
@@ -238,7 +263,7 @@
 
 .trend-svg {
   width: 100%;
-  height: 120px;
+  height: 184px;
   display: block;
   overflow: visible;
 }
@@ -301,19 +326,19 @@
 
 .trend-tooltip {
   position: absolute;
-  top: 0;
+  top: 2px;
   left: var(--tip-x, 50%);
   transform: translateX(var(--tip-shift, -50%));
   width: max-content;
-  min-width: 152px;
+  min-width: 196px;
   max-width: min(320px, calc(100% - 8px));
-  padding: 5px 9px;
+  padding: 6px 10px;
   background: var(--surface-panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  box-shadow: none;
+  box-shadow: var(--shadow-popover);
   pointer-events: none;
-  z-index: 15;
+  z-index: 25;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -378,14 +403,19 @@
   margin-top: 1px;
 }
 
+.trend-tooltip.is-line-low {
+  top: auto;
+  bottom: 20px;
+}
+
 .trend-tooltip.is-hm-top {
-  top: 0;
-  bottom: auto;
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .trend-tooltip.is-hm-bottom {
-  top: auto;
-  bottom: 0;
+  top: calc(100% + 6px);
+  bottom: auto;
 }
 
 .trend-x-axis {
@@ -426,8 +456,8 @@
 .trend-heatmap-stage {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 2px;
+  gap: 8px;
+  padding-top: 4px;
   width: 100%;
   user-select: none;
 }
@@ -435,7 +465,7 @@
 .trend-heatmap-body {
   --hm-weeks: 26;
   --hm-gap: 2px;
-  --hm-cell: 9px;
+  --hm-cell: 12px;
   display: flex;
   align-items: flex-start;
   gap: 4px;
@@ -446,9 +476,9 @@
 @supports (width: 1cqi) {
   .trend-heatmap-body {
     --hm-cell: clamp(
-      6.5px,
+      11px,
       calc((100cqi - 18px - (var(--hm-weeks) - 1) * var(--hm-gap)) / var(--hm-weeks)),
-      18px
+      20px
     );
   }
 }
@@ -620,9 +650,128 @@
   margin-left: auto;
 }
 
+.cons-view-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
 .cons-item-foot strong {
   color: var(--text-primary);
   font-weight: 600;
+}
+
+.cons-source-row {
+  gap: 5px;
+}
+
+.cons-source-bar-hit {
+  padding: 5px 0;
+  margin: -5px 0;
+  cursor: pointer;
+}
+
+.cons-source-bar-hit:hover .cons-source-model-bar,
+.cons-source-bar-hit.is-hovered .cons-source-model-bar {
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.cons-source-foot {
+  justify-content: flex-end;
+  min-height: 16px;
+}
+
+.month-col.is-interactive {
+  cursor: pointer;
+}
+
+.month-col.is-interactive:hover .month-stack,
+.month-col.is-hovered .month-stack {
+  box-shadow: 0 0 0 1px var(--text-primary);
+}
+
+.month-col.is-interactive:hover .month-label,
+.month-col.is-hovered .month-label {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* --- 共享模型构成悬浮详情卡 (Client Sources & Monthly Breakdown Popover) --- */
+.cons-breakdown-popover {
+  position: absolute;
+  left: var(--pop-x, 8px);
+  top: var(--pop-y, 8px);
+  width: max-content;
+  min-width: 196px;
+  max-width: min(310px, calc(100% - 16px));
+  padding: 6px 10px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-popover);
+  pointer-events: none;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.cons-pop-models {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid var(--border-hairline);
+  padding-top: 4px;
+  margin-top: 2px;
+}
+
+.cons-pop-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+}
+
+.cons-pop-model-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cons-pop-model-name {
+  max-width: 156px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cons-pop-model-row.is-other .cons-pop-model-name {
+  color: var(--text-secondary);
+}
+
+.cons-pop-model-right {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cons-pop-model-tok {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.cons-pop-model-pct {
+  min-width: 40px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 /* --- 6. 12 个月垂直堆叠柱状图 (12-Month Stacked Bar Chart) --- */

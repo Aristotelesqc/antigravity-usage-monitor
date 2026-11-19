@@ -6,7 +6,14 @@
  * 3. 两种模式共享自适应防溢出的悬浮详情卡片（精确日期/小时区间、Token 拆分、费用与调用次数）。
  */
 
-import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
+import {
+  h,
+  patchAttr,
+  patchClasses,
+  patchKeyedList,
+  patchStyleVar,
+  patchText,
+} from '../../core/domPatch.js';
 import { formatTokensPrecise, formatUsd } from '../../core/formatters.js';
 import { SVG_NS } from '../../icons/SvgIcon.js';
 import { getEffectiveLocale, t } from '../../i18n/index.js';
@@ -196,9 +203,9 @@ function buildHeatmapMonthTicks(slots, firstDow, totalWeeks) {
  */
 export function createTrendAreaChart() {
   const DEFAULT_VIEW_W = 460;
-  const VIEW_H = 120;
-  const TOP_Y = 24;
-  const BOTTOM_Y = 102;
+  const VIEW_H = 184;
+  const TOP_Y = 26;
+  const BOTTOM_Y = 164;
   const SPAN_Y = BOTTOM_Y - TOP_Y;
 
   let viewW = DEFAULT_VIEW_W;
@@ -243,7 +250,12 @@ export function createTrendAreaChart() {
   const hGridGroup = document.createElementNS(SVG_NS, 'g');
   hGridGroup.setAttribute('class', 'trend-grid');
   const hGridLines = [];
-  for (const y of [TOP_Y, Math.round((TOP_Y + BOTTOM_Y) / 2), BOTTOM_Y]) {
+  for (const y of [
+    TOP_Y,
+    Math.round(TOP_Y + SPAN_Y / 3),
+    Math.round(TOP_Y + (SPAN_Y * 2) / 3),
+    BOTTOM_Y,
+  ]) {
     const line = document.createElementNS(SVG_NS, 'line');
     line.setAttribute('x1', '0');
     line.setAttribute('y1', String(y));
@@ -292,12 +304,28 @@ export function createTrendAreaChart() {
 
   const peakPill = h('span', { className: 'trend-peak-pill text-mono', text: '0' });
 
-  // 共享悬停详情浮层卡片（曲线图与热力格子图共用）
+  function createTooltipModelRow() {
+    const dotEl = h('span', { className: 'dot-swatch cons-model-dot' });
+    const nameEl = h('span', { className: 'cons-pop-model-name' });
+    const tokEl = h('span', { className: 'cons-pop-model-tok' });
+    const pctEl = h('strong', { className: 'cons-pop-model-pct' });
+    const rowEl = h('div', { className: 'cons-pop-model-row' }, [
+      h('span', { className: 'cons-pop-model-left' }, [dotEl, nameEl]),
+      h('span', { className: 'cons-pop-model-right text-mono' }, [tokEl, pctEl]),
+    ]);
+    return {
+      el: rowEl,
+      refs: { rowEl, dotEl, nameEl, tokEl, pctEl },
+    };
+  }
+
+  // 共享悬停详情浮层卡片（曲线图与热力格子图共用，含该时段分模型占比明细）
   const tipTimeEl = h('span', { className: 'trend-tip-time text-mono' });
   const tipCallsEl = h('span', { className: 'trend-tip-calls text-mono' });
   const tipTokensEl = h('strong', { className: 'trend-tip-tokens text-mono' });
   const tipCostEl = h('span', { className: 'trend-tip-cost text-mono' });
   const tipSubEl = h('div', { className: 'trend-tip-sub text-mono', hidden: true });
+  const tipModelsEl = h('div', { className: 'cons-pop-models', hidden: true });
 
   const tooltipEl = h(
     'div',
@@ -306,6 +334,7 @@ export function createTrendAreaChart() {
       h('div', { className: 'trend-tip-head' }, [tipTimeEl, tipCallsEl]),
       h('div', { className: 'trend-tip-main' }, [tipTokensEl, tipCostEl]),
       tipSubEl,
+      tipModelsEl,
     ]
   );
 
@@ -407,6 +436,21 @@ export function createTrendAreaChart() {
         })
       );
     }
+
+    const modelSegs = Array.isArray(slot.modelSegments) ? slot.modelSegments : [];
+    patchAttr(tipModelsEl, 'hidden', modelSegs.length === 0);
+    patchKeyedList(tipModelsEl, modelSegs, {
+      keyFn: (r) => r.key,
+      sigFn: (r) => `${r.key}:${r.label}:${r.color}:${r.tokText}:${r.pctText}:${r.isOther}`,
+      createRow: createTooltipModelRow,
+      updateRow: (rRefs, r) => {
+        patchClasses(rRefs.rowEl, { 'is-other': Boolean(r.isOther) });
+        patchStyleVar(rRefs.dotEl, '--dot-color', r.color);
+        patchText(rRefs.nameEl, r.label);
+        patchText(rRefs.tokEl, r.tokText);
+        patchText(rRefs.pctEl, r.pctText);
+      },
+    });
   }
 
   function showLineHoverAtIndex(idx) {
@@ -427,7 +471,11 @@ export function createTrendAreaChart() {
     patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
 
     patchAttr(peakPill, 'hidden', true);
-    patchClasses(tooltipEl, { 'is-hm-bottom': false, 'is-hm-top': false });
+    patchClasses(tooltipEl, {
+      'is-hm-bottom': false,
+      'is-hm-top': false,
+      'is-line-low': pt.y < Math.round((TOP_Y + BOTTOM_Y) / 2),
+    });
     patchAttr(tooltipEl, 'hidden', false);
     populateTooltipContent(slot);
 
@@ -462,10 +510,11 @@ export function createTrendAreaChart() {
     const row = Number(targetCell.getAttribute('data-hm-row') || 0);
     const col = Number(targetCell.getAttribute('data-hm-col') || 0);
 
-    // 上半区（周一~周四）浮层停靠底部，下半区（周五~周日）停靠顶部，互不遮挡被悬停格子且永不越界裁剪
+    // 上半区（周一~周四）浮层停靠热力图下方，下半区（周五~周日）停靠热力图上方，互不遮挡被悬停格子且永不越界裁剪
     patchClasses(tooltipEl, {
       'is-hm-bottom': row <= 3,
       'is-hm-top': row > 3,
+      'is-line-low': false,
     });
     patchAttr(tooltipEl, 'hidden', false);
     populateTooltipContent(slot);
@@ -494,7 +543,7 @@ export function createTrendAreaChart() {
     patchAttr(hoverLine, 'hidden', true);
     patchAttr(hoverDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
-    patchClasses(tooltipEl, { 'is-hm-bottom': false, 'is-hm-top': false });
+    patchClasses(tooltipEl, { 'is-hm-bottom': false, 'is-hm-top': false, 'is-line-low': false });
     if (!currentIsHeatmap) {
       patchAttr(peakPill, 'hidden', false);
     }
@@ -776,11 +825,17 @@ export function createTrendAreaChart() {
     const sig =
       `${locale}|${useHeatmap ? 'hm' : `line:${viewW}`}|` +
       slots
-        .map(
-          (s) =>
-            `${s?.startMs || ''}:${s?.label || ''}:${s?.fullLabel || ''}:${safeSlotTokens(s?.tokens)}:${Number(s?.costUsd || 0)}:${Number(s?.calls || 0)}`
-        )
+        .map((s) => {
+          const mSig = Array.isArray(s?.modelSegments)
+            ? s.modelSegments.map((m) => `${m.key}:${m.color}:${m.pctText}`).join(',')
+            : '';
+          return `${s?.startMs || ''}:${s?.label || ''}:${s?.fullLabel || ''}:${safeSlotTokens(s?.tokens)}:${Number(s?.costUsd || 0)}:${Number(s?.calls || 0)}:${mSig}`;
+        })
         .join('|');
+
+    if (hoveredIdx >= 0 && hoveredIdx < slots.length && !tooltipEl.hasAttribute('hidden')) {
+      populateTooltipContent(slots[hoveredIdx]);
+    }
 
     if (useHeatmap) {
       currentPts = [];

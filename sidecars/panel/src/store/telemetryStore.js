@@ -538,6 +538,26 @@ export function isEquivalentTelemetry(prev, next) {
   if (pAcct?.unpricedCalls !== nAcct?.unpricedCalls) return false;
 
   // 6. 比对历史趋势时间分桶序列与年度分月序列
+  const areModelSlicesEqual = (pList, nList) => {
+    const a = pList || [];
+    const b = nList || [];
+    if (a.length !== b.length) return false;
+    for (let k = 0; k < a.length; k++) {
+      if (
+        a[k]?.label !== b[k]?.label ||
+        a[k]?.shortName !== b[k]?.shortName ||
+        a[k]?.upstreamName !== b[k]?.upstreamName ||
+        a[k]?.costUsd !== b[k]?.costUsd ||
+        a[k]?.unpricedCalls !== b[k]?.unpricedCalls ||
+        a[k]?.totalTokens !== b[k]?.totalTokens ||
+        a[k]?.calls !== b[k]?.calls
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const pTrend = prev.consumption?.trendSeries || [];
   const nTrend = next.consumption?.trendSeries || [];
   if (pTrend.length !== nTrend.length) return false;
@@ -546,12 +566,14 @@ export function isEquivalentTelemetry(prev, next) {
       pTrend[i]?.tokens !== nTrend[i]?.tokens ||
       pTrend[i]?.calls !== nTrend[i]?.calls ||
       pTrend[i]?.label !== nTrend[i]?.label ||
-      pTrend[i]?.fullLabel !== nTrend[i]?.fullLabel
+      pTrend[i]?.fullLabel !== nTrend[i]?.fullLabel ||
+      !areModelSlicesEqual(pTrend[i]?.models, nTrend[i]?.models)
     ) {
       return false;
     }
   }
   if (prev.consumption?.monthlyYear !== next.consumption?.monthlyYear) return false;
+
   const pMonthly = prev.consumption?.monthlySeries || [];
   const nMonthly = next.consumption?.monthlySeries || [];
   if (pMonthly.length !== nMonthly.length) return false;
@@ -559,28 +581,16 @@ export function isEquivalentTelemetry(prev, next) {
     if (
       pMonthly[i]?.totalTokens !== nMonthly[i]?.totalTokens ||
       pMonthly[i]?.costUsd !== nMonthly[i]?.costUsd ||
-      pMonthly[i]?.calls !== nMonthly[i]?.calls
+      pMonthly[i]?.calls !== nMonthly[i]?.calls ||
+      !areModelSlicesEqual(pMonthly[i]?.models, nMonthly[i]?.models)
     ) {
       return false;
     }
   }
 
   // 7. 比对按模型汇总明细与数据来源汇总明细
-  const pModels = prev.modelBreakdown || [];
-  const nModels = next.modelBreakdown || [];
-  if (pModels.length !== nModels.length) return false;
-  for (let i = 0; i < pModels.length; i++) {
-    if (
-      pModels[i]?.label !== nModels[i]?.label ||
-      pModels[i]?.shortName !== nModels[i]?.shortName ||
-      pModels[i]?.upstreamName !== nModels[i]?.upstreamName ||
-      pModels[i]?.costUsd !== nModels[i]?.costUsd ||
-      pModels[i]?.unpricedCalls !== nModels[i]?.unpricedCalls ||
-      pModels[i]?.totalTokens !== nModels[i]?.totalTokens ||
-      pModels[i]?.calls !== nModels[i]?.calls
-    ) {
-      return false;
-    }
+  if (!areModelSlicesEqual(prev.modelBreakdown, next.modelBreakdown)) {
+    return false;
   }
 
   const pSources = prev.consumption?.sourcesBreakdown || [];
@@ -592,7 +602,8 @@ export function isEquivalentTelemetry(prev, next) {
       pSources[i]?.costUsd !== nSources[i]?.costUsd ||
       pSources[i]?.unpricedCalls !== nSources[i]?.unpricedCalls ||
       pSources[i]?.totalTokens !== nSources[i]?.totalTokens ||
-      pSources[i]?.calls !== nSources[i]?.calls
+      pSources[i]?.calls !== nSources[i]?.calls ||
+      !areModelSlicesEqual(pSources[i]?.models, nSources[i]?.models)
     ) {
       return false;
     }

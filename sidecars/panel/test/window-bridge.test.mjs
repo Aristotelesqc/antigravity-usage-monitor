@@ -2033,7 +2033,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     );
     assert.equal(
       plotStageEl.querySelector('.trend-svg').getAttribute('viewBox'),
-      '0 0 180 120',
+      '0 0 180 184',
       'TrendAreaChart dynamically adapts viewBox width to measured container width (180px in MockNode)'
     );
     assert.match(

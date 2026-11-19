@@ -546,6 +546,8 @@ export function aggregateMultiWindowUsage({
     thinkingTokens: 0,
     totalTokens: 0,
     costUsd: 0,
+    unpricedCalls: 0,
+    perModelStats: new Map(),
   }));
 
   const SOURCE_LABELS = {
@@ -692,6 +694,7 @@ export function aggregateMultiWindowUsage({
           mBucket.totalTokens += stepTotalTokens;
           mBucket.costUsd += resolvedCost;
           mBucket.unpricedCalls = (mBucket.unpricedCalls || 0) + unpriced;
+          accumulateStepIntoModelMap(mBucket.perModelStats, st, mInfo, stepCost);
         }
       }
 
@@ -757,6 +760,8 @@ export function aggregateMultiWindowUsage({
             outputTokens: outTok,
             costUsd: resolvedCost,
             unpricedCalls: unpriced,
+            mInfo,
+            responseModel: st.responseModel || '',
           });
         }
 
@@ -770,6 +775,7 @@ export function aggregateMultiWindowUsage({
             thinkingTokens: 0,
             totalTokens: 0,
             costUsd: 0,
+            perModelStats: new Map(),
           });
         }
         const sAgg = perSourceStats.get(srcKey);
@@ -781,15 +787,20 @@ export function aggregateMultiWindowUsage({
         sAgg.totalTokens += stepTotalTokens;
         sAgg.costUsd += resolvedCost;
         sAgg.unpricedCalls = (sAgg.unpricedCalls || 0) + unpriced;
+        accumulateStepIntoModelMap(sAgg.perModelStats, st, mInfo, stepCost);
 
         accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost);
       }
     }
   }
 
-  for (const mBucket of monthlySeries) {
-    mBucket.costUsd = +mBucket.costUsd.toFixed(4);
-  }
+  const finalizedMonthlySeries = monthlySeries.map(
+    ({ perModelStats: monthModelMap, ...mBucket }) => ({
+      ...mBucket,
+      costUsd: +mBucket.costUsd.toFixed(4),
+      models: finalizeModelBreakdownMap(monthModelMap),
+    })
+  );
 
   // 构建当前选定时间窗口的自适应自然整点/整日趋势序列 (trendSeries)
   const trend = planUsageTrend(selectedWindow, nowMs, earliestSelectedStepMs, latestSelectedStepMs);
@@ -940,9 +951,62 @@ export function aggregateMultiWindowUsage({
       bucket.costUsd += item.costUsd;
       bucket.unpricedCalls = (bucket.unpricedCalls || 0) + item.unpricedCalls;
       bucket.calls += 1;
+
+      if (item.mInfo && item.tokens > 0) {
+        bucket.perModelStats ??= new Map();
+        const mInfo = item.mInfo;
+        const modelGroupKey = mInfo.baseLabel || mInfo.label;
+        let bModel = bucket.perModelStats.get(modelGroupKey);
+        if (!bModel) {
+          bModel = {
+            label: modelGroupKey,
+            shortName: mInfo.shortName,
+            fallbackModelId:
+              mInfo.modelId && mInfo.modelId !== 'unknown'
+                ? formatUpstreamModelId(mInfo.modelId, mInfo)
+                : '',
+            upstreamModelCounts: new Map(),
+            family: mInfo.family,
+            calls: 0,
+            totalTokens: 0,
+            costUsd: 0,
+            unpricedCalls: 0,
+          };
+          bucket.perModelStats.set(modelGroupKey, bModel);
+        }
+        if (item.responseModel) {
+          const formattedResp = formatUpstreamModelId(item.responseModel, mInfo);
+          bModel.upstreamModelCounts.set(
+            formattedResp,
+            (bModel.upstreamModelCounts.get(formattedResp) || 0) + 1
+          );
+        }
+        bModel.calls += 1;
+        bModel.totalTokens += item.tokens;
+        bModel.costUsd += item.costUsd;
+        bModel.unpricedCalls += item.unpricedCalls || 0;
+      }
     }
     for (const b of trendSeries) {
       b.costUsd = +b.costUsd.toFixed(4);
+      if (b.perModelStats) {
+        b.models = Array.from(b.perModelStats.values())
+          .sort((a, c) => c.totalTokens - a.totalTokens || c.calls - a.calls)
+          .map(({ upstreamModelCounts, fallbackModelId, ...m }) => {
+            const sortedUpstream = Array.from(upstreamModelCounts.entries())
+              .sort((a, c) => c[1] - a[1])
+              .map(([name]) => name);
+            const primaryUpstream =
+              sortedUpstream.length > 0 ? sortedUpstream[0] : fallbackModelId || m.shortName || m.label;
+            return {
+              ...m,
+              upstreamName: primaryUpstream,
+              upstreamModels: sortedUpstream,
+              costUsd: +m.costUsd.toFixed(6),
+            };
+          });
+        delete b.perModelStats;
+      }
     }
   }
 
@@ -960,9 +1024,10 @@ export function aggregateMultiWindowUsage({
 
   const sourcesBreakdown = Array.from(perSourceStats.values())
     .filter((s) => s.totalTokens > 0 || s.calls > 0)
-    .map((s) => ({
+    .map(({ perModelStats: sourceModelMap, ...s }) => ({
       ...s,
       costUsd: +s.costUsd.toFixed(2),
+      models: finalizeModelBreakdownMap(sourceModelMap),
     }))
     .sort((a, b) => b.totalTokens - a.totalTokens || b.calls - a.calls);
 
@@ -1019,7 +1084,7 @@ export function aggregateMultiWindowUsage({
     trendSeries,
     sourcesBreakdown,
     currentYear,
-    monthlySeries,
+    monthlySeries: finalizedMonthlySeries,
     todayBucket,
     weekBucket,
     quotaWeekBucket: finalizedQuotaWeekBucket,

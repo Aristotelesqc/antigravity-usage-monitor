@@ -19,13 +19,16 @@ import {
   patchText,
 } from '../core/domPatch.js';
 import {
+  buildDeterministicModelColorMap,
   formatCnyApprox,
   formatDateSpanBadge,
   formatTokensPrecise,
   formatUsd,
+  getCanonicalModelColorSeed,
   mergeModelsByDisplayName,
   normalizeModelDisplayMode,
   normalizeOrchestratorIdDisplayMode,
+  resolveDeterministicModelColor,
 } from '../core/formatters.js';
 import { scaleBucketsExact } from '../../shared/telemetry-display-rules.mjs';
 import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
@@ -274,86 +277,205 @@ export const ConsumptionView = defineComponent({
 
     // --- Section 4: 客户端来源列表 ---
     const sourcesTitleSpan = h('span', { className: 'panel-title', text: t('cons.clientSources') });
+    const sourcesHoverHint = h('span', {
+      className: 'text-muted text-mono',
+      style: 'font-size: var(--fs-sm);',
+      text: t('cons.hoverModelsHint'),
+    });
     const sourcesListEl = h('div', { className: 'cons-item-list' });
     const sourcesPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
         sourcesTitleSpan,
+        sourcesHoverHint,
       ]),
       sourcesListEl,
     ]);
 
-    // --- Section 5: 按月细分 (12 个月垂直 4 段堆叠柱状图) ---
-    const monthlyTitleSpan = h('span', { className: 'panel-title', text: t('cons.monthlyTitle') });
+    // --- Section 5: 按月细分 (12 个月垂直按模型配色堆叠柱状图 + 悬停明细浮层) ---
+    const monthlyTitleSpan = h('span', { text: t('cons.monthlyTitle') });
     const monthlyYearBadge = h('span', { className: 'cons-badge text-mono', text: '2026' });
+    const monthlyHoverHint = h('span', {
+      className: 'text-muted text-mono',
+      style: 'font-size: var(--fs-sm);',
+      text: t('cons.hoverModelsHint'),
+    });
+
+    let activeHoverTargetEl = null;
+
+    function createPopoverModelRow() {
+      const dotEl = h('span', { className: 'dot-swatch cons-model-dot' });
+      const nameEl = h('span', { className: 'cons-pop-model-name' });
+      const tokEl = h('span', { className: 'cons-pop-model-tok' });
+      const pctEl = h('strong', { className: 'cons-pop-model-pct' });
+      const rowEl = h('div', { className: 'cons-pop-model-row' }, [
+        h('span', { className: 'cons-pop-model-left' }, [dotEl, nameEl]),
+        h('span', { className: 'cons-pop-model-right text-mono' }, [tokEl, pctEl]),
+      ]);
+      return {
+        el: rowEl,
+        refs: { rowEl, dotEl, nameEl, tokEl, pctEl },
+      };
+    }
+
+    const popTitleEl = h('span', { className: 'trend-tip-time' });
+    const popCallsEl = h('span', { className: 'trend-tip-calls text-mono' });
+    const popTokensEl = h('strong', { className: 'trend-tip-tokens text-mono' });
+    const popCostEl = h('span', { className: 'trend-tip-cost text-mono' });
+    const popListEl = h('div', { className: 'cons-pop-models' });
+    const breakdownPopoverEl = h(
+      'div',
+      { className: 'cons-breakdown-popover', hidden: true },
+      [
+        h('div', { className: 'trend-tip-head' }, [popTitleEl, popCallsEl]),
+        h('div', { className: 'trend-tip-main' }, [popTokensEl, popCostEl]),
+        popListEl,
+      ]
+    );
+
+    function hideBreakdownPopover() {
+      if (activeHoverTargetEl) {
+        patchClasses(activeHoverTargetEl, { 'is-hovered': false });
+        activeHoverTargetEl = null;
+      }
+      patchAttr(breakdownPopoverEl, 'hidden', true);
+    }
+
+    function positionBreakdownPopover(anchorEl, pointerClientX = null) {
+      const rootRect = rootEl.getBoundingClientRect?.() || {
+        left: 0,
+        top: 0,
+        width: 360,
+        height: 600,
+      };
+      const anchorRect = anchorEl?.getBoundingClientRect?.() || {
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 0,
+        height: 0,
+      };
+      const tipRect = breakdownPopoverEl.getBoundingClientRect?.() || {
+        width: 220,
+        height: 120,
+      };
+      const rootW = rootRect.width > 0 ? rootRect.width : 360;
+      const rootH = rootRect.height > 0 ? rootRect.height : 600;
+      const tipW = tipRect.width > 0 ? tipRect.width : 220;
+      const tipH = tipRect.height > 0 ? tipRect.height : 120;
+
+      const centerX =
+        Number.isFinite(pointerClientX) && pointerClientX > 0 && rootRect.width > 0
+          ? pointerClientX - rootRect.left
+          : anchorRect.left - rootRect.left + anchorRect.width / 2;
+
+      const maxLeft = Math.max(8, rootW - tipW - 8);
+      const leftPx = Math.max(8, Math.min(maxLeft, centerX - tipW / 2));
+
+      const aboveTop = anchorRect.top - rootRect.top - tipH - 8;
+      const belowTop = anchorRect.bottom - rootRect.top + 8;
+      const topPx =
+        aboveTop >= 6
+          ? aboveTop
+          : Math.min(Math.max(6, rootH - tipH - 6), Math.max(6, belowTop));
+
+      patchStyleVar(breakdownPopoverEl, '--pop-x', `${Math.round(leftPx)}px`);
+      patchStyleVar(breakdownPopoverEl, '--pop-y', `${Math.round(topPx)}px`);
+    }
+
+    function showBreakdownPopover(anchorEl, payload, pointerClientX = null) {
+      if (!payload || !(payload.totalTokens > 0 || payload.calls > 0)) {
+        hideBreakdownPopover();
+        return;
+      }
+      if (activeHoverTargetEl && activeHoverTargetEl !== anchorEl) {
+        patchClasses(activeHoverTargetEl, { 'is-hovered': false });
+      }
+      activeHoverTargetEl = anchorEl;
+      patchClasses(anchorEl, { 'is-hovered': true });
+
+      patchText(popTitleEl, payload.title || '—');
+      patchText(popCallsEl, t('cons.callsCount', { calls: payload.calls || 0 }));
+      patchText(popTokensEl, `${formatTokensPrecise(payload.totalTokens || 0)} tok`);
+      patchText(popCostEl, payload.costText || '$0.00');
+
+      const rows = Array.isArray(payload.segments) ? payload.segments : [];
+      patchAttr(popListEl, 'hidden', rows.length === 0);
+      patchKeyedList(popListEl, rows, {
+        keyFn: (r) => r.key,
+        sigFn: (r) => `${r.key}:${r.label}:${r.color}:${r.tokText}:${r.pctText}:${r.isOther}`,
+        createRow: createPopoverModelRow,
+        updateRow: (rRefs, r) => {
+          patchClasses(rRefs.rowEl, { 'is-other': Boolean(r.isOther) });
+          patchStyleVar(rRefs.dotEl, '--dot-color', r.color);
+          patchText(rRefs.nameEl, r.label);
+          patchText(rRefs.tokEl, r.tokText);
+          patchText(rRefs.pctEl, r.pctText);
+        },
+      });
+
+      patchAttr(breakdownPopoverEl, 'hidden', false);
+      positionBreakdownPopover(anchorEl, pointerClientX);
+    }
+
+    function createMonthModelSegment() {
+      const segEl = h('div', { className: 'month-seg cons-model-seg' });
+      return { el: segEl, refs: { segEl } };
+    }
+
     const monthlyCols = Array.from({ length: 12 }, (_, idx) => {
       const costText = h('span', { className: 'month-cost text-mono', text: '' });
-      const barThink = h('div', { className: 'month-seg seg-thinking' });
-      const barOut = h('div', { className: 'month-seg seg-output' });
-      const barCache = h('div', { className: 'month-seg seg-cached' });
-      const barIn = h('div', { className: 'month-seg seg-input' });
-      const stackWrap = h('div', { className: 'month-stack' }, [
-        barThink,
-        barOut,
-        barCache,
-        barIn,
-      ]);
+      const stackWrap = h('div', { className: 'month-stack' });
       const zeroDot = h('span', { className: 'month-zero-dot' });
       const monthLabel = h('span', { className: 'month-label', text: t('cons.monthLabel', { m: idx + 1 }) });
       const tokText = h('span', { className: 'month-tok text-mono', text: '' });
 
-      const colEl = h('div', { className: 'month-col' }, [
-        costText,
-        h('div', { className: 'month-bar-well' }, [stackWrap, zeroDot]),
-        monthLabel,
-        tokText,
-      ]);
+      const colState = { hoverPayload: null };
+      const colEl = h(
+        'div',
+        {
+          className: 'month-col',
+          onMouseEnter: (e) => {
+            if (colState.hoverPayload) {
+              showBreakdownPopover(colEl, colState.hoverPayload, null);
+            } else {
+              e?.stopPropagation?.();
+            }
+          },
+          onMouseLeave: () => {
+            if (activeHoverTargetEl === colEl) hideBreakdownPopover();
+          },
+        },
+        [
+          costText,
+          h('div', { className: 'month-bar-well' }, [stackWrap, zeroDot]),
+          monthLabel,
+          tokText,
+        ]
+      );
       return {
         el: colEl,
         costText,
         stackWrap,
         zeroDot,
-        barThink,
-        barOut,
-        barCache,
-        barIn,
         monthLabel,
         tokText,
+        colState,
       };
     });
 
-    const legInputSpan = h('span', { text: t('cons.legInput') });
-    const legCacheSpan = h('span', { text: t('cons.legCache') });
-    const legOutputSpan = h('span', { text: t('cons.legOutput') });
-    const legThinkingSpan = h('span', { text: t('cons.legThinking') });
-
     const monthlyPanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
-        monthlyTitleSpan,
-        monthlyYearBadge,
+        h('span', { className: 'panel-title' }, [
+          monthlyTitleSpan,
+          monthlyYearBadge,
+        ]),
+        monthlyHoverHint,
       ]),
       h(
         'div',
         { className: 'monthly-grid' },
         monthlyCols.map((c) => c.el)
       ),
-      h('div', { className: 'monthly-legend' }, [
-        h('span', { className: 'legend-left' }, [
-          h('span', { className: 'dot-swatch seg-input' }),
-          legInputSpan,
-        ]),
-        h('span', { className: 'legend-left' }, [
-          h('span', { className: 'dot-swatch seg-cached' }),
-          legCacheSpan,
-        ]),
-        h('span', { className: 'legend-left' }, [
-          h('span', { className: 'dot-swatch seg-output' }),
-          legOutputSpan,
-        ]),
-        h('span', { className: 'legend-left' }, [
-          h('span', { className: 'dot-swatch seg-thinking' }),
-          legThinkingSpan,
-        ]),
-      ]),
     ]);
 
     const scrollInner = h(
@@ -374,12 +496,86 @@ export const ConsumptionView = defineComponent({
       contentEl: scrollInner,
       className: 'view-pane',
     });
+    viewScrollbar.el.addEventListener?.('scroll', hideBreakdownPopover, { passive: true });
+
+    const rootEl = h('div', { className: 'cons-view-stage' }, [
+      viewScrollbar.el,
+      breakdownPopoverEl,
+    ]);
 
     /**
-     * 创建热门模型或数据来源的通用单行 DOM 结构（含标题、占比胶囊、总量、费用、4 段条与底部分项脚标）。
+     * 将分模型列表收敛为主力模型 + 长尾「其他 (N)」，避免进度条尾部与浮层出现 0.0% 碎屑噪音。
+     */
+    function partitionModelSegments(
+      mergedModels,
+      modelColorMap,
+      { maxMain = 5, minSharePct = 1.5 } = {}
+    ) {
+      if (!Array.isArray(mergedModels) || mergedModels.length === 0) return [];
+      const sumTok = mergedModels.reduce((sum, m) => sum + Number(m.totalTokens || 0), 0);
+      const mainModels = [];
+      const tailModels = [];
+
+      for (let i = 0; i < mergedModels.length; i++) {
+        const m = mergedModels[i];
+        const mTok = Number(m.totalTokens || 0);
+        const sharePct = sumTok > 0 ? (mTok / sumTok) * 100 : 0;
+        if (i === 0 || (mainModels.length < maxMain && sharePct >= minSharePct)) {
+          mainModels.push(m);
+        } else {
+          tailModels.push(m);
+        }
+      }
+
+      if (tailModels.length === 1) {
+        mainModels.push(tailModels.pop());
+      }
+
+      const out = mainModels.map((m) => {
+        const seed = getCanonicalModelColorSeed(m);
+        const color =
+          modelColorMap?.get(seed) || resolveDeterministicModelColor(seed || m.displayText);
+        const tok = Number(m.totalTokens || 0);
+        const pct = sumTok > 0 ? (tok / sumTok) * 100 : 0;
+        const label = m.displayText || m.label || m.shortName || '—';
+        return {
+          key: label,
+          label,
+          tok,
+          pct,
+          tokText: formatTokensPrecise(tok),
+          pctText: `${pct.toFixed(1)}%`,
+          color,
+          isOther: false,
+        };
+      });
+
+      if (tailModels.length >= 2) {
+        const otherTok = tailModels.reduce((sum, m) => sum + Number(m.totalTokens || 0), 0);
+        const otherPct = sumTok > 0 ? (otherTok / sumTok) * 100 : 0;
+        const otherLabel = t('cons.otherModelsCount', { count: tailModels.length });
+        out.push({
+          key: '__other__',
+          label: otherLabel,
+          tok: otherTok,
+          pct: otherPct,
+          tokText: formatTokensPrecise(otherTok),
+          pctText: `${otherPct.toFixed(1)}%`,
+          color: 'var(--cons-other-seg)',
+          isOther: true,
+        });
+      }
+
+      return out;
+    }
+
+    /**
+     * 创建热门模型单行 DOM 结构（模型名称后附专属颜色圆点 + 按总占比缩放的 4 段比例条 + 底部分项脚标）。
      */
     function createBreakdownItemRow() {
-      const nameEl = h('strong', { className: 'cons-row-title' });
+      const nameTextEl = h('span', { className: 'cons-row-title-text' });
+      const modelDotEl = h('span', { className: 'dot-swatch cons-model-dot cons-title-model-dot' });
+      const nameEl = h('strong', { className: 'cons-row-title' }, [nameTextEl, modelDotEl]);
       const pctBadge = h('span', { className: 'cons-share-pill text-mono', text: '0%' });
       const totalTokEl = h('span', { className: 'cons-row-tok text-mono' });
       const costEl = h('strong', { className: 'cons-row-cost text-mono' });
@@ -439,6 +635,8 @@ export const ConsumptionView = defineComponent({
         el: rowEl,
         refs: {
           nameEl,
+          nameTextEl,
+          modelDotEl,
           pctBadge,
           totalTokEl,
           costEl,
@@ -458,22 +656,27 @@ export const ConsumptionView = defineComponent({
     }
 
     /**
-     * 增量更新热门模型或数据来源单行的指标文本与 4 段比例条宽度。
+     * 增量更新热门模型单行的指标文本、名称后的专属颜色圆点与按总占比缩放的 4 段比例条宽度。
      */
-    function updateBreakdownItemRow(refs, item, grandTotalTokens, showTokensInHeader = true) {
+    function updateBreakdownItemRow(refs, item, grandTotalTokens, modelColor = '') {
       patchText(refs.inLbl, t('cons.footInput'));
       patchText(refs.cacheLbl, t('cons.footCache'));
       patchText(refs.outLbl, t('cons.footOutput'));
       patchText(refs.thinkLbl, t('cons.footThinking'));
       patchText(refs.callsLbl, t('cons.footCalls'));
       const displayLabel = item.label || item.name || item.shortName || '—';
-      patchText(refs.nameEl, displayLabel);
+      patchText(refs.nameTextEl, displayLabel);
       patchAttr(refs.nameEl, 'title', item.title || displayLabel);
+      patchAttr(refs.modelDotEl, 'hidden', !modelColor);
+      if (modelColor) {
+        patchStyleVar(refs.modelDotEl, '--dot-color', modelColor);
+      }
       const total = Number(item.totalTokens || 0);
       const share = grandTotalTokens > 0 ? +((total / grandTotalTokens) * 100).toFixed(1) : 0;
+      const scaleRatio =
+        grandTotalTokens > 0 && total > 0 ? Math.min(1, Math.max(0.008, total / grandTotalTokens)) : 0;
       patchText(refs.pctBadge, `${share.toFixed(1)}%`);
-      patchText(refs.totalTokEl, showTokensInHeader ? formatTokensPrecise(total) : '');
-      patchAttr(refs.totalTokEl, 'hidden', !showTokensInHeader);
+      patchText(refs.totalTokEl, formatTokensPrecise(total));
       const costVal = Number(item.costUsd || 0);
       const callsCount = Number(item.calls || 0);
       const isAllUnpriced =
@@ -496,6 +699,7 @@ export const ConsumptionView = defineComponent({
         cacheReadTokens: Number(item.cacheReadTokens || 0),
         responseTokens: responseTok,
         thinkingTokens: thinkingTok,
+        scaleRatio,
       });
 
       patchText(refs.inVal, formatTokensPrecise(item.inputTokens || 0));
@@ -503,6 +707,148 @@ export const ConsumptionView = defineComponent({
       patchText(refs.outVal, formatTokensPrecise(responseTok));
       patchText(refs.thinkVal, formatTokensPrecise(thinkingTok));
       patchText(refs.callsVal, String(Number(item.calls || 0)));
+    }
+
+    function createSourceModelSegment() {
+      const segEl = h('div', { className: 'progress-seg cons-model-seg' });
+      return { el: segEl, refs: { segEl } };
+    }
+
+    /**
+     * 创建客户端来源单行 DOM 结构（保留长尾合并分段配色进度条与右侧总调用数，悬停进度条弹出各模型明细浮层）。
+     */
+    function createSourceBreakdownRow() {
+      const nameTextEl = h('span', { className: 'cons-row-title-text' });
+      const nameEl = h('strong', { className: 'cons-row-title' }, [nameTextEl]);
+      const pctBadge = h('span', { className: 'cons-share-pill text-mono', text: '0%' });
+      const totalTokEl = h('span', { className: 'cons-row-tok text-mono' });
+      const costEl = h('strong', { className: 'cons-row-cost text-mono' });
+      const trackEl = h('div', { className: 'progress-track cons-seg-bar cons-source-model-bar' });
+      const rowState = { hoverPayload: null };
+      const barHitEl = h(
+        'div',
+        {
+          className: 'cons-source-bar-hit',
+          onMouseEnter: (e) => {
+            if (rowState.hoverPayload) {
+              showBreakdownPopover(barHitEl, rowState.hoverPayload, e?.clientX ?? null);
+            }
+          },
+          onMouseMove: (e) => {
+            if (rowState.hoverPayload && activeHoverTargetEl === barHitEl) {
+              positionBreakdownPopover(barHitEl, e?.clientX ?? null);
+            }
+          },
+          onMouseLeave: () => {
+            if (activeHoverTargetEl === barHitEl) hideBreakdownPopover();
+          },
+        },
+        [trackEl]
+      );
+      const callsLbl = h('span', { text: t('cons.footCalls') });
+      const callsVal = h('strong', { className: 'text-mono' });
+
+      const rowEl = h('div', { className: 'cons-item-row cons-source-row' }, [
+        h('div', { className: 'panel-header' }, [
+          nameEl,
+          h('span', { className: 'cons-row-metrics' }, [
+            pctBadge,
+            totalTokEl,
+            costEl,
+          ]),
+        ]),
+        barHitEl,
+        h('div', { className: 'cons-item-foot cons-source-foot' }, [
+          h('span', { className: 'legend-left cons-calls-stat' }, [
+            callsLbl,
+            callsVal,
+          ]),
+        ]),
+      ]);
+
+      return {
+        el: rowEl,
+        refs: {
+          nameEl,
+          nameTextEl,
+          pctBadge,
+          totalTokEl,
+          costEl,
+          barHitEl,
+          trackEl,
+          callsLbl,
+          callsVal,
+          rowState,
+        },
+      };
+    }
+
+    function updateSourceBreakdownRow(refs, item, grandTotalTokens, modelColorMap) {
+      patchText(refs.callsLbl, t('cons.footCalls'));
+      const displayLabel = item.label || item.name || '—';
+      patchText(refs.nameTextEl, displayLabel);
+      patchAttr(refs.nameEl, 'title', item.title || displayLabel);
+
+      const total = Number(item.totalTokens || 0);
+      const share = grandTotalTokens > 0 ? +((total / grandTotalTokens) * 100).toFixed(1) : 0;
+      const scaleRatio =
+        grandTotalTokens > 0 && total > 0 ? Math.min(1, Math.max(0.01, total / grandTotalTokens)) : 0;
+      patchText(refs.pctBadge, `${share.toFixed(1)}%`);
+      patchText(refs.totalTokEl, formatTokensPrecise(total));
+
+      const costVal = Number(item.costUsd || 0);
+      const callsCount = Number(item.calls || 0);
+      const isAllUnpriced =
+        callsCount > 0 && Number(item.unpricedCalls || 0) >= callsCount && !(costVal > 0);
+      const costText = formatUsd(isAllUnpriced ? null : costVal, {
+        precise: costVal > 0 && costVal < 0.1,
+      });
+      patchText(refs.costEl, costText);
+      patchText(refs.callsVal, String(callsCount));
+
+      const sourceModels = Array.isArray(item.mergedModels) ? item.mergedModels : [];
+      const partitioned = partitionModelSegments(sourceModels, modelColorMap, {
+        maxMain: 5,
+        minSharePct: 1.5,
+      });
+
+      const barItems =
+        partitioned.length > 0
+          ? partitioned.map((seg) => ({
+              key: seg.key,
+              segPct: scaleRatio > 0 ? seg.pct * scaleRatio : 0,
+              color: seg.color,
+            }))
+          : total > 0
+            ? [
+                {
+                  key: '__source_fallback__',
+                  segPct: scaleRatio * 100,
+                  color: 'var(--accent-primary)',
+                },
+              ]
+            : [];
+
+      patchKeyedList(refs.trackEl, barItems, {
+        keyFn: (seg) => seg.key,
+        sigFn: (seg) => `${seg.key}:${seg.segPct.toFixed(2)}:${seg.color}`,
+        createRow: createSourceModelSegment,
+        updateRow: (segRefs, seg) => {
+          patchStyleVar(segRefs.segEl, '--seg-w', `${seg.segPct.toFixed(2)}%`);
+          patchStyleVar(segRefs.segEl, '--seg-color', seg.color);
+        },
+      });
+
+      refs.rowState.hoverPayload =
+        total > 0 || callsCount > 0
+          ? {
+              title: displayLabel,
+              calls: callsCount,
+              totalTokens: total,
+              costText,
+              segments: partitioned,
+            }
+          : null;
     }
 
     let latestSlice = null;
@@ -613,28 +959,7 @@ export const ConsumptionView = defineComponent({
         thinkingTokens,
       });
 
-      // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与粒度提示
-      const rangeBadgeText = isEnglishLocale()
-        ? getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
-          t('cons.allTime')
-        : preset?.label || rangeInfo.label || t('cons.allTime');
-      patchText(trendRangeBadge, rangeBadgeText);
-      const trendSeries = cons.trendSeries || [];
-      const isHourlyTrend =
-        trendSeries[0]?.granularity === 'hour' ||
-        (trendSeries[0]?.label || '').includes(':');
-      const isHeatmapTrend = !isHourlyTrend && trendSeries.length > HEATMAP_DAYS_THRESHOLD;
-      patchText(
-        trendGranularityHint,
-        isHeatmapTrend
-          ? t('cons.trendHeatmapHint', { days: trendSeries.length })
-          : isHourlyTrend
-            ? t('cons.trendPointsHintHourly', { points: trendSeries.length || 0 })
-            : t('cons.trendPointsHintDaily', { points: trendSeries.length || 0 })
-      );
-      trendChart.update(trendSeries);
-
-      // 3. 同步热门模型列表（按最终展示名称去重归并后按总 Token 数降序排列并执行键值增量对账）
+      // 2-5. 统一解析展示模式与全局确定性模型配色映射（确保趋势浮层、模型排行圆点、客户端来源条、月度堆叠柱四处完全同色）
       const localeSig = i18nStore.getState().locale;
       const displaySettings = {
         modelDisplayMode: normalizeModelDisplayMode(
@@ -644,38 +969,130 @@ export const ConsumptionView = defineComponent({
         showUpstreamModel: Boolean(slice.showUpstreamModel),
         orchestratorIdMode: slice.orchestratorIdMode,
       };
+      const mergeAndSortBucketModels = (rawList) =>
+        mergeModelsByDisplayName(rawList || [], displaySettings, {
+          preferLabelInShort: true,
+        })
+          .filter((m) => Number(m.totalTokens || 0) > 0 || Number(m.calls || 0) > 0)
+          .sort(
+            (a, b) =>
+              (b.totalTokens || 0) - (a.totalTokens || 0) || (b.calls || 0) - (a.calls || 0)
+          );
+
       const models = mergeModelsByDisplayName(slice.modelBreakdown || [], displaySettings, {
         preferLabelInShort: true,
       }).sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0));
       const modelsTotalTok = models.reduce((s, m) => s + Number(m.totalTokens || 0), 0);
 
+      const rawSources = cons.sourcesBreakdown || [];
+      const sourcesTotalTok = rawSources.reduce((s, x) => s + Number(x.totalTokens || 0), 0);
+      const allSourceMergedModels = [];
+      const sourcesWithModels = rawSources.map((s) => {
+        const mergedModels = mergeAndSortBucketModels(s.models);
+        for (const m of mergedModels) {
+          allSourceMergedModels.push(m);
+        }
+        return { ...s, mergedModels };
+      });
+
+      const monthlySeries = cons.monthlySeries || [];
+      const allMonthMergedModels = [];
+      const monthsMergedModels = Array.from({ length: 12 }, (_, idx) => {
+        const merged = mergeAndSortBucketModels(monthlySeries[idx]?.models);
+        for (const m of merged) {
+          allMonthMergedModels.push(m);
+        }
+        return merged;
+      });
+
+      const rawTrendSeries = cons.trendSeries || [];
+      const allTrendMergedModels = [];
+      const trendMergedByIdx = rawTrendSeries.map((slot) => {
+        if (!Array.isArray(slot?.models) || slot.models.length === 0) return null;
+        const merged = mergeAndSortBucketModels(slot.models);
+        for (const m of merged) {
+          allTrendMergedModels.push(m);
+        }
+        return merged;
+      });
+
+      const modelColorMap = buildDeterministicModelColorMap([
+        ...models,
+        ...allSourceMergedModels,
+        ...allMonthMergedModels,
+        ...allTrendMergedModels,
+      ]);
+
+      // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与悬停分模型浮层
+      const rangeBadgeText = isEnglishLocale()
+        ? getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
+          t('cons.allTime')
+        : preset?.label || rangeInfo.label || t('cons.allTime');
+      patchText(trendRangeBadge, rangeBadgeText);
+      const isHourlyTrend =
+        rawTrendSeries[0]?.granularity === 'hour' ||
+        (rawTrendSeries[0]?.label || '').includes(':');
+      const isHeatmapTrend = !isHourlyTrend && rawTrendSeries.length > HEATMAP_DAYS_THRESHOLD;
+      patchText(
+        trendGranularityHint,
+        isHeatmapTrend
+          ? t('cons.trendHeatmapHint', { days: rawTrendSeries.length })
+          : isHourlyTrend
+            ? t('cons.trendPointsHintHourly', { points: rawTrendSeries.length || 0 })
+            : t('cons.trendPointsHintDaily', { points: rawTrendSeries.length || 0 })
+      );
+      const enrichedTrendSeries = rawTrendSeries.map((slot, idx) => {
+        const mergedSlotModels = trendMergedByIdx[idx];
+        if (!mergedSlotModels || mergedSlotModels.length === 0) return slot;
+        return {
+          ...slot,
+          modelSegments: partitionModelSegments(mergedSlotModels, modelColorMap, {
+            maxMain: 5,
+            minSharePct: 1.5,
+          }),
+        };
+      });
+      trendChart.update(enrichedTrendSeries);
+
+      // 3. 同步热门模型列表（名称后带专属颜色圆点 + 4 段条按总占比缩放长度）
       patchKeyedList(modelsListEl, models, {
         keyFn: (m) => m.displayText || m.label || m.shortName,
-        sigFn: (m) =>
-          `${localeSig}:${m.displayText}:${m.displayTitle}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`,
+        sigFn: (m) => {
+          const seed = getCanonicalModelColorSeed(m);
+          const color = modelColorMap.get(seed) || resolveDeterministicModelColor(seed);
+          return `${localeSig}:${m.displayText}:${m.displayTitle}:${color}:${m.totalTokens}:${m.inputTokens}:${m.cacheReadTokens}:${m.responseTokens}:${m.thinkingTokens}:${m.costUsd}:${m.unpricedCalls}:${m.calls}:${modelsTotalTok}`;
+        },
         createRow: createBreakdownItemRow,
-        updateRow: (refs, m) =>
+        updateRow: (refs, m) => {
+          const seed = getCanonicalModelColorSeed(m);
+          const color = modelColorMap.get(seed) || resolveDeterministicModelColor(seed);
           updateBreakdownItemRow(
             refs,
             { ...m, label: m.displayText, title: m.displayTitle },
             modelsTotalTok,
-            true
-          ),
+            color
+          );
+        },
       });
 
-      // 4. 同步数据来源列表
-      const sources = cons.sourcesBreakdown || [];
-      const sourcesTotalTok = sources.reduce((s, x) => s + Number(x.totalTokens || 0), 0);
-      patchKeyedList(sourcesListEl, sources, {
+      // 4. 同步客户端来源列表（长尾合并分段配色 + 右侧总调用数 + 悬停进度条弹出明细浮层）
+      patchKeyedList(sourcesListEl, sourcesWithModels, {
         keyFn: (s) => s.name,
-        sigFn: (s) => `${localeSig}:${s.name}:${s.totalTokens}:${s.costUsd}:${s.unpricedCalls}:${s.calls}:${sourcesTotalTok}`,
-        createRow: createBreakdownItemRow,
-        updateRow: (refs, s) => updateBreakdownItemRow(refs, s, sourcesTotalTok, true),
+        sigFn: (s) => {
+          const modelsSig = s.mergedModels
+            .map((m) => {
+              const seed = getCanonicalModelColorSeed(m);
+              return `${m.displayText}:${m.totalTokens}:${m.calls}:${modelColorMap.get(seed) || ''}`;
+            })
+            .join('|');
+          return `${localeSig}:${s.name}:${s.totalTokens}:${s.costUsd}:${s.unpricedCalls}:${s.calls}:${sourcesTotalTok}:${modelsSig}`;
+        },
+        createRow: createSourceBreakdownRow,
+        updateRow: (refs, s) => updateSourceBreakdownRow(refs, s, sourcesTotalTok, modelColorMap),
       });
 
-      // 5. 同步 12 个月垂直堆叠柱状图（相对于年度峰值月缩放柱高，最低保留 8% 可视高度）
+      // 5. 同步 12 个月垂直堆叠柱状图（按模型配色堆叠 + 长尾合并 + 悬停弹出明细浮层）
       patchText(monthlyYearBadge, String(monthlyYear));
-      const monthlySeries = cons.monthlySeries || [];
       const maxMonthTokens = Math.max(
         1,
         ...monthlySeries.map((m) => Number(m.totalTokens || 0))
@@ -683,10 +1100,12 @@ export const ConsumptionView = defineComponent({
 
       for (let i = 0; i < 12; i++) {
         const col = monthlyCols[i];
-        const m = monthlySeries[i] || { totalTokens: 0, costUsd: 0 };
+        const m = monthlySeries[i] || { totalTokens: 0, costUsd: 0, calls: 0 };
         const mTot = Number(m.totalTokens || 0);
+        const mCalls = Number(m.calls || 0);
         const hasData = mTot > 0;
 
+        patchClasses(col.el, { 'is-interactive': hasData || mCalls > 0 });
         patchClasses(col.monthLabel, { 'is-current': i === currentMonthIdx });
         patchAttr(col.stackWrap, 'hidden', !hasData);
         patchAttr(col.zeroDot, 'hidden', hasData);
@@ -694,27 +1113,61 @@ export const ConsumptionView = defineComponent({
         if (!hasData) {
           patchText(col.costText, '');
           patchText(col.tokText, '');
+          col.colState.hoverPayload = null;
+          patchKeyedList(col.stackWrap, [], {
+            keyFn: (x) => x.key,
+            sigFn: (x) => x.key,
+            createRow: createMonthModelSegment,
+            updateRow: () => {},
+          });
         } else {
           const cVal = Number(m.costUsd || 0);
+          const isMonthUnpriced =
+            mCalls > 0 && Number(m.unpricedCalls || 0) >= mCalls && !(cVal > 0);
           patchText(
             col.costText,
-            cVal >= 10 ? `$${Math.round(cVal)}` : `$${cVal.toFixed(2)}`
+            isMonthUnpriced ? '—' : cVal >= 10 ? `$${Math.round(cVal)}` : `$${cVal.toFixed(2)}`
           );
           patchText(col.tokText, formatTokensPrecise(mTot));
 
           const totalHeightPct = Math.max(8, Math.min(100, (mTot / maxMonthTokens) * 100));
           patchStyleVar(col.stackWrap, '--bar-h', `${totalHeightPct.toFixed(1)}%`);
 
-          const inPctM = (Number(m.inputTokens || 0) / mTot) * 100;
-          const cachePctM = (Number(m.cacheReadTokens || 0) / mTot) * 100;
-          const outPctM = (Number(m.responseTokens || 0) / mTot) * 100;
-          const thinkPctM = (Number(m.thinkingTokens || 0) / mTot) * 100;
+          const monthModels = monthsMergedModels[i] || [];
+          const barPartitioned = partitionModelSegments(monthModels, modelColorMap, {
+            maxMain: 5,
+            minSharePct: 1.5,
+          });
+          // 垂直柱状图底端放主力模型、顶端叠放小占比及「其他」，视觉重心稳定
+          const verticalSegments =
+            barPartitioned.length > 0
+              ? [...barPartitioned].reverse()
+              : [{ key: '__month_fallback__', pct: 100, color: 'var(--accent-primary)' }];
 
-          patchStyleVar(col.barIn, '--seg-h', `${inPctM.toFixed(1)}%`);
-          patchStyleVar(col.barCache, '--seg-h', `${cachePctM.toFixed(1)}%`);
-          patchStyleVar(col.barOut, '--seg-h', `${outPctM.toFixed(1)}%`);
-          patchStyleVar(col.barThink, '--seg-h', `${thinkPctM.toFixed(1)}%`);
+          patchKeyedList(col.stackWrap, verticalSegments, {
+            keyFn: (seg) => seg.key,
+            sigFn: (seg) => `${seg.key}:${seg.pct.toFixed(2)}:${seg.color}`,
+            createRow: createMonthModelSegment,
+            updateRow: (segRefs, seg) => {
+              patchStyleVar(segRefs.segEl, '--seg-h', `${seg.pct.toFixed(2)}%`);
+              patchStyleVar(segRefs.segEl, '--seg-color', seg.color);
+            },
+          });
+
+          col.colState.hoverPayload = {
+            title: t('cons.monthFullLabel', { year: monthlyYear, m: i + 1 }),
+            calls: mCalls,
+            totalTokens: mTot,
+            costText: formatUsd(isMonthUnpriced ? null : cVal, {
+              precise: cVal > 0 && cVal < 0.1,
+            }),
+            segments: barPartitioned,
+          };
         }
+      }
+
+      if (activeHoverTargetEl && activeHoverTargetEl.isConnected === false) {
+        hideBreakdownPopover();
       }
 
       viewScrollbar.refresh();
@@ -739,6 +1192,7 @@ export const ConsumptionView = defineComponent({
       (slice) => {
         latestSlice = slice;
         if (getVisibleMonitorView() !== 'consumption') {
+          hideBreakdownPopover();
           isDirty = true;
           return;
         }
@@ -750,7 +1204,11 @@ export const ConsumptionView = defineComponent({
     const unsubView = uiStore.subscribe(
       getVisibleMonitorView,
       (activeView) => {
-        if (activeView === 'consumption' && isDirty) {
+        if (activeView !== 'consumption') {
+          hideBreakdownPopover();
+          return;
+        }
+        if (isDirty) {
           isDirty = false;
           if (latestSlice) {
             renderConsumptionData(latestSlice);
@@ -776,14 +1234,12 @@ export const ConsumptionView = defineComponent({
       patchText(trendTitleSpan, t('cons.trendTitle'));
       patchText(modelsTitleSpan, t('cons.topModels'));
       patchText(sourcesTitleSpan, t('cons.clientSources'));
+      patchText(sourcesHoverHint, t('cons.hoverModelsHint'));
       patchText(monthlyTitleSpan, t('cons.monthlyTitle'));
+      patchText(monthlyHoverHint, t('cons.hoverModelsHint'));
       for (let i = 0; i < 12; i++) {
         patchText(monthlyCols[i].monthLabel, t('cons.monthLabel', { m: i + 1 }));
       }
-      patchText(legInputSpan, t('cons.legInput'));
-      patchText(legCacheSpan, t('cons.legCache'));
-      patchText(legOutputSpan, t('cons.legOutput'));
-      patchText(legThinkingSpan, t('cons.legThinking'));
     }
 
     const unsubI18n = i18nStore.subscribe(
@@ -800,6 +1256,7 @@ export const ConsumptionView = defineComponent({
     );
 
     onCleanup(() => {
+      hideBreakdownPopover();
       unsub();
       unsubView();
       unsubI18n();
@@ -811,8 +1268,8 @@ export const ConsumptionView = defineComponent({
     });
 
     return {
-      el: viewScrollbar.el,
-      refs: { timeFilterSwitch, startPicker, endPicker, viewScrollbar },
+      el: rootEl,
+      refs: { timeFilterSwitch, startPicker, endPicker, viewScrollbar, breakdownPopoverEl },
     };
   },
 });
