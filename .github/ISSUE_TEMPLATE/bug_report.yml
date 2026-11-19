@@ -1,0 +1,43 @@
+name: Bug 反馈 / Bug Report
+description: 反馈统计异常、界面显示、窗口挂载或运行报错问题 / Report a bug, UI issue, mount failure, or crash
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 运行环境 / Environment
+      options:
+        - Windows - Antigravity Desktop
+        - Windows - IDE / CLI
+        - macOS - Antigravity Desktop
+        - macOS - IDE / CLI
+        - Linux - Antigravity Desktop
+        - Linux - IDE / CLI
+        - SSH 远程 / Remote SSH or Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 插件及客户端版本 / Versions
+      placeholder: "例如 / e.g. usage-monitor v1.5.2, Antigravity 2.33.0, Node.js 22.x"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 现象描述及复现步骤 / Description & Steps to Reproduce
+      placeholder: |
+        简述发生了什么、预期行为是什么，以及如何复现。
+        Describe what happened, what you expected, and steps to reproduce.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 报错日志或截图（可选）/ Logs or Screenshots (Optional)
+      description: 截图可直接拖入文本框；上传日志前请移除个人 Token 或隐私路径。 / Drag & drop screenshots here; please redact personal tokens or sensitive paths.

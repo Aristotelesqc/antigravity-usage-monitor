@@ -1,0 +1,30 @@
+name: 功能建议 / Feature Request
+description: 提出新功能想法、交互体验优化或新模型适配需求 / Suggest a new feature, UX improvement, or model support
+title: "[Feat]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 需求背景或痛点 / Problem or Use Case
+      placeholder: |
+        希望解决什么使用场景下的问题？
+        What problem or workflow does this solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望方案或效果 / Proposed Solution
+      placeholder: |
+        简述你期望的交互方式、展示内容或能力。
+        Describe the behavior, UI, or capability you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充截图或参考（可选）/ Screenshots or References (Optional)
+      description: 可直接拖入草图、截图或相关参考链接。 / Drag & drop mockups, screenshots, or reference links.
