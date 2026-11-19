@@ -327,7 +327,7 @@ export function computePublicationFit(
 
     if (sw <= 1e-12) {
       const fallbackVal = ols.intercept + ols.slope * x0;
-      return { rawFit: fallbackVal, leverageNormSq: 1 / n, diagHat: 1 / n };
+      return { rawFit: fallbackVal, leverageNormSq: 1 / n, diagHat: 1 / n, localHatDiag: 1 / n };
     }
 
     const mx = swx / sw;
@@ -343,6 +343,7 @@ export function computePublicationFit(
     const useSlope = sxxW > 1e-12;
     const inverseWeightSum = 1 / sw;
     const slopeScale = useSlope ? dx0 / sxxW : 0;
+    const localHatDiag = inverseWeightSum + (useSlope ? (dx0 * dx0) / sxxW : 0);
     let rawFit = 0;
     let leverageNormSq = 0;
     let diagHat = 0;
@@ -356,21 +357,53 @@ export function computePublicationFit(
       if (j === diagIdx) diagHat = lj;
     }
 
-    return { rawFit, leverageNormSq, diagHat };
+    return { rawFit, leverageNormSq, diagHat, localHatDiag };
   }
 
   const rawSampleFits = new Float64Array(n);
   const sampleLevSq = new Float64Array(n);
   let sse = 0;
   let traceL = 0;
+  let precomputedGridEval = null;
 
-  for (let i = 0; i < n; i++) {
-    const res = evalLoessPoint(xs[i], i);
-    rawSampleFits[i] = res.rawFit;
-    sampleLevSq[i] = res.leverageNormSq;
-    traceL += res.diagHat;
-    const diff = ys[i] - res.rawFit;
-    sse += diff * diff;
+  // 大样本（n > 200 且 x 单调有序）采用与 R `stats::loess(surface = "interpolate")` 一致的网格插值加速：
+  // 仅在 M 个均匀网格顶点做精确 LOESS（O(M·N)），再线性插值样本拟合值与杠杆度，避免 O(N²) 阻塞主线程。
+  if (n > 200 && sortedXs && M >= 2) {
+    const gridRawFit = new Float64Array(M);
+    const gridLevSq = new Float64Array(M);
+    const gridHatDiag = new Float64Array(M);
+    for (let k = 0; k < M; k++) {
+      const res = evalLoessPoint(gridXs[k], -1);
+      gridRawFit[k] = res.rawFit;
+      gridLevSq[k] = res.leverageNormSq;
+      gridHatDiag[k] = res.localHatDiag;
+    }
+    precomputedGridEval = { gridRawFit, gridLevSq };
+
+    const invSpan = (M - 1) / xSpan;
+    const maxK0 = M - 2;
+    for (let i = 0; i < n; i++) {
+      const u = (xs[i] - xMin) * invSpan;
+      const k0 = u <= 0 ? 0 : u >= maxK0 ? maxK0 : Math.floor(u);
+      const frac = Math.max(0, Math.min(1, u - k0));
+      const rf = gridRawFit[k0] + frac * (gridRawFit[k0 + 1] - gridRawFit[k0]);
+      const ls = Math.max(0, gridLevSq[k0] + frac * (gridLevSq[k0 + 1] - gridLevSq[k0]));
+      const hd = gridHatDiag[k0] + frac * (gridHatDiag[k0 + 1] - gridHatDiag[k0]);
+      rawSampleFits[i] = rf;
+      sampleLevSq[i] = ls;
+      traceL += hd;
+      const diff = ys[i] - rf;
+      sse += diff * diff;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      const res = evalLoessPoint(xs[i], i);
+      rawSampleFits[i] = res.rawFit;
+      sampleLevSq[i] = res.leverageNormSq;
+      traceL += res.diagHat;
+      const diff = ys[i] - res.rawFit;
+      sse += diff * diff;
+    }
   }
 
   const dfRes = Math.max(1, n - traceL);
@@ -394,16 +427,27 @@ export function computePublicationFit(
     clampedSse += d * d;
   }
 
-  const grid = gridXs.map((gx) => {
-    const res = evalLoessPoint(gx, -1);
-    const half = tCrit * sigmaHat * Math.sqrt(res.leverageNormSq);
-    return {
-      x: gx,
-      fit: clampValue(res.rawFit, minVal, maxVal),
-      ciLow: clampValue(res.rawFit - half, minVal, maxVal),
-      ciHigh: clampValue(res.rawFit + half, minVal, maxVal),
-    };
-  });
+  const grid = precomputedGridEval
+    ? gridXs.map((gx, k) => {
+        const rf = precomputedGridEval.gridRawFit[k];
+        const half = tCrit * sigmaHat * Math.sqrt(Math.max(0, precomputedGridEval.gridLevSq[k]));
+        return {
+          x: gx,
+          fit: clampValue(rf, minVal, maxVal),
+          ciLow: clampValue(rf - half, minVal, maxVal),
+          ciHigh: clampValue(rf + half, minVal, maxVal),
+        };
+      })
+    : gridXs.map((gx) => {
+        const res = evalLoessPoint(gx, -1);
+        const half = tCrit * sigmaHat * Math.sqrt(res.leverageNormSq);
+        return {
+          x: gx,
+          fit: clampValue(res.rawFit, minVal, maxVal),
+          ciLow: clampValue(res.rawFit - half, minVal, maxVal),
+          ciHigh: clampValue(res.rawFit + half, minVal, maxVal),
+        };
+      });
 
   const r2Loess = syy > 1e-12 ? clampValue(1 - clampedSse / syy, 0, 1) : 1;
 
@@ -1659,14 +1703,19 @@ export function createModelFitChart() {
     const rect = svg.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
     const relX = ((e.clientX - rect.left) / rect.width) * viewW;
-    let bestIdx = 0;
-    let bestDist = Math.abs(currentSamples[0].x - relX);
-    for (let i = 1; i < currentSamples.length; i++) {
-      const d = Math.abs(currentSamples[i].x - relX);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
+    let lo = 0;
+    let hi = currentSamples.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (currentSamples[mid].x < relX) lo = mid + 1;
+      else hi = mid;
+    }
+    let bestIdx = lo;
+    if (
+      lo > 0 &&
+      Math.abs(currentSamples[lo - 1].x - relX) <= Math.abs(currentSamples[lo].x - relX)
+    ) {
+      bestIdx = lo - 1;
     }
     showHoverAt(bestIdx);
   });
@@ -2080,16 +2129,28 @@ export function createModelFitChart() {
 
         const dotRadius =
           combinedSamples.length > 80 ? '1.8' : combinedSamples.length > 36 ? '2.1' : '2.4';
+        const dedupOverdraw = combinedSamples.length > 200;
+        const scatterTarget =
+          typeof document.createDocumentFragment === 'function'
+            ? document.createDocumentFragment()
+            : scatterGroup;
 
         for (const s of seriesList) {
+          const binCounts = dedupOverdraw ? new Map() : null;
           for (const sp of s.samples) {
+            if (binCounts) {
+              const binKey = (Math.round(sp.x * 2) << 11) ^ Math.round(sp.rawY * 2);
+              const prevCnt = binCounts.get(binKey) || 0;
+              if (prevCnt >= 6) continue;
+              binCounts.set(binKey, prevCnt + 1);
+            }
             const dot = document.createElementNS(SVG_NS, 'circle');
             dot.setAttribute('cx', sp.x.toFixed(1));
             dot.setAttribute('cy', sp.rawY.toFixed(1));
             dot.setAttribute('r', dotRadius);
             dot.setAttribute('class', 'sstep-scatter-dot is-multi');
             patchStyleVar(dot, '--sstep-fit-accent', s.colorVar);
-            scatterGroup.appendChild(dot);
+            scatterTarget.appendChild(dot);
           }
 
           if (s.samples.length === 1) {
@@ -2138,6 +2199,9 @@ export function createModelFitChart() {
             patchStyleVar(curveEl, '--sstep-fit-accent', s.colorVar);
             multiCurveGroup.appendChild(curveEl);
           }
+        }
+        if (scatterTarget !== scatterGroup) {
+          scatterGroup.appendChild(scatterTarget);
         }
 
         while (multiLegendEl.firstChild) multiLegendEl.removeChild(multiLegendEl.firstChild);
@@ -2271,13 +2335,27 @@ export function createModelFitChart() {
       // 2. 绘制半透明冷蓝灰实心观测散点（自然呈现局部密度，不抢夺拟合曲线焦点）
       while (scatterGroup.firstChild) scatterGroup.removeChild(scatterGroup.firstChild);
       const dotRadius = samples.length > 80 ? '1.8' : samples.length > 36 ? '2.1' : '2.4';
+      const binCounts = samples.length > 200 ? new Map() : null;
+      const scatterTarget =
+        typeof document.createDocumentFragment === 'function'
+          ? document.createDocumentFragment()
+          : scatterGroup;
       for (const s of samples) {
+        if (binCounts) {
+          const binKey = (Math.round(s.x * 2) << 11) ^ Math.round(s.rawY * 2);
+          const prevCnt = binCounts.get(binKey) || 0;
+          if (prevCnt >= 6) continue;
+          binCounts.set(binKey, prevCnt + 1);
+        }
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('cx', s.x.toFixed(1));
         dot.setAttribute('cy', s.rawY.toFixed(1));
         dot.setAttribute('r', dotRadius);
         dot.setAttribute('class', 'sstep-scatter-dot');
-        scatterGroup.appendChild(dot);
+        scatterTarget.appendChild(dot);
+      }
+      if (scatterTarget !== scatterGroup) {
+        scatterGroup.appendChild(scatterTarget);
       }
 
       // 3. 绘制 95% CI 置信带闭合多边形与回归拟合曲线（绝不向底部 X 轴填充面积！）

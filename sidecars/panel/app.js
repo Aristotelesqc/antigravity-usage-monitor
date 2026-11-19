@@ -6591,6 +6591,7 @@ const CustomScrollbar = defineComponent({
     let isDragging = false;
     let dragStartY = 0;
     let dragStartScrollTop = 0;
+    let scrollRafId = 0;
 
     function syncThumb() {
       const scrollHeight = Number(contentEl.scrollHeight || 0);
@@ -6617,7 +6618,15 @@ const CustomScrollbar = defineComponent({
     }
 
     function onContentScroll() {
-      syncThumb();
+      if (isDragging || typeof requestAnimationFrame !== 'function') {
+        syncThumb();
+        return;
+      }
+      if (scrollRafId) return;
+      scrollRafId = requestAnimationFrame(() => {
+        scrollRafId = 0;
+        syncThumb();
+      });
     }
 
     function onDocMouseMove(e) {
@@ -6672,7 +6681,7 @@ const CustomScrollbar = defineComponent({
       syncThumb();
     });
 
-    contentEl.addEventListener('scroll', onContentScroll);
+    contentEl.addEventListener('scroll', onContentScroll, { passive: true });
     hostEl.addEventListener('mouseenter', syncThumb);
 
     let resizeObserver = null;
@@ -6686,6 +6695,10 @@ const CustomScrollbar = defineComponent({
 
     onCleanup(() => {
       onDocMouseUp();
+      if (scrollRafId && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(scrollRafId);
+        scrollRafId = 0;
+      }
       contentEl.removeEventListener('scroll', onContentScroll);
       hostEl.removeEventListener('mouseenter', syncThumb);
       if (resizeObserver) {
@@ -8500,7 +8513,7 @@ function computePublicationFit(
 
     if (sw <= 1e-12) {
       const fallbackVal = ols.intercept + ols.slope * x0;
-      return { rawFit: fallbackVal, leverageNormSq: 1 / n, diagHat: 1 / n };
+      return { rawFit: fallbackVal, leverageNormSq: 1 / n, diagHat: 1 / n, localHatDiag: 1 / n };
     }
 
     const mx = swx / sw;
@@ -8516,6 +8529,7 @@ function computePublicationFit(
     const useSlope = sxxW > 1e-12;
     const inverseWeightSum = 1 / sw;
     const slopeScale = useSlope ? dx0 / sxxW : 0;
+    const localHatDiag = inverseWeightSum + (useSlope ? (dx0 * dx0) / sxxW : 0);
     let rawFit = 0;
     let leverageNormSq = 0;
     let diagHat = 0;
@@ -8529,21 +8543,53 @@ function computePublicationFit(
       if (j === diagIdx) diagHat = lj;
     }
 
-    return { rawFit, leverageNormSq, diagHat };
+    return { rawFit, leverageNormSq, diagHat, localHatDiag };
   }
 
   const rawSampleFits = new Float64Array(n);
   const sampleLevSq = new Float64Array(n);
   let sse = 0;
   let traceL = 0;
+  let precomputedGridEval = null;
 
-  for (let i = 0; i < n; i++) {
-    const res = evalLoessPoint(xs[i], i);
-    rawSampleFits[i] = res.rawFit;
-    sampleLevSq[i] = res.leverageNormSq;
-    traceL += res.diagHat;
-    const diff = ys[i] - res.rawFit;
-    sse += diff * diff;
+  // 大样本（n > 200 且 x 单调有序）采用与 R `stats::loess(surface = "interpolate")` 一致的网格插值加速：
+  // 仅在 M 个均匀网格顶点做精确 LOESS（O(M·N)），再线性插值样本拟合值与杠杆度，避免 O(N²) 阻塞主线程。
+  if (n > 200 && sortedXs && M >= 2) {
+    const gridRawFit = new Float64Array(M);
+    const gridLevSq = new Float64Array(M);
+    const gridHatDiag = new Float64Array(M);
+    for (let k = 0; k < M; k++) {
+      const res = evalLoessPoint(gridXs[k], -1);
+      gridRawFit[k] = res.rawFit;
+      gridLevSq[k] = res.leverageNormSq;
+      gridHatDiag[k] = res.localHatDiag;
+    }
+    precomputedGridEval = { gridRawFit, gridLevSq };
+
+    const invSpan = (M - 1) / xSpan;
+    const maxK0 = M - 2;
+    for (let i = 0; i < n; i++) {
+      const u = (xs[i] - xMin) * invSpan;
+      const k0 = u <= 0 ? 0 : u >= maxK0 ? maxK0 : Math.floor(u);
+      const frac = Math.max(0, Math.min(1, u - k0));
+      const rf = gridRawFit[k0] + frac * (gridRawFit[k0 + 1] - gridRawFit[k0]);
+      const ls = Math.max(0, gridLevSq[k0] + frac * (gridLevSq[k0 + 1] - gridLevSq[k0]));
+      const hd = gridHatDiag[k0] + frac * (gridHatDiag[k0 + 1] - gridHatDiag[k0]);
+      rawSampleFits[i] = rf;
+      sampleLevSq[i] = ls;
+      traceL += hd;
+      const diff = ys[i] - rf;
+      sse += diff * diff;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      const res = evalLoessPoint(xs[i], i);
+      rawSampleFits[i] = res.rawFit;
+      sampleLevSq[i] = res.leverageNormSq;
+      traceL += res.diagHat;
+      const diff = ys[i] - res.rawFit;
+      sse += diff * diff;
+    }
   }
 
   const dfRes = Math.max(1, n - traceL);
@@ -8567,16 +8613,27 @@ function computePublicationFit(
     clampedSse += d * d;
   }
 
-  const grid = gridXs.map((gx) => {
-    const res = evalLoessPoint(gx, -1);
-    const half = tCrit * sigmaHat * Math.sqrt(res.leverageNormSq);
-    return {
-      x: gx,
-      fit: clampValue(res.rawFit, minVal, maxVal),
-      ciLow: clampValue(res.rawFit - half, minVal, maxVal),
-      ciHigh: clampValue(res.rawFit + half, minVal, maxVal),
-    };
-  });
+  const grid = precomputedGridEval
+    ? gridXs.map((gx, k) => {
+        const rf = precomputedGridEval.gridRawFit[k];
+        const half = tCrit * sigmaHat * Math.sqrt(Math.max(0, precomputedGridEval.gridLevSq[k]));
+        return {
+          x: gx,
+          fit: clampValue(rf, minVal, maxVal),
+          ciLow: clampValue(rf - half, minVal, maxVal),
+          ciHigh: clampValue(rf + half, minVal, maxVal),
+        };
+      })
+    : gridXs.map((gx) => {
+        const res = evalLoessPoint(gx, -1);
+        const half = tCrit * sigmaHat * Math.sqrt(res.leverageNormSq);
+        return {
+          x: gx,
+          fit: clampValue(res.rawFit, minVal, maxVal),
+          ciLow: clampValue(res.rawFit - half, minVal, maxVal),
+          ciHigh: clampValue(res.rawFit + half, minVal, maxVal),
+        };
+      });
 
   const r2Loess = syy > 1e-12 ? clampValue(1 - clampedSse / syy, 0, 1) : 1;
 
@@ -9832,14 +9889,19 @@ function createModelFitChart() {
     const rect = svg.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
     const relX = ((e.clientX - rect.left) / rect.width) * viewW;
-    let bestIdx = 0;
-    let bestDist = Math.abs(currentSamples[0].x - relX);
-    for (let i = 1; i < currentSamples.length; i++) {
-      const d = Math.abs(currentSamples[i].x - relX);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
+    let lo = 0;
+    let hi = currentSamples.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (currentSamples[mid].x < relX) lo = mid + 1;
+      else hi = mid;
+    }
+    let bestIdx = lo;
+    if (
+      lo > 0 &&
+      Math.abs(currentSamples[lo - 1].x - relX) <= Math.abs(currentSamples[lo].x - relX)
+    ) {
+      bestIdx = lo - 1;
     }
     showHoverAt(bestIdx);
   });
@@ -10253,16 +10315,28 @@ function createModelFitChart() {
 
         const dotRadius =
           combinedSamples.length > 80 ? '1.8' : combinedSamples.length > 36 ? '2.1' : '2.4';
+        const dedupOverdraw = combinedSamples.length > 200;
+        const scatterTarget =
+          typeof document.createDocumentFragment === 'function'
+            ? document.createDocumentFragment()
+            : scatterGroup;
 
         for (const s of seriesList) {
+          const binCounts = dedupOverdraw ? new Map() : null;
           for (const sp of s.samples) {
+            if (binCounts) {
+              const binKey = (Math.round(sp.x * 2) << 11) ^ Math.round(sp.rawY * 2);
+              const prevCnt = binCounts.get(binKey) || 0;
+              if (prevCnt >= 6) continue;
+              binCounts.set(binKey, prevCnt + 1);
+            }
             const dot = document.createElementNS(SVG_NS, 'circle');
             dot.setAttribute('cx', sp.x.toFixed(1));
             dot.setAttribute('cy', sp.rawY.toFixed(1));
             dot.setAttribute('r', dotRadius);
             dot.setAttribute('class', 'sstep-scatter-dot is-multi');
             patchStyleVar(dot, '--sstep-fit-accent', s.colorVar);
-            scatterGroup.appendChild(dot);
+            scatterTarget.appendChild(dot);
           }
 
           if (s.samples.length === 1) {
@@ -10311,6 +10385,9 @@ function createModelFitChart() {
             patchStyleVar(curveEl, '--sstep-fit-accent', s.colorVar);
             multiCurveGroup.appendChild(curveEl);
           }
+        }
+        if (scatterTarget !== scatterGroup) {
+          scatterGroup.appendChild(scatterTarget);
         }
 
         while (multiLegendEl.firstChild) multiLegendEl.removeChild(multiLegendEl.firstChild);
@@ -10444,13 +10521,27 @@ function createModelFitChart() {
       // 2. 绘制半透明冷蓝灰实心观测散点（自然呈现局部密度，不抢夺拟合曲线焦点）
       while (scatterGroup.firstChild) scatterGroup.removeChild(scatterGroup.firstChild);
       const dotRadius = samples.length > 80 ? '1.8' : samples.length > 36 ? '2.1' : '2.4';
+      const binCounts = samples.length > 200 ? new Map() : null;
+      const scatterTarget =
+        typeof document.createDocumentFragment === 'function'
+          ? document.createDocumentFragment()
+          : scatterGroup;
       for (const s of samples) {
+        if (binCounts) {
+          const binKey = (Math.round(s.x * 2) << 11) ^ Math.round(s.rawY * 2);
+          const prevCnt = binCounts.get(binKey) || 0;
+          if (prevCnt >= 6) continue;
+          binCounts.set(binKey, prevCnt + 1);
+        }
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('cx', s.x.toFixed(1));
         dot.setAttribute('cy', s.rawY.toFixed(1));
         dot.setAttribute('r', dotRadius);
         dot.setAttribute('class', 'sstep-scatter-dot');
-        scatterGroup.appendChild(dot);
+        scatterTarget.appendChild(dot);
+      }
+      if (scatterTarget !== scatterGroup) {
+        scatterGroup.appendChild(scatterTarget);
       }
 
       // 3. 绘制 95% CI 置信带闭合多边形与回归拟合曲线（绝不向底部 X 轴填充面积！）
@@ -14042,6 +14133,341 @@ function formatTurnPromptText(rawPrompt, { hasMedia = false, mediaOnly = false }
   return hasMedia ? `${text} ${t('steps.turnMediaSuffix')}` : text;
 }
 
+const VIRTUAL_ROW_THRESHOLD = 80;
+const VIRTUAL_OVERSCAN_ROWS = 16;
+const VIRTUAL_REFILL_MARGIN = 6;
+const MAX_ROW_POOL_SIZE = 96;
+const FALLBACK_VIEWPORT_H = 560;
+const BASE_SINGLE_ROW_H = 28;
+const BASE_REASON_ROW_H = 42;
+const SIZER_ROW_KEY = '__vsizer__';
+const SPACER_TOP_KEY = '__vspacer_top__';
+const SPACER_BOTTOM_KEY = '__vspacer_bottom__';
+
+function estTokenChars(val) {
+  const n = Math.max(0, Number(val || 0));
+  if (n >= 1_000_000) return n >= 10_000_000 ? 6 : 5;
+  if (n >= 100_000) return 6;
+  if (n >= 10_000) return 5;
+  if (n >= 1_000) return 4;
+  if (n >= 100) return 3;
+  if (n >= 10) return 2;
+  return 1;
+}
+
+function estCostChars(val) {
+  const n = Number(val);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  if (n >= 100) return 7;
+  if (n >= 10) return 6;
+  if (n >= 0.01) return 5;
+  return 7;
+}
+
+function estSegmentChars(seg, st) {
+  const inTok = Math.max(0, Number(st?.inputTokens || 0));
+  const cacheTok = Math.max(0, Number(st?.cacheReadTokens || 0));
+  const outTok = Math.max(0, Number(st?.outputTokens || 0));
+  const thinkTok = Math.max(0, Number(st?.thinkingTokens || 0));
+  const respTok =
+    st?.responseTokens != null
+      ? Math.max(0, Number(st.responseTokens))
+      : Math.max(0, outTok - thinkTok);
+  switch (seg) {
+    case 'context':
+      return estTokenChars(st?.contextTokens ?? inTok + cacheTok + outTok);
+    case 'in':
+      return estTokenChars(inTok);
+    case 'out':
+      return estTokenChars(outTok);
+    case 'cache':
+      return estTokenChars(cacheTok);
+    case 'think':
+      return estTokenChars(thinkTok);
+    case 'reply':
+      return estTokenChars(respTok);
+    case 'total':
+    default:
+      return estTokenChars(inTok + cacheTok + outTok);
+  }
+}
+
+function resolveBadgeTextForStep(st) {
+  return formatAgentBadgeText({
+    agentKind:
+      st?.agentKind ||
+      (!st?.isSubagent ? 'main' : st?.isSideQuestion ? 'side_question' : 'subagent'),
+    agentOrdinal:
+      st?.agentOrdinal || (st?.isSideQuestion ? st?.sideIndex || 0 : st?.agentIndex || 0),
+    isMain: !st?.isSubagent,
+    isSideQuestion: Boolean(st?.isSideQuestion),
+    sideIndex: st?.sideIndex || 0,
+    index: st?.agentIndex || 0,
+    badgeText: st?.agentBadge,
+  });
+}
+
+function buildColumnSizerSpec(tableSteps, colKeys, wantedSet, cellCtx) {
+  const firstStep = tableSteps[0] || {};
+  const colSteps = {};
+  const needStep = wantedSet.has('step');
+  const needTime = wantedSet.has('time');
+  const needModel = wantedSet.has('model');
+  const needTps = wantedSet.has('tps');
+  const needTtft = wantedSet.has('ttft');
+  const needDuration = wantedSet.has('duration');
+  const needTokensCombo = wantedSet.has('tokens_combo');
+  const needTokensIoCache = wantedSet.has('tokens_io_cache');
+  const needTokensCustom = wantedSet.has('tokens_custom');
+  const needInput = wantedSet.has('input_tokens');
+  const needCacheTok = wantedSet.has('cache_tokens');
+  const needOutput = wantedSet.has('output_tokens');
+  const needCachePct = wantedSet.has('cache');
+  const needCost = wantedSet.has('cost');
+  const customSegs = needTokensCustom
+    ? parseStepTokenComboSegments(cellCtx?.stepTokenComboFormat)
+    : null;
+
+  let bestStepNum = -1;
+  let bestStepObj = firstStep;
+  let bestTimeObj = null;
+  const modelCandidates = needModel ? new Map() : null;
+  let maxTpsVal = -1;
+  let maxTpsObj = null;
+  const reasonCandidates = needTps ? new Set() : null;
+  let maxTtftVal = -1;
+  let bestTtftObj = firstStep;
+  let maxDurVal = -1;
+  let bestDurObj = firstStep;
+  let bestComboScore = -1;
+  let bestComboObj = firstStep;
+  let bestIoCacheScore = -1;
+  let bestIoCacheObj = firstStep;
+  let bestCustomScore = -1;
+  let bestCustomObj = firstStep;
+  let maxInputVal = -1;
+  let bestInputObj = firstStep;
+  let maxCacheTokVal = -1;
+  let bestCacheTokObj = firstStep;
+  let maxOutputVal = -1;
+  let bestOutputObj = firstStep;
+  let bestCachePctScore = -1;
+  let bestCachePctObj = firstStep;
+  let bestCostScore = -1;
+  let bestCostObj = firstStep;
+
+  let bestBadgeText = '';
+  let bestBadgeClass = '';
+  const badgeCandidates = cellCtx?.showAgentBadge ? new Set() : null;
+
+  for (let i = 0; i < tableSteps.length; i++) {
+    const st = tableSteps[i];
+    if (!st || typeof st !== 'object') continue;
+
+    if (badgeCandidates) {
+      const bKey = `${st.agentKind || ''}|${st.isSubagent ? 1 : 0}|${st.isSideQuestion ? 1 : 0}|${st.agentOrdinal || 0}|${st.sideIndex || 0}|${st.agentIndex || 0}|${st.agentBadge || ''}`;
+      if (!badgeCandidates.has(bKey)) {
+        badgeCandidates.add(bKey);
+        const text = resolveBadgeTextForStep(st);
+        if (text.length > bestBadgeText.length) {
+          bestBadgeText = text;
+          bestBadgeClass = getAgentBadgeClass(st.agentIndex || 0, !st.isSubagent);
+        }
+      }
+    }
+
+    if (needStep) {
+      const idxNum = Number(st.stepIndex) || 0;
+      if (idxNum > bestStepNum) {
+        bestStepNum = idxNum;
+        bestStepObj = st;
+      }
+    }
+
+    if (needTime && !bestTimeObj && Number(st.createdAtMs || 0) > 0) {
+      bestTimeObj = st;
+    }
+
+    if (modelCandidates) {
+      const mKey = `${st.baseModelShort || st.modelShort || ''}|${st.baseModelLabel || st.modelLabel || ''}|${st.rawModel || ''}|${st.isCompactionStep ? 1 : 0}`;
+      if (!modelCandidates.has(mKey)) {
+        modelCandidates.set(mKey, st);
+      }
+    }
+
+    if (needTps) {
+      const tpsVal = Number(st.tokPerSec);
+      if (Number.isFinite(tpsVal) && tpsVal > maxTpsVal) {
+        maxTpsVal = tpsVal;
+        maxTpsObj = st;
+      }
+      if (st.selectedSpeedReason) {
+        reasonCandidates.add(st.selectedSpeedReason);
+      }
+    }
+
+    if (needTtft) {
+      const v = Number(st.ttftSec);
+      if (Number.isFinite(v) && v > maxTtftVal) {
+        maxTtftVal = v;
+        bestTtftObj = st;
+      }
+    }
+
+    if (needDuration) {
+      const v = Number(st.totalDurationSec ?? st.streamDurationSec);
+      if (Number.isFinite(v) && v > maxDurVal) {
+        maxDurVal = v;
+        bestDurObj = st;
+      }
+    }
+
+    if (needTokensCombo) {
+      const inTok = Math.max(0, Number(st.inputTokens || 0));
+      const cacheTok = Math.max(0, Number(st.cacheReadTokens || 0));
+      const outTok = Math.max(0, Number(st.outputTokens || 0));
+      const thinkTok = Math.max(0, Number(st.thinkingTokens || 0));
+      const respTok =
+        st.responseTokens != null
+          ? Math.max(0, Number(st.responseTokens))
+          : Math.max(0, outTok - thinkTok);
+      const ctxTok = Math.max(0, Number(st.contextTokens ?? inTok + cacheTok + outTok));
+      const score =
+        (estTokenChars(ctxTok) + estTokenChars(thinkTok) + estTokenChars(respTok)) * 1e9 +
+        ctxTok;
+      if (score > bestComboScore) {
+        bestComboScore = score;
+        bestComboObj = st;
+      }
+    }
+
+    if (needTokensIoCache) {
+      const inTok = Math.max(0, Number(st.inputTokens || 0));
+      const outTok = Math.max(0, Number(st.outputTokens || 0));
+      const cacheTok = Math.max(0, Number(st.cacheReadTokens || 0));
+      const score =
+        (estTokenChars(inTok) + estTokenChars(outTok) + estTokenChars(cacheTok)) * 1e9 +
+        cacheTok;
+      if (score > bestIoCacheScore) {
+        bestIoCacheScore = score;
+        bestIoCacheObj = st;
+      }
+    }
+
+    if (needTokensCustom && customSegs) {
+      let chars = 0;
+      for (let s = 0; s < customSegs.length; s++) {
+        chars += estSegmentChars(customSegs[s], st);
+      }
+      if (chars > bestCustomScore) {
+        bestCustomScore = chars;
+        bestCustomObj = st;
+      }
+    }
+
+    if (needInput) {
+      const v = Math.max(0, Number(st.inputTokens || 0));
+      const score = estTokenChars(v) * 1e9 + v;
+      if (score > maxInputVal) {
+        maxInputVal = score;
+        bestInputObj = st;
+      }
+    }
+
+    if (needCacheTok) {
+      const v = Math.max(0, Number(st.cacheReadTokens || 0));
+      const score = estTokenChars(v) * 1e9 + v;
+      if (score > maxCacheTokVal) {
+        maxCacheTokVal = score;
+        bestCacheTokObj = st;
+      }
+    }
+
+    if (needOutput) {
+      const v = Math.max(0, Number(st.outputTokens || 0));
+      const score = estTokenChars(v) * 1e9 + v;
+      if (score > maxOutputVal) {
+        maxOutputVal = score;
+        bestOutputObj = st;
+      }
+    }
+
+    if (needCachePct) {
+      const pct = Number(st.cacheHitPct ?? 0);
+      const hasDec = pct > 0 && pct < 100 && Math.abs(pct - Math.round(pct)) > 1e-6;
+      const score = pct >= 100 ? 4 : hasDec ? (pct >= 10 ? 5 : 4) : pct >= 10 ? 3 : 2;
+      if (score > bestCachePctScore) {
+        bestCachePctScore = score;
+        bestCachePctObj = st;
+      }
+    }
+
+    if (needCost) {
+      const c = Number(st.costUsd);
+      const score = estCostChars(c) * 1e6 + (Number.isFinite(c) && c > 0 ? c : 0);
+      if (score > bestCostScore) {
+        bestCostScore = score;
+        bestCostObj = st;
+      }
+    }
+  }
+
+  if (needStep) colSteps.step = bestStepObj;
+  if (needTime) colSteps.time = bestTimeObj || firstStep;
+  if (needModel && modelCandidates) {
+    let bestModelLen = -1;
+    let bestModelObj = firstStep;
+    for (const cand of modelCandidates.values()) {
+      const disp = resolveModelDisplayInfo(cand, cellCtx?.displaySettings, { fallback: '—' });
+      const len = (disp.baseText?.length || 0) + (disp.compactionSuffix?.length || 0);
+      if (len > bestModelLen) {
+        bestModelLen = len;
+        bestModelObj = cand;
+      }
+    }
+    colSteps.model = bestModelObj;
+  }
+  if (needTps) {
+    let longestReasonKey = null;
+    let longestReasonLen = 0;
+    if (reasonCandidates) {
+      for (const rk of reasonCandidates) {
+        const txt = speedReasonText(rk);
+        if (txt && txt.length > longestReasonLen) {
+          longestReasonLen = txt.length;
+          longestReasonKey = rk;
+        }
+      }
+    }
+    colSteps.tps = {
+      ...(maxTpsObj || firstStep),
+      tokPerSec: maxTpsVal > 0 ? maxTpsVal : firstStep.tokPerSec,
+      selectedSpeedReason: longestReasonKey,
+    };
+  }
+  if (needTtft) colSteps.ttft = bestTtftObj;
+  if (needDuration) colSteps.duration = bestDurObj;
+  if (needTokensCombo) colSteps.tokens_combo = bestComboObj;
+  if (needTokensIoCache) colSteps.tokens_io_cache = bestIoCacheObj;
+  if (needTokensCustom) colSteps.tokens_custom = bestCustomObj;
+  if (needInput) colSteps.input_tokens = bestInputObj;
+  if (needCacheTok) colSteps.cache_tokens = bestCacheTokObj;
+  if (needOutput) colSteps.output_tokens = bestOutputObj;
+  if (needCachePct) colSteps.cache = bestCachePctObj;
+  if (needCost) colSteps.cost = bestCostObj;
+
+  const sigParts = colKeys.map((colKey) => {
+    const st = colSteps[colKey] || firstStep;
+    return `${colKey}=${STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx)}`;
+  });
+  return {
+    colSteps,
+    badgeText: bestBadgeText,
+    badgeClass: bestBadgeClass,
+    sig: `sizer:${bestBadgeText}:${sigParts.join('|')}`,
+  };
+}
+
 const StepTableWidget = defineComponent({
   name: 'StepTableWidget',
   setup({ props, onCleanup }) {
@@ -14049,8 +14475,11 @@ const StepTableWidget = defineComponent({
     const interactiveBadges = props.interactiveBadges !== false;
     const onSelectAgentScopes =
       typeof props.onSelectAgentScopes === 'function' ? props.onSelectAgentScopes : null;
+    const onVirtualHeightChange =
+      typeof props.onVirtualHeightChange === 'function' ? props.onVirtualHeightChange : null;
 
     const stepsTheadRow = h('tr');
+    const stepsThead = h('thead', {}, [stepsTheadRow]);
     const stepsTbody = h('tbody');
 
     function syncTableHeaderColumns(colKeys, headerCtx = {}) {
@@ -14073,7 +14502,7 @@ const StepTableWidget = defineComponent({
     syncTableHeaderColumns(DEFAULT_STEP_COLUMN_KEYS);
 
     const stepsTableEl = h('table', { className: 'data-table steps-data-table' }, [
-      h('thead', {}, [stepsTheadRow]),
+      stepsThead,
       stepsTbody,
     ]);
     const stepsTablePane = h('div', { className: 'table-viewport is-step-table' }, [stepsTableEl]);
@@ -14136,15 +14565,97 @@ const StepTableWidget = defineComponent({
       }
     }
 
-    stepsTablePane.addEventListener('scroll', hideTurnTip);
-    stepsTbody.addEventListener('mouseleave', hideTurnTip);
     const hoverRows = new WeakMap();
     let lastRenderedRows = null;
     let lastRenderOptions = '';
     let trackedCascadeId = null;
+    let lastAbsorbedAllSteps = null;
     const seenStepKeys = new Set();
     const maxSeenStepByAgent = new Map();
     const activeEnterTimers = new Map();
+
+    // Virtualization state (activates transparently only when !standalone && rowCount > 80)
+    let activeDataset = null;
+    let renderedSliceStart = -1;
+    let renderedSliceEnd = -1;
+    let renderedTopSpacerH = -1;
+    let renderedBottomSpacerH = -1;
+    let scrollRafId = 0;
+    let calibrateRafId = 0;
+    let lastFontScale = 1;
+    let calibratedSingleRowH = 0;
+    let calibratedReasonRowH = 0;
+    const rowPool = [];
+
+    function readUiFontScale() {
+      try {
+        if (typeof getComputedStyle === 'function') {
+          const target =
+            stepsTableEl || (typeof document !== 'undefined' ? document.documentElement : null);
+          if (target) {
+            const raw = getComputedStyle(target)?.getPropertyValue?.('--ui-font-scale');
+            const parsed = Number.parseFloat(raw);
+            if (Number.isFinite(parsed) && parsed >= 0.5 && parsed <= 2.5) {
+              return parsed;
+            }
+          }
+        }
+      } catch {
+        // Fallback to default scale in headless/mock environments.
+      }
+      return 1;
+    }
+
+    function getEstRowHeights() {
+      const single =
+        calibratedSingleRowH > 0
+          ? calibratedSingleRowH
+          : Math.round(BASE_SINGLE_ROW_H * lastFontScale);
+      const reason =
+        calibratedReasonRowH > 0
+          ? calibratedReasonRowH
+          : Math.round(BASE_REASON_ROW_H * lastFontScale);
+      return { single, reason };
+    }
+
+    function buildRowTops(n, hasReasonFlags) {
+      const { single, reason } = getEstRowHeights();
+      const tops = new Float64Array(n + 1);
+      let acc = 0;
+      for (let i = 0; i < n; i++) {
+        tops[i] = acc;
+        acc += hasReasonFlags && hasReasonFlags[i] ? reason : single;
+      }
+      tops[n] = acc;
+      return { rowTops: tops, totalBodyH: acc };
+    }
+
+    function findRowIndexAtOffset(rowTops, n, offset) {
+      if (n <= 0 || offset <= 0) return 0;
+      if (offset >= rowTops[n - 1]) return n - 1;
+      let lo = 0;
+      let hi = n - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >>> 1;
+        if (rowTops[mid] <= offset) lo = mid;
+        else hi = mid - 1;
+      }
+      return lo;
+    }
+
+    function syncFontScaleIfChanged() {
+      const nextScale = readUiFontScale();
+      if (Math.abs(nextScale - lastFontScale) < 0.005) return false;
+      lastFontScale = nextScale;
+      calibratedSingleRowH = 0;
+      calibratedReasonRowH = 0;
+      if (activeDataset?.isVirtualized) {
+        const rebuilt = buildRowTops(activeDataset.tableSteps.length, activeDataset.hasReasonFlags);
+        activeDataset.rowTops = rebuilt.rowTops;
+        activeDataset.totalBodyH = rebuilt.totalBodyH;
+      }
+      return true;
+    }
 
     function getStepRowIdentity(st, fallbackCascadeId) {
       const agentKey = String(st?.agentCascadeId || fallbackCascadeId || 'conv');
@@ -14204,80 +14715,185 @@ const StepTableWidget = defineComponent({
       cell.onmouseleave = null;
     }
 
-    function renderStepTable(
-      tableSteps,
-      cascadeId,
-      colKeys,
-      locale,
-      {
-        effectiveScopes = ['all'],
-        hasSubagents = false,
-        isMergedMultiAgents = false,
-        showStepTurnRail = false,
-        showStepAgentBadge = true,
-        showStepSpeedColor = false,
-        stepTokenComboFormat = undefined,
-        displaySettings = {},
-        allConversationSteps = null,
-        allowNewRowFade = false,
-      } = {}
-    ) {
-      const normCascadeId = String(cascadeId || '');
-      let enteringRowKeys = null;
-      if (!normCascadeId || trackedCascadeId === null || normCascadeId !== trackedCascadeId) {
-        trackedCascadeId = normCascadeId || null;
-        seenStepKeys.clear();
-        maxSeenStepByAgent.clear();
-        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
-        absorbStepsIntoBaseline(tableSteps, normCascadeId);
-      } else if (!allowNewRowFade || standalone) {
-        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
-        absorbStepsIntoBaseline(tableSteps, normCascadeId);
-      } else {
-        for (const st of tableSteps) {
-          if (!st || typeof st !== 'object') continue;
-          const { agentKey, stepNum, rowKey } = getStepRowIdentity(st, normCascadeId);
-          if (!seenStepKeys.has(rowKey)) {
-            const prevMax = maxSeenStepByAgent.get(agentKey);
-            if (prevMax === undefined || !Number.isFinite(stepNum) || stepNum > prevMax) {
-              enteringRowKeys ??= new Set();
-              enteringRowKeys.add(rowKey);
+    function calibrateRowHeights() {
+      calibrateRafId = 0;
+      if (!activeDataset?.isVirtualized) return;
+      if (Number(stepsTablePane.clientHeight || 0) <= 0) return;
+      const needSingle = calibratedSingleRowH <= 0;
+      const needReason = calibratedReasonRowH <= 0 && activeDataset.hasAnyReason;
+      if (!needSingle && !needReason) return;
+
+      let measuredSingle = 0;
+      let measuredReason = 0;
+      // Measure contiguous run of normal rows to eliminate single-row subpixel/border-collapse drift.
+      let runStartTop = 0;
+      let runEndBottom = 0;
+      let runCount = 0;
+      let bestRunStride = 0;
+      let bestRunCount = 0;
+
+      const children = stepsTbody.children || [];
+      for (let i = 0; i < children.length; i++) {
+        const tr = children[i];
+        if (!tr || tr.classList?.contains('step-vspacer') || tr.classList?.contains('step-vsizer')) {
+          runCount = 0;
+          continue;
+        }
+        const isReason = tr.dataset?.hasReason === '1';
+        if (!isReason && needSingle) {
+          const rect = tr.getBoundingClientRect?.();
+          const hVal = Number(rect?.height || tr.offsetHeight || 0);
+          if (hVal >= 14 && hVal <= 120) {
+            if (!measuredSingle) measuredSingle = hVal;
+            if (rect && Number.isFinite(rect.top) && Number.isFinite(rect.bottom) && rect.bottom > rect.top) {
+              if (runCount === 0) {
+                runStartTop = rect.top;
+              }
+              runEndBottom = rect.bottom;
+              runCount += 1;
+              if (runCount > bestRunCount && runCount >= 2) {
+                const stride = (runEndBottom - runStartTop) / runCount;
+                if (stride >= 14 && stride <= 120) {
+                  bestRunCount = runCount;
+                  bestRunStride = stride;
+                }
+              }
             }
           }
+        } else {
+          runCount = 0;
+          if (isReason && needReason && !measuredReason) {
+            const hVal = Number(tr.getBoundingClientRect?.()?.height || tr.offsetHeight || 0);
+            if (hVal >= 18 && hVal <= 160) measuredReason = hVal;
+          }
         }
-        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
-        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+        if ((!needSingle || bestRunCount >= 12) && (!needReason || measuredReason > 0)) {
+          break;
+        }
       }
 
-      const colOrderSig = colKeys.join(',');
-      const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
-      const renderOptions = JSON.stringify([
-        cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
-        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, normTokenFmt,
-        displaySettings.modelDisplayMode, displaySettings.showUpstreamModel,
-        displaySettings.orchestratorIdMode,
-      ]);
-      if (lastRenderOptions === renderOptions && lastRenderedRows &&
-          (lastRenderedRows === tableSteps || (lastRenderedRows.length === tableSteps.length &&
-            tableSteps.every((step, i) => step === lastRenderedRows[i])))) {
-        return;
+      if (bestRunStride > 0) {
+        measuredSingle = bestRunStride;
       }
-      const wantedSet = new Set(colKeys);
-      syncTableHeaderColumns(colKeys, { stepTokenComboFormat: normTokenFmt });
 
-      const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
-      const cellCtx = {
-        hasSubagents,
+      let changed = false;
+      if (measuredSingle > 0) {
+        const prev = getEstRowHeights().single;
+        calibratedSingleRowH = measuredSingle;
+        if (Math.abs(measuredSingle - prev) >= 0.25) changed = true;
+      }
+      if (measuredReason > 0) {
+        const prev = getEstRowHeights().reason;
+        calibratedReasonRowH = measuredReason;
+        if (Math.abs(measuredReason - prev) >= 0.25) changed = true;
+      }
+
+      if (changed && activeDataset) {
+        const prevTops = activeDataset.rowTops;
+        const anchorIdx = renderedSliceStart > 0 ? renderedSliceStart : 0;
+        const prevAnchorTop = prevTops ? prevTops[anchorIdx] : 0;
+        const rebuilt = buildRowTops(activeDataset.tableSteps.length, activeDataset.hasReasonFlags);
+        activeDataset.rowTops = rebuilt.rowTops;
+        activeDataset.totalBodyH = rebuilt.totalBodyH;
+        const curScrollTop = Number(stepsTablePane.scrollTop || 0);
+        if (anchorIdx > 0 && curScrollTop > 0) {
+          const delta = rebuilt.rowTops[anchorIdx] - prevAnchorTop;
+          if (Math.abs(delta) >= 0.5) {
+            stepsTablePane.scrollTop = Math.max(0, curScrollTop + delta);
+          }
+        }
+        renderCurrentWindow({ force: true, enteringRowKeys: null });
+        onVirtualHeightChange?.();
+      }
+    }
+
+    function scheduleCalibrateRowHeights() {
+      if (!activeDataset?.isVirtualized) return;
+      const needSingle = calibratedSingleRowH <= 0;
+      const needReason = calibratedReasonRowH <= 0 && activeDataset.hasAnyReason;
+      if (!needSingle && !needReason) return;
+      if (calibrateRafId) return;
+      if (typeof requestAnimationFrame === 'function') {
+        calibrateRafId = requestAnimationFrame(calibrateRowHeights);
+      } else {
+        calibrateRowHeights();
+      }
+    }
+
+    function renderCurrentWindow({ force = false, enteringRowKeys = null } = {}) {
+      const ds = activeDataset;
+      if (!ds) return;
+      const {
+        tableSteps,
+        cascadeId,
+        colKeys,
+        wantedSet,
+        colOrderSig,
+        locale,
+        cellCtx,
+        railActive,
         showAgentBadge,
-        showStepSpeedColor,
-        stepTokenComboFormat: normTokenFmt,
+        showStepTurnRail,
+        useRootTurn,
+        isVirtualized,
+        hasReasonFlags,
+        rowTops,
+        totalBodyH,
+        sizerSpec,
         effectiveScopes,
-        scopeSigKey: effectiveScopes.join(','),
-        displaySettings,
-        onSelectAgentScopes,
-      };
+        formattedPrompts,
+      } = ds;
 
-      const useRootTurn = Boolean(hasSubagents && isMergedMultiAgents);
+      const n = tableSteps.length;
+      let startIdx = 0;
+      let endIdx = n;
+      let topSpacerH = 0;
+      let bottomSpacerH = 0;
+
+      if (isVirtualized) {
+        const scrollTop = Math.max(0, Number(stepsTablePane.scrollTop || 0));
+        const rawClientH = Number(stepsTablePane.clientHeight || 0);
+        const viewportH = rawClientH > 0 ? rawClientH : FALLBACK_VIEWPORT_H;
+        const rawTheadH = Number(
+          stepsThead.offsetHeight || stepsThead.getBoundingClientRect?.()?.height || 0
+        );
+        const theadH = rawTheadH > 0 ? rawTheadH : getEstRowHeights().single;
+        const viewTop = Math.max(0, scrollTop - theadH);
+        const viewBottom = viewTop + viewportH;
+        const firstVis = findRowIndexAtOffset(rowTops, n, viewTop);
+        const lastVis = findRowIndexAtOffset(rowTops, n, viewBottom);
+
+        if (
+          !force &&
+          renderedSliceStart >= 0 &&
+          renderedSliceEnd > renderedSliceStart &&
+          renderedSliceEnd <= n
+        ) {
+          const topSafe =
+            renderedSliceStart === 0 || firstVis - renderedSliceStart >= VIRTUAL_REFILL_MARGIN;
+          const bottomSafe =
+            renderedSliceEnd === n || renderedSliceEnd - 1 - lastVis >= VIRTUAL_REFILL_MARGIN;
+          if (topSafe && bottomSafe) {
+            return;
+          }
+        }
+
+        startIdx = Math.max(0, firstVis - VIRTUAL_OVERSCAN_ROWS);
+        endIdx = Math.min(n, lastVis + 1 + VIRTUAL_OVERSCAN_ROWS);
+        topSpacerH = +rowTops[startIdx].toFixed(2);
+        bottomSpacerH = +Math.max(0, totalBodyH - rowTops[endIdx]).toFixed(2);
+
+        if (
+          !force &&
+          startIdx === renderedSliceStart &&
+          endIdx === renderedSliceEnd &&
+          topSpacerH === renderedTopSpacerH &&
+          bottomSpacerH === renderedBottomSpacerH
+        ) {
+          return;
+        }
+      }
+
       const getStepTurnIdx = (st) =>
         useRootTurn ? (st?.rootTurnIndex ?? st?.turnIndex) : st?.turnIndex;
       const getStepIsStart = (st) =>
@@ -14292,12 +14908,15 @@ const StepTableWidget = defineComponent({
         Boolean(useRootTurn ? (st?.rootTurnHasMedia ?? st?.turnHasMedia) : st?.turnHasMedia);
       const getStepMediaOnly = (st) =>
         Boolean(useRootTurn ? (st?.rootTurnMediaOnly ?? st?.turnMediaOnly) : st?.turnMediaOnly);
-      const turnKeys = showStepTurnRail ? tableSteps.map((st) => {
+
+      function getTurnKeyAt(idx) {
+        if (!showStepTurnRail || idx < 0 || idx >= n) return '';
+        const st = tableSteps[idx];
         const tIdx = getStepTurnIdx(st);
         if (!Number.isInteger(tIdx) || tIdx <= 0) return '';
         return useRootTurn ? `root:${tIdx}` : `${st?.agentId || 'main'}:${tIdx}`;
-      }) : [];
-      const formattedPrompts = new Map();
+      }
+
       function formattedTurnPrompt(st) {
         const raw = getStepPrompt(st);
         const hasMedia = getStepHasMedia(st);
@@ -14309,13 +14928,38 @@ const StepTableWidget = defineComponent({
         return formattedPrompts.get(cacheKey);
       }
 
-      const decoratedSteps = tableSteps.map((st, idx) => {
-        const tKey = turnKeys[idx];
+      const windowItems = [];
+      if (isVirtualized && sizerSpec) {
+        windowItems.push({
+          isSizer: true,
+          isSpacer: false,
+          rowKey: SIZER_ROW_KEY,
+          sizerSpec,
+        });
+      }
+      if (isVirtualized && topSpacerH > 0) {
+        windowItems.push({
+          isSizer: false,
+          isSpacer: true,
+          rowKey: SPACER_TOP_KEY,
+          height: topSpacerH,
+          colSpan: colKeys.length,
+        });
+      }
+
+      for (let idx = startIdx; idx < endIdx; idx++) {
+        const st = tableSteps[idx];
+        const tKey = getTurnKeyAt(idx);
         const hasTurn = Boolean(tKey);
-        const hasUp = hasTurn && turnKeys[idx - 1] === tKey;
-        const hasDown = hasTurn && turnKeys[idx + 1] === tKey;
-        return {
+        const hasUp = hasTurn && getTurnKeyAt(idx - 1) === tKey;
+        const hasDown = hasTurn && getTurnKeyAt(idx + 1) === tKey;
+        windowItems.push({
+          isSizer: false,
+          isSpacer: false,
           st,
+          logicalIdx: idx,
+          isStripeEven: (idx & 1) === 1,
+          hasReason: Boolean(hasReasonFlags && hasReasonFlags[idx]),
           rowKey: `${st.agentCascadeId || cascadeId || 'conv'}-${st.stepIndex}`,
           hasTurn,
           hasUp,
@@ -14323,18 +14967,28 @@ const StepTableWidget = defineComponent({
           isStart: Boolean(hasTurn && (getStepIsStart(st) || !hasDown)),
           isLatest: hasTurn && getStepIsLatest(st),
           prompt: hasTurn ? formattedTurnPrompt(st) : '',
-        };
-      });
-
-      const railActive = Boolean(showStepTurnRail && decoratedSteps.some((d) => d.hasTurn));
-      if (!railActive) {
-        hideTurnTip();
+        });
       }
-      patchClasses(stepsTableEl, { 'has-turn-rail': railActive });
 
-      patchKeyedList(stepsTbody, decoratedSteps, {
+      if (isVirtualized && bottomSpacerH > 0) {
+        windowItems.push({
+          isSizer: false,
+          isSpacer: true,
+          rowKey: SPACER_BOTTOM_KEY,
+          height: bottomSpacerH,
+          colSpan: colKeys.length,
+        });
+      }
+
+      patchKeyedList(stepsTbody, windowItems, {
         keyFn: (item) => item.rowKey,
         sigFn: (item) => {
+          if (item.isSizer) {
+            return `${locale}:${colOrderSig}:${showAgentBadge ? 1 : 0}:${railActive ? 1 : 0}:${item.sizerSpec.sig}`;
+          }
+          if (item.isSpacer) {
+            return `spacer:${item.colSpan}:${item.height}`;
+          }
           const { st } = item;
           const parts = colKeys
             .map((colKey) => STEP_COLUMN_REGISTRY[colKey].sigPart(st, cellCtx))
@@ -14342,13 +14996,40 @@ const StepTableWidget = defineComponent({
           const badgeSig = showAgentBadge
             ? `${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`
             : '';
-          return `${locale}:${colOrderSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
+          const stripeSig = isVirtualized ? (item.isStripeEven ? 'E' : 'O') : 'N';
+          return `${locale}:${colOrderSig}:${stripeSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
-        createRow: () => {
+        createRow: (item) => {
+          if (item.isSizer) {
+            const tr = h('tr', { className: 'step-vsizer', 'aria-hidden': 'true' });
+            return {
+              el: tr,
+              refs: {
+                isSizer: true,
+                isSpacer: false,
+                cellMap: new Map(),
+                colOrderSig: '',
+                agentBadgeEl: null,
+              },
+            };
+          }
+          if (item.isSpacer) {
+            const td = h('td', {
+              className: 'step-vspacer-cell',
+              colspan: String(item.colSpan),
+            });
+            const tr = h('tr', { className: 'step-vspacer', 'aria-hidden': 'true' }, [td]);
+            return { el: tr, refs: { isSizer: false, isSpacer: true, td } };
+          }
+          if (rowPool.length > 0) {
+            return rowPool.pop();
+          }
           const tr = h('tr');
           return {
             el: tr,
             refs: {
+              isSizer: false,
+              isSpacer: false,
               cellMap: new Map(),
               colOrderSig: '',
               railEl: null,
@@ -14358,7 +15039,78 @@ const StepTableWidget = defineComponent({
           };
         },
         updateRow: (refs, item, _idx, tr) => {
+          if (item.isSizer) {
+            const spec = item.sizerSpec;
+            if (refs.colOrderSig !== colOrderSig) {
+              for (const [oldColKey, entry] of refs.cellMap) {
+                if (!wantedSet.has(oldColKey)) {
+                  if (refs.agentBadgeEl?.parentNode === entry.innerEl) {
+                    entry.innerEl.removeChild(refs.agentBadgeEl);
+                  }
+                  tr.removeChild(entry.td);
+                  refs.cellMap.delete(oldColKey);
+                }
+              }
+              const isNewSizer = refs.colOrderSig === '';
+              for (let i = 0; i < colKeys.length; i++) {
+                const colKey = colKeys[i];
+                let entry = refs.cellMap.get(colKey);
+                if (!entry) {
+                  const created = STEP_COLUMN_REGISTRY[colKey].createCell();
+                  const innerEl = h('div', { className: 'step-vsizer-inner' });
+                  while (created.td.firstChild) {
+                    innerEl.appendChild(created.td.firstChild);
+                  }
+                  created.td.appendChild(innerEl);
+                  entry = { td: created.td, refs: created.refs, innerEl };
+                  refs.cellMap.set(colKey, entry);
+                }
+                if (isNewSizer) {
+                  tr.appendChild(entry.td);
+                } else {
+                  const currentTd = tr.children[i] || null;
+                  if (currentTd !== entry.td) tr.insertBefore(entry.td, currentTd);
+                }
+              }
+              refs.colOrderSig = colOrderSig;
+            }
+            for (const colKey of colKeys) {
+              const entry = refs.cellMap.get(colKey);
+              const probeStep = spec.colSteps[colKey] || tableSteps[0];
+              if (entry && probeStep) {
+                STEP_COLUMN_REGISTRY[colKey].updateCell(entry.refs, probeStep, cellCtx);
+              }
+            }
+            const firstColKey = colKeys[0];
+            const firstInner = firstColKey ? refs.cellMap.get(firstColKey)?.innerEl || null : null;
+            const showSizerBadge = Boolean(showAgentBadge && firstInner && spec.badgeText);
+            if (showSizerBadge && !refs.agentBadgeEl) {
+              refs.agentBadgeEl = h('span', { className: 'agent-badge', style: 'margin-right: 4px;' });
+            }
+            if (firstInner && refs.agentBadgeEl) {
+              if (refs.agentBadgeEl.parentNode !== firstInner || firstInner.firstChild !== refs.agentBadgeEl) {
+                firstInner.insertBefore(refs.agentBadgeEl, firstInner.firstChild);
+              }
+              patchAttr(refs.agentBadgeEl, 'hidden', !showSizerBadge);
+              if (showSizerBadge) {
+                patchAttr(refs.agentBadgeEl, 'class', `agent-badge ${spec.badgeClass || ''}`.trim());
+                patchText(refs.agentBadgeEl, spec.badgeText);
+              }
+            }
+            return;
+          }
+          if (item.isSpacer) {
+            patchAttr(refs.td, 'colspan', String(item.colSpan));
+            if (refs.td?.style) {
+              refs.td.style.height = `${item.height}px`;
+            }
+            return;
+          }
           const { st, hasTurn, hasUp, hasDown, isStart, isLatest, prompt } = item;
+          patchClasses(tr, { 'is-stripe-even': Boolean(isVirtualized && item.isStripeEven) });
+          if (tr.dataset) {
+            tr.dataset.hasReason = item.hasReason ? '1' : '0';
+          }
 
           if (refs.colOrderSig !== colOrderSig) {
             if (refs.hoverTd) {
@@ -14417,8 +15169,10 @@ const StepTableWidget = defineComponent({
             const afterRail = refs.railEl
               ? refs.railEl.nextSibling ?? firstTd.children[1] ?? null
               : firstTd.firstChild;
-            if (refs.agentBadgeEl &&
-              (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl)) {
+            if (
+              refs.agentBadgeEl &&
+              (refs.agentBadgeEl.parentNode !== firstTd || afterRail !== refs.agentBadgeEl)
+            ) {
               firstTd.insertBefore(refs.agentBadgeEl, afterRail);
             }
           }
@@ -14488,7 +15242,11 @@ const StepTableWidget = defineComponent({
           patchAttr(refs.railEl, 'hidden', !showRowRail);
           if (showRowRail) {
             const marker = isStart ? ' is-origin' : !hasUp && hasDown ? ' is-cap' : '';
-            patchAttr(refs.railEl, 'class', `turn-rail${isLatest ? ' is-latest' : ''}${hasUp ? ' has-up' : ''}${hasDown ? ' has-down' : ''}${marker}`);
+            patchAttr(
+              refs.railEl,
+              'class',
+              `turn-rail${isLatest ? ' is-latest' : ''}${hasUp ? ' has-up' : ''}${hasDown ? ' has-down' : ''}${marker}`
+            );
           }
 
           const hoverTd = showRowRail && prompt ? firstTd : null;
@@ -14513,17 +15271,270 @@ const StepTableWidget = defineComponent({
             activeEnterTimers.set(tr, timer);
           }
         },
-        destroyRow: (_refs, tr) => {
+        destroyRow: (refs, tr) => {
+          if (refs?.hoverTd) {
+            clearCellHover(refs.hoverTd);
+            refs.hoverTd = null;
+          }
           clearRowEnterState(tr);
+          if (!refs?.isSpacer && !refs?.isSizer && tr) {
+            patchClasses(tr, { 'is-stripe-even': false, 'is-step-entering': false });
+            if (refs.agentBadgeEl) {
+              refs.agentBadgeEl.onclick = null;
+            }
+            if (rowPool.length < MAX_ROW_POOL_SIZE) {
+              rowPool.push({ el: tr, refs });
+            }
+          }
         },
       });
+
+      renderedSliceStart = startIdx;
+      renderedSliceEnd = endIdx;
+      renderedTopSpacerH = topSpacerH;
+      renderedBottomSpacerH = bottomSpacerH;
+
+      if (isVirtualized) {
+        scheduleCalibrateRowHeights();
+      }
+    }
+
+    function refreshViewport() {
+      if (!activeDataset?.isVirtualized) return;
+      const scaleChanged = syncFontScaleIfChanged();
+      renderCurrentWindow({ force: scaleChanged, enteringRowKeys: null });
+      scheduleCalibrateRowHeights();
+    }
+
+    function onPaneScroll() {
+      hideTurnTip();
+      if (!activeDataset?.isVirtualized) return;
+      if (typeof requestAnimationFrame === 'function') {
+        if (scrollRafId) return;
+        scrollRafId = requestAnimationFrame(() => {
+          scrollRafId = 0;
+          renderCurrentWindow({ force: false, enteringRowKeys: null });
+        });
+      } else {
+        renderCurrentWindow({ force: false, enteringRowKeys: null });
+      }
+    }
+
+    stepsTablePane.addEventListener('scroll', onPaneScroll, { passive: true });
+    stepsTbody.addEventListener('mouseleave', hideTurnTip);
+
+    let paneResizeObs = null;
+    if (typeof ResizeObserver === 'function') {
+      paneResizeObs = new ResizeObserver(() => {
+        if (!activeDataset?.isVirtualized) return;
+        refreshViewport();
+      });
+      paneResizeObs.observe(stepsTablePane);
+    }
+
+    function renderStepTable(
+      tableSteps,
+      cascadeId,
+      colKeys,
+      locale,
+      {
+        effectiveScopes = ['all'],
+        hasSubagents = false,
+        isMergedMultiAgents = false,
+        showStepTurnRail = false,
+        showStepAgentBadge = true,
+        showStepSpeedColor = false,
+        stepTokenComboFormat = undefined,
+        displaySettings = {},
+        allConversationSteps = null,
+        allowNewRowFade = false,
+      } = {}
+    ) {
+      const normCascadeId = String(cascadeId || '');
+      let enteringRowKeys = null;
+      if (!normCascadeId || trackedCascadeId === null || normCascadeId !== trackedCascadeId) {
+        trackedCascadeId = normCascadeId || null;
+        lastAbsorbedAllSteps = null;
+        seenStepKeys.clear();
+        maxSeenStepByAgent.clear();
+        if (allConversationSteps && allConversationSteps !== tableSteps) {
+          absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+          lastAbsorbedAllSteps = allConversationSteps;
+        }
+        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+      } else if (!allowNewRowFade || standalone) {
+        if (allConversationSteps && allConversationSteps !== lastAbsorbedAllSteps && allConversationSteps !== tableSteps) {
+          absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+          lastAbsorbedAllSteps = allConversationSteps;
+        }
+        if (tableSteps !== lastRenderedRows) {
+          absorbStepsIntoBaseline(tableSteps, normCascadeId);
+        }
+      } else if (tableSteps !== lastRenderedRows) {
+        let pendingMaxByAgent = null;
+        for (const st of tableSteps) {
+          if (!st || typeof st !== 'object') continue;
+          const { agentKey, stepNum, rowKey } = getStepRowIdentity(st, normCascadeId);
+          if (!seenStepKeys.has(rowKey)) {
+            seenStepKeys.add(rowKey);
+            const prevMax = maxSeenStepByAgent.get(agentKey);
+            if (prevMax === undefined || !Number.isFinite(stepNum) || stepNum > prevMax) {
+              enteringRowKeys ??= new Set();
+              enteringRowKeys.add(rowKey);
+            }
+            if (Number.isFinite(stepNum)) {
+              const curPending = pendingMaxByAgent?.get(agentKey);
+              if (curPending === undefined || stepNum > curPending) {
+                pendingMaxByAgent ??= new Map();
+                pendingMaxByAgent.set(agentKey, stepNum);
+              }
+            }
+          }
+        }
+        if (pendingMaxByAgent) {
+          for (const [agentKey, maxStep] of pendingMaxByAgent) {
+            const prevMax = maxSeenStepByAgent.get(agentKey);
+            if (prevMax === undefined || maxStep > prevMax) {
+              maxSeenStepByAgent.set(agentKey, maxStep);
+            }
+          }
+        }
+        if (allConversationSteps && allConversationSteps !== lastAbsorbedAllSteps && allConversationSteps !== tableSteps) {
+          absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+          lastAbsorbedAllSteps = allConversationSteps;
+        }
+      } else if (allConversationSteps && allConversationSteps !== lastAbsorbedAllSteps && allConversationSteps !== tableSteps) {
+        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+        lastAbsorbedAllSteps = allConversationSteps;
+      }
+
+      const colOrderSig = colKeys.join(',');
+      const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
+      const renderOptions = JSON.stringify([
+        cascadeId, locale, colOrderSig, effectiveScopes, hasSubagents, isMergedMultiAgents,
+        showStepTurnRail, showStepAgentBadge, showStepSpeedColor, normTokenFmt,
+        displaySettings.modelDisplayMode, displaySettings.showUpstreamModel,
+        displaySettings.orchestratorIdMode,
+      ]);
+      if (
+        lastRenderOptions === renderOptions &&
+        lastRenderedRows &&
+        (lastRenderedRows === tableSteps ||
+          (lastRenderedRows.length === tableSteps.length &&
+            tableSteps.every((step, i) => step === lastRenderedRows[i])))
+      ) {
+        if (activeDataset?.isVirtualized) {
+          refreshViewport();
+        }
+        return;
+      }
+
+      syncFontScaleIfChanged();
+      const wantedSet = new Set(colKeys);
+      syncTableHeaderColumns(colKeys, { stepTokenComboFormat: normTokenFmt });
+
+      const showAgentBadge = Boolean(hasSubagents && showStepAgentBadge);
+      const cellCtx = {
+        hasSubagents,
+        showAgentBadge,
+        showStepSpeedColor,
+        stepTokenComboFormat: normTokenFmt,
+        effectiveScopes,
+        scopeSigKey: effectiveScopes.join(','),
+        displaySettings,
+        onSelectAgentScopes,
+      };
+
+      const useRootTurn = Boolean(hasSubagents && isMergedMultiAgents);
+      let railActive = false;
+      if (showStepTurnRail) {
+        for (let i = 0; i < tableSteps.length; i++) {
+          const st = tableSteps[i];
+          const tIdx = useRootTurn ? (st?.rootTurnIndex ?? st?.turnIndex) : st?.turnIndex;
+          if (Number.isInteger(tIdx) && tIdx > 0) {
+            railActive = true;
+            break;
+          }
+        }
+      }
+      if (!railActive) {
+        hideTurnTip();
+      }
+
+      const isVirtualized = !standalone && tableSteps.length > VIRTUAL_ROW_THRESHOLD;
+      patchClasses(stepsTableEl, {
+        'has-turn-rail': railActive,
+        'is-virtualized': isVirtualized,
+      });
+
+      let hasReasonFlags = null;
+      let hasAnyReason = false;
+      let rowTops = null;
+      let totalBodyH = 0;
+      let sizerSpec = null;
+      if (isVirtualized) {
+        const hasTpsCol = wantedSet.has('tps');
+        if (hasTpsCol) {
+          hasReasonFlags = new Uint8Array(tableSteps.length);
+          for (let i = 0; i < tableSteps.length; i++) {
+            const rawReason = tableSteps[i]?.selectedSpeedReason;
+            if (rawReason && speedReasonText(rawReason)) {
+              hasReasonFlags[i] = 1;
+              hasAnyReason = true;
+            }
+          }
+        }
+        const built = buildRowTops(tableSteps.length, hasReasonFlags);
+        rowTops = built.rowTops;
+        totalBodyH = built.totalBodyH;
+        sizerSpec = buildColumnSizerSpec(tableSteps, colKeys, wantedSet, cellCtx);
+      }
+
+      activeDataset = {
+        tableSteps,
+        cascadeId,
+        colKeys,
+        wantedSet,
+        colOrderSig,
+        locale,
+        cellCtx,
+        railActive,
+        showAgentBadge,
+        showStepTurnRail,
+        useRootTurn,
+        isVirtualized,
+        hasReasonFlags,
+        hasAnyReason,
+        rowTops,
+        totalBodyH,
+        sizerSpec,
+        effectiveScopes,
+        formattedPrompts: new Map(),
+      };
+      renderedSliceStart = -1;
+      renderedSliceEnd = -1;
+      renderedTopSpacerH = -1;
+      renderedBottomSpacerH = -1;
+
+      renderCurrentWindow({ force: true, enteringRowKeys });
       lastRenderOptions = renderOptions;
       lastRenderedRows = tableSteps;
     }
 
     onCleanup(() => {
-      stepsTablePane.removeEventListener('scroll', hideTurnTip);
+      stepsTablePane.removeEventListener('scroll', onPaneScroll);
       stepsTbody.removeEventListener('mouseleave', hideTurnTip);
+      if (scrollRafId && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(scrollRafId);
+        scrollRafId = 0;
+      }
+      if (calibrateRafId && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(calibrateRafId);
+        calibrateRafId = 0;
+      }
+      paneResizeObs?.disconnect();
+      paneResizeObs = null;
+      rowPool.length = 0;
       for (const tr of [...activeEnterTimers.keys()]) {
         clearRowEnterState(tr);
       }
@@ -14539,6 +15550,7 @@ const StepTableWidget = defineComponent({
         turnTipEl,
         syncTableHeaderColumns,
         renderStepTable,
+        refreshViewport,
         hideTurnTip,
         setBoundsElGetter,
       },
@@ -20325,8 +21337,10 @@ const StepsDetailView = defineComponent({
     });
 
     // --- 子视图 1：单步明细表（委托给可复用的 `StepTableWidget` 解耦组件） ---
+    let stepsScroll = null;
     const stepTableWidget = StepTableWidget({
       onSelectAgentScopes: applyAgentScopesSelection,
+      onVirtualHeightChange: () => stepsScroll?.refresh(),
     });
     const {
       stepsTablePane,
@@ -20337,8 +21351,9 @@ const StepsDetailView = defineComponent({
       hideTurnTip,
       syncTableHeaderColumns,
       renderStepTable,
+      refreshViewport: refreshStepTableViewport,
     } = stepTableWidget.refs;
-    const stepsScroll = CustomScrollbar({
+    stepsScroll = CustomScrollbar({
       contentEl: stepsTablePane,
       className: 'table-scroll-host',
     });
@@ -20497,6 +21512,19 @@ const StepsDetailView = defineComponent({
 
     let latestSlice = null;
     let isDirty = false;
+    let cachedChronoSrc = null;
+    let cachedChronoMerged = false;
+    let cachedChronoOut = [];
+
+    function getMemoizedChronoSteps(steps, isMergedMultiAgents) {
+      if (cachedChronoSrc === steps && cachedChronoMerged === isMergedMultiAgents) {
+        return cachedChronoOut;
+      }
+      cachedChronoSrc = steps;
+      cachedChronoMerged = isMergedMultiAgents;
+      cachedChronoOut = toChronologicalSteps(steps, isMergedMultiAgents);
+      return cachedChronoOut;
+    }
 
     function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
       if (scopedConv?.hasKnownModel !== false) {
@@ -20683,33 +21711,14 @@ const StepsDetailView = defineComponent({
 
       const showAgentPrefix = isMergedMultiAgents;
       const showModels = uiSt.stepsSubTab === 'models';
-      const chronoSteps = toChronologicalSteps(steps, isMergedMultiAgents);
-
-      const stepTtftFallbackMap = new Map();
-      const stepModelOptionMap = new Map();
-      for (const st of chronoSteps) {
-        const gk = getStepModelGroupKey(st);
-        if (!stepModelOptionMap.has(gk)) {
-          const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
-          stepModelOptionMap.set(gk, {
-            label: disp.baseText || disp.text || gk,
-            calls: 0,
-          });
-        }
-        stepModelOptionMap.get(gk).calls += 1;
-
-        if (showModels && !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
-          const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
-          prev.sum += Number(st.ttftSec);
-          prev.count += 1;
-          stepTtftFallbackMap.set(gk, prev);
-        }
-      }
 
       const availableModelKeys = new Set();
       const modelColorByGroup = new Map();
       const perModelOptions = [];
+      let breakdownCalls = 0;
       for (const m of models) {
+        if (!m || typeof m !== 'object') continue;
+        breakdownCalls += Math.max(0, Number(m.calls || 0));
         const gk = getStepModelGroupKey(m);
         if (availableModelKeys.has(gk)) continue;
         availableModelKeys.add(gk);
@@ -20727,18 +21736,35 @@ const StepsDetailView = defineComponent({
           meta: t('header.convMetaSteps', { count: Number(m.calls || 0) }),
         });
       }
-      for (const [gk, info] of stepModelOptionMap.entries()) {
-        if (!availableModelKeys.has(gk)) {
-          availableModelKeys.add(gk);
-          modelColorByGroup.set(
-            gk,
-            MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
-          );
-          perModelOptions.push({
-            value: gk,
-            label: info.label,
-            meta: t('header.convMetaSteps', { count: info.calls }),
-          });
+
+      const needStepModelFallback =
+        steps.length > 0 && (models.length === 0 || breakdownCalls < steps.length);
+      if (needStepModelFallback) {
+        const stepModelOptionMap = new Map();
+        for (const st of steps) {
+          const gk = getStepModelGroupKey(st);
+          if (!stepModelOptionMap.has(gk)) {
+            const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
+            stepModelOptionMap.set(gk, {
+              label: disp.baseText || disp.text || gk,
+              calls: 0,
+            });
+          }
+          stepModelOptionMap.get(gk).calls += 1;
+        }
+        for (const [gk, info] of stepModelOptionMap.entries()) {
+          if (!availableModelKeys.has(gk)) {
+            availableModelKeys.add(gk);
+            modelColorByGroup.set(
+              gk,
+              MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
+            );
+            perModelOptions.push({
+              value: gk,
+              label: info.label,
+              meta: t('header.convMetaSteps', { count: info.calls }),
+            });
+          }
         }
       }
 
@@ -20814,6 +21840,23 @@ const StepsDetailView = defineComponent({
           allowNewRowFade: shouldAnimateNewRows,
         });
         stepsScroll.refresh();
+        fitPinnedWhileVisible = false;
+        return;
+      }
+
+      const chronoSteps = getMemoizedChronoSteps(steps, isMergedMultiAgents);
+      const stepTtftFallbackMap = new Map();
+      const needTtftFallback = models.some((m) => m && m.avgTtftSec == null);
+      if (needTtftFallback) {
+        for (const st of chronoSteps) {
+          if (!st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
+            const gk = getStepModelGroupKey(st);
+            const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
+            prev.sum += Number(st.ttftSec);
+            prev.count += 1;
+            stepTtftFallbackMap.set(gk, prev);
+          }
+        }
       }
 
       // 2. 顶部“会话走势”更新
@@ -20833,15 +21876,11 @@ const StepsDetailView = defineComponent({
         ? ['__all__']
         : Array.from(new Set(fitLockedModelKeys.filter((k) => availableModelKeys.has(k))));
 
-      if (!showModels) {
-        fitPinnedWhileVisible = false;
-      }
       if ((!fitPinnedWhileVisible && !fitUserPicked) || sanitizedLocked.length === 0) {
         fitLockedModelKeys = [defaultActiveModelKey];
       } else {
         fitLockedModelKeys = sanitizedLocked;
       }
-      if (!showModels) return;
       if (availableModelKeys.size > 0) fitPinnedWhileVisible = true;
 
       patchAttr(lineModelSelect.el, 'hidden', !hasMultipleModels);
@@ -21114,6 +22153,7 @@ const StepsDetailView = defineComponent({
         if (getVisibleMonitorView() === 'steps' && latestSlice) {
           renderStepsData(latestSlice);
         } else if (tab === 'steps') {
+          refreshStepTableViewport();
           stepsScroll.refresh();
         } else {
           modelsScroll.refresh();
@@ -21238,6 +22278,7 @@ const StepsDetailView = defineComponent({
         fitMetricSwitch,
         stepsScroll,
         modelsScroll,
+        refreshStepTableViewport,
       },
     };
   },
@@ -21547,6 +22588,7 @@ const App = defineComponent({
         } else if (activeView === 'consumption') {
           consumptionView.refs?.viewScrollbar?.refresh();
         } else if (activeView === 'steps') {
+          stepsView.refs?.refreshStepTableViewport?.();
           stepsView.refs?.stepsScroll?.refresh();
           stepsView.refs?.modelsScroll?.refresh();
         } else if (activeView === 'settings') {
@@ -23777,6 +24819,7 @@ function mountWindowOverlay() {
     } else if (activeView === 'consumption') {
       refs?.consumptionView?.refs?.viewScrollbar?.refresh();
     } else if (activeView === 'steps') {
+      refs?.stepsView?.refs?.refreshStepTableViewport?.();
       refs?.stepsView?.refs?.stepsScroll?.refresh();
       refs?.stepsView?.refs?.modelsScroll?.refresh();
     } else if (activeView === 'settings') {

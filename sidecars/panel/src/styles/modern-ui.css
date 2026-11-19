@@ -494,7 +494,7 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
   border-bottom: none;
 }
 
-[data-modern-ui="true"] .data-table tbody tr {
+[data-modern-ui="true"] .data-table tbody tr:not(.step-vspacer):not(.step-vsizer) {
   transition: background-color 130ms var(--ease-modern);
 }
 
@@ -506,11 +506,13 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
   animation: anim-modern-step-cell-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-[data-modern-ui="true"] .data-table tbody tr:nth-child(even) {
+[data-modern-ui="true"] .data-table:not(.is-virtualized) tbody tr:nth-child(even),
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even {
   background: var(--modern-stripe-bg);
 }
 
-[data-modern-ui="true"] .data-table tbody tr:hover {
+[data-modern-ui="true"] .data-table tbody tr:not(.step-vspacer):not(.step-vsizer):hover,
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even:hover {
   background: var(--modern-surface-hover);
 }
 

@@ -119,6 +119,7 @@ export const App = defineComponent({
         } else if (activeView === 'consumption') {
           consumptionView.refs?.viewScrollbar?.refresh();
         } else if (activeView === 'steps') {
+          stepsView.refs?.refreshStepTableViewport?.();
           stepsView.refs?.stepsScroll?.refresh();
           stepsView.refs?.modelsScroll?.refresh();
         } else if (activeView === 'settings') {

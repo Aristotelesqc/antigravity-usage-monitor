@@ -260,8 +260,10 @@ export const StepsDetailView = defineComponent({
     });
 
     // --- 子视图 1：单步明细表（委托给可复用的 `StepTableWidget` 解耦组件） ---
+    let stepsScroll = null;
     const stepTableWidget = StepTableWidget({
       onSelectAgentScopes: applyAgentScopesSelection,
+      onVirtualHeightChange: () => stepsScroll?.refresh(),
     });
     const {
       stepsTablePane,
@@ -272,8 +274,9 @@ export const StepsDetailView = defineComponent({
       hideTurnTip,
       syncTableHeaderColumns,
       renderStepTable,
+      refreshViewport: refreshStepTableViewport,
     } = stepTableWidget.refs;
-    const stepsScroll = CustomScrollbar({
+    stepsScroll = CustomScrollbar({
       contentEl: stepsTablePane,
       className: 'table-scroll-host',
     });
@@ -432,6 +435,19 @@ export const StepsDetailView = defineComponent({
 
     let latestSlice = null;
     let isDirty = false;
+    let cachedChronoSrc = null;
+    let cachedChronoMerged = false;
+    let cachedChronoOut = [];
+
+    function getMemoizedChronoSteps(steps, isMergedMultiAgents) {
+      if (cachedChronoSrc === steps && cachedChronoMerged === isMergedMultiAgents) {
+        return cachedChronoOut;
+      }
+      cachedChronoSrc = steps;
+      cachedChronoMerged = isMergedMultiAgents;
+      cachedChronoOut = toChronologicalSteps(steps, isMergedMultiAgents);
+      return cachedChronoOut;
+    }
 
     function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
       if (scopedConv?.hasKnownModel !== false) {
@@ -618,33 +634,14 @@ export const StepsDetailView = defineComponent({
 
       const showAgentPrefix = isMergedMultiAgents;
       const showModels = uiSt.stepsSubTab === 'models';
-      const chronoSteps = toChronologicalSteps(steps, isMergedMultiAgents);
-
-      const stepTtftFallbackMap = new Map();
-      const stepModelOptionMap = new Map();
-      for (const st of chronoSteps) {
-        const gk = getStepModelGroupKey(st);
-        if (!stepModelOptionMap.has(gk)) {
-          const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
-          stepModelOptionMap.set(gk, {
-            label: disp.baseText || disp.text || gk,
-            calls: 0,
-          });
-        }
-        stepModelOptionMap.get(gk).calls += 1;
-
-        if (showModels && !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
-          const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
-          prev.sum += Number(st.ttftSec);
-          prev.count += 1;
-          stepTtftFallbackMap.set(gk, prev);
-        }
-      }
 
       const availableModelKeys = new Set();
       const modelColorByGroup = new Map();
       const perModelOptions = [];
+      let breakdownCalls = 0;
       for (const m of models) {
+        if (!m || typeof m !== 'object') continue;
+        breakdownCalls += Math.max(0, Number(m.calls || 0));
         const gk = getStepModelGroupKey(m);
         if (availableModelKeys.has(gk)) continue;
         availableModelKeys.add(gk);
@@ -662,18 +659,35 @@ export const StepsDetailView = defineComponent({
           meta: t('header.convMetaSteps', { count: Number(m.calls || 0) }),
         });
       }
-      for (const [gk, info] of stepModelOptionMap.entries()) {
-        if (!availableModelKeys.has(gk)) {
-          availableModelKeys.add(gk);
-          modelColorByGroup.set(
-            gk,
-            MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
-          );
-          perModelOptions.push({
-            value: gk,
-            label: info.label,
-            meta: t('header.convMetaSteps', { count: info.calls }),
-          });
+
+      const needStepModelFallback =
+        steps.length > 0 && (models.length === 0 || breakdownCalls < steps.length);
+      if (needStepModelFallback) {
+        const stepModelOptionMap = new Map();
+        for (const st of steps) {
+          const gk = getStepModelGroupKey(st);
+          if (!stepModelOptionMap.has(gk)) {
+            const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
+            stepModelOptionMap.set(gk, {
+              label: disp.baseText || disp.text || gk,
+              calls: 0,
+            });
+          }
+          stepModelOptionMap.get(gk).calls += 1;
+        }
+        for (const [gk, info] of stepModelOptionMap.entries()) {
+          if (!availableModelKeys.has(gk)) {
+            availableModelKeys.add(gk);
+            modelColorByGroup.set(
+              gk,
+              MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
+            );
+            perModelOptions.push({
+              value: gk,
+              label: info.label,
+              meta: t('header.convMetaSteps', { count: info.calls }),
+            });
+          }
         }
       }
 
@@ -749,6 +763,23 @@ export const StepsDetailView = defineComponent({
           allowNewRowFade: shouldAnimateNewRows,
         });
         stepsScroll.refresh();
+        fitPinnedWhileVisible = false;
+        return;
+      }
+
+      const chronoSteps = getMemoizedChronoSteps(steps, isMergedMultiAgents);
+      const stepTtftFallbackMap = new Map();
+      const needTtftFallback = models.some((m) => m && m.avgTtftSec == null);
+      if (needTtftFallback) {
+        for (const st of chronoSteps) {
+          if (!st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
+            const gk = getStepModelGroupKey(st);
+            const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
+            prev.sum += Number(st.ttftSec);
+            prev.count += 1;
+            stepTtftFallbackMap.set(gk, prev);
+          }
+        }
       }
 
       // 2. 顶部“会话走势”更新
@@ -768,15 +799,11 @@ export const StepsDetailView = defineComponent({
         ? ['__all__']
         : Array.from(new Set(fitLockedModelKeys.filter((k) => availableModelKeys.has(k))));
 
-      if (!showModels) {
-        fitPinnedWhileVisible = false;
-      }
       if ((!fitPinnedWhileVisible && !fitUserPicked) || sanitizedLocked.length === 0) {
         fitLockedModelKeys = [defaultActiveModelKey];
       } else {
         fitLockedModelKeys = sanitizedLocked;
       }
-      if (!showModels) return;
       if (availableModelKeys.size > 0) fitPinnedWhileVisible = true;
 
       patchAttr(lineModelSelect.el, 'hidden', !hasMultipleModels);
@@ -1049,6 +1076,7 @@ export const StepsDetailView = defineComponent({
         if (getVisibleMonitorView() === 'steps' && latestSlice) {
           renderStepsData(latestSlice);
         } else if (tab === 'steps') {
+          refreshStepTableViewport();
           stepsScroll.refresh();
         } else {
           modelsScroll.refresh();
@@ -1173,6 +1201,7 @@ export const StepsDetailView = defineComponent({
         fitMetricSwitch,
         stepsScroll,
         modelsScroll,
+        refreshStepTableViewport,
       },
     };
   },

@@ -2203,6 +2203,7 @@ export function mountWindowOverlay() {
     } else if (activeView === 'consumption') {
       refs?.consumptionView?.refs?.viewScrollbar?.refresh();
     } else if (activeView === 'steps') {
+      refs?.stepsView?.refs?.refreshStepTableViewport?.();
       refs?.stepsView?.refs?.stepsScroll?.refresh();
       refs?.stepsView?.refs?.modelsScroll?.refresh();
     } else if (activeView === 'settings') {

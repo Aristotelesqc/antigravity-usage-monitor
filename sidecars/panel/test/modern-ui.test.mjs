@@ -14,6 +14,7 @@ import {
   parseCssColorLuminance,
 } from '../src/core/appearance.js';
 import { createTrendAreaChart } from '../src/components/charts/TrendAreaChart.js';
+import { computePublicationFit } from '../src/components/charts/SessionStepCharts.js';
 import { SegmentedControl } from '../src/components/ui/SegmentedControl.js';
 import { ContextWindowWidget } from '../src/components/widgets/ContextWindowWidget.js';
 import { LiveActivityWidget } from '../src/components/widgets/LiveActivityWidget.js';
@@ -760,4 +761,230 @@ test('saveSettingsPatch prevents stale in-flight telemetry polls from snapping s
   assert.equal(telemetryStore.getState().telemetry.activeConversation.stepCount, 3);
   assert.equal(telemetryStore.getState().telemetry.settings.experimentalModernUi, true);
   assert.equal(telemetryStore.getState().telemetry.settings.fontScale, 'lg');
+});
+
+test('StepTableWidget virtualizes large sessions (>80 rows) with exact turn-rail boundaries, stable zebra parity, live fade-in, and zero blank top gap on tab return', (t) => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { document: mockDoc } = createMockDom();
+  globalThis.document = mockDoc;
+  globalThis.window = {
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  t.after(() => {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  });
+
+  const stepTable = StepTableWidget({});
+  const { stepsTablePane, stepsTableEl, stepsTbody, renderStepTable } = stepTable.refs;
+  stepsTablePane.clientHeight = 500;
+  stepsTablePane.clientWidth = 520;
+  stepsTablePane.scrollTop = 0;
+
+  const cols = ['step', 'model', 'tps', 'ttft', 'tokens_combo', 'cache', 'cost'];
+  const makeStep = (idx, extra = {}) => ({
+    stepIndex: idx,
+    modelShort: idx % 5 === 0 ? '4-neon' : '4-carbon',
+    tokPerSec: idx % 17 === 0 ? null : 62.5,
+    selectedSpeedReason: idx % 17 === 0 ? 'below_min_output' : null,
+    ttftSec: 1.2,
+    inputTokens: 1200,
+    cacheReadTokens: 80000,
+    outputTokens: 600,
+    thinkingTokens: 200,
+    responseTokens: 400,
+    contextTokens: 81800,
+    cacheHitPct: 98.5,
+    costUsd: 0.021,
+    turnIndex: Math.floor((idx - 1) / 4) + 1,
+    isTurnStart: (idx - 1) % 4 === 0,
+    isLatestTurn: idx > 1718,
+    turnPromptClean: `Turn ${Math.floor((idx - 1) / 4) + 1}`,
+    ...extra,
+  });
+
+  // 1. Small dataset (<=80 rows) stays direct without virtualization or spacers
+  const smallSteps = Array.from({ length: 12 }, (_, i) => makeStep(12 - i));
+  renderStepTable(smallSteps, 'conv-small', cols, 'zh-CN', {
+    showStepTurnRail: true,
+    allConversationSteps: smallSteps,
+    allowNewRowFade: false,
+  });
+  assert.equal(stepsTableEl.classList.contains('is-virtualized'), false);
+  assert.equal(stepsTbody.children.length, 12);
+  assert.equal(
+    stepsTbody.children.some((tr) => tr.classList.contains('step-vspacer')),
+    false
+  );
+
+  // 2. Large 1,722-step session activates transparent virtual windowing
+  const isRealRow = (tr) =>
+    !tr.classList.contains('step-vspacer') && !tr.classList.contains('step-vsizer');
+  const totalSteps = 1722;
+  const bigSteps = Array.from({ length: totalSteps }, (_, i) =>
+    makeStep(
+      totalSteps - i,
+      i === 900
+        ? { modelShort: '4-hydrogen', modelLabel: 'Gemini 4 Hydrogen', isCompactionStep: true }
+        : {}
+    )
+  );
+  const t0 = performance.now();
+  renderStepTable(bigSteps, 'conv-big', cols, 'zh-CN', {
+    showStepTurnRail: true,
+    allConversationSteps: bigSteps,
+    allowNewRowFade: false,
+  });
+  const initialRenderMs = performance.now() - t0;
+  assert.equal(stepsTableEl.classList.contains('is-virtualized'), true);
+  assert.equal(stepsTableEl.classList.contains('has-turn-rail'), true);
+
+  const initialRealRows = stepsTbody.children.filter(isRealRow);
+  const initialSpacers = stepsTbody.children.filter((tr) => tr.classList.contains('step-vspacer'));
+  const initialSizers = stepsTbody.children.filter((tr) => tr.classList.contains('step-vsizer'));
+  assert.equal(initialSizers.length, 1, 'Virtualized table mounts one zero-height global width sizer row');
+  assert.match(
+    initialSizers[0].children[1].textContent,
+    /4-hydrogen/,
+    'Sizer row pre-measures global widest model from off-screen row #900 on frame 1'
+  );
+  assert.ok(
+    initialRealRows.length >= 25 && initialRealRows.length < 75,
+    `Expected bounded mounted row window, got ${initialRealRows.length}`
+  );
+  assert.equal(initialSpacers.length, 1, 'At scrollTop=0 only bottom spacer should be mounted');
+  assert.equal(initialRealRows[0].children[0].textContent, '#1722');
+  assert.equal(initialRealRows[0].classList.contains('is-stripe-even'), false, 'Logical row 0 is odd');
+  assert.equal(initialRealRows[1].classList.contains('is-stripe-even'), true, 'Logical row 1 is even');
+
+  // 2.5 Hysteresis: small wheel scroll inside overscan margin skips DOM updates completely
+  const initialSnapshot = [...initialRealRows];
+  stepsTablePane.scrollTop = 56;
+  stepsTablePane.dispatchEvent({ type: 'scroll' });
+  const afterSmallScroll = stepsTbody.children.filter(isRealRow);
+  assert.equal(afterSmallScroll.length, initialSnapshot.length);
+  assert.equal(
+    afterSmallScroll[0],
+    initialSnapshot[0],
+    'Small scroll within hysteresis margin must keep mounted rows untouched'
+  );
+
+  // 3. Scrolling mid-table shifts window, mounts both spacers, keeps logical parity & seamless turn-rail boundary
+  const initialRowSet = new Set(initialSnapshot);
+  stepsTablePane.scrollTop = 24000;
+  stepsTablePane.dispatchEvent({ type: 'scroll' });
+  const midRealRows = stepsTbody.children.filter(isRealRow);
+  const midSpacers = stepsTbody.children.filter((tr) => tr.classList.contains('step-vspacer'));
+  assert.equal(midSpacers.length, 2, 'Mid-scroll must mount both top and bottom spacers');
+  assert.ok(midRealRows.length >= 25 && midRealRows.length < 75);
+  assert.equal(
+    midRealRows.some((tr) => tr.classList.contains('is-step-entering')),
+    false,
+    'Scrolling into historical rows must never trigger new-row fade-in animation'
+  );
+
+  // 3.5 Second distant jump recycles pooled <tr> nodes from the first jump (zero fresh allocations)
+  stepsTablePane.scrollTop = 36000;
+  stepsTablePane.dispatchEvent({ type: 'scroll' });
+  const farRealRows = stepsTbody.children.filter(isRealRow);
+  assert.ok(
+    farRealRows.some((tr) => initialRowSet.has(tr)),
+    'Distant jump must recycle previously unmounted <tr> nodes from rowPool'
+  );
+  assert.equal(
+    stepTable.refs.stepsTheadRow.children.every((th) => !th.style.minWidth),
+    true,
+    'Scrolling must never ratchet th.style.minWidth and clip trailing columns'
+  );
+  // Return to mid-table to continue boundary checks
+  stepsTablePane.scrollTop = 24000;
+  stepsTablePane.dispatchEvent({ type: 'scroll' });
+  const midCheckRows = stepsTbody.children.filter(isRealRow);
+
+  // Verify logical zebra parity & turn-rail boundary continuity on first & last mounted mid rows
+  for (const tr of midCheckRows) {
+    const stepNum = Number(tr.children[0].textContent.replace(/^#/, ''));
+    const logicalIdx = totalSteps - stepNum;
+    assert.equal(
+      tr.classList.contains('is-stripe-even'),
+      logicalIdx % 2 === 1,
+      `Row #${stepNum} (logicalIdx=${logicalIdx}) must preserve exact logical zebra parity`
+    );
+  }
+  const firstMidRow = midCheckRows[0];
+  const firstMidStepNum = Number(firstMidRow.children[0].textContent.replace(/^#/, ''));
+  const firstMidIdx = totalSteps - firstMidStepNum;
+  const expectedHasUp = bigSteps[firstMidIdx - 1]?.turnIndex === bigSteps[firstMidIdx]?.turnIndex;
+  const firstMidRail = firstMidRow.querySelector('.turn-rail');
+  assert.ok(firstMidRail, 'Mid-table virtualized row must preserve turn-rail element');
+  assert.equal(
+    firstMidRail.classList.contains('has-up'),
+    expectedHasUp,
+    'First mounted row in virtual window must compute has-up from real adjacent step outside window'
+  );
+
+  // 4. Simulating tab switch away & back (display:none resets scrollTop to 0 with unchanged bigSteps reference)
+  stepsTablePane.scrollTop = 0;
+  renderStepTable(bigSteps, 'conv-big', cols, 'zh-CN', {
+    showStepTurnRail: true,
+    allConversationSteps: bigSteps,
+    allowNewRowFade: false,
+  });
+  const returnedRealRows = stepsTbody.children.filter(isRealRow);
+  const returnedSpacers = stepsTbody.children.filter((tr) => tr.classList.contains('step-vspacer'));
+  assert.equal(returnedSpacers.length, 1, 'Returning to scrollTop=0 must drop top spacer immediately');
+  assert.equal(returnedRealRows[0].children[0].textContent, '#1722');
+
+  // 5. Live new step prepended at top animates ONLY the new row even when virtualized
+  const nextBigSteps = [makeStep(1723, { isLatestTurn: true }), ...bigSteps];
+  renderStepTable(nextBigSteps, 'conv-big', cols, 'zh-CN', {
+    showStepTurnRail: true,
+    allConversationSteps: nextBigSteps,
+    allowNewRowFade: true,
+  });
+  const liveRealRows = stepsTbody.children.filter(isRealRow);
+  assert.equal(liveRealRows[0].children[0].textContent, '#1723');
+  assert.equal(liveRealRows[0].classList.contains('is-step-entering'), true);
+  assert.equal(liveRealRows[1].classList.contains('is-step-entering'), false);
+
+  // 6. Narrowing filter below threshold cleanly exits virtualization
+  const filteredSteps = nextBigSteps.slice(0, 20);
+  renderStepTable(filteredSteps, 'conv-big', cols, 'zh-CN', {
+    showStepTurnRail: true,
+    allConversationSteps: nextBigSteps,
+    allowNewRowFade: false,
+  });
+  assert.equal(stepsTableEl.classList.contains('is-virtualized'), false);
+  assert.equal(stepsTbody.children.length, 20);
+  assert.equal(
+    stepsTbody.children.some((tr) => !isRealRow(tr)),
+    false
+  );
+
+  // Verify compiled CSS ships virtualized zebra striping, sizer, spacer, and overflow-anchor rules
+  const builtStyles = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(builtStyles, /\.data-table\.is-virtualized\s+tbody\s+tr\.is-stripe-even/);
+  assert.match(builtStyles, /\.step-vspacer-cell/);
+  assert.match(builtStyles, /\.step-vsizer-inner/);
+  assert.match(builtStyles, /overflow-anchor:\s*none;/);
+  assert.ok(initialRenderMs < 150, `Virtualized 1722-row initial render should stay fast (was ${initialRenderMs.toFixed(1)}ms)`);
+
+  // 7. Large-N LOESS grid interpolation tracks trends accurately without O(N^2) stalls
+  const loessXs = Array.from({ length: totalSteps }, (_, i) => i + 1);
+  const loessYs = loessXs.map((x) => 80 - 30 * (x / totalSteps) + ((x * 17) % 9) - 4);
+  const lt0 = performance.now();
+  const bigFit = computePublicationFit(loessXs, loessYs, { minVal: 0 });
+  const loessMs = performance.now() - lt0;
+  assert.equal(bigFit.method, 'LOESS');
+  assert.equal(bigFit.grid.length, 64);
+  assert.equal(bigFit.sampleFits.length, totalSteps);
+  assert.ok(bigFit.sampleFits[0] > 76 && bigFit.sampleFits[totalSteps - 1] < 54);
+  assert.ok(bigFit.r2 > 0.85, `Expected high R² on smooth downward trend, got ${bigFit.r2}`);
+  assert.ok(bigFit.grid.every((g) => g.ciLow <= g.fit + 1e-9 && g.fit <= g.ciHigh + 1e-9));
+  assert.ok(loessMs < 80, `Interpolated 1722-sample LOESS should stay fast (was ${loessMs.toFixed(1)}ms)`);
+
+  stepTable.destroy();
 });

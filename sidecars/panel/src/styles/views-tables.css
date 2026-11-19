@@ -29,6 +29,7 @@
 
 .table-viewport.is-step-table {
   overflow-x: auto;
+  overflow-anchor: none;
 }
 
 /* --- 2. 粘性表头数据表 (Sticky-Header Data Table) --- */
@@ -72,8 +73,42 @@
   font-weight: 600;
 }
 
-.data-table tbody tr:hover {
+.data-table tbody tr:not(.step-vspacer):not(.step-vsizer):hover {
   background: var(--surface-hover);
+}
+
+.data-table tbody tr.step-vspacer,
+.data-table tbody tr.step-vspacer:hover,
+.data-table tbody tr.step-vsizer,
+.data-table tbody tr.step-vsizer:hover {
+  background: transparent !important;
+  pointer-events: none;
+}
+
+.data-table tbody tr.step-vsizer {
+  visibility: hidden;
+  height: 0;
+}
+
+.data-table tbody tr.step-vsizer td {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border: none !important;
+  line-height: 0;
+  height: 0;
+}
+
+.step-vsizer-inner {
+  display: block;
+  height: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.data-table tbody tr.step-vspacer td.step-vspacer-cell {
+  padding: 0 !important;
+  border: none !important;
+  line-height: 0;
 }
 
 .step-model-cell {
