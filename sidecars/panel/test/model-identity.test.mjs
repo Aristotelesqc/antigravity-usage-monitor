@@ -182,7 +182,7 @@ test('empty session does not invent an Argon model or a model quota pool', async
 });
 
 test('unknown single-step cost renders as pending while aggregate subtotals omit pending suffix', () => {
-  assert.equal(formatUsd(null),'待定'); assert.equal(formatUsd(0),'$0.00');
+  assert.equal(formatUsd(null),'En attente'); assert.equal(formatUsd(0),'$0.00');
   assert.equal(formatUsd(0.1,{unpricedCalls:1}),'$0.10');
 });
 
@@ -454,7 +454,7 @@ test('orchestratorIdMode defaults to compact, persists via settings action, and 
     );
     assert.equal(
       resolveModelDisplayInfo(orchWorkerCompaction, { showUpstreamModel, orchestratorIdMode: 'compact' }).text,
-      'worker-agy-hydrogen·压缩'
+      'worker-agy-hydrogen·compact'
     );
     assert.equal(
       resolveModelDisplayInfo(orchCarbon, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
@@ -466,7 +466,7 @@ test('orchestratorIdMode defaults to compact, persists via settings action, and 
     );
     assert.equal(
       resolveModelDisplayInfo(orchWorkerCompaction, { showUpstreamModel, orchestratorIdMode: 'full' }).text,
-      'gemini-flash-worker-agy (hydrogen-4)·压缩'
+      'gemini-flash-worker-agy (hydrogen-4)·compact'
     );
   }
 

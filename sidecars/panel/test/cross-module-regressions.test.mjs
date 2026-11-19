@@ -464,11 +464,11 @@ test('BUG-09, BUG-14 & BUG-15: SemVer 2.0 prerelease/build ordering, future-only
   assert.equal(claudePool.remainingPct, 40);
   assert.equal(claudePool.weeklyRemainingPct, 80);
 
-  assert.equal(formatCountdown(new Date(nowMs + 30_000).toISOString(), nowMs), '<1分钟后重置');
-  assert.equal(formatCountdown('1969-12-31T23:59:59Z', nowMs), '未知重置时间');
+  assert.equal(formatCountdown(new Date(nowMs + 30_000).toISOString(), nowMs), 'Réinit. dans <1m');
+  assert.equal(formatCountdown('1969-12-31T23:59:59Z', nowMs), 'Réinit. inconnue');
   assert.equal(formatUsd(0.0004, { precise: true }), '<$0.001');
   assert.equal(formatUsd(12.34, { unpricedCalls: 1, compactPending: true }), '$12.34');
-  assert.equal(speedReasonText('short_timing'), '耗时过短 (<0.5s)');
+  assert.equal(speedReasonText('short_timing'), 'Trop court (<0,5 s)');
 });
 
 test('BUG-17 & CANCEL-06: extractContextBreakdown classifies messagePrompts when children are empty and blocks post-compaction carryover', () => {

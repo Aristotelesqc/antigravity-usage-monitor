@@ -31,7 +31,7 @@ import {
   resolveDeterministicModelColor,
 } from '../core/formatters.js';
 import { scaleBucketsExact } from '../../shared/telemetry-display-rules.mjs';
-import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
+import { getEffectiveLocale, i18nStore, isEnglishLocale, t } from '../i18n/index.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
 import {
   prefetchConsumptionPresets,
@@ -1139,7 +1139,7 @@ export const ConsumptionView = defineComponent({
       ]);
 
       // 2. 同步历史趋势交互式 SVG 面积图 / 类 GitHub 每日热力图（>90天）与悬停分模型浮层
-      const rangeBadgeText = isEnglishLocale()
+      const rangeBadgeText = getEffectiveLocale() !== 'zh-CN'
         ? getConsumptionTimeRangeOptions().find((o) => o.value === slice.range)?.label ||
           t('cons.allTime')
         : preset?.label || rangeInfo.label || t('cons.allTime');

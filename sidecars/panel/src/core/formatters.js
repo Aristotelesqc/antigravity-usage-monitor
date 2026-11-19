@@ -3,7 +3,9 @@
  * USD estimates, countdown timers, and custom datetime displays.
  */
 
-import { isEnglishLocale, t } from '../i18n/index.js';
+import { getEffectiveLocale, isEnglishLocale, isFrenchLocale, t } from '../i18n/index.js';
+
+const FR_MONTH_SHORT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 import {
   normalizeModelDisplayMode,
   normalizeOrchestratorIdMode,
@@ -76,6 +78,14 @@ export function formatCnyApprox(usdAmount, rate = 7.2) {
 export function formatDateSpanBadge(startMs, endMs) {
   const s = startMs && Number.isFinite(startMs) ? new Date(startMs) : new Date();
   const e = endMs && Number.isFinite(endMs) ? new Date(endMs) : new Date();
+  if (isFrenchLocale()) {
+    const sMon = FR_MONTH_SHORT[s.getMonth()] || '';
+    const eMon = FR_MONTH_SHORT[e.getMonth()] || '';
+    if (s.getFullYear() !== e.getFullYear()) {
+      return `${s.getDate()} ${sMon} ${s.getFullYear()} ~ ${e.getDate()} ${eMon} ${e.getFullYear()}`;
+    }
+    return `${s.getDate()} ${sMon} ~ ${e.getDate()} ${eMon}`;
+  }
   if (isEnglishLocale()) {
     const sMon = EN_MONTH_SHORT[s.getMonth()] || '';
     const eMon = EN_MONTH_SHORT[e.getMonth()] || '';
@@ -706,7 +716,7 @@ export function formatAgentBadgeText(agent) {
   if (kind === 'side_question') {
     const ord = Number(agent.agentOrdinal || agent.sideIndex || 0);
     if (ord > 0) return t('fmt.sideBadge', { index: ord });
-    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    if (getEffectiveLocale() === 'zh-CN' && agent.badgeText) return String(agent.badgeText);
     return t('fmt.sideBadgeShort');
   }
   if (kind === 'swarm_worker') {
@@ -717,7 +727,7 @@ export function formatAgentBadgeText(agent) {
   }
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   if (ord > 0) return t('fmt.subBadge', { index: ord });
-  if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+  if (getEffectiveLocale() === 'zh-CN' && agent.badgeText) return String(agent.badgeText);
   return t('fmt.subBadgeShort');
 }
 

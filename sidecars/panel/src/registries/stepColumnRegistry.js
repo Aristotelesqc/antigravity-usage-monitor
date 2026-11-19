@@ -19,7 +19,7 @@ import {
   resolveModelDisplayInfo,
   speedReasonText,
 } from '../core/formatters.js';
-import { t } from '../i18n/index.js';
+import { isFrenchLocale, t } from '../i18n/index.js';
 import {
   DEFAULT_STEP_TABLE_COLUMNS,
   DEFAULT_STEP_TOKEN_COMBO_FORMAT,
@@ -49,7 +49,7 @@ function resolveStepTokenParts(st) {
 }
 
 function formatPartWithOptionalCost(tokCount, costVal) {
-  const countStr = Math.round(Number(tokCount || 0)).toLocaleString();
+  const countStr = Math.round(Number(tokCount || 0)).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US');
   if (costVal != null && Number.isFinite(Number(costVal))) {
     return `${countStr} (${formatUsd(Number(costVal), { precise: true })})`;
   }
@@ -66,7 +66,7 @@ function resolveSegmentDisplay(seg, parts, st) {
     case 'context':
       return {
         short: formatTokens(parts.ctxTok),
-        tip: `${t('steps.tokSeg.context.tip')} ${Math.round(parts.ctxTok).toLocaleString()}`,
+        tip: `${t('steps.tokSeg.context.tip')} ${Math.round(parts.ctxTok).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US')}`,
       };
     case 'in':
       return {
@@ -86,12 +86,12 @@ function resolveSegmentDisplay(seg, parts, st) {
     case 'think':
       return {
         short: formatTokens(parts.thinkTok),
-        tip: `${t('steps.tokSeg.think.tip')} ${Math.round(parts.thinkTok).toLocaleString()}`,
+        tip: `${t('steps.tokSeg.think.tip')} ${Math.round(parts.thinkTok).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US')}`,
       };
     case 'reply':
       return {
         short: formatTokens(parts.respTok),
-        tip: `${t('steps.tokSeg.reply.tip')} ${Math.round(parts.respTok).toLocaleString()}`,
+        tip: `${t('steps.tokSeg.reply.tip')} ${Math.round(parts.respTok).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US')}`,
       };
     case 'total':
     default:

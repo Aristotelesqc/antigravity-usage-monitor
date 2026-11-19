@@ -7,7 +7,7 @@
 import { defineComponent } from '../../core/component.js';
 import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
-import { setI18nLanguage, t } from '../../i18n/index.js';
+import { isFrenchLocale, setI18nLanguage, t } from '../../i18n/index.js';
 import {
   normalizeClientModelDisplayMode,
   normalizeClientOrchestratorIdMode,
@@ -292,7 +292,7 @@ export const SettingsOtherTab = defineComponent({
         const legacy = new Set(members.map((member) => saved[member]).filter(Boolean));
         return saved[id] || (legacy.size > 1 ? mixed : legacy.values().next().value) || '';
       };
-      const formatLimit = (value) => /^\d+$/.test(value) ? t('settings.oth.ctxTokens', { count: Number(value).toLocaleString() }) : value;
+      const formatLimit = (value) => /^\d+$/.test(value) ? t('settings.oth.ctxTokens', { count: Number(value).toLocaleString(isFrenchLocale() ? 'fr-FR' : 'en-US') }) : value;
       const isAvailable = (model, value) => model.options.some(({ name }) => name === value) ||
         (/^[1-9]\d*$/.test(value) && Number(value) <= model.capacity);
       const current = models.get(contextModelId);

@@ -27,8 +27,9 @@ import { SegmentedControl } from '../../components/ui/SegmentedControl.js';
 
 function getLanguageOptions() {
   return [
-    { value: 'zh-CN', label: t('settings.gen.langZh') },
+    { value: 'fr-FR', label: t('settings.gen.langFr') },
     { value: 'en-US', label: t('settings.gen.langEn') },
+    { value: 'zh-CN', label: t('settings.gen.langZh') },
     { value: 'auto', label: t('settings.gen.langAuto') },
   ];
 }
@@ -73,7 +74,7 @@ function formatCloudSyncTimeText(tsMs, updatedAt) {
 export const SettingsGeneralTab = defineComponent({
   name: 'SettingsGeneralTab',
   setup({ props, onCleanup }) {
-    let draftLanguage = 'zh-CN';
+    let draftLanguage = 'fr-FR';
     let draftThemeAccent = 'host';
     let draftFontScale = 'md';
     let draftModernUi = false;

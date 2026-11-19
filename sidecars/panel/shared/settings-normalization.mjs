@@ -2,7 +2,7 @@
  * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
  */
 
-export const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'zh-CN', 'en-US']);
+export const SUPPORTED_LANGUAGES = Object.freeze(['auto', 'fr-FR', 'en-US', 'zh-CN']);
 
 export const THEME_ACCENT_KEYS = Object.freeze([
   'host',
@@ -149,12 +149,13 @@ export const DEFAULT_POPOVER_WIDTH = 580;
  */
 export function normalizeLanguageSetting(lang) {
   const raw = String(lang ?? '').trim();
-  if (!raw) return 'zh-CN';
+  if (!raw) return 'fr-FR';
   const lower = raw.toLowerCase();
   if (lower === 'auto' || lower === 'system') return 'auto';
+  if (lower === 'fr' || lower === 'fr-fr' || lower.startsWith('fr-')) return 'fr-FR';
   if (lower === 'en' || lower === 'en-us' || lower.startsWith('en-')) return 'en-US';
   if (lower === 'zh' || lower === 'zh-cn' || lower.startsWith('zh')) return 'zh-CN';
-  return 'zh-CN';
+  return 'fr-FR';
 }
 
 /**

@@ -522,6 +522,7 @@ export function buildBundle(panelDir = PANEL_DIR) {
     'src/icons/svgRegistry.js',
     'src/icons/SvgIcon.js',
     'src/core/reactive.js',
+    'src/i18n/fr-FR.js',
     'src/i18n/zh-CN.js',
     'src/i18n/en-US.js',
     'src/i18n/index.js',

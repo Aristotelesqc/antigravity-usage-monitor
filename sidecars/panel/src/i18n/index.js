@@ -5,12 +5,14 @@
 
 import { createReactiveStore } from '../core/reactive.js';
 import { normalizeLanguageSetting } from '../../shared/settings-normalization.mjs';
+import { I18N_MESSAGES_FR_FR } from './fr-FR.js';
 import { I18N_MESSAGES_ZH_CN } from './zh-CN.js';
 import { I18N_MESSAGES_EN_US } from './en-US.js';
 
 export const I18N_DICTIONARIES = Object.freeze({
-  'zh-CN': I18N_MESSAGES_ZH_CN,
+  'fr-FR': I18N_MESSAGES_FR_FR,
   'en-US': I18N_MESSAGES_EN_US,
+  'zh-CN': I18N_MESSAGES_ZH_CN,
 });
 
 export function normalizeI18nLanguage(raw) {
@@ -20,17 +22,20 @@ export function normalizeI18nLanguage(raw) {
 export function detectHostSystemLocale() {
   try {
     if (typeof navigator !== 'undefined' && navigator.language) {
-      return String(navigator.language).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en-US';
+      const nav = String(navigator.language).toLowerCase();
+      if (nav.startsWith('fr')) return 'fr-FR';
+      if (nav.startsWith('zh')) return 'zh-CN';
+      return 'en-US';
     }
   } catch {
     // Ignore environment navigator read errors
   }
-  return 'zh-CN';
+  return 'fr-FR';
 }
 
 export const i18nStore = createReactiveStore({
-  language: 'zh-CN',
-  locale: 'zh-CN',
+  language: 'fr-FR',
+  locale: 'fr-FR',
 });
 
 export function setI18nLanguage(rawLang) {
@@ -44,7 +49,11 @@ export function setI18nLanguage(rawLang) {
 }
 
 export function getEffectiveLocale() {
-  return i18nStore.getState().locale || 'zh-CN';
+  return i18nStore.getState().locale || 'fr-FR';
+}
+
+export function isFrenchLocale() {
+  return getEffectiveLocale() === 'fr-FR';
 }
 
 export function isEnglishLocale() {

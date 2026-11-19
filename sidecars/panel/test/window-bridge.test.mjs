@@ -1424,9 +1424,10 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(mockSettings.experimentalModernUi, false);
     assert.equal(portalHost.hasAttribute('data-modern-ui'), false);
     assert.equal(popoverEl.hasAttribute('data-modern-ui'), false);
-    assert.equal(langBtns.length, 3, 'Language switch has 简体中文 / English / 跟随宿主');
-    assert.equal(langBtns[0].textContent, '简体中文');
-    assert.equal(langBtns[0].classList.contains('is-active'), true, 'Default language is zh-CN');
+    assert.equal(langBtns.length, 4, 'Language switch has Français / English / 简体中文 / Système');
+    assert.equal(langBtns[0].textContent, 'Français');
+    assert.equal(langBtns[2].textContent, '简体中文');
+    assert.equal(langBtns[2].classList.contains('is-active'), true, 'Mock settings language is zh-CN');
     const generalSelects = generalPane.querySelectorAll('.custom-select');
     assert.equal(generalSelects.length, 1, 'General tab has Update Mode select');
     const updateModeSelectEl = generalSelects[0];
@@ -1466,7 +1467,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(portalHost.getAttribute('data-font-scale'), 'md');
     assert.equal(popoverEl.getAttribute('data-font-scale'), 'md');
 
-    // Live i18n switch: zh-CN -> en-US -> zh-CN without page reload
+    // Live i18n switch: zh-CN -> en-US -> fr-FR -> zh-CN without page reload
     langBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.language, 'en-US');
@@ -1476,6 +1477,11 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(subNavBtns[1].textContent, 'Structure');
     assert.equal(subNavBtns[2].textContent, 'Other');
     langBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.language, 'fr-FR');
+    assert.equal(pillTabs[0].querySelector('.pill-tab-label').textContent, 'En direct');
+    assert.equal(subNavBtns[0].textContent, 'Général');
+    langBtns[2].dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(mockSettings.language, 'zh-CN');
     assert.equal(pillTabs[0].querySelector('.pill-tab-label').textContent, '实时监控');

@@ -2,11 +2,11 @@
   "name": "usage-monitor",
   "displayName": "Usage & Speed Monitor",
   "version": "1.5.2",
-  "description": "实时查看生成速度、首字延迟、上下文占用、可用额度及历史用量。",
+  "description": "Suivi en temps réel : vitesse (TPS), latence (TTFT), contexte, quotas et historique. / Real-time TPS, TTFT, context, quotas & history.",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
-    "打开用量监控面板",
-    "查看当前会话的 Token 消耗",
-    "查看今日和本周的模型用量明细"
+    "Ouvrir le moniteur d'utilisation",
+    "Voir la consommation de tokens de la session active",
+    "Open Usage Monitor and check daily & weekly usage"
   ]
 }

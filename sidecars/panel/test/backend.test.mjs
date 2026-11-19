@@ -1057,7 +1057,7 @@ test('preferences schema defaults match pre-refactor UI, migrate legacy none slo
   // 1. Default schema matches pre-refactor out-of-box UI 100%
   const hDefault = backendHarness({});
   const def = hDefault.loadSettings();
-  assert.equal(def.language, 'zh-CN');
+  assert.equal(def.language, 'fr-FR');
   assert.equal(def.themeAccent, 'host');
   assert.equal(def.fontScale, 'md');
   assert.equal(def.pluginUpdateMode, 'manual');
