@@ -494,7 +494,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
               '-NoProfile',
               '-NonInteractive',
               '-Command',
-              `Expand-Archive -LiteralPath '${zipFile.replace(/'/g, "''")}' -DestinationPath '${extractDir.replace(/'/g, "''")}' -Force`,
+              `Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${zipFile.replace(/'/g, "''")}', '${extractDir.replace(/'/g, "''")}')`,
             ]);
           } else {
             await runExecFile('unzip', ['-oq', zipFile, '-d', extractDir]);

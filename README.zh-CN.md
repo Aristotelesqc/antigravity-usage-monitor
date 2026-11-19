@@ -117,30 +117,12 @@ Google Antigravity 2.0、Antigravity IDE 与 Antigravity CLI 的本地用量、�
 
 插件目录名需保持为 `usage-monitor`，**无需运行 `npm install`**。
 
-### 方式一：Git 克隆
-
-```powershell
-# Windows PowerShell
-git clone https://github.com/yuhuan-dev/antigravity-usage-monitor.git "$env:USERPROFILE\.gemini\config\plugins\usage-monitor"
-```
-
-```bash
-# macOS / Linux
-git clone https://github.com/yuhuan-dev/antigravity-usage-monitor.git ~/.gemini/config/plugins/usage-monitor
-```
-
-也可以直接在 Antigravity 对话中执行：
-
-```text
-把 https://github.com/yuhuan-dev/antigravity-usage-monitor 克隆到 ~/.gemini/config/plugins/usage-monitor 并启用插件
-```
-
-### 方式二：下载 Release 压缩包
+### 方式一：下载 Release 压缩包
 
 下载 [`usage-monitor.zip`](https://github.com/yuhuan-dev/antigravity-usage-monitor/releases/latest/download/usage-monitor.zip)，解压到 `~/.gemini/config/plugins/` 下并保持文件夹名为 `usage-monitor`。
 
 <details>
-<summary>Windows PowerShell 下载与解压命令</summary>
+<summary>Windows PowerShell 下载及解压命令</summary>
 
 ```powershell
 $pluginsDir = "$env:USERPROFILE\.gemini\config\plugins"
@@ -150,6 +132,24 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
 ```
 
 </details>
+
+### 方式二：Git 克隆
+
+```powershell
+# Windows PowerShell
+git clone --filter=blob:none --single-branch https://github.com/yuhuan-dev/antigravity-usage-monitor.git "$env:USERPROFILE\.gemini\config\plugins\usage-monitor"
+```
+
+```bash
+# macOS / Linux
+git clone --filter=blob:none --single-branch https://github.com/yuhuan-dev/antigravity-usage-monitor.git ~/.gemini/config/plugins/usage-monitor
+```
+
+也可以直接在 Antigravity 对话中执行：
+
+```text
+把 https://github.com/yuhuan-dev/antigravity-usage-monitor 用 --filter=blob:none --single-branch 克隆到 ~/.gemini/config/plugins/usage-monitor 并启用插件
+```
 
 ---
 

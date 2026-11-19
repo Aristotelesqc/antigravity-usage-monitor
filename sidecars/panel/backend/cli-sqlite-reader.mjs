@@ -678,6 +678,16 @@ export function readLocalSummarySnapshot(productRoots = PRODUCT_DATA_ROOTS, { fo
           const sqLower = String(pRow?.conversation_id || '').trim().toLowerCase();
           const parentLower = String(pRow?.parent_id || '').trim().toLowerCase();
           if (!sqLower || !parentLower) continue;
+          const childSummary = nextSummariesObj[sqLower];
+          if (
+            childSummary &&
+            !childSummary.isSideQuestion &&
+            (childSummary.trajectoryMetadata?.subagentSpec ||
+              (Number(childSummary.trajectoryType) > 0 && Number(childSummary.trajectoryType) !== 22))
+          ) {
+            // 排除通过 fork 创建的蜂群工蜂或常规子代理，避免误归入旁路提问
+            continue;
+          }
           const parentSummary = nextSummariesObj[parentLower];
           const titleFromParent = String(
             parentSummary?.annotations?.sideQuestionTitles?.[sqLower] ||
@@ -904,6 +914,84 @@ function decodeProtoContextWindowMetaSlice(buf, state, end, includeBreakdown) {
   };
 }
 
+function decodeProtoRetryInfoSlice(buf, state, end) {
+  const ri = {};
+  while (state.off < end) {
+    const rTag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
+    const rFn = rTag >>> 3;
+    const rWt = rTag & 7;
+    if (rFn === 2 && rWt === 2) {
+      ri.usage = decodeProtoModelUsageSlice(buf, state, readSubEnd(buf, state, end));
+    } else if (rFn === 3 && rWt === 2) {
+      const errStr = readProtoString(buf, state, end).trim();
+      if (errStr) {
+        ri.error = errStr.length > 320 ? `${errStr.slice(0, 319)}…` : errStr;
+      }
+    } else if (rFn === 5 && rWt === 0) {
+      const code = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
+      if (code > 0) ri.reasonCode = code;
+    } else if (rFn === 7 && rWt === 2) {
+      const dur = decodeProtoDurationSlice(buf, state, readSubEnd(buf, state, end));
+      if (dur) ri.retryDelay = dur;
+    } else {
+      skipProtoField(buf, state, rWt, end);
+    }
+  }
+  state.off = end;
+  return ri;
+}
+
+function decodeProtoErrorMessageSlice(buf, state, end) {
+  let userErrorMessage = '';
+  let shortError = '';
+  let errorCode = 0;
+  let shouldShowModel = false;
+  let shouldShowUser = false;
+
+  while (state.off < end) {
+    const tag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
+    const fn = tag >>> 3;
+    const wt = tag & 7;
+    if (fn === 3 && wt === 2) {
+      const eEnd = readSubEnd(buf, state, end);
+      while (state.off < eEnd) {
+        const eTag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, eEnd)));
+        const eFn = eTag >>> 3;
+        const eWt = eTag & 7;
+        if (eFn === 1 && eWt === 2) {
+          const s = readProtoString(buf, state, eEnd).trim();
+          if (s) userErrorMessage = s.length > 240 ? `${s.slice(0, 239)}…` : s;
+        } else if (eFn === 2 && eWt === 2) {
+          const s = readProtoString(buf, state, eEnd).trim();
+          if (s) shortError = s.length > 320 ? `${s.slice(0, 319)}…` : s;
+        } else if (eFn === 7 && eWt === 0) {
+          errorCode = Number(BigInt.asUintN(32, readProtoVarint(buf, state, eEnd)));
+        } else {
+          skipProtoField(buf, state, eWt, eEnd);
+        }
+      }
+      state.off = eEnd;
+    } else if (fn === 4 && wt === 0) {
+      shouldShowModel = readProtoVarint(buf, state, end) !== 0n;
+    } else if (fn === 5 && wt === 0) {
+      shouldShowUser = readProtoVarint(buf, state, end) !== 0n;
+    } else {
+      skipProtoField(buf, state, wt, end);
+    }
+  }
+  state.off = end;
+  if (!userErrorMessage && !shortError && !errorCode) return null;
+  return {
+    error: {
+      ...(userErrorMessage ? { userErrorMessage } : {}),
+      ...(shortError ? { shortError } : {}),
+      ...(errorCode > 0 ? { errorCode } : {}),
+    },
+    ...(shouldShowModel ? { shouldShowModel: true } : {}),
+    ...(shouldShowUser ? { shouldShowUser: true } : {}),
+  };
+}
+
 function decodeProtoChatModelMetaSlice(buf, state, end, includeBreakdown) {
   let model = '';
   let usage = null;
@@ -912,6 +1000,8 @@ function decodeProtoChatModelMetaSlice(buf, state, end, includeBreakdown) {
   let streamingDuration = '';
   let responseModel = '';
   let modelDisplayName = '';
+  let retryCount = 0;
+  let retryInfos = null;
   const extraMeta = {};
   let messagePrompts = null;
   let tools = null;
@@ -994,6 +1084,8 @@ function decodeProtoChatModelMetaSlice(buf, state, end, includeBreakdown) {
       timeToFirstToken = decodeProtoDurationSlice(buf, state, readSubEnd(buf, state, end));
     } else if (fn === 12 && wt === 2) {
       streamingDuration = decodeProtoDurationSlice(buf, state, readSubEnd(buf, state, end));
+    } else if (fn === 14 && wt === 0) {
+      retryCount = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
     } else if (fn === 16 && wt === 2) {
       if (includeBreakdown) {
         const psEnd = readSubEnd(buf, state, end);
@@ -1020,6 +1112,10 @@ function decodeProtoChatModelMetaSlice(buf, state, end, includeBreakdown) {
       } else {
         skipProtoField(buf, state, wt, end);
       }
+    } else if (fn === 17 && wt === 2) {
+      const ri = decodeProtoRetryInfoSlice(buf, state, readSubEnd(buf, state, end));
+      if (!retryInfos) retryInfos = [];
+      retryInfos.push(ri);
     } else if (fn === 19 && wt === 2) {
       responseModel = readProtoString(buf, state, end).trim();
     } else if (fn === 20 && wt === 2) {
@@ -1046,6 +1142,8 @@ function decodeProtoChatModelMetaSlice(buf, state, end, includeBreakdown) {
     usage.apiProvider = 'API_PROVIDER_ANTHROPIC';
   }
 
+  const hasRetryEvidence =
+    retryCount > 0 || Boolean(retryInfos && retryInfos.some((r) => r?.error || r?.reasonCode));
   return {
     chatModel: {
       ...(model ? { model } : {}),
@@ -1055,6 +1153,8 @@ function decodeProtoChatModelMetaSlice(buf, state, end, includeBreakdown) {
         : {}),
       ...(timeToFirstToken ? { timeToFirstToken } : {}),
       ...(streamingDuration ? { streamingDuration } : {}),
+      ...(retryCount > 0 ? { retryCount } : {}),
+      ...(hasRetryEvidence && retryInfos ? { retryInfos } : {}),
       ...(responseModel ? { responseModel } : {}),
       ...(modelDisplayName ? { modelDisplayName } : {}),
       ...(messagePrompts ? { messagePrompts } : {}),
@@ -1223,19 +1323,7 @@ function decodeProtoStepMeta(rawBlob, fallbackIdx) {
       }
       state.off = siEnd;
     } else if (fn === 28 && wt === 2) {
-      const riEnd = readSubEnd(buf, state, end);
-      const ri = {};
-      while (state.off < riEnd) {
-        const rTag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, riEnd)));
-        const rFn = rTag >>> 3;
-        const rWt = rTag & 7;
-        if (rFn === 2 && rWt === 2) {
-          ri.usage = decodeProtoModelUsageSlice(buf, state, readSubEnd(buf, state, riEnd));
-        } else {
-          skipProtoField(buf, state, rWt, riEnd);
-        }
-      }
-      state.off = riEnd;
+      const ri = decodeProtoRetryInfoSlice(buf, state, readSubEnd(buf, state, end));
       if (!retryInfos) retryInfos = [];
       retryInfos.push(ri);
     } else if (fn === 30 && wt === 2) {
@@ -1451,7 +1539,26 @@ function decodeProtoGenericStepInvokeSubagentSlice(buf, state, end) {
   return invokeSubagent;
 }
 
-function decodeProtoSelectiveStepPayload(rawBlob, { stepTypeNum, isInvokeSubagent, keepFullText }) {
+function decodeProtoSystemMessageSlice(buf, state, end) {
+  let message = '';
+  while (state.off < end) {
+    const tag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
+    const fn = tag >>> 3;
+    const wt = tag & 7;
+    if (fn === 1 && wt === 2) {
+      message = readProtoString(buf, state, end);
+    } else {
+      skipProtoField(buf, state, wt, end);
+    }
+  }
+  state.off = end;
+  return message;
+}
+
+function decodeProtoSelectiveStepPayload(
+  rawBlob,
+  { stepTypeNum, isInvokeSubagent, includeSystemMessage = false, keepFullText }
+) {
   const buf = toUint8Array(rawBlob);
   if (!buf || buf.length === 0) return {};
   const state = { off: 0 };
@@ -1472,6 +1579,12 @@ function decodeProtoSelectiveStepPayload(rawBlob, { stepTypeNum, isInvokeSubagen
         readSubEnd(buf, state, end),
         keepFullText
       );
+    } else if (fn === 24 && wt === 2 && stepTypeNum === 17) {
+      const em = decodeProtoErrorMessageSlice(buf, state, readSubEnd(buf, state, end));
+      if (em) out.errorMessage = em;
+    } else if (fn === 114 && wt === 2 && stepTypeNum === 101 && includeSystemMessage) {
+      const sysMsg = decodeProtoSystemMessageSlice(buf, state, readSubEnd(buf, state, end));
+      if (sysMsg) out.systemMessage = { message: sysMsg };
     } else if (fn === 140 && wt === 2 && isInvokeSubagent) {
       const inv = decodeProtoGenericStepInvokeSubagentSlice(buf, state, readSubEnd(buf, state, end));
       if (inv) out.invokeSubagent = inv;
@@ -1728,6 +1841,17 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
         ownStepRecords.push({ idx, stepTypeNum, statusNum, metadata });
       }
 
+      const isChildTrajectory =
+        !isSideQuestion &&
+        Boolean(
+          trajectoryMetadata.parentConversationId ||
+            parentConversationId ||
+            (trajectoryMetadata.rootConversationId &&
+              trajectoryMetadata.rootConversationId !== normCid) ||
+            (rootConversationId && rootConversationId !== normCid) ||
+            trajectoryMetadata.subagentSpec
+        );
+
       const runningTailStart = isRunning
         ? Math.max(0, ownStepRecords.length - 16)
         : ownStepRecords.length;
@@ -1743,6 +1867,8 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
           if (
             rec.stepTypeNum === 14 ||
             rec.stepTypeNum === 15 ||
+            rec.stepTypeNum === 17 ||
+            (isChildTrajectory && rec.stepTypeNum === 101) ||
             isInvSub ||
             (inRunningTail && (rec.stepTypeNum !== 132 || !rec.metadata?.toolCall?.argumentsJson))
           ) {
@@ -1805,6 +1931,7 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
             const decodedPayload = decodeProtoSelectiveStepPayload(rawPayload, {
               stepTypeNum: rec.stepTypeNum,
               isInvokeSubagent: isInvSub,
+              includeSystemMessage: isChildTrajectory && rec.stepTypeNum === 101,
               keepFullText: inRunningTail,
             });
             if (decodedPayload.userInput) {
@@ -1816,8 +1943,15 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
                 );
               }
             }
+            if (decodedPayload.systemMessage) {
+              stepObj.systemMessage = decodedPayload.systemMessage;
+              stepObj.content = decodedPayload.systemMessage.message;
+            }
             if (decodedPayload.plannerResponse) {
               stepObj.plannerResponse = decodedPayload.plannerResponse;
+            }
+            if (decodedPayload.errorMessage) {
+              stepObj.errorMessage = decodedPayload.errorMessage;
             }
             if (decodedPayload.invokeSubagent) {
               stepObj.invokeSubagent = decodedPayload.invokeSubagent;

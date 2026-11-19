@@ -14,12 +14,17 @@ import {
   patchText,
 } from '../core/domPatch.js';
 import {
+  buildModelAnomalyDiagnostic,
+  formatAnomalyKindLabel,
+  formatAnomalyTagText,
   formatMetric,
+  formatSpeedMetric,
   formatTokens,
   formatUsd,
   mergeModelsByDisplayName,
   normalizeModelDisplayMode,
   normalizeOrchestratorIdDisplayMode,
+  resolveModelAnomalySummary,
   resolveModelDisplayInfo,
 } from '../core/formatters.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
@@ -77,6 +82,11 @@ function mergeSelectedAgentUnits(units) {
           totalTokens: 0,
           costUsd: 0,
           unpricedCalls: 0,
+          anomalySteps: 0,
+          anomalyCount: 0,
+          anomalyDangerCount: 0,
+          anomalyTotalDelaySec: 0,
+          anomalyByKind: {},
           _speedWeightedSum: 0,
           _speedWeight: 0,
           _ttftWeightedSum: 0,
@@ -116,6 +126,16 @@ function mergeSelectedAgentUnits(units) {
       acc.totalTokens += totTok;
       acc.costUsd += costUsd;
       acc.unpricedCalls += unpricedCalls;
+      acc.anomalySteps += Math.max(0, Number(m.anomalySteps || 0));
+      acc.anomalyCount += Math.max(0, Number(m.anomalyCount || 0));
+      acc.anomalyDangerCount += Math.max(0, Number(m.anomalyDangerCount || 0));
+      acc.anomalyTotalDelaySec += Math.max(0, Number(m.anomalyTotalDelaySec || 0));
+      if (m.anomalyByKind && typeof m.anomalyByKind === 'object') {
+        for (const [kind, cnt] of Object.entries(m.anomalyByKind)) {
+          const n = Math.max(0, Number(cnt || 0));
+          if (n > 0) acc.anomalyByKind[kind] = (acc.anomalyByKind[kind] || 0) + n;
+        }
+      }
 
       if (Number.isFinite(Number(m.avgTokPerSec)) && Number(m.avgTokPerSec) > 0) {
         const w = Math.max(1, outTok || calls || 1);
@@ -164,6 +184,15 @@ function mergeSelectedAgentUnits(units) {
         avgTtftSec:
           acc._ttftWeight > 0 ? +(acc._ttftWeightedSum / acc._ttftWeight).toFixed(1) : null,
         cacheHitPct: promptTok > 0 ? +((acc.cacheReadTokens / promptTok) * 100).toFixed(1) : 0,
+        ...(acc.anomalyCount > 0
+          ? {
+              anomalySteps: acc.anomalySteps,
+              anomalyCount: acc.anomalyCount,
+              anomalyDangerCount: acc.anomalyDangerCount,
+              anomalyTotalDelaySec: +acc.anomalyTotalDelaySec.toFixed(1),
+              anomalyByKind: acc.anomalyByKind,
+            }
+          : {}),
       };
     })
     .sort((a, b) => b.totalTokens - a.totalTokens || b.calls - a.calls);
@@ -197,6 +226,8 @@ export const StepsDetailView = defineComponent({
     let lastSyncedUiScope = uiStore.getState().selectedAgentScope || 'all';
     let selectedTableModels = ['__all__'];
     let selectedLineModels = ['__all__'];
+    let onlyAnomalies = false;
+    let anomalyKindFilter = '';
 
     function applyAgentScopesSelection(nextScopes) {
       selectedAgentScopes = nextScopes;
@@ -220,7 +251,6 @@ export const StepsDetailView = defineComponent({
       collapseAll: true,
       multiUnit: t('steps.unitAgent'),
       modelValue: selectedAgentScopes,
-      icon: 'layers',
       placeholder: t('steps.allAgents'),
       className: 'steps-inline-scope-select',
       options: [{ value: 'all', label: t('steps.allAgents') }],
@@ -261,8 +291,10 @@ export const StepsDetailView = defineComponent({
     });
 
     // --- 子视图 1：单步明细表（委托给可复用的 `StepTableWidget` 解耦组件） ---
+    let stepsScroll = null;
     const stepTableWidget = StepTableWidget({
       onSelectAgentScopes: applyAgentScopesSelection,
+      onVirtualHeightChange: () => stepsScroll?.refresh(),
     });
     const {
       stepsTablePane,
@@ -270,14 +302,35 @@ export const StepsDetailView = defineComponent({
       stepsTheadRow,
       stepsTbody,
       turnTipEl,
+      anomalyTipEl,
       hideTurnTip,
+      showAnomalyTip,
+      hideAnomalyTip,
       syncTableHeaderColumns,
       renderStepTable,
+      refreshViewport: refreshStepTableViewport,
     } = stepTableWidget.refs;
-    const stepsScroll = CustomScrollbar({
+    stepsScroll = CustomScrollbar({
       contentEl: stepsTablePane,
       className: 'table-scroll-host',
     });
+
+    const anomalyFilterLabelEl = h('span', { className: 'steps-anomaly-filter-label text-mono' });
+    const anomalyFilterClearBtn = h('button', {
+      type: 'button',
+      className: 'btn-ghost-sm steps-anomaly-filter-clear',
+      text: t('steps.anomalyFilterAll'),
+      onclick: () => {
+        onlyAnomalies = false;
+        anomalyKindFilter = '';
+        if (latestSlice) renderStepsData(latestSlice);
+      },
+    });
+    const anomalyFilterBarEl = h(
+      'div',
+      { className: 'steps-anomaly-filterbar', hidden: true },
+      [anomalyFilterLabelEl, anomalyFilterClearBtn]
+    );
 
     // --- 子视图 2：总汇总分析面板 ---
     let selectedLineMetric = 'totalTokens';
@@ -381,6 +434,24 @@ export const StepsDetailView = defineComponent({
       className: 'cons-badge text-mono',
       text: t('cons.callsCount', { calls: 0 }),
     });
+    const modelsAnomalyMetaEl = h('button', {
+      type: 'button',
+      className: 'steps-anomaly-strip-meta text-mono',
+      onclick: () => {
+        hideAnomalyTip();
+        selectedTableModels = ['__all__'];
+        onlyAnomalies = true;
+        anomalyKindFilter = '';
+        uiStore.setState({ stepsSubTab: 'steps' });
+      },
+    });
+    const modelsAnomalyTagsEl = h('div', { className: 'steps-anomaly-strip-tags' });
+    const modelsAnomalyStripEl = h(
+      'div',
+      { className: 'steps-anomaly-strip', hidden: true },
+      [modelsAnomalyMetaEl, modelsAnomalyTagsEl]
+    );
+    let lastAnomalyStripSig = '';
     const modelsEmptyEl = h('div', {
       className: 'smodel-empty text-muted',
       text: t('steps.modelsEmpty'),
@@ -388,6 +459,7 @@ export const StepsDetailView = defineComponent({
     const modelsListEl = h('div', { className: 'smodel-list' });
     const modelsSummarySection = h('div', { className: 'smodel-section' }, [
       h('div', { className: 'smodel-section-head' }, [modelsSectionTitleEl, modelsSummaryMeta]),
+      modelsAnomalyStripEl,
       modelsEmptyEl,
       modelsListEl,
     ]);
@@ -397,6 +469,8 @@ export const StepsDetailView = defineComponent({
       modelFitCard,
       modelsSummarySection,
     ]);
+    const onModelsPaneScroll = () => hideAnomalyTip();
+    modelsAnalyticsPane.addEventListener('scroll', onModelsPaneScroll, { passive: true });
     const modelsScroll = CustomScrollbar({
       contentEl: modelsAnalyticsPane,
       className: 'table-scroll-host',
@@ -422,9 +496,11 @@ export const StepsDetailView = defineComponent({
             subTabSwitch.el,
           ]),
         ]),
+        anomalyFilterBarEl,
         stepsScroll.el,
         modelsScroll.el,
         turnTipEl,
+        anomalyTipEl,
       ]
     );
     stepTableWidget.refs.setBoundsElGetter(() => panelEl);
@@ -433,6 +509,19 @@ export const StepsDetailView = defineComponent({
 
     let latestSlice = null;
     let isDirty = false;
+    let cachedChronoSrc = null;
+    let cachedChronoMerged = false;
+    let cachedChronoOut = [];
+
+    function getMemoizedChronoSteps(steps, isMergedMultiAgents) {
+      if (cachedChronoSrc === steps && cachedChronoMerged === isMergedMultiAgents) {
+        return cachedChronoOut;
+      }
+      cachedChronoSrc = steps;
+      cachedChronoMerged = isMergedMultiAgents;
+      cachedChronoOut = toChronologicalSteps(steps, isMergedMultiAgents);
+      return cachedChronoOut;
+    }
 
     function resolveDefaultActiveModelKey(scopedConv, chronoSteps, models, availableModelKeys) {
       if (scopedConv?.hasKnownModel !== false) {
@@ -482,6 +571,8 @@ export const StepsDetailView = defineComponent({
       patchText(fitTitleEl, t('steps.fitTitle'));
       patchText(modelsSectionTitleEl, t('steps.modelsTitle'));
       patchText(modelsEmptyEl, t('steps.modelsEmpty'));
+      patchText(anomalyFilterClearBtn, t('steps.anomalyFilterAll'));
+      lastAnomalyStripSig = '';
       lineMetricSwitch.setProps({
         modelValue: selectedLineMetric,
         options: getLineMetricSwitchOptions(),
@@ -503,7 +594,7 @@ export const StepsDetailView = defineComponent({
       }
     }
 
-    function renderStepsData(slice) {
+    function renderStepsData(slice, { allowNewRowFade = false } = {}) {
       if (!slice) return;
       const uiSt = uiStore.getState();
       const locale = getEffectiveLocale();
@@ -515,6 +606,8 @@ export const StepsDetailView = defineComponent({
           lastSyncedUiScope = uiSt.selectedAgentScope || 'all';
           selectedTableModels = ['__all__'];
           selectedLineModels = ['__all__'];
+          onlyAnomalies = false;
+          anomalyKindFilter = '';
         }
         fitLockedCascadeId = currentCid;
         fitUserPicked = false;
@@ -619,33 +712,14 @@ export const StepsDetailView = defineComponent({
 
       const showAgentPrefix = isMergedMultiAgents;
       const showModels = uiSt.stepsSubTab === 'models';
-      const chronoSteps = toChronologicalSteps(steps, isMergedMultiAgents);
-
-      const stepTtftFallbackMap = new Map();
-      const stepModelOptionMap = new Map();
-      for (const st of chronoSteps) {
-        const gk = getStepModelGroupKey(st);
-        if (!stepModelOptionMap.has(gk)) {
-          const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
-          stepModelOptionMap.set(gk, {
-            label: disp.baseText || disp.text || gk,
-            calls: 0,
-          });
-        }
-        stepModelOptionMap.get(gk).calls += 1;
-
-        if (showModels && !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
-          const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
-          prev.sum += Number(st.ttftSec);
-          prev.count += 1;
-          stepTtftFallbackMap.set(gk, prev);
-        }
-      }
 
       const availableModelKeys = new Set();
       const modelColorByGroup = new Map();
       const perModelOptions = [];
+      let breakdownCalls = 0;
       for (const m of models) {
+        if (!m || typeof m !== 'object') continue;
+        breakdownCalls += Math.max(0, Number(m.calls || 0));
         const gk = getStepModelGroupKey(m);
         if (availableModelKeys.has(gk)) continue;
         availableModelKeys.add(gk);
@@ -663,18 +737,35 @@ export const StepsDetailView = defineComponent({
           meta: t('header.convMetaSteps', { count: Number(m.calls || 0) }),
         });
       }
-      for (const [gk, info] of stepModelOptionMap.entries()) {
-        if (!availableModelKeys.has(gk)) {
-          availableModelKeys.add(gk);
-          modelColorByGroup.set(
-            gk,
-            MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
-          );
-          perModelOptions.push({
-            value: gk,
-            label: info.label,
-            meta: t('header.convMetaSteps', { count: info.calls }),
-          });
+
+      const needStepModelFallback =
+        steps.length > 0 && (models.length === 0 || breakdownCalls < steps.length);
+      if (needStepModelFallback) {
+        const stepModelOptionMap = new Map();
+        for (const st of steps) {
+          const gk = getStepModelGroupKey(st);
+          if (!stepModelOptionMap.has(gk)) {
+            const disp = resolveModelDisplayInfo(st, displaySettings, { fallback: gk });
+            stepModelOptionMap.set(gk, {
+              label: disp.baseText || disp.text || gk,
+              calls: 0,
+            });
+          }
+          stepModelOptionMap.get(gk).calls += 1;
+        }
+        for (const [gk, info] of stepModelOptionMap.entries()) {
+          if (!availableModelKeys.has(gk)) {
+            availableModelKeys.add(gk);
+            modelColorByGroup.set(
+              gk,
+              MODEL_COLOR_VARS[(availableModelKeys.size - 1) % MODEL_COLOR_VARS.length]
+            );
+            perModelOptions.push({
+              value: gk,
+              label: info.label,
+              meta: t('header.convMetaSteps', { count: info.calls }),
+            });
+          }
         }
       }
 
@@ -710,9 +801,29 @@ export const StepsDetailView = defineComponent({
       const tableModelFilterSet = selectedTableModels.includes('__all__')
         ? null
         : new Set(selectedTableModels);
-      const tableSteps = tableModelFilterSet
+      const modelFilteredSteps = tableModelFilterSet
         ? steps.filter((st) => tableModelFilterSet.has(getStepModelGroupKey(st)))
         : steps;
+      const tableSteps = onlyAnomalies
+        ? modelFilteredSteps.filter((st) => {
+            const a = st?.anomaly;
+            if (!a || !(Number(a.count) > 0)) return false;
+            if (anomalyKindFilter) {
+              return Number(a.kinds?.[anomalyKindFilter] || 0) > 0;
+            }
+            return true;
+          })
+        : modelFilteredSteps;
+
+      const showAnomalyFilterBar = !showModels && onlyAnomalies;
+      patchAttr(anomalyFilterBarEl, 'hidden', !showAnomalyFilterBar);
+      if (showAnomalyFilterBar) {
+        const baseLabel = t('steps.anomalyFilterLabel', { count: tableSteps.length });
+        const kindSuffix = anomalyKindFilter
+          ? ` · ${formatAnomalyKindLabel(anomalyKindFilter)}`
+          : '';
+        patchText(anomalyFilterLabelEl, `${baseLabel}${kindSuffix}`);
+      }
 
       const stepsTabLabel =
         tableSteps.length !== steps.length
@@ -729,6 +840,12 @@ export const StepsDetailView = defineComponent({
         ],
       });
 
+      const allConversationSteps = hasSubagents
+        ? aggregated?.recentSteps || []
+        : slice.recentSteps || [];
+      const shouldAnimateNewRows = Boolean(
+        allowNewRowFade && slice.experimentalModernUi && !showModels
+      );
       if (!showModels) {
         const colKeys = normalizeClientStepColumns(slice.stepTableColumns);
         renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
@@ -740,8 +857,27 @@ export const StepsDetailView = defineComponent({
           showStepSpeedColor: slice.showStepSpeedColor === true,
           stepTokenComboFormat: slice.stepTokenComboFormat,
           displaySettings,
+          allConversationSteps,
+          allowNewRowFade: shouldAnimateNewRows,
         });
         stepsScroll.refresh();
+        fitPinnedWhileVisible = false;
+        return;
+      }
+
+      const chronoSteps = getMemoizedChronoSteps(steps, isMergedMultiAgents);
+      const stepTtftFallbackMap = new Map();
+      const needTtftFallback = models.some((m) => m && m.avgTtftSec == null);
+      if (needTtftFallback) {
+        for (const st of chronoSteps) {
+          if (!st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0) {
+            const gk = getStepModelGroupKey(st);
+            const prev = stepTtftFallbackMap.get(gk) || { sum: 0, count: 0 };
+            prev.sum += Number(st.ttftSec);
+            prev.count += 1;
+            stepTtftFallbackMap.set(gk, prev);
+          }
+        }
       }
 
       // 2. 顶部“会话走势”更新
@@ -761,15 +897,11 @@ export const StepsDetailView = defineComponent({
         ? ['__all__']
         : Array.from(new Set(fitLockedModelKeys.filter((k) => availableModelKeys.has(k))));
 
-      if (!showModels) {
-        fitPinnedWhileVisible = false;
-      }
       if ((!fitPinnedWhileVisible && !fitUserPicked) || sanitizedLocked.length === 0) {
         fitLockedModelKeys = [defaultActiveModelKey];
       } else {
         fitLockedModelKeys = sanitizedLocked;
       }
-      if (!showModels) return;
       if (availableModelKeys.size > 0) fitPinnedWhileVisible = true;
 
       patchAttr(lineModelSelect.el, 'hidden', !hasMultipleModels);
@@ -829,10 +961,79 @@ export const StepsDetailView = defineComponent({
 
       // 4. 极简模型总览列表增量对账
       const displayModels = mergeModelsByDisplayName(models, displaySettings, { fallback: '—' });
+      const needStepAnomalyFallback = displayModels.every((m) => !(Number(m?.anomalyCount) > 0));
+      let stepAnomalyByGroup = null;
+      if (needStepAnomalyFallback) {
+        for (const st of chronoSteps) {
+          const a = st?.anomaly;
+          if (!a || !(Number(a.count) > 0)) continue;
+          if (!stepAnomalyByGroup) stepAnomalyByGroup = new Map();
+          const gk = getStepModelGroupKey(st);
+          let acc = stepAnomalyByGroup.get(gk);
+          if (!acc) {
+            acc = {
+              anomalySteps: 0,
+              anomalyCount: 0,
+              anomalyDangerCount: 0,
+              anomalyTotalDelaySec: 0,
+              anomalyByKind: {},
+            };
+            stepAnomalyByGroup.set(gk, acc);
+          }
+          acc.anomalySteps += 1;
+          acc.anomalyCount += Number(a.count) || 0;
+          if (a.severity === 'danger') acc.anomalyDangerCount += 1;
+          acc.anomalyTotalDelaySec += Number(a.totalDelaySec) || 0;
+          if (a.kinds && typeof a.kinds === 'object') {
+            for (const [k, cnt] of Object.entries(a.kinds)) {
+              const n = Math.max(0, Number(cnt || 0));
+              if (n > 0) acc.anomalyByKind[k] = (acc.anomalyByKind[k] || 0) + n;
+            }
+          }
+        }
+      }
+      const resolveEffectiveAnomalyModel = (m) => {
+        if (Number(m?.anomalyCount) > 0 || !stepAnomalyByGroup) return m;
+        const gk = getStepModelGroupKey(m);
+        const groupKeys =
+          Array.isArray(m.sourceLabels) && m.sourceLabels.length > 0
+            ? Array.from(new Set(m.sourceLabels.map((lbl) => getStepModelGroupKey({ label: lbl }))))
+            : [gk];
+        let anomalySteps = 0;
+        let anomalyCount = 0;
+        let anomalyDangerCount = 0;
+        let anomalyTotalDelaySec = 0;
+        const anomalyByKind = {};
+        for (const key of groupKeys) {
+          const hit = stepAnomalyByGroup.get(key);
+          if (!hit) continue;
+          anomalySteps += hit.anomalySteps;
+          anomalyCount += hit.anomalyCount;
+          anomalyDangerCount += hit.anomalyDangerCount;
+          anomalyTotalDelaySec += hit.anomalyTotalDelaySec;
+          for (const [k, cnt] of Object.entries(hit.anomalyByKind)) {
+            anomalyByKind[k] = (anomalyByKind[k] || 0) + cnt;
+          }
+        }
+        if (anomalyCount <= 0) return m;
+        return {
+          ...m,
+          anomalySteps,
+          anomalyCount,
+          anomalyDangerCount,
+          anomalyTotalDelaySec: +anomalyTotalDelaySec.toFixed(1),
+          anomalyByKind,
+        };
+      };
+
       let sumCalls = 0;
       let sumTokens = 0;
       let sumCost = 0;
       let sumUnpriced = 0;
+      let sumAnomalyCount = 0;
+      let sumAnomalySteps = 0;
+      const sumAnomalyByKind = {};
+      const effectiveAnomalyModels = new Map();
       for (const m of displayModels) {
         sumCalls += Math.max(0, Number(m.calls || 0));
         sumTokens += Math.max(0, Number(m.totalTokens || 0));
@@ -840,6 +1041,54 @@ export const StepsDetailView = defineComponent({
         if (Number.isFinite(Number(m.costUsd))) {
           sumCost += Math.max(0, Number(m.costUsd));
         }
+        const effM = resolveEffectiveAnomalyModel(m);
+        effectiveAnomalyModels.set(m, effM);
+        const anomSum = resolveModelAnomalySummary(effM);
+        if (anomSum) {
+          sumAnomalyCount += anomSum.count;
+          sumAnomalySteps += anomSum.steps;
+          for (const [k, v] of anomSum.entries) {
+            sumAnomalyByKind[k] = (sumAnomalyByKind[k] || 0) + v;
+          }
+        }
+      }
+
+      if (sumAnomalyCount > 0) {
+        patchAttr(modelsAnomalyStripEl, 'hidden', false);
+        const sortedKinds = Object.entries(sumAnomalyByKind)
+          .filter(([, v]) => v > 0)
+          .sort((a, b) => b[1] - a[1]);
+        const stripSig = `${locale}:${sumAnomalyCount}:${sumAnomalySteps}:${sortedKinds.map(([k, v]) => `${k}=${v}`).join(',')}`;
+        if (stripSig !== lastAnomalyStripSig) {
+          lastAnomalyStripSig = stripSig;
+          patchText(
+            modelsAnomalyMetaEl,
+            t('steps.anomalySummaryMeta', { count: sumAnomalyCount, steps: sumAnomalySteps })
+          );
+          while (modelsAnomalyTagsEl.firstChild) {
+            modelsAnomalyTagsEl.removeChild(modelsAnomalyTagsEl.firstChild);
+          }
+          for (const [kind, cnt] of sortedKinds) {
+            const isDanger = kind === 'rate_limit' || kind === 'auth_or_model';
+            const btn = h('button', {
+              type: 'button',
+              className: `step-anomaly-tag smodel-anomaly-tag text-mono${isDanger ? ' is-danger' : ''}`,
+              text: formatAnomalyTagText(kind, cnt),
+              title: `${formatAnomalyKindLabel(kind)} · ${t('steps.anomalyModelClickHint')}`,
+              onclick: () => {
+                hideAnomalyTip();
+                selectedTableModels = ['__all__'];
+                onlyAnomalies = true;
+                anomalyKindFilter = kind;
+                uiStore.setState({ stepsSubTab: 'steps' });
+              },
+            });
+            modelsAnomalyTagsEl.appendChild(btn);
+          }
+        }
+      } else {
+        lastAnomalyStripSig = '';
+        patchAttr(modelsAnomalyStripEl, 'hidden', true);
       }
 
       if (displayModels.length === 0) {
@@ -883,11 +1132,21 @@ export const StepsDetailView = defineComponent({
               : [gk];
           const isActiveFit =
             hasMultipleModels && cardGroupKeys.some((k) => fitActiveKeySet.has(k));
-          return `${locale}:${m.displayText}:${m.displayTitle}:${m.calls}:${sumCalls}:${displayModels.length}:${m.avgTokPerSec}:${avgTtft}:${m.cacheHitPct}:${m.inputTokens}:${m.cacheReadTokens}:${m.thinkingTokens}:${m.responseTokens}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${isActiveFit}:${hasMultipleModels}`;
+          const effM = effectiveAnomalyModels.get(m) || m;
+          const anomSum = resolveModelAnomalySummary(effM);
+          const anomSig = anomSum
+            ? `${anomSum.count}:${anomSum.steps}:${anomSum.primaryKind}:${anomSum.severity}:${anomSum.totalDelaySec}`
+            : '';
+          return `${locale}:${m.displayText}:${m.displayTitle}:${m.calls}:${sumCalls}:${displayModels.length}:${m.avgTokPerSec}:${avgTtft}:${m.cacheHitPct}:${m.inputTokens}:${m.cacheReadTokens}:${m.thinkingTokens}:${m.responseTokens}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${isActiveFit}:${hasMultipleModels}:${anomSig}`;
         },
         createRow: () => {
           const nameEl = h('strong', { className: 'smodel-name' });
           const callsPillEl = h('span', { className: 'smodel-calls-pill text-mono' });
+          const anomalyTagEl = h('span', {
+            className: 'step-anomaly-tag smodel-anomaly-tag text-mono',
+            title: '',
+            hidden: true,
+          });
           const tokEl = h('span', { className: 'smodel-tok text-mono' });
           const costEl = h('strong', { className: 'smodel-cost text-mono' });
           const segBar = createFourSegmentBar();
@@ -898,7 +1157,7 @@ export const StepsDetailView = defineComponent({
 
           const cardEl = h('div', { className: 'smodel-card' }, [
             h('div', { className: 'smodel-head' }, [
-              h('div', { className: 'smodel-ident' }, [nameEl, callsPillEl]),
+              h('div', { className: 'smodel-ident' }, [nameEl, callsPillEl, anomalyTagEl]),
               h('div', { className: 'smodel-totals' }, [tokEl, costEl]),
             ]),
             segBar.el,
@@ -907,7 +1166,18 @@ export const StepsDetailView = defineComponent({
 
           return {
             el: cardEl,
-            refs: { nameEl, callsPillEl, tokEl, costEl, segBar, perfEl, splitEl },
+            refs: {
+              nameEl,
+              callsPillEl,
+              anomalyTagEl,
+              tokEl,
+              costEl,
+              segBar,
+              perfEl,
+              splitEl,
+              cardTitle: '',
+              isHoveringAnomaly: false,
+            },
           };
         },
         updateRow: (refs, m, _idx, cardEl) => {
@@ -931,6 +1201,40 @@ export const StepsDetailView = defineComponent({
               ? t('steps.modelCallsShare', { calls, pct: callSharePct })
               : t('steps.modelCallsOnly', { calls })
           );
+
+          const effM = effectiveAnomalyModels.get(m) || m;
+          const anomSum = resolveModelAnomalySummary(effM);
+          patchAttr(refs.anomalyTagEl, 'hidden', !anomSum);
+          if (anomSum) {
+            patchText(refs.anomalyTagEl, anomSum.tagText);
+            patchClasses(refs.anomalyTagEl, { 'is-danger': anomSum.severity === 'danger' });
+            patchAttr(refs.anomalyTagEl, 'title', '');
+            refs.anomalyTagEl.onmouseenter = () => {
+              refs.isHoveringAnomaly = true;
+              patchAttr(cardEl, 'title', null);
+              showAnomalyTip(refs.anomalyTagEl, buildModelAnomalyDiagnostic(effM));
+            };
+            refs.anomalyTagEl.onmouseleave = () => {
+              refs.isHoveringAnomaly = false;
+              patchAttr(cardEl, 'title', refs.cardTitle || null);
+              hideAnomalyTip();
+            };
+            refs.anomalyTagEl.onclick = (e) => {
+              e?.stopPropagation?.();
+              refs.isHoveringAnomaly = false;
+              patchAttr(cardEl, 'title', refs.cardTitle || null);
+              hideAnomalyTip();
+              selectedTableModels = hasMultipleModels ? [...cardGroupKeys] : ['__all__'];
+              onlyAnomalies = true;
+              anomalyKindFilter = '';
+              uiStore.setState({ stepsSubTab: 'steps' });
+            };
+          } else {
+            refs.isHoveringAnomaly = false;
+            refs.anomalyTagEl.onmouseenter = null;
+            refs.anomalyTagEl.onmouseleave = null;
+            refs.anomalyTagEl.onclick = null;
+          }
 
           const inTok = Math.max(0, Number(m.inputTokens || 0));
           const cacheTok = Math.max(0, Number(m.cacheReadTokens || 0));
@@ -975,7 +1279,7 @@ export const StepsDetailView = defineComponent({
           patchText(
             refs.perfEl,
             t('steps.modelPerfFoot', {
-              tps: formatMetric(m.avgTokPerSec, ' tok/s'),
+              tps: formatSpeedMetric(m.avgTokPerSec, ' tok/s'),
               ttft: formatMetric(resolvedAvgTtft, 's'),
               cache: resolvedCachePct,
             })
@@ -993,15 +1297,12 @@ export const StepsDetailView = defineComponent({
           const isActiveFit =
             hasMultipleModels && cardGroupKeys.some((k) => fitActiveKeySet.has(k));
           patchClasses(cardEl, { 'is-fit-active': isActiveFit });
-          patchAttr(
-            cardEl,
-            'title',
-            !hasMultipleModels
-              ? dispTitle
-              : isActiveFit
-                ? t('steps.fitActiveCardTitle', { title: dispTitle })
-                : t('steps.fitInactiveCardTitle', { text: dispText })
-          );
+          refs.cardTitle = !hasMultipleModels
+            ? dispTitle
+            : isActiveFit
+              ? t('steps.fitActiveCardTitle', { title: dispTitle })
+              : t('steps.fitInactiveCardTitle', { text: dispText });
+          patchAttr(cardEl, 'title', refs.isHoveringAnomaly ? null : refs.cardTitle);
           cardEl.onclick = (e) => {
             if (!hasMultipleModels) return;
             if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && !isFitPooledAll) {
@@ -1036,12 +1337,15 @@ export const StepsDetailView = defineComponent({
       (st) => st.stepsSubTab,
       (tab) => {
         hideTurnTip();
+        hideAnomalyTip();
         subTabSwitch.setValue(tab);
+        patchAttr(anomalyFilterBarEl, 'hidden', tab !== 'steps' || !onlyAnomalies);
         patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
         patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
         if (getVisibleMonitorView() === 'steps' && latestSlice) {
           renderStepsData(latestSlice);
         } else if (tab === 'steps') {
+          refreshStepTableViewport();
           stepsScroll.refresh();
         } else {
           modelsScroll.refresh();
@@ -1070,6 +1374,7 @@ export const StepsDetailView = defineComponent({
           st.telemetry?.settings?.stepTokenComboFormat
         ),
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
+        experimentalModernUi: Boolean(st.telemetry?.settings?.experimentalModernUi),
       }),
       (slice) => {
         latestSlice = slice;
@@ -1081,7 +1386,9 @@ export const StepsDetailView = defineComponent({
           return;
         }
         isDirty = false;
-        renderStepsData(slice);
+        renderStepsData(slice, {
+          allowNewRowFade: uiStore.getState().stepsSubTab === 'steps',
+        });
       }
     );
 
@@ -1104,6 +1411,7 @@ export const StepsDetailView = defineComponent({
         prevActiveView = uiSlice.activeView;
         if (uiSlice.activeView !== 'steps') {
           hideTurnTip();
+          hideAnomalyTip();
           fitPinnedWhileVisible = false;
           if (scopeChanged) isDirty = true;
           return;
@@ -1128,6 +1436,7 @@ export const StepsDetailView = defineComponent({
     );
 
     onCleanup(() => {
+      modelsAnalyticsPane.removeEventListener('scroll', onModelsPaneScroll);
       unsubUi();
       unsubTelemetry();
       unsubView();
@@ -1153,6 +1462,9 @@ export const StepsDetailView = defineComponent({
         stepsTheadRow,
         stepsTbody,
         turnTipEl,
+        anomalyTipEl,
+        anomalyFilterBarEl,
+        modelsAnomalyStripEl,
         modelsListEl,
         inlineScopeSelect,
         stepsModelSelect,
@@ -1163,6 +1475,7 @@ export const StepsDetailView = defineComponent({
         fitMetricSwitch,
         stepsScroll,
         modelsScroll,
+        refreshStepTableViewport,
       },
     };
   },

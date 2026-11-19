@@ -54,6 +54,10 @@ td {
   color: inherit;
 }
 
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
 input[type="number"] {
   appearance: textfield;
   -moz-appearance: textfield;

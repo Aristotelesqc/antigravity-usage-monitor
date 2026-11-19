@@ -597,6 +597,260 @@ export function extractContextBreakdown(chat) {
   };
 }
 
+const ANOMALY_SEVERITY_PRIORITY = Object.freeze({
+  rate_limit: 9,
+  auth_or_model: 8,
+  timeout: 7,
+  capacity: 6,
+  disconnect: 5,
+  upstream: 4,
+  model_output: 3,
+  safety: 2,
+  error: 1,
+  canceled: 0,
+});
+
+/**
+ * 将模型调用重试、超时或错误文本归类为标准化异常类型。
+ *
+ * @param {string} [rawError='']
+ * @param {{ reasonCode?: number, errorCode?: number, isCanceled?: boolean }} [opts]
+ * @returns {'timeout'|'rate_limit'|'capacity'|'disconnect'|'upstream'|'model_output'|'safety'|'auth_or_model'|'canceled'|'error'}
+ */
+export function classifyStepAnomalyError(
+  rawError = '',
+  { reasonCode = 0, errorCode = 0, isCanceled = false } = {}
+) {
+  const s = String(rawError || '').trim();
+  if (isCanceled || /context canceled by user|stream reading error:\s*context canceled/i.test(s)) {
+    return 'canceled';
+  }
+  if (reasonCode === 2 || /model output error|model produced invalid output|invalid tool call/i.test(s)) {
+    return 'model_output';
+  }
+  if (
+    errorCode === 429 ||
+    /\b429\b|RESOURCE_EXHAUSTED|quota reached|rate.?limit/i.test(s)
+  ) {
+    return 'rate_limit';
+  }
+  if (
+    /stream idle timeout|TLS handshake timeout|i\/o timeout|context deadline exceeded|\btimeout\b/i.test(
+      s
+    )
+  ) {
+    return 'timeout';
+  }
+  if (
+    errorCode === 503 ||
+    /\b503\b|UNAVAILABLE|No capacity available|overloaded|high demand/i.test(s)
+  ) {
+    return 'capacity';
+  }
+  if (
+    /wsarecv|wsasend|forcibly closed|connection reset|broken pipe|ECONNRESET|unexpected EOF|:\s*EOF\b|The stream was interrupted|no such host|dial tcp|tls:|bad record MAC/i.test(
+      s
+    )
+  ) {
+    return 'disconnect';
+  }
+  if (/safety filter|content safety|sensitive words/i.test(s)) {
+    return 'safety';
+  }
+  if (
+    errorCode === 500 ||
+    errorCode === 502 ||
+    errorCode === 504 ||
+    /\b(?:500|502|504)\b|\bINTERNAL\b|BAD_GATEWAY/i.test(s)
+  ) {
+    return 'upstream';
+  }
+  if (
+    errorCode === 400 ||
+    errorCode === 401 ||
+    errorCode === 403 ||
+    errorCode === 404 ||
+    /\b(?:400|401|403|404)\b|PERMISSION_DENIED|UNAUTHENTICATED|FAILED_PRECONDITION|NOT_FOUND|unknown model|unsupported mime/i.test(
+      s
+    )
+  ) {
+    return 'auth_or_model';
+  }
+  return 'error';
+}
+
+function cleanAnomalyErrorExcerpt(rawText) {
+  let s = String(rawText || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) return '';
+  s = s.replace(/^API error \(attempt \d+\):\s*/i, '');
+  s = s.replace(/^agent executor error:\s*generating and executing:\s*/i, '');
+  s = s.replace(/^request failed:\s*/i, '');
+  return s.length > 180 ? `${s.slice(0, 179)}…` : s;
+}
+
+function extractErrorStepPayload(step) {
+  if (!step || typeof step !== 'object') return null;
+  const em = step.errorMessage;
+  const errObj = em?.error && typeof em.error === 'object' ? em.error : em;
+  const shortErr = String(
+    errObj?.shortError ||
+      errObj?.message ||
+      step.error ||
+      ''
+  ).trim();
+  const userMsg = String(errObj?.userErrorMessage || '').trim();
+  const fallbackContent =
+    !shortErr && !userMsg && typeof step.content === 'string'
+      ? step.content.replace(/^Error:\s*/i, '').trim()
+      : '';
+  const message = shortErr || userMsg || fallbackContent;
+  if (!message) return null;
+  const errorCode = Number(errObj?.errorCode || 0) || 0;
+  const terminal = Boolean(em?.shouldShowUser);
+  return { message, userMsg, errorCode, terminal };
+}
+
+function buildStepAnomalyRecord(step, meta, chat, pendingErrorSteps = []) {
+  const retryInfosRaw = [
+    ...(Array.isArray(chat?.retryInfos) ? chat.retryInfos : []),
+    ...(Array.isArray(meta?.retryInfos) ? meta.retryInfos : []),
+  ];
+  const retryErrorEntries = [];
+  for (let i = 0; i < retryInfosRaw.length; i += 1) {
+    const ri = retryInfosRaw[i];
+    if (!ri || typeof ri !== 'object') continue;
+    const errText = String(ri.error || ri.errorMessage || '').trim();
+    const reasonCode = Number(ri.reasonCode || 0) || 0;
+    const delaySec = duration(ri.retryDelay);
+    if (!errText && !(reasonCode > 0 && reasonCode !== 3)) continue;
+    const kind = classifyStepAnomalyError(errText, { reasonCode });
+    // 纯用户取消且无其他重试时不重复打告警微标（速度列已有「已取消」）
+    if (kind === 'canceled') continue;
+    retryErrorEntries.push({
+      attempt: retryErrorEntries.length + 1,
+      kind,
+      delaySec: delaySec != null && delaySec > 0 ? +delaySec.toFixed(1) : 0,
+      message: cleanAnomalyErrorExcerpt(errText),
+      terminal: reasonCode === 3,
+      source: 'retry',
+    });
+  }
+
+  const events = [...retryErrorEntries];
+  const declaredRetryCount = Math.max(0, Math.floor(Number(chat?.retryCount || 0)));
+
+  // 合并同一轮前置 ERROR_MESSAGE 步骤（对已被 retryInfos 记录的同源重试做去重，保留断流续跑/安全过滤/离线日志补充）
+  const usedRetryKinds = new Map();
+  for (const ev of retryErrorEntries) {
+    usedRetryKinds.set(ev.kind, (usedRetryKinds.get(ev.kind) || 0) + 1);
+  }
+  const matchedKindBudget = new Map(usedRetryKinds);
+
+  for (const errStep of pendingErrorSteps || []) {
+    const info = extractErrorStepPayload(errStep);
+    if (!info) continue;
+    const kind = classifyStepAnomalyError(info.message, { errorCode: info.errorCode });
+    if (kind === 'canceled') continue;
+    const isInterruptOrSafety =
+      kind === 'safety' ||
+      /The stream was interrupted/i.test(info.message) ||
+      info.terminal;
+    if (!isInterruptOrSafety) {
+      const rem = matchedKindBudget.get(kind) || 0;
+      if (rem > 0) {
+        matchedKindBudget.set(kind, rem - 1);
+        continue;
+      }
+    }
+    events.push({
+      attempt: events.length + 1,
+      kind,
+      delaySec: 0,
+      message: cleanAnomalyErrorExcerpt(info.message),
+      terminal: Boolean(info.terminal),
+      source: 'error_step',
+    });
+  }
+
+  const isStatusError = step?.status === 'CORTEX_STEP_STATUS_ERROR';
+  const isStatusInterrupted = step?.status === 'CORTEX_STEP_STATUS_INTERRUPTED';
+  if (events.length === 0 && (isStatusError || isStatusInterrupted)) {
+    events.push({
+      attempt: 1,
+      kind: isStatusInterrupted ? 'disconnect' : 'error',
+      delaySec: 0,
+      message: '',
+      terminal: isStatusError,
+      source: 'status',
+    });
+  }
+
+  const count = Math.max(events.length, declaredRetryCount);
+  if (count <= 0) return null;
+
+  if (events.length === 0 && declaredRetryCount > 0) {
+    events.push({
+      attempt: 1,
+      kind: 'error',
+      delaySec: 0,
+      message: '',
+      terminal: false,
+      source: 'retry_count',
+    });
+  }
+
+  const kinds = {};
+  let totalDelaySec = 0;
+  let hasDanger = isStatusError;
+  for (const ev of events) {
+    kinds[ev.kind] = (kinds[ev.kind] || 0) + 1;
+    if (ev.delaySec > 0) totalDelaySec += ev.delaySec;
+    if (ev.terminal || ev.kind === 'rate_limit' || ev.kind === 'auth_or_model') {
+      hasDanger = true;
+    }
+  }
+  // 归并主分类：按出现次数降序，同次数按严重度优先级决胜
+  let primaryKind = events[0].kind;
+  let bestCount = -1;
+  let bestPrio = -1;
+  for (const [k, c] of Object.entries(kinds)) {
+    const prio = ANOMALY_SEVERITY_PRIORITY[k] ?? 1;
+    if (c > bestCount || (c === bestCount && prio > bestPrio)) {
+      primaryKind = k;
+      bestCount = c;
+      bestPrio = prio;
+    }
+  }
+
+  const roundedDelay = totalDelaySec > 0 ? +totalDelaySec.toFixed(1) : 0;
+  const severity = hasDanger ? 'danger' : 'warn';
+  const compactEvents = events.slice(0, 6).map((ev, idx) => ({
+    attempt: idx + 1,
+    kind: ev.kind,
+    ...(ev.delaySec > 0 ? { delaySec: ev.delaySec } : {}),
+    ...(ev.message ? { message: ev.message } : {}),
+    ...(ev.terminal ? { terminal: true } : {}),
+  }));
+  const kindSig = Object.entries(kinds)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}=${v}`)
+    .join(',');
+  const sig = `${primaryKind}:${count}:${severity}:${roundedDelay}:${kindSig}`;
+  return {
+    anomaly: {
+      count,
+      primaryKind,
+      severity,
+      totalDelaySec: roundedDelay,
+      kinds,
+      events: compactEvents,
+    },
+    anomalySig: sig,
+  };
+}
+
 /**
  * 从原始轨迹步骤数组与生成器元数据中提取标准化模型步骤指标。
  *
@@ -679,6 +933,78 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
     return Boolean(step.userInput && typeof step.userInput === 'object');
   };
 
+  const hasHumanUserTurn = rawSteps.some(isUserTurnBoundary);
+
+  const isSystemWakeupBoundary = (step) => {
+    if (hasHumanUserTurn || !step || typeof step !== 'object') return false;
+    if (isCheckpointStep(step)) return false;
+    const t = String(step.type || '').trim().toUpperCase();
+    if (t !== 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE' && t !== 'SYSTEM_MESSAGE') {
+      return false;
+    }
+    const rawMsg = String(step?.systemMessage?.message || step?.content || '').trim();
+    const withoutSummary = rawMsg
+      .replace(/<CONTEXT_SUMMARY>[\s\S]*?<\/CONTEXT_SUMMARY>/gi, '')
+      .trim();
+    if (!withoutSummary || /BROWSER_HOST_FACTS/i.test(withoutSummary)) return false;
+    return true;
+  };
+
+  const extractSystemWakeupInfo = (step) => {
+    let raw = String(step?.systemMessage?.message || step?.content || '').trim();
+    const sysMatches = [...raw.matchAll(/<SYSTEM_MESSAGE>([\s\S]*?)<\/SYSTEM_MESSAGE>/gi)];
+    if (sysMatches.length > 0) {
+      raw = sysMatches[sysMatches.length - 1][1].trim();
+    } else {
+      raw = raw.replace(/^The following is a <SYSTEM_MESSAGE>[\s\S]*?<SYSTEM_MESSAGE>/i, '').replace(/<\/SYSTEM_MESSAGE>\s*$/i, '').trim();
+    }
+    raw = raw.replace(/^\[Message\]\s+timestamp=\S+\s+sender=\S+\s+priority=\S+\s+content=/i, '').trim();
+
+    const doorbellMatch = raw.match(/^\[swarm\]\s+new board message\s+#(\d+)\s*$/i);
+    if (doorbellMatch) {
+      const tag = `[swarm] #${doorbellMatch[1]}`;
+      return { cleanText: tag, legacyPrompt: tag, hasMedia: false, isDoorbellOnly: true };
+    }
+
+    const assignMatch = raw.match(
+      /^You have just started\.\s*Your assignment\s*\(recorded on the board as #(\d+)\s+for\s+@?([^\s):]+)\)\s*:\s*([\s\S]*)$/i
+    );
+    if (assignMatch) {
+      const seq = assignMatch[1];
+      const member = assignMatch[2];
+      const bodyLines = String(assignMatch[3] || '')
+        .split(/\r?\n/)
+        .map((l) => l.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      const bodyPreview = bodyLines.join(' ');
+      const full = bodyPreview ? `#${seq} @${member} · ${bodyPreview}` : `#${seq} @${member}`;
+      const cleanText = full.length > 180 ? `${full.slice(0, 179)}…` : full;
+      return { cleanText, legacyPrompt: cleanText, hasMedia: false, isDoorbellOnly: false };
+    }
+
+    const boardDeltaMatch = raw.match(
+      /^\[board\]\s+the latest message is #(\d+)\s*\(you have read up to #(\d+)\)/i
+    );
+    if (boardDeltaMatch) {
+      const tag = `[board] #${boardDeltaMatch[2]} -> #${boardDeltaMatch[1]}`;
+      return { cleanText: tag, legacyPrompt: tag, hasMedia: false, isDoorbellOnly: true };
+    }
+
+    const monitorTickMatch = raw.match(/^\[monitor\]\s+tick:[^(]*\(iteration\s+(\d+)\)\s*$/i);
+    if (monitorTickMatch) {
+      const tag = `[monitor] tick #${monitorTickMatch[1]}`;
+      return { cleanText: tag, legacyPrompt: tag, hasMedia: false, isDoorbellOnly: false };
+    }
+
+    const cleaned = raw
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+    const cleanText = cleaned.length > 180 ? `${cleaned.slice(0, 179)}…` : cleaned;
+    return { cleanText, legacyPrompt: cleanText, hasMedia: false, isDoorbellOnly: false };
+  };
+
   const extractUserTurnInfo = (step) => {
     const ui = step?.userInput;
     let raw = '';
@@ -717,15 +1043,111 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
   };
 
   let pendingTurnCleanPrompts = [];
+  let pendingTurnDoorbellOnly = false;
+  let pendingErrorSteps = [];
+
+  const isErrorMessageStep = (step) => {
+    if (!step || typeof step !== 'object') return false;
+    const t = String(step.type || '').trim().toUpperCase();
+    return (
+      t === 'CORTEX_STEP_TYPE_ERROR_MESSAGE' ||
+      t === 'ERROR_MESSAGE' ||
+      Boolean(step.errorMessage && typeof step.errorMessage === 'object')
+    );
+  };
+
+  const mergeTrailingErrorsIntoStep = (targetStep, errSteps) => {
+    if (!targetStep || !Array.isArray(errSteps) || errSteps.length === 0) return;
+    const prevEvents = Array.isArray(targetStep.anomaly?.events) ? targetStep.anomaly.events : [];
+    const trailingRec = buildStepAnomalyRecord(null, null, null, errSteps);
+    if (!trailingRec) return;
+    const isStatusOnlyPlaceholder =
+      prevEvents.length === 1 &&
+      Number(targetStep.anomaly?.count || 0) === 1 &&
+      !prevEvents[0].message &&
+      !(Number(prevEvents[0].delaySec) > 0) &&
+      (prevEvents[0].kind === 'error' || prevEvents[0].kind === 'disconnect');
+    if (prevEvents.length === 0 || isStatusOnlyPlaceholder) {
+      const nextAnomaly =
+        isStatusOnlyPlaceholder &&
+        targetStep.anomaly?.severity === 'danger' &&
+        trailingRec.anomaly.severity !== 'danger'
+          ? { ...trailingRec.anomaly, severity: 'danger' }
+          : trailingRec.anomaly;
+      targetStep.anomaly = nextAnomaly;
+      targetStep.anomalySig =
+        nextAnomaly === trailingRec.anomaly
+          ? trailingRec.anomalySig
+          : trailingRec.anomalySig.replace(':warn:', ':danger:');
+      return;
+    }
+    const mergedKinds = { ...(targetStep.anomaly.kinds || {}) };
+    for (const [k, c] of Object.entries(trailingRec.anomaly.kinds || {})) {
+      mergedKinds[k] = (mergedKinds[k] || 0) + c;
+    }
+    const mergedCount = Number(targetStep.anomaly.count || 0) + Number(trailingRec.anomaly.count || 0);
+    const mergedDelay = +(
+      Number(targetStep.anomaly.totalDelaySec || 0) + Number(trailingRec.anomaly.totalDelaySec || 0)
+    ).toFixed(1);
+    const mergedSeverity =
+      targetStep.anomaly.severity === 'danger' || trailingRec.anomaly.severity === 'danger'
+        ? 'danger'
+        : 'warn';
+    let primaryKind = targetStep.anomaly.primaryKind || trailingRec.anomaly.primaryKind;
+    let bestCount = -1;
+    let bestPrio = -1;
+    for (const [k, c] of Object.entries(mergedKinds)) {
+      const prio = ANOMALY_SEVERITY_PRIORITY[k] ?? 1;
+      if (c > bestCount || (c === bestCount && prio > bestPrio)) {
+        primaryKind = k;
+        bestCount = c;
+        bestPrio = prio;
+      }
+    }
+    const combinedEvents = [...prevEvents, ...(trailingRec.anomaly.events || [])]
+      .slice(0, 6)
+      .map((ev, i) => ({ ...ev, attempt: i + 1 }));
+    const kindSig = Object.entries(mergedKinds)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, v]) => `${k}=${v}`)
+      .join(',');
+    targetStep.anomaly = {
+      count: mergedCount,
+      primaryKind,
+      severity: mergedSeverity,
+      totalDelaySec: mergedDelay,
+      kinds: mergedKinds,
+      events: combinedEvents,
+    };
+    targetStep.anomalySig = `${primaryKind}:${mergedCount}:${mergedSeverity}:${mergedDelay}:${kindSig}`;
+  };
+
   rawSteps.forEach((s, index) => {
-    if (isUserTurnBoundary(s)) {
-      const { cleanText, legacyPrompt, hasMedia } = extractUserTurnInfo(s);
+    const isHumanBoundary = isUserTurnBoundary(s);
+    const isWakeupBoundary = !isHumanBoundary && isSystemWakeupBoundary(s);
+    if (isHumanBoundary || isWakeupBoundary) {
+      if (pendingErrorSteps.length > 0 && result.length > 0) {
+        const lastPrev = result[result.length - 1];
+        if (lastPrev.turnIndex === activeTurnIndex) {
+          mergeTrailingErrorsIntoStep(lastPrev, pendingErrorSteps);
+        }
+      }
+      pendingErrorSteps = [];
+      const { cleanText, legacyPrompt, hasMedia, isDoorbellOnly = false } = isHumanBoundary
+        ? extractUserTurnInfo(s)
+        : extractSystemWakeupInfo(s);
       if (!hasUnconsumedTurn) {
         hasUnconsumedTurn = true;
         pendingTurnPrompts = legacyPrompt ? [legacyPrompt] : [];
         pendingTurnCleanPrompts = cleanText ? [cleanText] : [];
         pendingTurnHasMedia = hasMedia;
-      } else {
+        pendingTurnDoorbellOnly = Boolean(isWakeupBoundary && isDoorbellOnly);
+      } else if (isWakeupBoundary && pendingTurnDoorbellOnly && !isDoorbellOnly && cleanText) {
+        // 合并连续唤醒步时，用紧随其后的真实简报/任务正文覆盖前置的纯 #seq 门铃提示
+        pendingTurnPrompts = legacyPrompt ? [legacyPrompt] : [];
+        pendingTurnCleanPrompts = [cleanText];
+        pendingTurnDoorbellOnly = false;
+      } else if (!(isWakeupBoundary && isDoorbellOnly && !pendingTurnDoorbellOnly)) {
         if (
           legacyPrompt &&
           pendingTurnPrompts[pendingTurnPrompts.length - 1] !== legacyPrompt
@@ -742,11 +1164,18 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
       }
     }
 
+    if (isErrorMessageStep(s)) {
+      pendingErrorSteps.push(s);
+      return;
+    }
+
     const m = s?.metadata;
     const u = m?.modelUsage || m?.retryInfos?.[0]?.usage;
     if (!u) {
       return;
     }
+    const stepPendingErrors = pendingErrorSteps;
+    pendingErrorSteps = [];
 
     let stepIsTurnStart = false;
     let stepTurnPrompt = '';
@@ -769,6 +1198,7 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
       pendingTurnPrompts = [];
       pendingTurnCleanPrompts = [];
       pendingTurnHasMedia = false;
+      pendingTurnDoorbellOnly = false;
     }
 
     const stepIndex = m.sourceTrajectoryStepInfo?.stepIndex ?? index;
@@ -833,6 +1263,10 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
     let timingReason = null;
     if (s.status === 'CORTEX_STEP_STATUS_CANCELED') {
       timingReason = 'canceled';
+    } else if (s.status === 'CORTEX_STEP_STATUS_ERROR') {
+      timingReason = 'error';
+    } else if (s.status === 'CORTEX_STEP_STATUS_INTERRUPTED') {
+      timingReason = 'interrupted';
     } else if (!complete || !(totalDurationSec > 0)) {
       timingReason = 'incomplete_or_invalid_timing';
     } else if (!validCount(u.outputTokens)) {
@@ -897,6 +1331,8 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
         ? 'Orchestrator Worker (Hydrogen)'
         : rawDisplayName;
 
+    const anomalyRec = buildStepAnomalyRecord(s, m, chat, stepPendingErrors);
+
     result.push({
       stepIndex,
       isCompactionStep,
@@ -936,6 +1372,7 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
       speedSampleEligible:
         totalTokPerSec !== null && !shortOutputSample && !isCompactionStep,
       speedReason,
+      ...(anomalyRec ? { anomaly: anomalyRec.anomaly, anomalySig: anomalyRec.anomalySig } : {}),
       turnIndex: activeTurnIndex,
       isTurnStart: stepIsTurnStart,
       ...(stepIsTurnStart && stepTurnPrompt ? { turnPrompt: stepTurnPrompt } : {}),
@@ -943,6 +1380,13 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
       ...(stepIsTurnStart ? { turnHasMedia: stepTurnHasMedia, turnMediaOnly: stepTurnMediaOnly } : {}),
     });
   });
+
+  if (pendingErrorSteps.length > 0 && result.length > 0) {
+    const lastStep = result[result.length - 1];
+    if (lastStep.turnIndex === activeTurnIndex) {
+      mergeTrailingErrorsIntoStep(lastStep, pendingErrorSteps);
+    }
+  }
 
   // 末尾步骤上下文回填：若最后一个非压缩步骤缺少 contextBreakdown，且最近一次有效的 generatorMetadata 未跨过压缩边界，则补齐
   if (
@@ -1845,6 +2289,144 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     };
   }
 
+  if (nameLower === 'swarm') {
+    const action = pickField(['action', 'Action']).toLowerCase();
+    const memberName = pickField(['name', 'Name']).replace(/^@+/, '').trim();
+    if (action === 'add') {
+      const rawTasks = unwrapArgValue(args?.tasks);
+      const rawCount = Number(unwrapArgValue(args?.n) || 0);
+      const shardCount = Array.isArray(rawTasks) && rawTasks.length > 1
+        ? rawTasks.length
+        : rawCount > 1
+          ? Math.floor(rawCount)
+          : 0;
+      const detail = memberName
+        ? shardCount > 1
+          ? `@${memberName}-1..${shardCount}`
+          : `@${memberName}`
+        : '';
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_add',
+        isAskUser: false,
+        label: '派生工蜂',
+        detail,
+      };
+    }
+    if (action === 'title') {
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_title',
+        isAskUser: false,
+        label: '命名蜂群',
+        detail: cleanSingleLineSnippet(pickField(['title', 'Title']), 44) || '',
+      };
+    }
+    if (action === 'kill') {
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_kill',
+        isAskUser: false,
+        label: '终止工蜂',
+        detail: memberName ? `@${memberName}` : '',
+      };
+    }
+    if (action === 'model') {
+      const target = memberName ? `@${memberName}` : '@coordinator';
+      const nextModel = pickField(['model', 'Model']);
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_model',
+        isAskUser: false,
+        label: '切换工蜂模型',
+        detail: nextModel ? `${target} -> ${nextModel}` : target,
+      };
+    }
+    if (action === 'channel') {
+      const op = pickField(['op', 'Op']);
+      const ch = pickField(['channel', 'Channel']).replace(/^#+/, '').trim();
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_channel',
+        isAskUser: false,
+        label: '蜂群频道',
+        detail: ch ? `${op ? `${op} ` : ''}#${ch}` : op || '',
+      };
+    }
+    return {
+      toolName: nameLower,
+      actionKey: 'swarm_status',
+      isAskUser: false,
+      label: '巡检蜂群',
+      detail: action || 'status',
+    };
+  }
+
+  if (nameLower === 'post_message') {
+    const channel = pickField(['channel', 'Channel']).replace(/^#+/, '').trim();
+    const textSnippet = cleanSingleLineSnippet(pickField(['text', 'Text']), 48);
+    const detail =
+      channel && channel !== 'main'
+        ? `[#${channel}]${textSnippet ? ` ${textSnippet}` : ''}`
+        : textSnippet || '';
+    return {
+      toolName: nameLower,
+      actionKey: 'post_message',
+      isAskUser: false,
+      label: '发布看板',
+      detail,
+    };
+  }
+
+  if (nameLower === 'read_board') {
+    const rawStatus = unwrapArgValue(args?.status) ?? pickField(['status']);
+    const isStatus = String(rawStatus).trim().toLowerCase() === 'true';
+    const rawSeqs = unwrapArgValue(args?.seqs);
+    const seqsLabel =
+      Array.isArray(rawSeqs) && rawSeqs.length > 0
+        ? `${rawSeqs
+            .slice(0, 4)
+            .map((n) => `#${String(unwrapArgValue(n) ?? n).trim()}`)
+            .join(', ')}${rawSeqs.length > 4 ? '…' : ''}`
+        : '';
+    const sinceVal = unwrapArgValue(args?.since) ?? pickField(['since']);
+    const channel = pickField(['channel', 'Channel']).replace(/^#+/, '').trim();
+    const detail = isStatus
+      ? 'status'
+      : [
+          channel && channel !== 'main' ? `#${channel}` : '',
+          seqsLabel ||
+            (sinceVal !== undefined && sinceVal !== null && String(sinceVal).trim() !== ''
+              ? `#${String(sinceVal).trim()}+`
+              : ''),
+        ]
+          .filter(Boolean)
+          .join(' ');
+    return {
+      toolName: nameLower,
+      actionKey: 'read_board',
+      isAskUser: false,
+      label: '读取看板',
+      detail,
+    };
+  }
+
+  if (nameLower === 'swarm_wait') {
+    const sinceVal = unwrapArgValue(args?.since) ?? pickField(['since']);
+    const detail =
+      sinceVal !== undefined && sinceVal !== null && String(sinceVal).trim() !== ''
+        ? `#${String(sinceVal).trim()}+`
+        : '';
+    return {
+      toolName: nameLower,
+      actionKey: 'swarm_wait',
+      isAskUser: false,
+      isSwarmWait: true,
+      label: '看板待命',
+      detail,
+    };
+  }
+
   if (nameLower === 'manage_task') {
     const action = pickField(['Action', 'action']);
     const taskId = pickField(['TaskId', 'taskId']);
@@ -2032,7 +2614,7 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         const info = summarizeToolCall(activeTool, lastStep);
         const stepProgress =
           tools.length > 1 && !hasBracketPrefix(info.detail) ? `${tools.length}/${tools.length}` : '';
-        const phase = info.isAskUser ? 'waiting' : 'tool';
+        const phase = info.isAskUser || info.isSwarmWait ? 'waiting' : 'tool';
         return {
           phase,
           toolName: info.toolName,
@@ -2115,8 +2697,8 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
     if (hasBracketPrefix(info.detail)) {
       stepProgress = '';
     }
-    const waiting = isWaitingStepStatus(lastStep?.status) || info.isAskUser;
-    const waitingApproval = Boolean(waiting && !info.isAskUser);
+    const waiting = isWaitingStepStatus(lastStep?.status) || info.isAskUser || Boolean(info.isSwarmWait);
+    const waitingApproval = Boolean(waiting && !info.isAskUser && !info.isSwarmWait);
     const resolvedStartMs = startMs || prevStepEndMs || 0;
     const label = waitingApproval ? `等待确认 · ${info.label}` : info.label;
 
@@ -2207,7 +2789,7 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         getRawStepEndMs(lastStep) ||
         getRawStepEndMs(plannerStep) ||
         0;
-      const phase = info.isAskUser ? 'waiting' : 'tool';
+      const phase = info.isAskUser || info.isSwarmWait ? 'waiting' : 'tool';
 
       return {
         phase,
@@ -2228,6 +2810,22 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
       const infos = pTools.map((t, idx) =>
         summarizeToolCall(t, toolStepsAfterPlanner[idx] || lastStep)
       );
+      const swarmWaitInfo = infos.find((x) => x.isSwarmWait);
+      if (swarmWaitInfo) {
+        const startMs = getRawStepFinishMs(lastStep) || getRawStepEndMs(lastStep) || 0;
+        return {
+          phase: 'waiting',
+          toolName: swarmWaitInfo.toolName,
+          actionKey: swarmWaitInfo.actionKey,
+          waitingApproval: false,
+          detailKey: '',
+          label: swarmWaitInfo.label,
+          detail: swarmWaitInfo.detail,
+          stepProgress: '',
+          startedAtMs: startMs,
+          signature: `swarm-wait:${lastStepId}:${swarmWaitInfo.detail}`,
+        };
+      }
       const lastToolInfo = infos[infos.length - 1];
       const allSameLabel = infos.every((x) => x.actionKey === lastToolInfo.actionKey);
       const detailsList = infos.map((x) => x.detail).filter(Boolean);
@@ -2254,13 +2852,28 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
       };
     }
 
-    // B2.5：Connect RPC 轨迹中工具作为独立步骤存在（plannerResponse.toolCalls 为空）时，直接提取最后一个工具步骤的目标文件/命令
+    // B2.5：Connect RPC / SQLite 轨迹中工具作为独立步骤存在（plannerResponse.toolCalls 为空）时，直接提取最后一个工具步骤的目标文件/命令
     if (lastIdx > lastPlannerIdx) {
       const stepTypeUpper = String(lastStep?.type || '').toUpperCase();
-      if (!stepTypeUpper.includes('USER_INPUT') && !stepTypeUpper.includes('GENERIC')) {
+      const hasStepToolMeta = Boolean(lastStep?.metadata?.toolCall?.name);
+      if (!stepTypeUpper.includes('USER_INPUT') && (!stepTypeUpper.includes('GENERIC') || hasStepToolMeta)) {
         const lastInfo = summarizeToolCall(null, lastStep);
         if (lastInfo.toolName !== 'tool' || lastInfo.detail) {
           const startMs = getRawStepFinishMs(lastStep) || getRawStepEndMs(lastStep) || 0;
+          if (lastInfo.isSwarmWait) {
+            return {
+              phase: 'waiting',
+              toolName: lastInfo.toolName,
+              actionKey: lastInfo.actionKey,
+              waitingApproval: false,
+              detailKey: '',
+              label: lastInfo.label,
+              detail: lastInfo.detail,
+              stepProgress: '',
+              startedAtMs: startMs,
+              signature: `swarm-wait:${lastStepId}:${lastInfo.detail}`,
+            };
+          }
           return {
             phase: 'thinking',
             toolName: lastInfo.toolName,
@@ -2331,4 +2944,102 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
     signature: `post-step-think:${lastStepId}`,
   };
 }
+
+/**
+ * 识别并规范化蜂群（Native Swarm）工蜂节点的身份信息，剥离冗余的 `Swarm Worker (<name>)` 包裹。
+ *
+ * @param {{ role?: string, typeName?: string, agentScriptName?: string, memberName?: string }} [input={}]
+ * @returns {{ isSwarmWorker: boolean, memberName: string, isMonitor: boolean, isNarrator: boolean, isAuxiliary: boolean }}
+ */
+export function parseSwarmWorkerRole(input = {}) {
+  const rawRole = String(input?.role || '').trim();
+  const rawType = String(input?.typeName || '').trim().toLowerCase();
+  const rawScript = String(input?.agentScriptName || '').trim();
+  const explicitMember = String(input?.memberName || '').trim();
+
+  const wrapperMatch = rawRole.match(/^Swarm\s+Worker\s*\(([^)]+)\)\s*$/i);
+  const isSwarmWorker = Boolean(
+    explicitMember || wrapperMatch || rawType === 'worker' || rawType === 'swarm_worker'
+  );
+  if (!isSwarmWorker) {
+    return {
+      isSwarmWorker: false,
+      memberName: '',
+      isMonitor: false,
+      isNarrator: false,
+      isAuxiliary: false,
+    };
+  }
+
+  const candidate =
+    explicitMember ||
+    (wrapperMatch ? wrapperMatch[1] : '') ||
+    rawScript ||
+    (rawRole.toLowerCase() !== 'worker' && rawRole.toLowerCase() !== 'swarm worker' ? rawRole : '');
+  const memberName = String(candidate || '').replace(/^@+/, '').trim();
+  const isMonitor = /^monitor(?:-\d+)?$/i.test(memberName);
+  const isNarrator = /^narrator(?:-\d+)?$/i.test(memberName);
+  return {
+    isSwarmWorker: true,
+    memberName,
+    isMonitor,
+    isNarrator,
+    isAuxiliary: isMonitor || isNarrator,
+  };
+}
+
+/**
+ * 判断原始轨迹步骤是否已调用 `swarm_wait` 进入留言板待命状态（且后续尚未收到新的用户提问或系统唤醒消息）。
+ *
+ * @param {Array<object>} [rawSteps=[]]
+ * @returns {boolean}
+ */
+export function isParkedOnSwarmWait(rawSteps = []) {
+  if (!Array.isArray(rawSteps) || rawSteps.length === 0) return false;
+  let lastIdx = rawSteps.length - 1;
+  while (lastIdx > 0 && isAuxiliaryMetaStep(rawSteps[lastIdx]) && isRawStepComplete(rawSteps[lastIdx])) {
+    lastIdx--;
+  }
+  let lastPlannerIdx = -1;
+  for (let i = lastIdx; i >= 0; i--) {
+    const st = rawSteps[i];
+    const t = String(st?.type || '').trim().toUpperCase();
+    if (t.includes('USER_INPUT') || t.includes('SYSTEM_MESSAGE') || isCheckpointStep(st)) {
+      return false;
+    }
+    if (isPlannerStep(st)) {
+      lastPlannerIdx = i;
+      break;
+    }
+  }
+  if (lastPlannerIdx < 0) return false;
+
+  const pTools = getStepPlannerToolCalls(rawSteps[lastPlannerIdx]);
+  if (
+    pTools.some((tc) => {
+      const n = String(tc?.name || tc?.toolName || tc?.function?.name || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^default_api:/, '');
+      return n === 'swarm_wait';
+    })
+  ) {
+    return true;
+  }
+
+  for (let k = lastPlannerIdx + 1; k <= lastIdx; k++) {
+    const st = rawSteps[k];
+    const toolName = String(st?.metadata?.toolCall?.name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^default_api:/, '');
+    if (toolName === 'swarm_wait') return true;
+    const rawContent = String(st?.content || '').trim();
+    if (/Waiting for a message that calls on you|Waiting for any message posted after/i.test(rawContent)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 

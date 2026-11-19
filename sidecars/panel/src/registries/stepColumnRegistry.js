@@ -9,6 +9,7 @@ import { h, patchAttr, patchText } from '../core/domPatch.js';
 import {
   formatCachePct,
   formatMetric,
+  formatSpeedMetric,
   formatTokens,
   formatUsd,
   getCacheToneClass,
@@ -191,7 +192,7 @@ export const STEP_COLUMN_REGISTRY = Object.freeze({
       return { td, refs: { wrapEl, speedMain, speedReason: null } };
     },
     updateCell: (refs, st, ctx) => {
-      patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
+      patchText(refs.speedMain, formatSpeedMetric(st.tokPerSec, ' tok/s'));
       const hasValidSpeed =
         st.tokPerSec != null && Number.isFinite(Number(st.tokPerSec)) && Number(st.tokPerSec) > 0;
       const toneCls =

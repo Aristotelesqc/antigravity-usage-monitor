@@ -4,8 +4,9 @@
  * real-UI structure preview (`SettingsStructureTab.js`), ensuring 100% DOM/CSS parity.
  */
 
+import { isModernUiActiveForElement } from '../../core/appearance.js';
 import { defineComponent } from '../../core/component.js';
-import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
+import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
 import { t } from '../../i18n/index.js';
 import { createSvgIcon, SVG_NS } from '../../icons/SvgIcon.js';
 import { resolveCapsuleMetricPresentation } from '../../registries/metricRegistry.js';
@@ -18,6 +19,165 @@ import { buildFallbackRunningConversations } from './LiveActivityWidget.js';
 
 export const RING_RADIUS = 5.2;
 export const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
+
+const ODOMETER_DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const capsuleOdometerState = new WeakMap();
+
+/**
+ * 将胶囊指标文本拆分为「按数位对齐的数字滚轮 + 静态字符片段」：
+ * - 整数部分从右向左按位次键控（个位 `i:0`、十位 `i:1`...），小数部分从左向右键控（`f:0`...）；
+ * - 位数增减时既有数位节点原地复用，仅发生变化的数字位执行 0.15s 老虎机垂直滚动，未变位与单位纹丝不动。
+ *
+ * @param {string} rawText
+ * @returns {Array<{ key: string, kind: 'digit' | 'static', digit?: number, text?: string }>}
+ */
+export function tokenizeCapsuleOdometerText(rawText) {
+  const str = String(rawText ?? '');
+  if (!str) return [];
+  const parts = str.split(/(\d+(?:\.\d+)?)/g);
+  const tokens = [];
+  let numIdx = 0;
+  let staticIdx = 0;
+
+  for (let p = 0; p < parts.length; p += 1) {
+    const seg = parts[p];
+    if (!seg) continue;
+    if (/^\d+(?:\.\d+)?$/.test(seg)) {
+      const dotPos = seg.indexOf('.');
+      const intPart = dotPos >= 0 ? seg.slice(0, dotPos) : seg;
+      const fracPart = dotPos >= 0 ? seg.slice(dotPos + 1) : '';
+      const intLen = intPart.length;
+      for (let i = 0; i < intLen; i += 1) {
+        const place = intLen - 1 - i;
+        tokens.push({
+          key: `n:${numIdx}:i:${place}`,
+          kind: 'digit',
+          digit: Number(intPart[i]),
+        });
+      }
+      if (dotPos >= 0) {
+        tokens.push({ key: `n:${numIdx}:dot`, kind: 'static', text: '.' });
+        for (let j = 0; j < fracPart.length; j += 1) {
+          tokens.push({
+            key: `n:${numIdx}:f:${j}`,
+            kind: 'digit',
+            digit: Number(fracPart[j]),
+          });
+        }
+      }
+      numIdx += 1;
+    } else {
+      tokens.push({ key: `s:${staticIdx}`, kind: 'static', text: seg });
+      staticIdx += 1;
+    }
+  }
+  return tokens;
+}
+
+function createOdometerDigitReel(initialDigit) {
+  const cells = ODOMETER_DIGITS.map((d) => h('span', { className: 'wm-od-cell', text: d }));
+  const trackEl = h('span', { className: 'wm-od-track' }, cells);
+  patchStyleVar(trackEl, '--od-val', String(initialDigit));
+  const digitEl = h('span', { className: 'wm-od-digit', 'aria-hidden': 'true' }, [trackEl]);
+  return { el: digitEl, trackEl, kind: 'digit', digit: initialDigit };
+}
+
+/**
+ * 在实验性新 UI (`[data-modern-ui="true"]`) 下将胶囊数字渲染为 0.15s 老虎机垂直滚轮；
+ * 经典 UI 或无数字占位文本（如 `-- t/s`）严格退回原生纯文本 `patchText`，零多余 DOM 与动画。
+ */
+export function patchCapsuleOdometerText(
+  el,
+  nextValue,
+  { resetKey = '', modernUi = undefined } = {}
+) {
+  if (!el) return false;
+  const nextStr = String(nextValue ?? '');
+  const isModern = typeof modernUi === 'boolean' ? modernUi : isModernUiActiveForElement(el);
+  const prev = capsuleOdometerState.get(el);
+
+  if (!isModern || !/\d/.test(nextStr)) {
+    if (prev?.active) {
+      while (el.firstChild) el.removeChild(el.firstChild);
+      patchAttr(el, 'data-od-active', null);
+      patchAttr(el, 'data-od-value', null);
+      patchAttr(el, 'aria-label', null);
+    }
+    const changed = patchText(el, nextStr);
+    capsuleOdometerState.set(el, { active: false, text: nextStr, resetKey, nodes: null });
+    return changed;
+  }
+
+  if (prev?.active && prev.text === nextStr && prev.resetKey === resetKey) {
+    return false;
+  }
+
+  let nodes;
+  if (!prev?.active || prev.resetKey !== resetKey || !(prev.nodes instanceof Map)) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    nodes = new Map();
+  } else {
+    nodes = prev.nodes;
+  }
+
+  const tokens = tokenizeCapsuleOdometerText(nextStr);
+  const nextKeys = new Set();
+  const orderedEls = [];
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i];
+    nextKeys.add(tok.key);
+    let rec = nodes.get(tok.key);
+    if (!rec || rec.kind !== tok.kind) {
+      if (rec?.el?.parentNode === el) {
+        el.removeChild(rec.el);
+      }
+      if (tok.kind === 'digit') {
+        rec = createOdometerDigitReel(tok.digit);
+      } else {
+        rec = {
+          el: h('span', { className: 'wm-od-static', 'aria-hidden': 'true', text: tok.text }),
+          trackEl: null,
+          kind: 'static',
+          text: tok.text,
+        };
+      }
+      nodes.set(tok.key, rec);
+    } else if (tok.kind === 'digit') {
+      if (rec.digit !== tok.digit) {
+        patchStyleVar(rec.trackEl, '--od-val', String(tok.digit));
+        rec.digit = tok.digit;
+      }
+    } else if (rec.text !== tok.text) {
+      patchText(rec.el, tok.text);
+      rec.text = tok.text;
+    }
+    orderedEls.push(rec.el);
+  }
+
+  for (const [oldKey, rec] of nodes.entries()) {
+    if (!nextKeys.has(oldKey)) {
+      if (rec.el?.parentNode === el) {
+        el.removeChild(rec.el);
+      }
+      nodes.delete(oldKey);
+    }
+  }
+
+  for (let i = 0; i < orderedEls.length; i += 1) {
+    const targetNode = orderedEls[i];
+    const currentNode = el.children[i] || null;
+    if (currentNode !== targetNode) {
+      el.insertBefore(targetNode, currentNode);
+    }
+  }
+
+  patchAttr(el, 'data-od-active', '1');
+  patchAttr(el, 'data-od-value', nextStr);
+  patchAttr(el, 'aria-label', nextStr);
+  capsuleOdometerState.set(el, { active: true, text: nextStr, resetKey, nodes });
+  return true;
+}
 
 /**
  * Compute shared context ring + 1..5 capsule slot metric payload from telemetry & scoped conversation.
@@ -94,14 +254,29 @@ export function resolveMultiSessionCapsuleState(
     (acc, item) => acc + Number(item.runningSubagentCount || 0),
     0
   );
+  const runningSwarmCount = rawRunningList.reduce(
+    (acc, item) => acc + Number(item.runningSwarmCount || 0),
+    0
+  );
+  const isPureSwarmSubs = runningSubCount > 0 && runningSwarmCount === runningSubCount;
   const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
   const multiBtnText =
     runningCount > 0
       ? runningSubCount > 0
-        ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+        ? t(isPureSwarmSubs ? 'capsule.multiRunningWithSwarm' : 'capsule.multiRunningWithSubs', {
+            count: runningCount,
+            subs: runningSubCount,
+          })
         : t('capsule.multiRunning', { count: runningCount })
       : t('capsule.multiZero');
-  return { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText };
+  return {
+    rawRunningList,
+    runningCount,
+    runningSubCount,
+    runningSwarmCount,
+    hasWaiting,
+    multiBtnText,
+  };
 }
 
 /**
@@ -209,7 +384,7 @@ export function syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCt
     patchAttr(slot.el, 'class', fullSegClass);
     const fullTextClass = `${pres.textClass}${toneCls ? ` ${toneCls}` : ''}`;
     patchAttr(slot.textSpan, 'class', fullTextClass);
-    patchText(slot.textSpan, pres.text);
+    patchCapsuleOdometerText(slot.textSpan, pres.text, { resetKey: pres.metric });
 
     if (pres.showRing) {
       slot.ringFill.setAttribute('stroke-dashoffset', String(pres.dashOffset));
@@ -355,7 +530,7 @@ export const CapsuleBarWidget = defineComponent({
 
       if (!data) {
         patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
-        patchText(multiLabel, t('capsule.multiZero'));
+        patchCapsuleOdometerText(multiLabel, t('capsule.multiZero'), { resetKey: 'multi' });
         syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, { hasTelemetry: false });
         return;
       }
@@ -376,7 +551,7 @@ export const CapsuleBarWidget = defineComponent({
         'is-running': runningCount > 0 && !hasWaiting,
         'is-waiting': runningCount > 0 && hasWaiting,
       });
-      patchText(multiLabel, multiBtnText);
+      patchCapsuleOdometerText(multiLabel, multiBtnText, { resetKey: 'multi' });
 
       patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
       syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);

@@ -6,10 +6,13 @@
 
 import { defineComponent } from '../../core/component.js';
 import {
+  applyAppearanceToRoot,
   normalizeClientFontScale,
+  normalizeClientModernUi,
   normalizeClientThemeAccent,
 } from '../../core/appearance.js';
 import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
+import { isWindowOverlayMode } from '../../core/httpClient.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
 import { normalizeI18nLanguage, setI18nLanguage, t } from '../../i18n/index.js';
 import {
@@ -36,6 +39,13 @@ function getFontScaleOptions() {
     { value: 'md', label: t('settings.gen.fontMd') },
     { value: 'lg', label: t('settings.gen.fontLg') },
     { value: 'xl', label: t('settings.gen.fontXl') },
+  ];
+}
+
+function getModernUiOptions() {
+  return [
+    { value: 'off', label: t('settings.gen.modernUiOff') },
+    { value: 'on', label: t('settings.gen.modernUiOn') },
   ];
 }
 
@@ -66,10 +76,12 @@ export const SettingsGeneralTab = defineComponent({
     let draftLanguage = 'zh-CN';
     let draftThemeAccent = 'host';
     let draftFontScale = 'md';
+    let draftModernUi = false;
     let draftPluginUpdateMode = 'manual';
     let latestSettings = null;
     let latestCloudStatus = null;
     let appearanceTimer = null;
+    let appearanceSaveSeq = 0;
     let cloudTimer = null;
 
     const appearanceStatusText = h('span', {
@@ -123,6 +135,14 @@ export const SettingsGeneralTab = defineComponent({
       className: 'settings-hint-text',
       text: t('settings.gen.fontHint'),
     });
+    const modernUiLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.gen.modernUi'),
+    });
+    const modernUiHintEl = h('span', {
+      className: 'settings-hint-text',
+      text: t('settings.gen.modernUiHint'),
+    });
 
     const languageSwitch = SegmentedControl({
       ariaLabel: t('settings.gen.language'),
@@ -133,13 +153,18 @@ export const SettingsGeneralTab = defineComponent({
         draftLanguage = nextLang;
         setI18nLanguage(nextLang);
         languageSwitch.setValue(nextLang);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ language: nextLang });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -150,13 +175,18 @@ export const SettingsGeneralTab = defineComponent({
         const nextAccent = normalizeClientThemeAccent(val);
         draftThemeAccent = nextAccent;
         themeColorPicker.refs.setValue(nextAccent);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ themeAccent: nextAccent });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -169,14 +199,56 @@ export const SettingsGeneralTab = defineComponent({
         const nextScale = normalizeClientFontScale(val);
         draftFontScale = nextScale;
         fontScaleSwitch.setValue(nextScale);
+        const saveToken = ++appearanceSaveSeq;
         showAppearanceFeedback(t('settings.saving'), 0);
         try {
           await saveSettingsPatch({ fontScale: nextScale });
-          showAppearanceFeedback(t('settings.saved'), 1500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
           props.onLayoutChange?.();
         } catch {
           if (latestSettings) renderSettings(latestSettings);
-          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
+        }
+      },
+    });
+
+    const modernUiSwitch = SegmentedControl({
+      ariaLabel: t('settings.gen.modernUi'),
+      modelValue: 'off',
+      options: getModernUiOptions(),
+      onUpdateModelValue: async (val) => {
+        const nextModernUi = val === 'on';
+        draftModernUi = nextModernUi;
+        modernUiSwitch.setValue(nextModernUi ? 'on' : 'off');
+        if (!isWindowOverlayMode() && typeof document !== 'undefined' && document.documentElement) {
+          applyAppearanceToRoot(
+            document.documentElement,
+            {
+              ...(latestSettings || {}),
+              themeAccent: draftThemeAccent,
+              fontScale: draftFontScale,
+              experimentalModernUi: nextModernUi,
+            },
+            { includeFontScale: true }
+          );
+        }
+        const saveToken = ++appearanceSaveSeq;
+        showAppearanceFeedback(t('settings.saving'), 0);
+        try {
+          await saveSettingsPatch({ experimentalModernUi: nextModernUi });
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saved'), 1500);
+          }
+          props.onLayoutChange?.();
+        } catch {
+          if (latestSettings) renderSettings(latestSettings);
+          if (saveToken === appearanceSaveSeq) {
+            showAppearanceFeedback(t('settings.saveFailed'), 2500);
+          }
         }
       },
     });
@@ -192,6 +264,7 @@ export const SettingsGeneralTab = defineComponent({
       h('div', { className: 'form-row' }, [langLabelEl, languageSwitch.el]),
       h('div', { className: 'form-row' }, [accentLabelEl, themeColorPicker.el]),
       h('div', { className: 'form-row' }, [fontLabelEl, fontScaleSwitch.el, fontHintEl]),
+      h('div', { className: 'form-row' }, [modernUiLabelEl, modernUiSwitch.el, modernUiHintEl]),
     ]);
 
     // --- Card 2: 版本更新 ---
@@ -350,6 +423,7 @@ export const SettingsGeneralTab = defineComponent({
       draftLanguage = normalizeI18nLanguage(settings.language);
       draftThemeAccent = normalizeClientThemeAccent(settings.themeAccent);
       draftFontScale = normalizeClientFontScale(settings.fontScale);
+      draftModernUi = normalizeClientModernUi(settings.experimentalModernUi);
       draftPluginUpdateMode = normalizeClientUpdateMode(
         settings.pluginUpdateMode,
         settings.autoUpdatePlugin
@@ -363,6 +437,10 @@ export const SettingsGeneralTab = defineComponent({
       fontScaleSwitch.setProps({
         modelValue: draftFontScale,
         options: getFontScaleOptions(),
+      });
+      modernUiSwitch.setProps({
+        modelValue: draftModernUi ? 'on' : 'off',
+        options: getModernUiOptions(),
       });
       autoUpdateSelect.setProps({
         modelValue: draftPluginUpdateMode,
@@ -425,6 +503,8 @@ export const SettingsGeneralTab = defineComponent({
       patchText(accentLabelEl, t('settings.gen.themeAccent'));
       patchText(fontLabelEl, t('settings.gen.fontScale'));
       patchText(fontHintEl, t('settings.gen.fontHint'));
+      patchText(modernUiLabelEl, t('settings.gen.modernUi'));
+      patchText(modernUiHintEl, t('settings.gen.modernUiHint'));
       patchText(updateTitleEl, t('settings.gen.updateTitle'));
       patchText(updateModeLabelEl, t('settings.gen.updateMode'));
       patchText(pricingCellLabelEl, t('settings.gen.pricingLabel'));
@@ -440,6 +520,11 @@ export const SettingsGeneralTab = defineComponent({
       fontScaleSwitch.setProps({
         modelValue: draftFontScale,
         options: getFontScaleOptions(),
+      });
+      modernUiSwitch.setProps({
+        ariaLabel: t('settings.gen.modernUi'),
+        modelValue: draftModernUi ? 'on' : 'off',
+        options: getModernUiOptions(),
       });
       autoUpdateSelect.setProps({
         modelValue: draftPluginUpdateMode,
@@ -458,6 +543,7 @@ export const SettingsGeneralTab = defineComponent({
       languageSwitch.destroy();
       themeColorPicker.destroy();
       fontScaleSwitch.destroy();
+      modernUiSwitch.destroy();
       autoUpdateSelect.destroy();
     });
 
@@ -467,6 +553,7 @@ export const SettingsGeneralTab = defineComponent({
         languageSwitch,
         themeColorPicker,
         fontScaleSwitch,
+        modernUiSwitch,
         autoUpdateSelect,
         syncPricingBtn,
         updatePluginBtn,

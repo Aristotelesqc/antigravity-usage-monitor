@@ -29,10 +29,48 @@ async function bootstrapApp(mountTarget = document.getElementById('app-root')) {
     syncDocAppearance
   );
 
+  let hostThemeObserver = null;
+  let colorSchemeMql = null;
+  const onHostThemeChange = () => {
+    syncDocAppearance(telemetryStore.getState().telemetry?.settings);
+  };
+  try {
+    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+      hostThemeObserver = new MutationObserver(onHostThemeChange);
+      if (document.documentElement) {
+        hostThemeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
+        });
+      }
+      if (document.body) {
+        hostThemeObserver.observe(document.body, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
+        });
+      }
+      if (document.head) {
+        hostThemeObserver.observe(document.head, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      }
+    }
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      colorSchemeMql = window.matchMedia('(prefers-color-scheme: dark)');
+      colorSchemeMql?.addEventListener?.('change', onHostThemeChange);
+    }
+  } catch {
+    // ignore observer setup errors in constrained environments
+  }
+
   const stopPolling = startAsyncTelemetryLoop(2000);
   return {
     appInstance,
     stopPolling: () => {
+      hostThemeObserver?.disconnect?.();
+      colorSchemeMql?.removeEventListener?.('change', onHostThemeChange);
       unsubAppearance();
       stopPolling();
     },

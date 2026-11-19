@@ -22,7 +22,13 @@ const EN_MONTH_SHORT = Object.freeze([
 ]);
 
 export function formatMetric(value, unit = '') {
-  return Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : '—';
+  if (!Number.isFinite(value)) return '—';
+  const numStr = Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(1);
+  return `${numStr}${unit}`;
+}
+
+export function formatSpeedMetric(value, unit = ' tok/s') {
+  return formatMetric(value, unit);
 }
 
 export function formatCachePct(value) {
@@ -98,6 +104,8 @@ const SPEED_REASON_LABELS = {
   __proto__: null,
   incomplete_or_invalid_timing: 'fmt.speedIncomplete',
   canceled: 'fmt.speedCanceled',
+  error: 'fmt.speedError',
+  interrupted: 'fmt.speedInterrupted',
   compaction_timing_unavailable: 'fmt.speedCompactionTimingUnavailable',
   invalid_output_tokens: 'fmt.speedInvalidOutput',
   inconsistent_timing: 'fmt.speedInconsistent',
@@ -108,6 +116,135 @@ const SPEED_REASON_LABELS = {
 export function speedReasonText(reason) {
   const label = SPEED_REASON_LABELS[reason];
   return label ? t(label) : '';
+}
+
+const ANOMALY_KIND_ORDER = Object.freeze([
+  'rate_limit',
+  'timeout',
+  'capacity',
+  'disconnect',
+  'upstream',
+  'model_output',
+  'safety',
+  'auth_or_model',
+  'error',
+]);
+
+export function formatAnomalyKindLabel(kind) {
+  const k = String(kind || 'error');
+  const key = `steps.anomalyKind.${k}`;
+  const text = t(key);
+  return text === key ? t('steps.anomalyKind.error') : text;
+}
+
+export function formatAnomalyTagText(primaryKind, count = 1) {
+  const n = Math.max(1, Math.floor(Number(count) || 1));
+  const k = String(primaryKind || 'error');
+  if (k === 'capacity' && n === 1) return t('steps.anomalyTag.capacitySingle');
+  if (k === 'upstream' && n === 1) return t('steps.anomalyTag.upstreamSingle');
+  const key = `steps.anomalyTag.${k}`;
+  const formatted = t(key, { n });
+  return formatted === key ? t('steps.anomalyTag.error', { n }) : formatted;
+}
+
+export function resolveModelAnomalySummary(m) {
+  const count = Math.max(0, Number(m?.anomalyCount || 0));
+  const steps = Math.max(0, Number(m?.anomalySteps || 0));
+  if (count <= 0 && steps <= 0) return null;
+  const byKind = m?.anomalyByKind && typeof m.anomalyByKind === 'object' ? m.anomalyByKind : {};
+  const entries = Object.entries(byKind)
+    .map(([k, v]) => [k, Math.max(0, Number(v || 0))])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      const pa = ANOMALY_KIND_ORDER.indexOf(a[0]);
+      const pb = ANOMALY_KIND_ORDER.indexOf(b[0]);
+      return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb);
+    });
+  const totalCount = count || entries.reduce((sum, [, v]) => sum + v, 0) || steps;
+  const primaryKind = entries.length === 1 ? entries[0][0] : entries.length > 1 ? 'mixed' : 'error';
+  const severity =
+    Number(m?.anomalyDangerCount || 0) > 0 ||
+    entries.some(([k]) => k === 'rate_limit' || k === 'auth_or_model')
+      ? 'danger'
+      : 'warn';
+  return {
+    count: totalCount,
+    steps: steps || totalCount,
+    totalDelaySec: Math.max(0, Number(m?.anomalyTotalDelaySec || 0)),
+    primaryKind,
+    severity,
+    entries,
+    tagText: formatAnomalyTagText(primaryKind, totalCount),
+  };
+}
+
+export function formatStepAnomalyInlineSummary(anomaly) {
+  if (!anomaly || !(Number(anomaly.count) > 0)) return '';
+  const tag = formatAnomalyTagText(anomaly.primaryKind, anomaly.count);
+  const label = formatAnomalyKindLabel(anomaly.primaryKind);
+  const delaySec = Number(anomaly.totalDelaySec || 0);
+  const delayPart = delaySec > 0 ? ` · ${t('steps.anomalyDelayPart', { sec: delaySec })}` : '';
+  return `${tag} · ${label}${delayPart}`;
+}
+
+export function buildStepAnomalyDiagnostic(st) {
+  const a = st?.anomaly;
+  if (!a || !(Number(a.count) > 0)) return null;
+  const title = t('steps.anomalyStepTitle', {
+    step: Number(st.stepIndex ?? 0),
+    count: Number(a.count),
+  });
+  const delaySec = Number(a.totalDelaySec || 0);
+  const sub = delaySec > 0 ? t('steps.anomalyDelayPart', { sec: delaySec }) : '';
+  const events = Array.isArray(a.events) ? a.events : [];
+  const rows = events.map((ev, idx) => {
+    const label = formatAnomalyKindLabel(ev.kind);
+    const parts = [`#${ev.attempt || idx + 1} ${label}`];
+    if (Number(ev.delaySec) > 0) {
+      parts.push(t('steps.anomalyDelayPart', { sec: ev.delaySec }));
+    }
+    if (ev.terminal) {
+      parts.push(t('steps.anomalyTerminalTag'));
+    }
+    return {
+      text: parts.join(' · '),
+      detail: ev.message || '',
+      danger: Boolean(ev.terminal || ev.kind === 'rate_limit' || ev.kind === 'auth_or_model'),
+    };
+  });
+  return {
+    title,
+    sub,
+    rows,
+    hint: '',
+    severity: a.severity === 'danger' ? 'danger' : 'warn',
+  };
+}
+
+export function buildModelAnomalyDiagnostic(m) {
+  const sum = resolveModelAnomalySummary(m);
+  if (!sum) return null;
+  const title = t('steps.anomalyModelTitle', {
+    model: m?.displayText || m?.shortName || m?.label || '—',
+    count: sum.count,
+  });
+  const subParts = [t('steps.anomalyModelSub', { steps: sum.steps })];
+  if (sum.totalDelaySec > 0) {
+    subParts.push(t('steps.anomalyDelayPart', { sec: sum.totalDelaySec }));
+  }
+  const rows = sum.entries.map(([k, v]) => ({
+    text: t('steps.anomalyModelKindRow', { kind: formatAnomalyKindLabel(k), count: v }),
+    detail: '',
+    danger: k === 'rate_limit' || k === 'auth_or_model',
+  }));
+  return {
+    title,
+    sub: subParts.join(' · '),
+    rows,
+    hint: t('steps.anomalyModelClickHint'),
+    severity: sum.severity,
+  };
 }
 
 export function sampleSummary(summary) {
@@ -389,6 +526,12 @@ export function mergeModelsByDisplayName(models = [], settings = {}, options = {
         ttftWeightedSum: hasTtft ? Number(m.avgTtftSec) * ttftWeight : 0,
         ttftWeight: hasTtft ? ttftWeight : 0,
         ttftSampleCount,
+        anomalySteps: Math.max(0, Number(m.anomalySteps || 0)),
+        anomalyCount: Math.max(0, Number(m.anomalyCount || 0)),
+        anomalyDangerCount: Math.max(0, Number(m.anomalyDangerCount || 0)),
+        anomalyTotalDelaySec: Math.max(0, Number(m.anomalyTotalDelaySec || 0)),
+        anomalyByKind:
+          m.anomalyByKind && typeof m.anomalyByKind === 'object' ? { ...m.anomalyByKind } : {},
       };
       if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
       byDisplay.set(key, acc);
@@ -416,6 +559,17 @@ export function mergeModelsByDisplayName(models = [], settings = {}, options = {
     acc.totalTokens += totTok;
     acc.costUsd += costUsd;
     acc.unpricedCalls += unpricedCalls;
+
+    acc.anomalySteps += Math.max(0, Number(m.anomalySteps || 0));
+    acc.anomalyCount += Math.max(0, Number(m.anomalyCount || 0));
+    acc.anomalyDangerCount += Math.max(0, Number(m.anomalyDangerCount || 0));
+    acc.anomalyTotalDelaySec += Math.max(0, Number(m.anomalyTotalDelaySec || 0));
+    if (m.anomalyByKind && typeof m.anomalyByKind === 'object') {
+      for (const [ak, av] of Object.entries(m.anomalyByKind)) {
+        const cnt = Math.max(0, Number(av || 0));
+        if (cnt > 0) acc.anomalyByKind[ak] = (acc.anomalyByKind[ak] || 0) + cnt;
+      }
+    }
 
     if (hasSpeed) {
       acc.speedWeightedSum += Number(m.avgTokPerSec) * speedWeight;
@@ -467,6 +621,15 @@ export function mergeModelsByDisplayName(models = [], settings = {}, options = {
       avgTokPerSec,
       avgTtftSec,
       ttftSampleCount: acc.ttftSampleCount,
+      ...(acc.anomalyCount > 0
+        ? {
+            anomalySteps: acc.anomalySteps,
+            anomalyCount: acc.anomalyCount,
+            anomalyDangerCount: acc.anomalyDangerCount,
+            anomalyTotalDelaySec: +acc.anomalyTotalDelaySec.toFixed(1),
+            anomalyByKind: acc.anomalyByKind,
+          }
+        : {}),
       speedSummary: acc.baseItem.speedSummary
         ? {
             ...acc.baseItem.speedSummary,
@@ -496,21 +659,48 @@ export function getAgentBadgeClass(index = 0, isMain = false) {
   return `badge-sub-${slot}`;
 }
 
+function resolveStructuredAgentKind(agent) {
+  if (!agent) return 'main';
+  if (agent.agentKind) return agent.agentKind;
+  if (agent.isMain) return 'main';
+  if (agent.isSideQuestion || agent.typeName === 'side_question') return 'side_question';
+  if (
+    agent.typeName === 'worker' ||
+    agent.typeName === 'swarm_worker' ||
+    /^Swarm\s+Worker\s*\(/i.test(String(agent.role || ''))
+  ) {
+    return 'swarm_worker';
+  }
+  return 'subagent';
+}
+
+function normalizeSwarmMemberHandle(rawText) {
+  const trimmed = String(rawText || '').trim();
+  if (!trimmed) return '';
+  const wrapper = trimmed.match(/^Swarm\s+Worker\s*\(([^)]+)\)\s*$/i);
+  const inner = (wrapper ? wrapper[1] : trimmed).replace(/^@+/, '').trim();
+  if (
+    !inner ||
+    inner === '蜂群' ||
+    inner === '工蜂' ||
+    inner.toLowerCase() === 'swarm' ||
+    inner.toLowerCase() === 'worker' ||
+    inner.toLowerCase() === 'swarm worker'
+  ) {
+    return '';
+  }
+  return `@${inner}`;
+}
+
 /**
- * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理或旁路提问的紧凑徽章文本（零正则反拆中文）。
+ * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理、蜂群节点或旁路提问的紧凑徽章文本（零正则反拆中文）。
  *
  * @param {object|null|undefined} agent
  * @returns {string}
  */
 export function formatAgentBadgeText(agent) {
   if (!agent) return t('fmt.mainBadge');
-  const kind =
-    agent.agentKind ||
-    (agent.isMain
-      ? 'main'
-      : agent.isSideQuestion || agent.typeName === 'side_question'
-        ? 'side_question'
-        : 'subagent');
+  const kind = resolveStructuredAgentKind(agent);
   if (kind === 'all') return t('header.scopeAllShort');
   if (kind === 'main') return t('fmt.mainBadge');
   if (kind === 'side_question') {
@@ -518,6 +708,12 @@ export function formatAgentBadgeText(agent) {
     if (ord > 0) return t('fmt.sideBadge', { index: ord });
     if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
     return t('fmt.sideBadgeShort');
+  }
+  if (kind === 'swarm_worker') {
+    const ord = Number(agent.agentOrdinal || agent.index || 0);
+    if (ord > 0) return t('fmt.swarmBadge', { index: ord });
+    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    return t('fmt.swarmBadgeShort');
   }
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   if (ord > 0) return t('fmt.subBadge', { index: ord });
@@ -533,13 +729,7 @@ export function formatAgentBadgeText(agent) {
  */
 export function formatAgentLabel(agent) {
   if (!agent) return t('fmt.mainAgent');
-  const kind =
-    agent.agentKind ||
-    (agent.isMain
-      ? 'main'
-      : agent.isSideQuestion || agent.typeName === 'side_question'
-        ? 'side_question'
-        : 'subagent');
+  const kind = resolveStructuredAgentKind(agent);
   if (kind === 'all') return t('header.scopeAll');
   if (kind === 'main') return t('fmt.mainAgent');
 
@@ -560,6 +750,20 @@ export function formatAgentLabel(agent) {
     return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
   }
 
+  if (kind === 'swarm_worker') {
+    const ord = Number(agent.agentOrdinal || agent.index || 0);
+    const baseLabel = ord > 0 ? `${t('fmt.swarmAgent')} #${ord}` : t('fmt.swarmAgent');
+    const handle = normalizeSwarmMemberHandle(rawCustom || agent.role || '');
+    if (!handle) return baseLabel;
+    let auxSuffix = '';
+    if (/^@monitor(?:-\d+)?$/i.test(handle)) {
+      auxSuffix = ` (${t('fmt.swarmMonitorHint')})`;
+    } else if (/^@narrator(?:-\d+)?$/i.test(handle)) {
+      auxSuffix = ` (${t('fmt.swarmNarratorHint')})`;
+    }
+    return `${baseLabel} · ${handle}${auxSuffix}`;
+  }
+
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   const baseLabel = ord > 0 ? `${t('fmt.subAgent')} #${ord}` : t('fmt.subAgent');
   const isGeneric =
@@ -569,6 +773,31 @@ export function formatAgentLabel(agent) {
     rawCustom === t('fmt.subAgent') ||
     rawCustom === 'Subagent';
   return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+}
+
+/**
+ * 格式化会话选项右侧元信息（自适应区分纯蜂群、蜂群+子代理混合、常规子代理与单会话步数）。
+ *
+ * @param {object|null|undefined} conv
+ * @returns {string}
+ */
+export function formatConversationMeta(conv) {
+  if (!conv) return '';
+  const main = Number(conv.stepCount || 0);
+  const totalSubs = Number(conv.subagentCount || 0);
+  const swarm = Number(conv.swarmCount || 0);
+  const otherSubs = Math.max(0, totalSubs - swarm);
+  const total = Number(conv.totalStepCount ?? conv.totalStepsAllAgents ?? main);
+  if (swarm > 0 && otherSubs > 0) {
+    return t('header.convMetaWithSwarmAndSubs', { main, swarm, subs: otherSubs, total });
+  }
+  if (swarm > 0) {
+    return t('header.convMetaWithSwarm', { main, swarm, total });
+  }
+  if (totalSubs > 0) {
+    return t('header.convMetaWithSubs', { main, subs: totalSubs, total });
+  }
+  return t('header.convMetaSteps', { count: main });
 }
 
 /**
@@ -609,4 +838,163 @@ export function formatLiveActivityDetail(act) {
     return t('live.act.compactionResuming');
   }
   return String(act.detail || '');
+}
+
+/**
+ * 20 色感知均匀色环（无特定模型绑定，兼顾亮/暗背景可读性，彻底消除标准 HSL 绿色/暗红区过度聚集撞色）。
+ * 每项为 `[hue, saturationPct, lightnessPct]`。
+ */
+const PERCEPTUAL_MODEL_COLOR_RING = [
+  [217, 82, 53], // Royal Blue
+  [14, 80, 52], // Coral / Vermilion
+  [162, 74, 41], // Teal / Jade
+  [272, 74, 58], // Vivid Violet
+  [36, 88, 47], // Rich Amber
+  [336, 78, 53], // Rose / Raspberry
+  [193, 84, 43], // Cerulean / Cyan
+  [138, 66, 41], // Emerald Green
+  [246, 74, 60], // Indigo
+  [25, 86, 50], // Tangerine Orange
+  [306, 70, 52], // Magenta / Orchid
+  [177, 76, 39], // Deep Seafoam
+  [355, 76, 54], // Crimson Red
+  [205, 80, 48], // Ocean Blue
+  [45, 88, 44], // Warm Gold
+  [288, 68, 55], // Amethyst Purple
+  [102, 60, 42], // Leaf Green
+  [230, 76, 57], // Cobalt Blue
+  [322, 74, 51], // Berry Pink
+  [185, 72, 46], // Turquoise
+];
+
+/**
+ * 提取跨平台、跨语言、同屏三栏（模型排行 / 客户端来源 / 月度统计）严格一致的模型颜色种子字符串。
+ *
+ * 优先取单模型稳定 `sourceLabels[0]`；若多个外层槽位已在当前显示策略下合并（如 `4-argon`），
+ * 则以规范化 `displayText` 为种子，确保跨客户端与跨月份聚合子集不同时依然映射至完全相同的颜色。
+ *
+ * @param {object|string|null|undefined} model
+ * @returns {string}
+ */
+export function getCanonicalModelColorSeed(model) {
+  if (typeof model === 'string') {
+    return model.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+  if (!model || typeof model !== 'object') return '';
+  if (
+    Number(model.mergedCount || 0) <= 1 &&
+    Array.isArray(model.sourceLabels) &&
+    model.sourceLabels.length === 1 &&
+    model.sourceLabels[0]
+  ) {
+    return String(model.sourceLabels[0]).trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+  const raw =
+    model.displayText ||
+    model.label ||
+    model.modelId ||
+    model.baseItem?.modelId ||
+    model.shortName ||
+    model.name ||
+    '';
+  return String(raw).trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function hashModelSeed32(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+function formatRingSlotHsl(slotIdx, shiftLight = 0) {
+  const [hue, sat, light] = PERCEPTUAL_MODEL_COLOR_RING[slotIdx % PERCEPTUAL_MODEL_COLOR_RING.length];
+  const clampedLight = Math.min(66, Math.max(34, light + shiftLight));
+  return `hsl(${hue} ${sat}% ${clampedLight}%)`;
+}
+
+/**
+ * 基于模型标识通过 32 位雪崩哈希映射至 20 色感知均匀色环，确保跨电脑同模型同色且无需硬编码颜色表。
+ *
+ * @param {object|string|null|undefined} seedOrModel
+ * @returns {string}
+ */
+export function resolveDeterministicModelColor(seedOrModel) {
+  const seed = getCanonicalModelColorSeed(seedOrModel);
+  if (!seed) return 'var(--accent-primary)';
+  const h = hashModelSeed32(seed);
+  return formatRingSlotHsl(h % PERCEPTUAL_MODEL_COLOR_RING.length);
+}
+
+/**
+ * 为一组模型构建确定性颜色映射表（双遍固有槽位保护）：
+ * 1. 所有无槽位冲突的模型 100% 保持其纯哈希固有色，不受长尾模型增减影响；
+ * 2. 仅当同屏两个模型恰好落入同一色环槽位时，按严格字典序以互质步长 `+7` 优先探查未被任何模型占用的空闲槽位。
+ *
+ * @param {Array<object|string>} [models=[]]
+ * @returns {Map<string, string>} `canonicalSeed -> hsl(...)`
+ */
+export function buildDeterministicModelColorMap(models = []) {
+  const ringLen = PERCEPTUAL_MODEL_COLOR_RING.length;
+  const uniqueSeeds = Array.from(
+    new Set(
+      (Array.isArray(models) ? models : [])
+        .map((m) => getCanonicalModelColorSeed(m))
+        .filter(Boolean)
+    )
+  ).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  const naturalSlotCounts = new Map();
+  for (const seed of uniqueSeeds) {
+    const nat = hashModelSeed32(seed) % ringLen;
+    naturalSlotCounts.set(nat, (naturalSlotCounts.get(nat) || 0) + 1);
+  }
+
+  const usedSlots = new Set();
+  const colorMap = new Map();
+
+  for (const seed of uniqueSeeds) {
+    const h = hashModelSeed32(seed);
+    const nat = h % ringLen;
+    if (!usedSlots.has(nat)) {
+      usedSlots.add(nat);
+      colorMap.set(seed, formatRingSlotHsl(nat));
+      continue;
+    }
+
+    let picked = -1;
+    for (let k = 1; k < ringLen; k++) {
+      const cand = (nat + k * 7) % ringLen;
+      if (!usedSlots.has(cand) && !naturalSlotCounts.has(cand)) {
+        picked = cand;
+        break;
+      }
+    }
+    if (picked < 0) {
+      for (let k = 1; k < ringLen; k++) {
+        const cand = (nat + k * 7) % ringLen;
+        if (!usedSlots.has(cand)) {
+          picked = cand;
+          break;
+        }
+      }
+    }
+
+    if (picked >= 0) {
+      usedSlots.add(picked);
+      colorMap.set(seed, formatRingSlotHsl(picked));
+    } else {
+      const shift = (h >>> 8) & 1 ? 9 : -8;
+      colorMap.set(seed, formatRingSlotHsl(nat, shift));
+    }
+  }
+
+  return colorMap;
 }

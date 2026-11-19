@@ -4,16 +4,26 @@
  */
 
 import { createReactiveStore } from '../core/reactive.js';
-import { callSidecarApi, getWindowBridgeConfig, isWindowOverlayMode } from '../core/httpClient.js';
+import {
+  abortSidecarApiKey,
+  callSidecarApi,
+  getWindowBridgeConfig,
+  isWindowOverlayMode,
+} from '../core/httpClient.js';
 import {
   formatAgentBadgeText,
   formatAgentLabel,
+  formatConversationMeta,
   formatLiveActivityDetail,
   formatLiveActivityLabel,
   getAgentBadgeClass,
 } from '../core/formatters.js';
 import { normalizeI18nLanguage, t } from '../i18n/index.js';
-import { normalizeClientFontScale, normalizeClientThemeAccent } from '../core/appearance.js';
+import {
+  normalizeClientFontScale,
+  normalizeClientModernUi,
+  normalizeClientThemeAccent,
+} from '../core/appearance.js';
 import {
   DEFAULT_HOVER_MODULES,
   DEFAULT_OVERVIEW_METRICS,
@@ -134,15 +144,285 @@ export const telemetryStore = createReactiveStore({
 
 let pollTimer = null;
 let feedbackTimer = null;
+let deferredConvSyncTimer = null;
 let activeBundleVersion = 0;
 let latestRequestSeq = 0;
+let latestConsumptionReqSeq = 0;
+let latestConversationSwitchSeq = 0;
 let activeForceCount = 0;
 let consecutivePollFailures = 0;
 let inFlightTelemetryPoll = null;
+let inFlightPresetsPrefetch = null;
+let lastPrefetchedUsageRevision = 0;
+let consumptionCacheScopeSig = '';
+const MAX_CONSUMPTION_RANGE_CACHE = 12;
+const MAX_CONVERSATION_VIEW_CACHE = 12;
+const CONSUMPTION_PRESET_KEYS = ['cycle', 'today', '24h', '7d', '14d', '30d', 'all'];
+const consumptionRangeCache = new Map();
+const conversationViewCache = new Map();
 let lastReceivedSteps = null;
 let loopActive = false;
 let loopIntervalMs = 2000;
 let loopTickFn = null;
+let settingsRevision = 0;
+let settingsWriteChain = Promise.resolve();
+const pendingSettingsMutations = new Map();
+const recentCommittedSettings = new Map();
+
+const TELEMETRY_RECOMPUTE_SETTING_KEYS = new Set([
+  'weeklyLimitMode',
+  'weeklyTokenBudget',
+  'weeklyCostBudget',
+  'windowMountMode',
+  'enableWindowOverlay',
+]);
+
+function makeConsumptionRangeCacheKey(range, customStartMs = 0, customEndMs = 0) {
+  const key = String(range || 'all');
+  if (key === 'custom') {
+    return `custom:${Number(customStartMs || 0)}:${Number(customEndMs || 0)}`;
+  }
+  return key;
+}
+
+export function clearConsumptionRangeCache() {
+  consumptionRangeCache.clear();
+  lastPrefetchedUsageRevision = 0;
+  inFlightPresetsPrefetch = null;
+}
+
+export function clearConversationViewCache() {
+  conversationViewCache.clear();
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
+}
+
+function buildConsumptionScopeSig(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  const acct = payload.account || {};
+  const set = payload.settings || {};
+  const cloud = payload.cloudStatus || {};
+  return `${String(acct.status || '')}|${String(acct.email || acct.name || '').toLowerCase()}|${String(set.weeklyLimitMode || '')}|${String(cloud.catalogVersion || '')}`;
+}
+
+function syncConsumptionCacheScope(payload) {
+  const nextSig = buildConsumptionScopeSig(payload);
+  if (!nextSig) return;
+  if (consumptionCacheScopeSig && consumptionCacheScopeSig !== nextSig) {
+    clearConsumptionRangeCache();
+    clearConversationViewCache();
+  }
+  consumptionCacheScopeSig = nextSig;
+}
+
+function recordConversationViewToCache(payload) {
+  const active = payload?.activeConversation;
+  const cidLower = String(active?.cascadeId || '').trim().toLowerCase();
+  if (!cidLower || !Array.isArray(active?.recentSteps)) return;
+  const entry = {
+    cascadeId: active.cascadeId,
+    activeConversation: active,
+    activePool: payload.quotas?.activePool || null,
+    weekly: payload.quotas?.weekly || null,
+    sessionConsumption: payload.consumption?.session || null,
+    sessionPresets:
+      payload.consumption?.sessionPresets ||
+      (payload.consumption?.presets
+        ? Object.fromEntries(
+            Object.entries(payload.consumption.presets).map(([k, v]) => [k, v?.session || null])
+          )
+        : null),
+    stepRevision: String(payload.stepRevision || ''),
+    cachedAtMs: Date.now(),
+  };
+  conversationViewCache.delete(cidLower);
+  conversationViewCache.set(cidLower, entry);
+  while (conversationViewCache.size > MAX_CONVERSATION_VIEW_CACHE) {
+    conversationViewCache.delete(conversationViewCache.keys().next().value);
+  }
+}
+
+function resolveCachedConversationRootId(telemetry, effectiveConvId) {
+  const target = String(effectiveConvId || '').trim();
+  const convs = Array.isArray(telemetry?.conversations) ? telemetry.conversations : [];
+  if (!target) {
+    return String(convs[0]?.cascadeId || '').trim().toLowerCase();
+  }
+  const lower = target.toLowerCase();
+  if (conversationViewCache.has(lower)) return lower;
+  const matchedRoot = convs.find(
+    (c) =>
+      String(c?.cascadeId || '').toLowerCase() === lower ||
+      (Array.isArray(c?.memberCascadeIds) &&
+        c.memberCascadeIds.some((m) => String(m || '').toLowerCase() === lower))
+  );
+  return String(matchedRoot?.cascadeId || lower).trim().toLowerCase();
+}
+
+function applyConversationSliceToTelemetry(baseTelemetry, slice) {
+  if (!baseTelemetry || !slice?.activeConversation) return baseTelemetry;
+  const activeCidLower = String(slice.activeConversation.cascadeId || '').toLowerCase();
+  const prevQuotas = baseTelemetry.quotas || {};
+  const nextQuotas =
+    slice.activePool || slice.weekly
+      ? {
+          ...prevQuotas,
+          ...(slice.activePool ? { activePool: slice.activePool } : {}),
+          ...(slice.weekly ? { weekly: slice.weekly } : {}),
+        }
+      : prevQuotas;
+
+  const prevCons = baseTelemetry.consumption || {};
+  let nextPresets = prevCons.presets;
+  if (slice.sessionPresets && prevCons.presets && typeof prevCons.presets === 'object') {
+    nextPresets = { ...prevCons.presets };
+    for (const [k, sBucket] of Object.entries(slice.sessionPresets)) {
+      if (sBucket && nextPresets[k]) {
+        nextPresets[k] = { ...nextPresets[k], session: sBucket };
+      }
+    }
+  }
+  const nextCons =
+    slice.sessionConsumption || nextPresets !== prevCons.presets
+      ? {
+          ...prevCons,
+          ...(slice.sessionConsumption ? { session: slice.sessionConsumption } : {}),
+          ...(nextPresets !== prevCons.presets ? { presets: nextPresets } : {}),
+        }
+      : prevCons;
+
+  const prevRunning = Array.isArray(baseTelemetry.runningConversations)
+    ? baseTelemetry.runningConversations
+    : null;
+  let nextRunning = prevRunning;
+  if (prevRunning && prevRunning.length > 0 && activeCidLower) {
+    let anyChanged = false;
+    const mapped = prevRunning.map((item) => {
+      const shouldSelect = String(item?.cascadeId || '').toLowerCase() === activeCidLower;
+      if (Boolean(item?.isCurrentSelected) === shouldSelect) return item;
+      anyChanged = true;
+      return { ...item, isCurrentSelected: shouldSelect };
+    });
+    if (anyChanged) nextRunning = mapped;
+  }
+
+  return {
+    ...baseTelemetry,
+    ...(slice.stepRevision ? { stepRevision: slice.stepRevision } : {}),
+    activeConversation: slice.activeConversation,
+    quotas: nextQuotas,
+    consumption: nextCons,
+    ...(nextRunning ? { runningConversations: nextRunning } : {}),
+  };
+}
+
+function putConsumptionRangeCacheEntry(cacheKey, entry) {
+  if (!cacheKey || !entry) return;
+  consumptionRangeCache.delete(cacheKey);
+  consumptionRangeCache.set(cacheKey, entry);
+  while (consumptionRangeCache.size > MAX_CONSUMPTION_RANGE_CACHE) {
+    consumptionRangeCache.delete(consumptionRangeCache.keys().next().value);
+  }
+}
+
+function recordConsumptionSliceToCache(
+  cons,
+  modelBreakdown,
+  { customStartMs = 0, customEndMs = 0, usageRevision = 0 } = {}
+) {
+  const rangeKey = String(cons?.selectedRange?.key || '');
+  if (!rangeKey) return;
+  const cacheKey = makeConsumptionRangeCacheKey(
+    rangeKey,
+    rangeKey === 'custom' ? customStartMs || cons.selectedRange?.startMs || 0 : 0,
+    rangeKey === 'custom' ? customEndMs || cons.selectedRange?.endMs || 0 : 0
+  );
+  putConsumptionRangeCacheEntry(cacheKey, {
+    revision: Number(cons.revision ?? usageRevision ?? 0),
+    selectedRange: cons.selectedRange,
+    session: cons.session,
+    account: cons.account,
+    trendSeries: Array.isArray(cons.trendSeries) ? cons.trendSeries : [],
+    sourcesBreakdown: Array.isArray(cons.sourcesBreakdown) ? cons.sourcesBreakdown : [],
+    modelBreakdown: Array.isArray(modelBreakdown) ? modelBreakdown : [],
+  });
+}
+
+function applyCachedConsumptionSlice(baseTelemetry, cachedEntry, targetRevision = 0) {
+  if (!baseTelemetry || !cachedEntry) return baseTelemetry;
+  const prevCons = baseTelemetry.consumption || {};
+  return {
+    ...baseTelemetry,
+    consumption: {
+      ...prevCons,
+      ...(targetRevision > 0 ? { revision: targetRevision } : {}),
+      selectedRange: cachedEntry.selectedRange,
+      session: cachedEntry.session ?? prevCons.session,
+      account: cachedEntry.account ?? prevCons.account,
+      trendSeries: cachedEntry.trendSeries,
+      sourcesBreakdown: cachedEntry.sourcesBreakdown,
+    },
+    modelBreakdown: cachedEntry.modelBreakdown,
+  };
+}
+
+function hasAllPresetRangesCached(expectedRevision) {
+  for (const key of CONSUMPTION_PRESET_KEYS) {
+    const entry = consumptionRangeCache.get(key);
+    if (!entry) return false;
+    if (expectedRevision > 0 && entry.revision !== expectedRevision) return false;
+  }
+  return true;
+}
+
+function enqueueSettingsWrite(task) {
+  const run = settingsWriteChain.then(task, task);
+  settingsWriteChain = run.catch(() => {});
+  return run;
+}
+
+function extractReturnedSettings(res) {
+  if (!res || typeof res !== 'object') return null;
+  if (res.settings && typeof res.settings === 'object' && !Array.isArray(res.settings)) {
+    return res.settings;
+  }
+  if (
+    typeof res.language === 'string' ||
+    typeof res.themeAccent === 'string' ||
+    typeof res.windowMountMode === 'string'
+  ) {
+    return res;
+  }
+  return null;
+}
+
+function reconcileIncomingTelemetrySettings(payload, reqSettingsRev) {
+  if (!payload?.settings || typeof payload.settings !== 'object') {
+    return payload;
+  }
+  for (const [k, entry] of [...recentCommittedSettings.entries()]) {
+    if (reqSettingsRev >= entry.rev) {
+      recentCommittedSettings.delete(k);
+    }
+  }
+  if (pendingSettingsMutations.size === 0 && recentCommittedSettings.size === 0) {
+    return payload;
+  }
+  let merged = null;
+  for (const [k, entry] of recentCommittedSettings.entries()) {
+    if (reqSettingsRev < entry.rev) {
+      merged ??= { ...payload.settings };
+      merged[k] = entry.value;
+    }
+  }
+  for (const [k, entry] of pendingSettingsMutations.entries()) {
+    merged ??= { ...payload.settings };
+    merged[k] = entry.value;
+  }
+  return merged ? { ...payload, settings: merged } : payload;
+}
 
 export const CLIENT_TOPBAR_SLOT_KEYS = TOPBAR_SLOT_KEYS;
 export const DEFAULT_CLIENT_TOPBAR_SLOTS = DEFAULT_TOPBAR_SLOTS;
@@ -194,6 +474,7 @@ export function isEquivalentTelemetry(prev, next) {
   if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
   if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
   if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if (Boolean(pSet?.experimentalModernUi) !== Boolean(nSet?.experimentalModernUi)) return false;
   if ((prev.hostPlatform || '') !== (next.hostPlatform || '')) return false;
   if (Boolean(pSet?.contextWindowRiskAccepted) !== Boolean(nSet?.contextWindowRiskAccepted)) {
     return false;
@@ -299,6 +580,8 @@ export function isEquivalentTelemetry(prev, next) {
   if (pAct?.cascadeId !== nAct?.cascadeId) return false;
   if (pAct?.stepCount !== nAct?.stepCount) return false;
   if (pAct?.subagentCount !== nAct?.subagentCount) return false;
+  if ((pAct?.swarmCount || 0) !== (nAct?.swarmCount || 0)) return false;
+  if ((pAct?.swarmTitle || '') !== (nAct?.swarmTitle || '')) return false;
   if (pAct?.totalStepsAllAgents !== nAct?.totalStepsAllAgents) return false;
   if (pAct?.isRunning !== nAct?.isRunning) return false;
   if (
@@ -375,6 +658,9 @@ export function isEquivalentTelemetry(prev, next) {
     const na = nAgents[i];
     if (
       pa?.agentId !== na?.agentId ||
+      pa?.agentKind !== na?.agentKind ||
+      pa?.agentOrdinal !== na?.agentOrdinal ||
+      (pa?.swarmState || '') !== (na?.swarmState || '') ||
       pa?.role !== na?.role ||
       pa?.stepCount !== na?.stepCount ||
       pa?.isRunning !== na?.isRunning ||
@@ -436,6 +722,7 @@ export function isEquivalentTelemetry(prev, next) {
         bs?.contextTokens !== as?.contextTokens ||
         bs?.cacheHitPct !== as?.cacheHitPct ||
         bs?.selectedSpeedReason !== as?.selectedSpeedReason ||
+        bs?.anomalySig !== as?.anomalySig ||
         bs?.turnIndex !== as?.turnIndex ||
         bs?.rootTurnIndex !== as?.rootTurnIndex ||
         bs?.isTurnStart !== as?.isTurnStart ||
@@ -492,6 +779,7 @@ export function isEquivalentTelemetry(prev, next) {
       before.contextTokens !== after.contextTokens ||
       before.cacheHitPct !== after.cacheHitPct ||
       before.selectedSpeedReason !== after.selectedSpeedReason ||
+      before.anomalySig !== after.anomalySig ||
       before.turnIndex !== after.turnIndex ||
       before.rootTurnIndex !== after.rootTurnIndex ||
       before.isTurnStart !== after.isTurnStart ||
@@ -532,6 +820,28 @@ export function isEquivalentTelemetry(prev, next) {
   if (pAcct?.unpricedCalls !== nAcct?.unpricedCalls) return false;
 
   // 6. 比对历史趋势时间分桶序列与年度分月序列
+  const areModelSlicesEqual = (pList, nList) => {
+    const a = pList || [];
+    const b = nList || [];
+    if (a.length !== b.length) return false;
+    for (let k = 0; k < a.length; k++) {
+      if (
+        a[k]?.label !== b[k]?.label ||
+        a[k]?.shortName !== b[k]?.shortName ||
+        a[k]?.upstreamName !== b[k]?.upstreamName ||
+        a[k]?.costUsd !== b[k]?.costUsd ||
+        a[k]?.unpricedCalls !== b[k]?.unpricedCalls ||
+        a[k]?.totalTokens !== b[k]?.totalTokens ||
+        a[k]?.calls !== b[k]?.calls ||
+        Number(a[k]?.anomalyCount || 0) !== Number(b[k]?.anomalyCount || 0) ||
+        Number(a[k]?.anomalySteps || 0) !== Number(b[k]?.anomalySteps || 0)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const pTrend = prev.consumption?.trendSeries || [];
   const nTrend = next.consumption?.trendSeries || [];
   if (pTrend.length !== nTrend.length) return false;
@@ -540,12 +850,14 @@ export function isEquivalentTelemetry(prev, next) {
       pTrend[i]?.tokens !== nTrend[i]?.tokens ||
       pTrend[i]?.calls !== nTrend[i]?.calls ||
       pTrend[i]?.label !== nTrend[i]?.label ||
-      pTrend[i]?.fullLabel !== nTrend[i]?.fullLabel
+      pTrend[i]?.fullLabel !== nTrend[i]?.fullLabel ||
+      !areModelSlicesEqual(pTrend[i]?.models, nTrend[i]?.models)
     ) {
       return false;
     }
   }
   if (prev.consumption?.monthlyYear !== next.consumption?.monthlyYear) return false;
+
   const pMonthly = prev.consumption?.monthlySeries || [];
   const nMonthly = next.consumption?.monthlySeries || [];
   if (pMonthly.length !== nMonthly.length) return false;
@@ -553,28 +865,19 @@ export function isEquivalentTelemetry(prev, next) {
     if (
       pMonthly[i]?.totalTokens !== nMonthly[i]?.totalTokens ||
       pMonthly[i]?.costUsd !== nMonthly[i]?.costUsd ||
-      pMonthly[i]?.calls !== nMonthly[i]?.calls
+      pMonthly[i]?.calls !== nMonthly[i]?.calls ||
+      !areModelSlicesEqual(pMonthly[i]?.models, nMonthly[i]?.models)
     ) {
       return false;
     }
   }
 
   // 7. 比对按模型汇总明细与数据来源汇总明细
-  const pModels = prev.modelBreakdown || [];
-  const nModels = next.modelBreakdown || [];
-  if (pModels.length !== nModels.length) return false;
-  for (let i = 0; i < pModels.length; i++) {
-    if (
-      pModels[i]?.label !== nModels[i]?.label ||
-      pModels[i]?.shortName !== nModels[i]?.shortName ||
-      pModels[i]?.upstreamName !== nModels[i]?.upstreamName ||
-      pModels[i]?.costUsd !== nModels[i]?.costUsd ||
-      pModels[i]?.unpricedCalls !== nModels[i]?.unpricedCalls ||
-      pModels[i]?.totalTokens !== nModels[i]?.totalTokens ||
-      pModels[i]?.calls !== nModels[i]?.calls
-    ) {
-      return false;
-    }
+  if (!areModelSlicesEqual(pAct?.modelBreakdown, nAct?.modelBreakdown)) {
+    return false;
+  }
+  if (!areModelSlicesEqual(prev.modelBreakdown, next.modelBreakdown)) {
+    return false;
   }
 
   const pSources = prev.consumption?.sourcesBreakdown || [];
@@ -586,7 +889,8 @@ export function isEquivalentTelemetry(prev, next) {
       pSources[i]?.costUsd !== nSources[i]?.costUsd ||
       pSources[i]?.unpricedCalls !== nSources[i]?.unpricedCalls ||
       pSources[i]?.totalTokens !== nSources[i]?.totalTokens ||
-      pSources[i]?.calls !== nSources[i]?.calls
+      pSources[i]?.calls !== nSources[i]?.calls ||
+      !areModelSlicesEqual(pSources[i]?.models, nSources[i]?.models)
     ) {
       return false;
     }
@@ -660,6 +964,8 @@ export function isEquivalentTelemetry(prev, next) {
       pConvs[i]?.status !== nConvs[i]?.status ||
       pConvs[i]?.stepCount !== nConvs[i]?.stepCount ||
       pConvs[i]?.subagentCount !== nConvs[i]?.subagentCount ||
+      (pConvs[i]?.swarmCount || 0) !== (nConvs[i]?.swarmCount || 0) ||
+      (pConvs[i]?.swarmTitle || '') !== (nConvs[i]?.swarmTitle || '') ||
       pConvs[i]?.totalStepCount !== nConvs[i]?.totalStepCount
     ) {
       return false;
@@ -678,7 +984,9 @@ export function isEquivalentTelemetry(prev, next) {
       pr?.isCurrentSelected !== nr?.isCurrentSelected ||
       pr?.isMainRunning !== nr?.isMainRunning ||
       pr?.subagentCount !== nr?.subagentCount ||
+      (pr?.swarmCount || 0) !== (nr?.swarmCount || 0) ||
       pr?.runningSubagentCount !== nr?.runningSubagentCount ||
+      (pr?.runningSwarmCount || 0) !== (nr?.runningSwarmCount || 0) ||
       pr?.mainActivity?.signature !== nr?.mainActivity?.signature ||
       pr?.mainActivity?.startedAtMs !== nr?.mainActivity?.startedAtMs
     ) {
@@ -690,6 +998,8 @@ export function isEquivalentTelemetry(prev, next) {
     for (let j = 0; j < pSubs.length; j++) {
       if (
         pSubs[j]?.cascadeId !== nSubs[j]?.cascadeId ||
+        pSubs[j]?.agentKind !== nSubs[j]?.agentKind ||
+        (pSubs[j]?.swarmState || '') !== (nSubs[j]?.swarmState || '') ||
         pSubs[j]?.role !== nSubs[j]?.role ||
         pSubs[j]?.isRunning !== nSubs[j]?.isRunning ||
         pSubs[j]?.stepCount !== nSubs[j]?.stepCount ||
@@ -765,6 +1075,10 @@ function readDisplaySteps(payload) {
 
 async function requestTelemetry(params, force) {
   const reqSeq = ++latestRequestSeq;
+  const reqSettingsRev = settingsRevision;
+  const reqRange = String(params.get('range') || '');
+  const reqStartMs = Number(params.get('startMs') || 0);
+  const reqEndMs = Number(params.get('endMs') || 0);
   const startMs = Date.now();
 
   if (force) {
@@ -815,18 +1129,70 @@ async function requestTelemetry(params, force) {
     }
     consecutivePollFailures = 0;
 
+    let resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+    syncConsumptionCacheScope(resolvedPayload);
+    recordConversationViewToCache(resolvedPayload);
+    if (resolvedPayload?.consumption) {
+      recordConsumptionSliceToCache(resolvedPayload.consumption, resolvedPayload.modelBreakdown, {
+        customStartMs: reqStartMs,
+        customEndMs: reqEndMs,
+      });
+    }
+
     const latestSt = telemetryStore.getState();
+    const incomingRev = Number(resolvedPayload?.consumption?.revision || 0);
+    const matchesCurrentRange =
+      !reqRange ||
+      (reqRange === latestSt.selectedTimeRange &&
+        (reqRange !== 'custom' ||
+          (reqStartMs === Number(latestSt.customStartMs || 0) &&
+            reqEndMs === Number(latestSt.customEndMs || 0))));
+
+    // 常规 2 秒轮询在途期间若用户已通过前端缓存瞬切到其他时间段，保留用户当前选中的范围不回跳，
+    // 若后端 usageRevision 已推进则静默补发一次轻量范围校准。
+    let needsSilentRangeRevalidate = false;
+    if (!force && !matchesCurrentRange && resolvedPayload?.consumption) {
+      const activeKey = makeConsumptionRangeCacheKey(
+        latestSt.selectedTimeRange,
+        latestSt.customStartMs,
+        latestSt.customEndMs
+      );
+      const cachedActive = consumptionRangeCache.get(activeKey);
+      if (cachedActive) {
+        resolvedPayload = applyCachedConsumptionSlice(resolvedPayload, cachedActive, incomingRev);
+        if (incomingRev > 0 && cachedActive.revision !== incomingRev) {
+          needsSilentRangeRevalidate = true;
+        }
+      } else if (
+        latestSt.telemetry?.consumption?.selectedRange?.key === latestSt.selectedTimeRange
+      ) {
+        resolvedPayload = {
+          ...resolvedPayload,
+          consumption: {
+            ...resolvedPayload.consumption,
+            selectedRange: latestSt.telemetry.consumption.selectedRange,
+            session: latestSt.telemetry.consumption.session,
+            account: latestSt.telemetry.consumption.account,
+            trendSeries: latestSt.telemetry.consumption.trendSeries,
+            sourcesBreakdown: latestSt.telemetry.consumption.sourcesBreakdown,
+          },
+          modelBreakdown: latestSt.telemetry.modelBreakdown,
+        };
+      }
+    }
+
     if (force) {
       const elapsed = Date.now() - startMs;
       if (elapsed < 220) {
         await new Promise((r) => setTimeout(r, 220 - elapsed));
       }
       if (reqSeq !== latestRequestSeq) {
-        return payload;
+        return resolvedPayload;
       }
+      const finalForcePayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
       if (feedbackTimer) clearTimeout(feedbackTimer);
       telemetryStore.setState({
-        telemetry: payload,
+        telemetry: finalForcePayload,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: 'synced',
       });
@@ -834,16 +1200,24 @@ async function requestTelemetry(params, force) {
         feedbackTimer = null;
         telemetryStore.setState({ syncState: 'idle' });
       }, 1100);
+      return finalForcePayload;
     } else {
-      const isSame = isEquivalentTelemetry(latestSt.telemetry, payload);
-      const nextTelemetry = isSame ? latestSt.telemetry : payload;
+      const isSame = isEquivalentTelemetry(latestSt.telemetry, resolvedPayload);
+      const nextTelemetry = isSame ? latestSt.telemetry : resolvedPayload;
       telemetryStore.setState({
         telemetry: nextTelemetry,
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
       });
+      if (needsSilentRangeRevalidate) {
+        void fetchConsumptionRangeSlice({
+          range: latestSt.selectedTimeRange,
+          customStartMs: latestSt.customStartMs,
+          customEndMs: latestSt.customEndMs,
+        });
+      }
+      return resolvedPayload;
     }
-    return payload;
   } catch (err) {
     if (err?.name === 'AbortError' || reqSeq !== latestRequestSeq) return null;
     consecutivePollFailures += 1;
@@ -861,6 +1235,354 @@ async function requestTelemetry(params, force) {
   }
 }
 
+async function fetchConsumptionRangeSlice({
+  range,
+  customStartMs = 0,
+  customEndMs = 0,
+} = {}) {
+  const reqSeq = ++latestConsumptionReqSeq;
+  const targetRange = String(range || 'today');
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  params.set('range', targetRange);
+  if (targetRange === 'custom') {
+    if (customStartMs > 0) params.set('startMs', String(customStartMs));
+    if (customEndMs > 0) params.set('endMs', String(customEndMs));
+  }
+  params.set('scope', 'consumption');
+
+  try {
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
+      method: 'GET',
+      abortKey: 'consumption-range',
+    });
+    if (!payload || typeof payload !== 'object') return null;
+
+    if (payload.scope === 'consumption' && payload.consumption) {
+      const usageRev = Number(payload.usageRevision ?? payload.consumption.revision ?? 0);
+      recordConsumptionSliceToCache(payload.consumption, payload.modelBreakdown, {
+        customStartMs,
+        customEndMs,
+        usageRevision: usageRev,
+      });
+      if (reqSeq !== latestConsumptionReqSeq) return payload;
+
+      const latestSt = telemetryStore.getState();
+      const stillMatches =
+        latestSt.selectedTimeRange === targetRange &&
+        (targetRange !== 'custom' ||
+          (Number(latestSt.customStartMs || 0) === Number(customStartMs || 0) &&
+            Number(latestSt.customEndMs || 0) === Number(customEndMs || 0)));
+      if (!stillMatches) return payload;
+
+      const prevTelemetry = latestSt.telemetry;
+      if (prevTelemetry) {
+        const nextTelemetry = {
+          ...prevTelemetry,
+          consumption: {
+            ...(prevTelemetry.consumption || {}),
+            ...payload.consumption,
+            ...(usageRev > 0 ? { revision: usageRev } : {}),
+          },
+          modelBreakdown: Array.isArray(payload.modelBreakdown)
+            ? payload.modelBreakdown
+            : prevTelemetry.modelBreakdown,
+        };
+        if (!isEquivalentTelemetry(prevTelemetry, nextTelemetry)) {
+          telemetryStore.setState({ telemetry: nextTelemetry });
+        }
+      }
+      return payload;
+    }
+
+    // 冷启动阶段后端尚无基础快照时会回退返回完整 telemetry，直接平滑复用现有状态合并
+    if (payload.consumption) {
+      syncConsumptionCacheScope(payload);
+      recordConsumptionSliceToCache(payload.consumption, payload.modelBreakdown, {
+        customStartMs,
+        customEndMs,
+      });
+      if (reqSeq === latestConsumptionReqSeq) {
+        const latestSt = telemetryStore.getState();
+        if (!isEquivalentTelemetry(latestSt.telemetry, payload)) {
+          telemetryStore.setState({ telemetry: payload });
+        }
+      }
+    }
+    return payload;
+  } catch (err) {
+    if (err?.name === 'AbortError') return null;
+    return null;
+  }
+}
+
+/**
+ * 快速切换当前查看的会话：
+ * - 命中前端 `conversationViewCache` 时，0ms 原子切换当前会话快照，并静默走轻量 `scope=conversation` 校准；
+ * - 未命中缓存时直接走零 LS RPC、零全盘扫描的 `scope=conversation` 通道；
+ * - 若后端提示该会话需要补读最新运行态或懒迁移字段（`needsBackgroundSync`），展示后再在后台静默补齐。
+ */
+export async function selectConversation(
+  nextConvId,
+  { hostRouteConversationId = undefined } = {}
+) {
+  const switchSeq = ++latestConversationSwitchSeq;
+  latestRequestSeq += 1;
+  inFlightTelemetryPoll = null;
+  abortSidecarApiKey('telemetry-poll');
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
+
+  const targetSelectedId = String(nextConvId || '').trim();
+  const prevSt = telemetryStore.getState();
+  const nextHostRouteId =
+    hostRouteConversationId !== undefined
+      ? String(hostRouteConversationId || '').trim()
+      : prevSt.hostRouteConversationId;
+  const effectiveConvId = targetSelectedId || nextHostRouteId || '';
+  const statePatch = {
+    selectedConversationId: targetSelectedId,
+    ...(hostRouteConversationId !== undefined ? { hostRouteConversationId: nextHostRouteId } : {}),
+  };
+
+  const prevTelemetry = prevSt.telemetry;
+  const lookupRootId = resolveCachedConversationRootId(prevTelemetry, effectiveConvId);
+  const cachedEntry = lookupRootId ? conversationViewCache.get(lookupRootId) : null;
+  const cachedSteps =
+    cachedEntry && cachedEntry.stepRevision
+      ? readDisplaySteps({
+          stepRevision: cachedEntry.stepRevision,
+          activeConversation: cachedEntry.activeConversation,
+        })
+      : null;
+
+  if (cachedEntry && prevTelemetry) {
+    const optimisticTelemetry = applyConversationSliceToTelemetry(prevTelemetry, cachedEntry);
+    if (cachedSteps) {
+      lastReceivedSteps = cachedSteps;
+    }
+    telemetryStore.setState({
+      ...statePatch,
+      telemetry: optimisticTelemetry,
+    });
+  } else {
+    telemetryStore.setState(statePatch);
+  }
+
+  const current = telemetryStore.getState();
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  if (current.selectedTimeRange) params.set('range', current.selectedTimeRange);
+  if (current.selectedTimeRange === 'custom') {
+    if (current.customStartMs > 0) params.set('startMs', String(current.customStartMs));
+    if (current.customEndMs > 0) params.set('endMs', String(current.customEndMs));
+  }
+  params.set('stepDetails', 'display');
+  params.set('stepRevision', cachedSteps?.revision || '');
+  params.set('scope', 'conversation');
+
+  const reqSettingsRev = settingsRevision;
+  try {
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
+      method: 'GET',
+      abortKey: 'conversation-switch',
+    });
+    if (!payload || typeof payload !== 'object') return null;
+    if (switchSeq !== latestConversationSwitchSeq) return payload;
+
+    const latestSt = telemetryStore.getState();
+    const latestEffectiveId =
+      String(latestSt.selectedConversationId || latestSt.hostRouteConversationId || '').trim();
+    if (latestEffectiveId !== effectiveConvId) return payload;
+
+    const active = payload.activeConversation;
+    if (payload.stepsUnchanged) {
+      const stepsSource =
+        (cachedSteps && payload.stepRevision === cachedSteps.revision ? cachedSteps : null) ||
+        (lastReceivedSteps && payload.stepRevision === lastReceivedSteps.revision
+          ? lastReceivedSteps
+          : null);
+      if (!active || !stepsSource) {
+        return fetchTelemetry({ force: false });
+      }
+      active.recentSteps = stepsSource.recentSteps;
+      active.agents.forEach((agent, index) => {
+        const steps = stepsSource.agentSteps[index];
+        if (steps) agent.recentSteps = steps;
+      });
+    }
+
+    if (payload.scope === 'conversation' && active) {
+      lastReceivedSteps = readDisplaySteps(payload) || lastReceivedSteps;
+      recordConversationViewToCache(payload);
+      const baseTelemetry = latestSt.telemetry;
+      if (baseTelemetry) {
+        const mergedTelemetry = applyConversationSliceToTelemetry(baseTelemetry, {
+          activeConversation: active,
+          activePool: payload.quotas?.activePool || null,
+          weekly: payload.quotas?.weekly || null,
+          sessionConsumption: payload.consumption?.session || null,
+          sessionPresets: payload.consumption?.sessionPresets || null,
+          stepRevision: payload.stepRevision || '',
+        });
+        if (!isEquivalentTelemetry(baseTelemetry, mergedTelemetry)) {
+          telemetryStore.setState({
+            telemetry: mergedTelemetry,
+            minuteTick: Math.floor(Date.now() / 30000),
+          });
+        }
+      } else {
+        return fetchTelemetry({ force: false });
+      }
+      if (payload.needsBackgroundSync && loopActive && typeof setTimeout === 'function') {
+        deferredConvSyncTimer = setTimeout(() => {
+          deferredConvSyncTimer = null;
+          if (switchSeq === latestConversationSwitchSeq && loopActive) {
+            void fetchTelemetry({ force: false });
+          }
+        }, 35);
+      }
+      return payload;
+    }
+
+    // 冷启动或全新未入缓存会话回退至完整载荷
+    const resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+    syncConsumptionCacheScope(resolvedPayload);
+    lastReceivedSteps = readDisplaySteps(resolvedPayload) || lastReceivedSteps;
+    recordConversationViewToCache(resolvedPayload);
+    if (resolvedPayload?.consumption) {
+      recordConsumptionSliceToCache(resolvedPayload.consumption, resolvedPayload.modelBreakdown, {
+        customStartMs: Number(current.customStartMs || 0),
+        customEndMs: Number(current.customEndMs || 0),
+      });
+    }
+    if (!isEquivalentTelemetry(latestSt.telemetry, resolvedPayload)) {
+      telemetryStore.setState({
+        telemetry: resolvedPayload,
+        minuteTick: Math.floor(Date.now() / 30000),
+        syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
+      });
+    }
+    return resolvedPayload;
+  } catch (err) {
+    if (err?.name === 'AbortError' || switchSeq !== latestConversationSwitchSeq) return null;
+    return null;
+  }
+}
+
+/**
+ * 切换「用量统计」时间范围：
+ * - 命中前端 rangeCache 时，在单次 setState 内 0ms 原子更新概览/趋势/模型/来源（若 usageRevision 一致则 0 次 HTTP 请求）；
+ * - 若后台数据已更新则先 0ms 展示缓存，再静默发起轻量 `scope=consumption` 校准；
+ * - 未命中缓存（如自定义时段或进页首 20ms 抢点）则直接走 `<5ms` 的 `scope=consumption` 通道。
+ */
+export function selectConsumptionTimeRange(
+  nextRange,
+  { customStartMs = undefined, customEndMs = undefined } = {}
+) {
+  const targetRange = String(nextRange || 'today');
+  const prevSt = telemetryStore.getState();
+  const nextStartMs =
+    targetRange === 'custom'
+      ? Number(customStartMs !== undefined ? customStartMs : prevSt.customStartMs || 0)
+      : prevSt.customStartMs;
+  const nextEndMs =
+    targetRange === 'custom'
+      ? Number(customEndMs !== undefined ? customEndMs : prevSt.customEndMs || 0)
+      : prevSt.customEndMs;
+
+  const statePatch = { selectedTimeRange: targetRange };
+  if (targetRange === 'custom') {
+    statePatch.customStartMs = nextStartMs;
+    statePatch.customEndMs = nextEndMs;
+  }
+
+  const cacheKey = makeConsumptionRangeCacheKey(targetRange, nextStartMs, nextEndMs);
+  const cached = consumptionRangeCache.get(cacheKey);
+  const prevTelemetry = prevSt.telemetry;
+
+  if (cached && prevTelemetry) {
+    const currentRev = Number(prevTelemetry.consumption?.revision || 0);
+    const nextTelemetry = applyCachedConsumptionSlice(
+      prevTelemetry,
+      cached,
+      currentRev > 0 ? currentRev : cached.revision
+    );
+    telemetryStore.setState({ ...statePatch, telemetry: nextTelemetry });
+    if (currentRev > 0 && cached.revision === currentRev) {
+      return Promise.resolve(nextTelemetry);
+    }
+    return fetchConsumptionRangeSlice({
+      range: targetRange,
+      customStartMs: nextStartMs,
+      customEndMs: nextEndMs,
+    });
+  }
+
+  telemetryStore.setState(statePatch);
+  return fetchConsumptionRangeSlice({
+    range: targetRange,
+    customStartMs: nextStartMs,
+    customEndMs: nextEndMs,
+  });
+}
+
+/**
+ * 仅在进入「用量统计」视图时触发一次静默后台预取，拉齐全部 7 个预设区间到前端缓存以实现 0ms 瞬切。
+ */
+export function prefetchConsumptionPresets() {
+  const prevTelemetry = telemetryStore.getState().telemetry;
+  const currentRev = Number(prevTelemetry?.consumption?.revision || 0);
+  if (currentRev > 0 && lastPrefetchedUsageRevision === currentRev && hasAllPresetRangesCached(currentRev)) {
+    return Promise.resolve(true);
+  }
+  if (inFlightPresetsPrefetch) {
+    return inFlightPresetsPrefetch;
+  }
+
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  params.set('scope', 'consumption-presets');
+
+  const task = callSidecarApi(`/api/telemetry?${params}`, {
+    method: 'GET',
+    abortKey: 'consumption-presets',
+  })
+    .then((payload) => {
+      if (payload?.scope === 'consumption-presets' && payload.ranges && typeof payload.ranges === 'object') {
+        const rev = Number(payload.usageRevision || currentRev || 0);
+        for (const [rangeKey, entry] of Object.entries(payload.ranges)) {
+          if (!entry || typeof entry !== 'object') continue;
+          recordConsumptionSliceToCache(
+            { ...entry, revision: rev },
+            entry.modelBreakdown,
+            { usageRevision: rev }
+          );
+        }
+        if (rev > 0) {
+          lastPrefetchedUsageRevision = rev;
+        }
+        return true;
+      }
+      return false;
+    })
+    .catch(() => false)
+    .finally(() => {
+      if (inFlightPresetsPrefetch === task) {
+        inFlightPresetsPrefetch = null;
+      }
+    });
+
+  inFlightPresetsPrefetch = task;
+  return task;
+}
+
 export async function saveSettingsPatch(patch) {
   const safePatch = patch && typeof patch === 'object' ? { ...patch } : {};
   if (Object.prototype.hasOwnProperty.call(safePatch, 'language')) {
@@ -871,6 +1593,9 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'fontScale')) {
     safePatch.fontScale = normalizeClientFontScale(safePatch.fontScale);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'experimentalModernUi')) {
+    safePatch.experimentalModernUi = normalizeClientModernUi(safePatch.experimentalModernUi);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
     safePatch.weeklyLimitMode = normalizeWeeklyLimitMode(safePatch.weeklyLimitMode);
@@ -949,31 +1674,119 @@ export async function saveSettingsPatch(patch) {
     safePatch.enableWindowOverlay = Boolean(safePatch.enableWindowOverlay);
     safePatch.windowMountMode = safePatch.enableWindowOverlay ? 'dual' : 'sidebar';
   }
+  const myRev = ++settingsRevision;
   const prevTelemetry = telemetryStore.getState().telemetry;
-  if (prevTelemetry?.settings) {
-    telemetryStore.setState({
-      telemetry: {
-        ...prevTelemetry,
-        settings: { ...prevTelemetry.settings, ...safePatch },
-      },
-    });
+  const patchKeys = Object.keys(safePatch);
+  const prevKeyValues = new Map();
+  for (const key of patchKeys) {
+    prevKeyValues.set(key, prevTelemetry?.settings?.[key]);
+    pendingSettingsMutations.set(key, { rev: myRev, value: safePatch[key] });
   }
+  let optimisticTelemetry = null;
+  if (prevTelemetry?.settings) {
+    optimisticTelemetry = {
+      ...prevTelemetry,
+      settings: { ...prevTelemetry.settings, ...safePatch },
+    };
+    telemetryStore.setState({ telemetry: optimisticTelemetry });
+  }
+  let res = null;
   try {
-    await callSidecarApi('/api/settings', { method: 'POST', body: safePatch });
+    res = await enqueueSettingsWrite(() =>
+      callSidecarApi('/api/settings', { method: 'POST', body: safePatch })
+    );
   } catch (err) {
-    if (prevTelemetry) {
-      telemetryStore.setState({ telemetry: prevTelemetry });
+    const rollbackKeys = [];
+    for (const key of patchKeys) {
+      const activeEntry = pendingSettingsMutations.get(key);
+      if (activeEntry?.rev === myRev) {
+        pendingSettingsMutations.delete(key);
+        rollbackKeys.push(key);
+      }
+    }
+    if (rollbackKeys.length > 0) {
+      const curTelemetry = telemetryStore.getState().telemetry;
+      if (prevTelemetry && optimisticTelemetry && curTelemetry === optimisticTelemetry) {
+        telemetryStore.setState({ telemetry: prevTelemetry });
+      } else if (curTelemetry?.settings) {
+        const rolledBackSettings = { ...curTelemetry.settings };
+        for (const key of rollbackKeys) {
+          if (recentCommittedSettings.has(key)) {
+            rolledBackSettings[key] = recentCommittedSettings.get(key).value;
+          } else {
+            rolledBackSettings[key] = prevKeyValues.get(key);
+          }
+        }
+        telemetryStore.setState({
+          telemetry: { ...curTelemetry, settings: rolledBackSettings },
+        });
+      }
     }
     throw err;
   }
-  await fetchTelemetry({ force: true });
+
+  const serverSettings = extractReturnedSettings(res);
+  const committedRev = ++settingsRevision;
+  for (const key of patchKeys) {
+    const activeEntry = pendingSettingsMutations.get(key);
+    const committedVal =
+      serverSettings && Object.prototype.hasOwnProperty.call(serverSettings, key)
+        ? serverSettings[key]
+        : safePatch[key];
+    if (activeEntry?.rev === myRev) {
+      pendingSettingsMutations.delete(key);
+      recentCommittedSettings.set(key, { rev: committedRev, value: committedVal });
+    }
+  }
+
+  const curTelemetry = telemetryStore.getState().telemetry;
+  if (curTelemetry?.settings) {
+    const nextSettings = serverSettings
+      ? { ...curTelemetry.settings, ...serverSettings }
+      : { ...curTelemetry.settings };
+    for (const [k, entry] of recentCommittedSettings.entries()) {
+      if (entry.rev > committedRev) {
+        nextSettings[k] = entry.value;
+      }
+    }
+    for (const [k, entry] of pendingSettingsMutations.entries()) {
+      nextSettings[k] = entry.value;
+    }
+    telemetryStore.setState({
+      telemetry: { ...curTelemetry, settings: nextSettings },
+    });
+  }
+
+  const needsTelemetryRecompute = patchKeys.some((k) => TELEMETRY_RECOMPUTE_SETTING_KEYS.has(k));
+  if (
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode') ||
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyTokenBudget') ||
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyCostBudget')
+  ) {
+    clearConsumptionRangeCache();
+    clearConversationViewCache();
+  }
+  if (needsTelemetryRecompute) {
+    inFlightTelemetryPoll = null;
+    void fetchTelemetry({ force: false });
+  }
 }
 
 export async function saveModelContextWindow(modelId, option) {
-  const result = await callSidecarApi('/api/context-window', {
-    method: 'POST',
-    body: { modelId, option },
-  });
+  const myRev = ++settingsRevision;
+  const result = await enqueueSettingsWrite(() =>
+    callSidecarApi('/api/context-window', {
+      method: 'POST',
+      body: { modelId, option },
+    })
+  );
+  const committedRev = ++settingsRevision;
+  if (result?.modelContextWindows) {
+    recentCommittedSettings.set('modelContextWindows', {
+      rev: Math.max(myRev, committedRev),
+      value: result.modelContextWindows,
+    });
+  }
   const telemetry = telemetryStore.getState().telemetry;
   if (telemetry?.settings) {
     telemetryStore.setState({
@@ -987,28 +1800,53 @@ export async function saveModelContextWindow(modelId, option) {
 }
 
 export async function resetAllSettings() {
-  const res = await callSidecarApi('/api/settings/reset', { method: 'POST', body: {} });
+  const myRev = ++settingsRevision;
+  const res = await enqueueSettingsWrite(() =>
+    callSidecarApi('/api/settings/reset', { method: 'POST', body: {} })
+  );
+  const committedRev = ++settingsRevision;
+  const serverSettings = extractReturnedSettings(res);
+  if (serverSettings) {
+    for (const [key, val] of Object.entries(serverSettings)) {
+      const pending = pendingSettingsMutations.get(key);
+      if (!pending || pending.rev <= myRev) {
+        pendingSettingsMutations.delete(key);
+        recentCommittedSettings.set(key, { rev: committedRev, value: val });
+      }
+    }
+  }
   const prevTelemetry = telemetryStore.getState().telemetry;
-  if (res?.settings && prevTelemetry) {
+  if (serverSettings && prevTelemetry) {
+    const mergedSettings = { ...serverSettings };
+    for (const [k, entry] of pendingSettingsMutations.entries()) {
+      mergedSettings[k] = entry.value;
+    }
     telemetryStore.setState({
       telemetry: {
         ...prevTelemetry,
-        settings: { ...res.settings },
+        settings: mergedSettings,
       },
     });
   }
-  await fetchTelemetry({ force: true });
+  inFlightTelemetryPoll = null;
+  clearConsumptionRangeCache();
+  clearConversationViewCache();
+  void fetchTelemetry({ force: false });
   return res;
 }
 
 export async function rebuildTrajectoryCache() {
   const res = await callSidecarApi('/api/cache/rebuild', { method: 'POST', body: {} });
+  clearConsumptionRangeCache();
+  clearConversationViewCache();
   await fetchTelemetry({ force: true });
   return res;
 }
 
 export async function triggerCloudSync() {
   const res = await callSidecarApi('/api/cloud-sync', { method: 'POST', body: {} });
+  clearConsumptionRangeCache();
+  clearConversationViewCache();
   await fetchTelemetry({ force: true });
   return res;
 }
@@ -1082,15 +1920,68 @@ export function stopAsyncTelemetryLoop() {
     clearTimeout(feedbackTimer);
     feedbackTimer = null;
   }
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
 }
 
 export {
   formatAgentBadgeText,
   formatAgentLabel,
+  formatConversationMeta,
   formatLiveActivityDetail,
   formatLiveActivityLabel,
   getAgentBadgeClass,
 };
+
+/**
+ * 在遥测快照中解析宿主当前路由会话 ID（兼容顶层主会话 ID 与子代理/蜂群工蜂 ID）。
+ *
+ * @param {object|null|undefined} telemetry
+ * @param {string} rawRouteId
+ * @returns {{ rootConv: object|null, childAgent: object|null, isChildRoute: boolean } | null}
+ */
+export function resolveHostRouteMatch(telemetry, rawRouteId) {
+  const routeLower = String(rawRouteId || '').trim().toLowerCase();
+  if (!routeLower || !telemetry) return null;
+  const convs = Array.isArray(telemetry.conversations) ? telemetry.conversations : [];
+  const actConv = telemetry.activeConversation || null;
+
+  const directRoot =
+    convs.find((c) => String(c?.cascadeId || '').toLowerCase() === routeLower) ||
+    (String(actConv?.cascadeId || '').toLowerCase() === routeLower ? actConv : null);
+  if (directRoot) {
+    return { rootConv: directRoot, childAgent: null, isChildRoute: false };
+  }
+
+  const activeChild = (actConv?.agents || []).find(
+    (a) =>
+      !a?.isMain &&
+      (String(a?.cascadeId || '').toLowerCase() === routeLower ||
+        String(a?.agentId || '').toLowerCase() === routeLower)
+  );
+  if (activeChild) {
+    const parentInList = convs.find(
+      (c) => String(c?.cascadeId || '').toLowerCase() === String(actConv?.cascadeId || '').toLowerCase()
+    );
+    return {
+      rootConv: parentInList || actConv,
+      childAgent: activeChild,
+      isChildRoute: true,
+    };
+  }
+
+  const memberParent = convs.find(
+    (c) =>
+      Array.isArray(c?.memberCascadeIds) &&
+      c.memberCascadeIds.some((id) => String(id || '').toLowerCase() === routeLower)
+  );
+  if (memberParent) {
+    return { rootConv: memberParent, childAgent: null, isChildRoute: true };
+  }
+  return null;
+}
 
 /**
  * 解析当前选中的主/子代理作用域视图数据与独立上下文窗口检视目标。

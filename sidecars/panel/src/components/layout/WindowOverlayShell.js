@@ -19,6 +19,7 @@ import {
   PANEL_SCALE_FACTORS,
   applyAppearanceToRoot,
   normalizeClientFontScale,
+  normalizeClientModernUi,
 } from '../../core/appearance.js';
 import {
   h,
@@ -33,6 +34,7 @@ import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 import {
   buildCapsuleSlotContext,
   createCapsuleSlotNode,
+  patchCapsuleOdometerText,
   resolveMultiSessionCapsuleState,
   syncCapsuleSlotNodes,
 } from '../widgets/CapsuleBarWidget.js';
@@ -50,6 +52,7 @@ import {
   normalizeClientUpdateMode,
   normalizeClientWindowMountMode,
   resolveScopedConversation,
+  selectConversation,
   startAsyncTelemetryLoop,
   stopAsyncTelemetryLoop,
   telemetryStore,
@@ -1084,8 +1087,7 @@ export function mountWindowOverlay() {
       selectedAgentScope: 'all',
       ctxInspectorAgentId: 'auto',
     });
-    telemetryStore.setState({ selectedConversationId: cascadeId });
-    void fetchTelemetry({ force: false });
+    void selectConversation(cascadeId);
     setMultiOpen(false);
     setPopoverOpen(true);
   }
@@ -1397,6 +1399,7 @@ export function mountWindowOverlay() {
     onSelectSession: inspectSessionInMonitor,
     onLayoutChange: () => {
       if (multiOpen) {
+        patchClasses(multiPanelEl, { 'is-instant': true });
         positionFloatingElements();
       }
     },
@@ -1454,9 +1457,23 @@ export function mountWindowOverlay() {
     applyAppearanceToRoot(capsuleHost, settings, { includeFontScale: false });
     applyAppearanceToRoot(portalHost, settings, { includeFontScale: true });
     const scaleKey = normalizeClientFontScale(settings?.fontScale);
-    popoverEl.setAttribute?.('data-font-scale', scaleKey);
-    hoverTipEl.setAttribute?.('data-font-scale', scaleKey);
-    multiPanelEl.setAttribute?.('data-font-scale', scaleKey);
+    const isModernUi = normalizeClientModernUi(settings?.experimentalModernUi);
+    const colorScheme = portalHost.getAttribute?.('data-color-scheme') || 'light';
+    for (const el of [popoverEl, hoverTipEl, multiPanelEl]) {
+      if (el.getAttribute?.('data-font-scale') !== scaleKey) {
+        el.setAttribute?.('data-font-scale', scaleKey);
+      }
+      if (el.getAttribute?.('data-color-scheme') !== colorScheme) {
+        el.setAttribute?.('data-color-scheme', colorScheme);
+      }
+      if (isModernUi) {
+        if (el.getAttribute?.('data-modern-ui') !== 'true') {
+          el.setAttribute?.('data-modern-ui', 'true');
+        }
+      } else if (el.hasAttribute?.('data-modern-ui')) {
+        el.removeAttribute?.('data-modern-ui');
+      }
+    }
   }
 
   portalShadow.appendChild(multiPanelEl);
@@ -1591,6 +1608,7 @@ export function mountWindowOverlay() {
 
   function ensureWorkbenchThemeObserved() {
     const wb = syncWorkbenchThemeVars();
+    syncPortalAppearance(telemetryStore.getState().telemetry?.settings);
     if (wb && wb !== observedWorkbench && themeObserver) {
       observedWorkbench = wb;
       try {
@@ -2186,6 +2204,7 @@ export function mountWindowOverlay() {
     } else if (activeView === 'consumption') {
       refs?.consumptionView?.refs?.viewScrollbar?.refresh();
     } else if (activeView === 'steps') {
+      refs?.stepsView?.refs?.refreshStepTableViewport?.();
       refs?.stepsView?.refs?.stepsScroll?.refresh();
       refs?.stepsView?.refs?.modelsScroll?.refresh();
     } else if (activeView === 'settings') {
@@ -2297,16 +2316,26 @@ export function mountWindowOverlay() {
     syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
   }
 
-  function renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, hostRouteConversationId) {
+  function renderMultiRunningPanel(
+    rawRunningList,
+    runningCount,
+    runningSubCount,
+    hostRouteConversationId,
+    runningSwarmCount = 0
+  ) {
     if (!multiOpen || document.hidden) {
       multiRunningWidget.refs.pauseTicker();
       return;
     }
+    const isPureSwarm = runningSubCount > 0 && runningSwarmCount === runningSubCount;
     patchText(
       multiRunningMetaEl,
       runningCount > 0
         ? runningSubCount > 0
-          ? t('multi.metaWithSubs', { main: runningCount, subs: runningSubCount })
+          ? t(isPureSwarm ? 'multi.metaWithSwarm' : 'multi.metaWithSubs', {
+              main: runningCount,
+              subs: runningSubCount,
+            })
           : t('multi.metaMainOnly', { main: runningCount })
         : t('multi.allIdle')
     );
@@ -2355,7 +2384,7 @@ export function mountWindowOverlay() {
 
     if (!telemetry) {
       patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
-      patchText(multiLabel, t('capsule.multiZero'));
+      patchCapsuleOdometerText(multiLabel, t('capsule.multiZero'), { resetKey: 'multi' });
       patchText(multiRunningMetaEl, t('multi.loading'));
       multiRunningWidget.refs.stopLiveTicker();
 
@@ -2377,25 +2406,32 @@ export function mountWindowOverlay() {
       ctxAgent,
       aggregated,
     });
-    const { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText } =
-      resolveMultiSessionCapsuleState(telemetry, {
-        agents,
-        aggregated,
-        latestTokPerSec: overviewActive.latestTokPerSec ?? null,
-        contextUsedPct: slotCtx.usedPct,
-      });
+    const {
+      rawRunningList,
+      runningCount,
+      runningSubCount,
+      runningSwarmCount,
+      hasWaiting,
+      multiBtnText,
+    } = resolveMultiSessionCapsuleState(telemetry, {
+      agents,
+      aggregated,
+      latestTokPerSec: overviewActive.latestTokPerSec ?? null,
+      contextUsedPct: slotCtx.usedPct,
+    });
 
     patchClasses(multiBtn, {
       'is-running': runningCount > 0 && !hasWaiting,
       'is-waiting': runningCount > 0 && hasWaiting,
     });
-    patchText(multiLabel, multiBtnText);
+    patchCapsuleOdometerText(multiLabel, multiBtnText, { resetKey: 'multi' });
 
     renderMultiRunningPanel(
       rawRunningList,
       runningCount,
       runningSubCount,
-      telSt.hostRouteConversationId
+      telSt.hostRouteConversationId,
+      runningSwarmCount
     );
 
     patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
@@ -2531,13 +2567,12 @@ export function mountWindowOverlay() {
     if (currentRouteId === lastObservedRouteId) return;
     lastObservedRouteId = currentRouteId;
     const st = telemetryStore.getState();
-    const patch = { hostRouteConversationId: currentRouteId };
-    if (currentRouteId && st.selectedConversationId && st.selectedConversationId !== currentRouteId) {
-      patch.selectedConversationId = '';
-    }
+    const nextSelectedId =
+      currentRouteId && st.selectedConversationId && st.selectedConversationId !== currentRouteId
+        ? ''
+        : st.selectedConversationId;
     uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-    telemetryStore.setState(patch);
-    void fetchTelemetry({ force: false });
+    void selectConversation(nextSelectedId, { hostRouteConversationId: currentRouteId });
   }
 
   const onDocMouseDown = (e) => {
@@ -2603,12 +2638,25 @@ export function mountWindowOverlay() {
     if (typeof MutationObserver !== 'undefined') {
       themeObserver = new MutationObserver(() => {
         syncWorkbenchThemeVars();
+        syncPortalAppearance(telemetryStore.getState().telemetry?.settings);
       });
       if (document.head) {
         themeObserver.observe(document.head, {
           childList: true,
           characterData: true,
           subtree: true,
+        });
+      }
+      if (document.documentElement) {
+        themeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
+        });
+      }
+      if (document.body) {
+        themeObserver.observe(document.body, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
         });
       }
       if (document.body) {

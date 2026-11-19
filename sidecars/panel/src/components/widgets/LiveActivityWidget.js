@@ -6,6 +6,7 @@
  */
 
 import { defineComponent } from '../../core/component.js';
+import { isModernUiActiveForElement } from '../../core/appearance.js';
 import {
   h,
   patchAttr,
@@ -24,11 +25,12 @@ import { createSvgIcon } from '../../icons/SvgIcon.js';
 import { getEffectiveLocale, t } from '../../i18n/index.js';
 import {
   extractHostRouteCascadeId,
-  fetchTelemetry,
   resolveScopedConversation,
+  selectConversation,
   telemetryStore,
 } from '../../store/telemetryStore.js';
 import { uiStore } from '../../store/uiStore.js';
+import { CustomScrollbar } from '../ui/CustomScrollbar.js';
 
 export function buildFallbackRunningConversations(
   data,
@@ -40,43 +42,68 @@ export function buildFallbackRunningConversations(
   }
   const activeConv = data.activeConversation || {};
   if (!activeConv.isRunning && !aggregated?.isRunning) return [];
+  const childAgents = (agents || []).filter((a) => !a.isMain);
+  const swarmChildren = childAgents.filter((a) => a.agentKind === 'swarm_worker');
   return [
     {
       cascadeId: activeConv.cascadeId || 'current',
       title: activeConv.title || t('live.currentSession'),
+      ...(activeConv.swarmTitle ? { swarmTitle: activeConv.swarmTitle } : {}),
       isCurrentSelected: true,
       isMainRunning: Boolean(activeConv.isRunning),
       isRunning: true,
       mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
-      subagentCount: Math.max(0, (agents?.length || 1) - 1),
-      runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
+      subagentCount: childAgents.length,
+      swarmCount: swarmChildren.length,
+      runningSubagentCount: childAgents.filter((a) => a.isRunning).length,
+      runningSwarmCount: swarmChildren.filter((a) => a.isRunning).length,
       ...(latestTokPerSec !== undefined ? { latestTokPerSec } : {}),
       ...(contextUsedPct !== undefined ? { contextUsedPct } : {}),
-      subagents: (agents || [])
-        .filter((a) => !a.isMain)
-        .map((s, idx) => ({
+      subagents: childAgents.map((s, idx) => {
+        const isSwarmW = s.agentKind === 'swarm_worker';
+        const isKilled = Boolean(s.swarmState === 'killed');
+        return {
           cascadeId: s.cascadeId || s.agentId,
           index: s.index || idx + 1,
           agentKind: s.agentKind || (s.isSideQuestion ? 'side_question' : 'subagent'),
-          agentOrdinal: s.agentOrdinal || (s.isSideQuestion ? s.sideIndex || 0 : s.index || idx + 1),
+          agentOrdinal:
+            s.agentOrdinal || (s.isSideQuestion ? s.sideIndex || 0 : s.index || idx + 1),
           customRole: s.customRole,
+          ...(s.swarmState ? { swarmState: s.swarmState } : {}),
           ...(s.isSideQuestion ? { isSideQuestion: true, sideIndex: s.sideIndex || 0 } : {}),
           badgeText: formatAgentBadgeText({ ...s, index: s.index || idx + 1 }),
-          shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-          role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
+          shortLabel:
+            s.shortLabel ||
+            `${isSwarmW ? t('fmt.swarmAgent') : t('fmt.subAgent')} #${s.agentOrdinal || idx + 1}`,
+          role:
+            s.role ||
+            `${isSwarmW ? t('fmt.swarmAgent') : t('fmt.subAgent')} #${s.agentOrdinal || idx + 1}`,
           isRunning: Boolean(s.isRunning),
           stepCount: Number(s.stepCount || 0),
           lastModifiedMs: s.lastModifiedMs || 0,
           liveActivity: s.liveActivity || {
-            phase: s.isRunning ? 'thinking' : 'done',
-            actionKey: s.isRunning ? 'thinking' : 'done',
-            label: s.isRunning ? t('live.thinking') : t('live.done'),
+            phase: s.isRunning ? 'thinking' : isSwarmW && !isKilled ? 'waiting' : 'done',
+            actionKey: s.isRunning
+              ? 'thinking'
+              : isSwarmW
+                ? isKilled
+                  ? 'swarm_killed'
+                  : 'swarm_waiting'
+                : 'done',
+            label: s.isRunning
+              ? t('live.thinking')
+              : isSwarmW
+                ? isKilled
+                  ? t('live.killed')
+                  : t('live.waiting')
+                : t('live.done'),
             detail: '',
             stepProgress: '',
             startedAtMs: s.lastModifiedMs || 0,
-            signature: `${s.agentId}:${s.stepCount || 0}`,
+            signature: `${s.agentId}:${s.swarmState || ''}:${s.stepCount || 0}`,
           },
-        })),
+        };
+      }),
     },
   ];
 }
@@ -172,6 +199,38 @@ export const LiveActivityWidget = defineComponent({
       }
     }
 
+    function readComputedPx(el, prop, fallback) {
+      if (!el || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return fallback;
+      }
+      try {
+        const val = parseFloat(window.getComputedStyle(el)?.[prop]);
+        return Number.isFinite(val) ? val : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function clearSubExpandAnim(refs) {
+      if (!refs) return;
+      if (refs.subAnimTimer) {
+        clearTimeout(refs.subAnimTimer);
+        refs.subAnimTimer = null;
+      }
+      refs.isCollapsingSubs = false;
+      const host = refs.subScroll?.el;
+      if (host) {
+        host.ontransitionend = null;
+        patchClasses(host, { 'is-sub-animating': false });
+        host.style.height = '';
+        host.style.paddingTop = '';
+        host.style.marginTop = '';
+        host.style.opacity = '';
+        host.style.overflow = '';
+        host.style.transition = '';
+      }
+    }
+
     function createLiveTaskCard() {
       const dotIcon = createSvgIcon('dot', { size: 11 });
       patchClasses(dotIcon, { 'is-pulsing': true });
@@ -194,12 +253,23 @@ export const LiveActivityWidget = defineComponent({
             text: '',
           })
         : null;
-      const subToggleBtn = h('button', {
-        type: 'button',
-        className: 'live-sub-toggle',
-        hidden: true,
-        text: t('live.subToggleIdle', { total: 0, arrow: '▸' }),
+      const subToggleLabel = h('span', {
+        className: 'live-sub-toggle-label',
+        text: t('live.subToggleIdle', { total: 0 }),
       });
+      const subToggleChevron = createSvgIcon('chevron-down', {
+        size: 11,
+        className: 'live-sub-toggle-chevron',
+      });
+      const subToggleBtn = h(
+        'button',
+        {
+          type: 'button',
+          className: 'live-sub-toggle',
+          hidden: true,
+        },
+        [subToggleLabel, subToggleChevron]
+      );
       const elapsedEl = h('span', {
         className: 'live-activity-elapsed text-mono',
         text: '0s',
@@ -248,7 +318,16 @@ export const LiveActivityWidget = defineComponent({
       ]);
 
       const subListEl = h('div', { className: 'live-sub-list', hidden: true });
-      const cardEl = h('div', { className: 'live-task-card' }, [headerEl, mainRowEl, subListEl]);
+      const subScroll = CustomScrollbar({
+        contentEl: subListEl,
+        className: 'live-sub-scroll-host',
+      });
+      patchAttr(subScroll.el, 'hidden', true);
+      const cardEl = h('div', { className: 'live-task-card' }, [
+        headerEl,
+        mainRowEl,
+        subScroll.el,
+      ]);
 
       return {
         el: cardEl,
@@ -259,6 +338,8 @@ export const LiveActivityWidget = defineComponent({
           hereTagEl,
           metricsEl,
           subToggleBtn,
+          subToggleLabel,
+          subToggleChevron,
           elapsedEl,
           mainBadge,
           mainPhase,
@@ -266,6 +347,9 @@ export const LiveActivityWidget = defineComponent({
           mainSep,
           mainDetail,
           subListEl,
+          subScroll,
+          subAnimTimer: null,
+          isCollapsingSubs: false,
         },
       };
     }
@@ -327,7 +411,12 @@ export const LiveActivityWidget = defineComponent({
       patchAttr(liveActivityBar, 'hidden', !hasRunningTasks);
       if (!hasRunningTasks) {
         stopLiveTicker();
-        patchKeyedList(liveActivityBar, [], {});
+        patchKeyedList(liveActivityBar, [], {
+          destroyRow: (refs) => {
+            clearSubExpandAnim(refs);
+            refs?.subScroll?.destroy?.();
+          },
+        });
         return;
       }
 
@@ -362,14 +451,17 @@ export const LiveActivityWidget = defineComponent({
           const isHere =
             showSessionExtras &&
             Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
+            (String(item.cascadeId || '').toLowerCase() === hostRouteLower ||
+              (item.subagents || []).some(
+                (s) => String(s?.cascadeId || '').toLowerCase() === hostRouteLower
+              ));
           const subSig = (item.subagents || [])
             .map(
               (s) =>
-                `${s.cascadeId}:${s.isRunning}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
+                `${s.cascadeId}:${s.isRunning}:${s.swarmState || ''}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
             )
             .join('|');
-          return `${locale}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${item.runningSubagentCount}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
+          return `${locale}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${item.swarmCount || 0}:${item.runningSubagentCount}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
         },
         createRow: createLiveTaskCard,
         updateRow: (refs, item) => {
@@ -407,8 +499,7 @@ export const LiveActivityWidget = defineComponent({
                 onSelectSession(item.cascadeId);
               } else if (item.cascadeId && item.cascadeId !== 'current') {
                 uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-                telemetryStore.setState({ selectedConversationId: item.cascadeId });
-                fetchTelemetry({ force: false });
+                void selectConversation(item.cascadeId);
               }
             };
           }
@@ -416,7 +507,10 @@ export const LiveActivityWidget = defineComponent({
           if (showSessionExtras && refs.hereTagEl && refs.metricsEl) {
             const isHere =
               Boolean(hostRouteLower) &&
-              String(item.cascadeId || '').toLowerCase() === hostRouteLower;
+              (String(item.cascadeId || '').toLowerCase() === hostRouteLower ||
+                (item.subagents || []).some(
+                  (s) => String(s?.cascadeId || '').toLowerCase() === hostRouteLower
+                ));
             patchText(refs.hereTagEl, t('multi.hereTag'));
             patchAttr(refs.hereTagEl, 'hidden', !isHere);
 
@@ -437,18 +531,27 @@ export const LiveActivityWidget = defineComponent({
           }
 
           const subCount = Number(item.subagentCount || item.subagents?.length || 0);
+          const swarmCount = Number(
+            item.swarmCount ??
+              (item.subagents || []).filter((s) => s?.agentKind === 'swarm_worker').length
+          );
+          const isPureSwarm = subCount > 0 && swarmCount === subCount;
           const runSubCount = Number(item.runningSubagentCount || 0);
           const isExpanded = resolveIsExpanded(item);
           patchText(refs.mainBadge, t('fmt.mainBadge'));
           patchAttr(refs.mainBadge, 'hidden', subCount === 0);
           patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
           if (subCount > 0) {
-            const arrow = isExpanded ? '▾' : '▸';
             const toggleText =
               runSubCount > 0
-                ? t('live.subToggleRunning', { run: runSubCount, total: subCount, arrow })
-                : t('live.subToggleIdle', { total: subCount, arrow });
-            patchText(refs.subToggleBtn, toggleText);
+                ? t(isPureSwarm ? 'live.swarmToggleRunning' : 'live.subToggleRunning', {
+                    run: runSubCount,
+                    total: subCount,
+                  })
+                : t(isPureSwarm ? 'live.swarmToggleIdle' : 'live.subToggleIdle', {
+                    total: subCount,
+                  });
+            patchText(refs.subToggleLabel, toggleText);
             patchClasses(refs.subToggleBtn, { 'is-expanded': isExpanded });
             if (interactive) {
               patchAttr(
@@ -458,11 +561,108 @@ export const LiveActivityWidget = defineComponent({
               );
               refs.subToggleBtn.onclick = (e) => {
                 e.stopPropagation();
-                manualSubExpandMap.set(item.cascadeId, !isExpanded);
-                if (latestUpdateArgs) update(latestUpdateArgs);
-                onLayoutChange?.();
+                const nextExpanded = !resolveIsExpanded(item);
+                const host = refs.subScroll.el;
+                const curH = Number(host.offsetHeight || 0);
+                const curPadTop = readComputedPx(host, 'paddingTop', 6);
+                const curMarginTop = readComputedPx(host, 'marginTop', 3);
+                const curOpacity = readComputedPx(host, 'opacity', 1);
+                const parentGap = readComputedPx(refs.cardEl, 'rowGap', 7);
+                const collapsedMarginTop = -Math.max(0, Math.round(parentGap));
+                const wasMidAnim = Boolean(refs.subAnimTimer);
+                clearSubExpandAnim(refs);
+                manualSubExpandMap.set(item.cascadeId, nextExpanded);
+
+                const modern = isModernUiActiveForElement(refs.cardEl);
+                if (!modern) {
+                  if (latestUpdateArgs) update(latestUpdateArgs);
+                  onLayoutChange?.();
+                  return;
+                }
+
+                if (nextExpanded) {
+                  if (latestUpdateArgs) update(latestUpdateArgs);
+                  const endH = Number(host.offsetHeight || host.scrollHeight || 0);
+                  const endPadTop = readComputedPx(host, 'paddingTop', 6);
+                  const endMarginTop = readComputedPx(host, 'marginTop', 3);
+                  const fromH = wasMidAnim && curH > 0 ? curH : 0;
+                  const fromPadTop = wasMidAnim && curH > 0 ? curPadTop : 0;
+                  const fromMarginTop = wasMidAnim && curH > 0 ? curMarginTop : collapsedMarginTop;
+                  const fromOpacity = wasMidAnim && curH > 0 ? curOpacity : 0;
+                  if (endH > 0) {
+                    patchClasses(host, { 'is-sub-animating': true });
+                    host.style.height = `${fromH}px`;
+                    host.style.paddingTop = `${fromPadTop}px`;
+                    host.style.marginTop = `${fromMarginTop}px`;
+                    host.style.opacity = `${fromOpacity}`;
+                    host.style.overflow = 'hidden';
+                    void host.offsetHeight;
+                    host.style.transition =
+                      'height 220ms cubic-bezier(0.16, 1, 0.3, 1), padding-top 220ms cubic-bezier(0.16, 1, 0.3, 1), margin-top 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease-out';
+                    host.style.height = `${endH}px`;
+                    host.style.paddingTop = `${endPadTop}px`;
+                    host.style.marginTop = `${endMarginTop}px`;
+                    host.style.opacity = '1';
+                    const finishExpand = () => {
+                      clearSubExpandAnim(refs);
+                      refs.subScroll.refresh();
+                      onLayoutChange?.();
+                    };
+                    host.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === host &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishExpand();
+                      }
+                    };
+                    refs.subAnimTimer = setTimeout(finishExpand, 260);
+                  } else {
+                    onLayoutChange?.();
+                  }
+                } else {
+                  patchClasses(refs.subToggleBtn, { 'is-expanded': false });
+                  patchAttr(refs.subToggleBtn, 'title', t('live.subExpandTitle'));
+                  if (curH > 0) {
+                    refs.isCollapsingSubs = true;
+                    patchClasses(host, { 'is-sub-animating': true });
+                    host.style.height = `${curH}px`;
+                    host.style.paddingTop = `${curPadTop}px`;
+                    host.style.marginTop = `${curMarginTop}px`;
+                    host.style.opacity = `${curOpacity}`;
+                    host.style.overflow = 'hidden';
+                    void host.offsetHeight;
+                    host.style.transition =
+                      'height 200ms cubic-bezier(0.16, 1, 0.3, 1), padding-top 200ms cubic-bezier(0.16, 1, 0.3, 1), margin-top 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease-out';
+                    host.style.height = '0px';
+                    host.style.paddingTop = '0px';
+                    host.style.marginTop = `${collapsedMarginTop}px`;
+                    host.style.opacity = '0';
+                    const finishCollapse = () => {
+                      clearSubExpandAnim(refs);
+                      patchAttr(host, 'hidden', true);
+                      patchAttr(refs.subListEl, 'hidden', true);
+                      if (latestUpdateArgs) update(latestUpdateArgs);
+                      onLayoutChange?.();
+                    };
+                    host.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === host &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishCollapse();
+                      }
+                    };
+                    refs.subAnimTimer = setTimeout(finishCollapse, 240);
+                  } else {
+                    if (latestUpdateArgs) update(latestUpdateArgs);
+                    onLayoutChange?.();
+                  }
+                }
               };
             }
+          } else if (refs.isCollapsingSubs) {
+            clearSubExpandAnim(refs);
           }
 
           const mainLabel = formatLiveActivityLabel(act, 'live.thinking');
@@ -493,13 +693,33 @@ export const LiveActivityWidget = defineComponent({
           }
 
           const showSubs = subCount > 0 && isExpanded;
-          patchAttr(refs.subListEl, 'hidden', !showSubs);
+          if (!refs.isCollapsingSubs) {
+            patchAttr(refs.subScroll.el, 'hidden', !showSubs);
+            patchAttr(refs.subListEl, 'hidden', !showSubs);
+          }
           if (showSubs) {
-            const subItems = item.subagents || [];
+            const rawSubItems = item.subagents || [];
+            const getSubSortRank = (s) => {
+              if (s?.isRunning) return 0;
+              if (s?.swarmState === 'waiting' || s?.liveActivity?.actionKey === 'swarm_waiting') {
+                return 1;
+              }
+              return 2;
+            };
+            const subItems =
+              rawSubItems.length > 1
+                ? rawSubItems
+                    .slice()
+                    .sort(
+                      (a, b) =>
+                        getSubSortRank(a) - getSubSortRank(b) ||
+                        Number(a?.index || 0) - Number(b?.index || 0)
+                    )
+                : rawSubItems;
             patchKeyedList(refs.subListEl, subItems, {
               keyFn: (sub) => sub.cascadeId,
               sigFn: (sub) =>
-                `${locale}:${sub.cascadeId}:${sub.role}:${sub.isRunning}:${sub.stepCount}:${sub.liveActivity?.signature || ''}:${sub.isRunning ? activityTimersMap.has(`sub:${sub.cascadeId}`) : true}`,
+                `${locale}:${sub.cascadeId}:${sub.agentKind || ''}:${sub.swarmState || ''}:${sub.role}:${sub.isRunning}:${sub.stepCount}:${sub.liveActivity?.signature || ''}:${sub.isRunning ? activityTimersMap.has(`sub:${sub.cascadeId}`) : true}`,
               createRow: createLiveSubRow,
               updateRow: (subRefs, sub) => {
                 const subAct = sub.liveActivity || {
@@ -510,7 +730,17 @@ export const LiveActivityWidget = defineComponent({
                   stepProgress: '',
                   startedAtMs: sub.lastModifiedMs || 0,
                 };
-                patchClasses(subRefs.rowEl, { 'is-done': !sub.isRunning });
+                const isWaitingSub =
+                  !sub.isRunning &&
+                  (sub.swarmState === 'waiting' || subAct.actionKey === 'swarm_waiting');
+                const isKilledSub =
+                  !sub.isRunning &&
+                  (sub.swarmState === 'killed' || subAct.actionKey === 'swarm_killed');
+                patchClasses(subRefs.rowEl, {
+                  'is-done': !sub.isRunning && !isWaitingSub,
+                  'is-waiting-sub': isWaitingSub,
+                  'is-killed-sub': isKilledSub,
+                });
 
                 const badgeCls = getAgentBadgeClass(sub.index || 1, false);
                 const subBadgeText = formatAgentBadgeText({
@@ -524,22 +754,33 @@ export const LiveActivityWidget = defineComponent({
                 const fallbackRole =
                   sub.agentKind === 'side_question' || sub.isSideQuestion
                     ? `${t('fmt.sideQuestion')}${sub.agentOrdinal || sub.sideIndex ? ` #${sub.agentOrdinal || sub.sideIndex}` : ''}`
-                    : `${t('fmt.subAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`;
+                    : sub.agentKind === 'swarm_worker'
+                      ? `${t('fmt.swarmAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`
+                      : `${t('fmt.subAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`;
                 const roleText =
                   sub.customRole !== undefined
                     ? sub.customRole || fallbackRole
                     : sub.role || sub.shortLabel || fallbackRole;
                 patchText(subRefs.subRole, roleText);
 
+                const idleFallbackKey = isKilledSub
+                  ? 'live.killed'
+                  : isWaitingSub
+                    ? 'live.waiting'
+                    : 'live.done';
                 const subLabel = sub.isRunning
                   ? formatLiveActivityLabel(subAct, 'live.running')
-                  : formatLiveActivityLabel(subAct, 'live.done');
+                  : formatLiveActivityLabel(subAct, idleFallbackKey);
                 const subDetail = formatLiveActivityDetail(subAct);
                 const subProg = subAct.stepProgress ? ` [${subAct.stepProgress}]` : '';
                 const summaryStr = showSessionExtras
                   ? sub.isRunning
                     ? `${subLabel}${subProg}${subDetail ? ` · ${subDetail}` : ''}`
-                    : t('live.doneWithSteps', { steps: sub.stepCount || 0 })
+                    : isKilledSub
+                      ? t('live.killedWithSteps', { steps: sub.stepCount || 0 })
+                      : isWaitingSub
+                        ? t('live.waitingWithSteps', { steps: sub.stepCount || 0 })
+                        : t('live.doneWithSteps', { steps: sub.stepCount || 0 })
                   : [`${subLabel}${subProg}`.trim(), subDetail].filter(Boolean).join(' ');
                 patchAttr(subRefs.subSummary, 'hidden', !summaryStr);
                 patchText(subRefs.subSummary, summaryStr);
@@ -570,7 +811,12 @@ export const LiveActivityWidget = defineComponent({
                 }
               },
             });
+            refs.subScroll.refresh();
           }
+        },
+        destroyRow: (refs) => {
+          clearSubExpandAnim(refs);
+          refs?.subScroll?.destroy?.();
         },
       });
 
@@ -585,6 +831,12 @@ export const LiveActivityWidget = defineComponent({
 
     onCleanup(() => {
       stopLiveTicker();
+      patchKeyedList(liveActivityBar, [], {
+        destroyRow: (refs) => {
+          clearSubExpandAnim(refs);
+          refs?.subScroll?.destroy?.();
+        },
+      });
     });
 
     return {

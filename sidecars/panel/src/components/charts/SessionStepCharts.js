@@ -11,6 +11,9 @@
 import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
 import {
   formatAgentBadgeText,
+  formatMetric,
+  formatSpeedMetric,
+  formatStepAnomalyInlineSummary,
   formatTokens,
   formatTokensPrecise,
   formatUsd,
@@ -327,7 +330,7 @@ export function computePublicationFit(
 
     if (sw <= 1e-12) {
       const fallbackVal = ols.intercept + ols.slope * x0;
-      return { rawFit: fallbackVal, leverageNormSq: 1 / n, diagHat: 1 / n };
+      return { rawFit: fallbackVal, leverageNormSq: 1 / n, diagHat: 1 / n, localHatDiag: 1 / n };
     }
 
     const mx = swx / sw;
@@ -343,6 +346,7 @@ export function computePublicationFit(
     const useSlope = sxxW > 1e-12;
     const inverseWeightSum = 1 / sw;
     const slopeScale = useSlope ? dx0 / sxxW : 0;
+    const localHatDiag = inverseWeightSum + (useSlope ? (dx0 * dx0) / sxxW : 0);
     let rawFit = 0;
     let leverageNormSq = 0;
     let diagHat = 0;
@@ -356,21 +360,53 @@ export function computePublicationFit(
       if (j === diagIdx) diagHat = lj;
     }
 
-    return { rawFit, leverageNormSq, diagHat };
+    return { rawFit, leverageNormSq, diagHat, localHatDiag };
   }
 
   const rawSampleFits = new Float64Array(n);
   const sampleLevSq = new Float64Array(n);
   let sse = 0;
   let traceL = 0;
+  let precomputedGridEval = null;
 
-  for (let i = 0; i < n; i++) {
-    const res = evalLoessPoint(xs[i], i);
-    rawSampleFits[i] = res.rawFit;
-    sampleLevSq[i] = res.leverageNormSq;
-    traceL += res.diagHat;
-    const diff = ys[i] - res.rawFit;
-    sse += diff * diff;
+  // 大样本（n > 200 且 x 单调有序）采用与 R `stats::loess(surface = "interpolate")` 一致的网格插值加速：
+  // 仅在 M 个均匀网格顶点做精确 LOESS（O(M·N)），再线性插值样本拟合值与杠杆度，避免 O(N²) 阻塞主线程。
+  if (n > 200 && sortedXs && M >= 2) {
+    const gridRawFit = new Float64Array(M);
+    const gridLevSq = new Float64Array(M);
+    const gridHatDiag = new Float64Array(M);
+    for (let k = 0; k < M; k++) {
+      const res = evalLoessPoint(gridXs[k], -1);
+      gridRawFit[k] = res.rawFit;
+      gridLevSq[k] = res.leverageNormSq;
+      gridHatDiag[k] = res.localHatDiag;
+    }
+    precomputedGridEval = { gridRawFit, gridLevSq };
+
+    const invSpan = (M - 1) / xSpan;
+    const maxK0 = M - 2;
+    for (let i = 0; i < n; i++) {
+      const u = (xs[i] - xMin) * invSpan;
+      const k0 = u <= 0 ? 0 : u >= maxK0 ? maxK0 : Math.floor(u);
+      const frac = Math.max(0, Math.min(1, u - k0));
+      const rf = gridRawFit[k0] + frac * (gridRawFit[k0 + 1] - gridRawFit[k0]);
+      const ls = Math.max(0, gridLevSq[k0] + frac * (gridLevSq[k0 + 1] - gridLevSq[k0]));
+      const hd = gridHatDiag[k0] + frac * (gridHatDiag[k0 + 1] - gridHatDiag[k0]);
+      rawSampleFits[i] = rf;
+      sampleLevSq[i] = ls;
+      traceL += hd;
+      const diff = ys[i] - rf;
+      sse += diff * diff;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      const res = evalLoessPoint(xs[i], i);
+      rawSampleFits[i] = res.rawFit;
+      sampleLevSq[i] = res.leverageNormSq;
+      traceL += res.diagHat;
+      const diff = ys[i] - res.rawFit;
+      sse += diff * diff;
+    }
   }
 
   const dfRes = Math.max(1, n - traceL);
@@ -394,16 +430,27 @@ export function computePublicationFit(
     clampedSse += d * d;
   }
 
-  const grid = gridXs.map((gx) => {
-    const res = evalLoessPoint(gx, -1);
-    const half = tCrit * sigmaHat * Math.sqrt(res.leverageNormSq);
-    return {
-      x: gx,
-      fit: clampValue(res.rawFit, minVal, maxVal),
-      ciLow: clampValue(res.rawFit - half, minVal, maxVal),
-      ciHigh: clampValue(res.rawFit + half, minVal, maxVal),
-    };
-  });
+  const grid = precomputedGridEval
+    ? gridXs.map((gx, k) => {
+        const rf = precomputedGridEval.gridRawFit[k];
+        const half = tCrit * sigmaHat * Math.sqrt(Math.max(0, precomputedGridEval.gridLevSq[k]));
+        return {
+          x: gx,
+          fit: clampValue(rf, minVal, maxVal),
+          ciLow: clampValue(rf - half, minVal, maxVal),
+          ciHigh: clampValue(rf + half, minVal, maxVal),
+        };
+      })
+    : gridXs.map((gx) => {
+        const res = evalLoessPoint(gx, -1);
+        const half = tCrit * sigmaHat * Math.sqrt(res.leverageNormSq);
+        return {
+          x: gx,
+          fit: clampValue(res.rawFit, minVal, maxVal),
+          ciLow: clampValue(res.rawFit - half, minVal, maxVal),
+          ciHigh: clampValue(res.rawFit + half, minVal, maxVal),
+        };
+      });
 
   const r2Loess = syy > 1e-12 ? clampValue(1 - clampedSse / syy, 0, 1) : 1;
 
@@ -597,9 +644,9 @@ function formatChartMetricValue(metric, val) {
     case 'context':
       return `${formatTokensPrecise(val)} tok`;
     case 'tps':
-      return `${val.toFixed(1)} tok/s`;
+      return formatSpeedMetric(val, ' tok/s');
     case 'ttft':
-      return `${val.toFixed(1)}s`;
+      return formatMetric(val, 's');
     case 'cache':
       return `${val.toFixed(1)}%`;
     case 'cost':
@@ -616,9 +663,9 @@ function formatChartMetricCompact(metric, val) {
     case 'context':
       return formatTokens(val);
     case 'tps':
-      return `${val.toFixed(1)} tok/s`;
+      return formatSpeedMetric(val, ' tok/s');
     case 'ttft':
-      return `${val.toFixed(1)}s`;
+      return formatMetric(val, 's');
     case 'cache':
       return `${val.toFixed(1)}%`;
     case 'cost':
@@ -706,6 +753,10 @@ export function createSessionLineChart() {
   const dotsGroup = document.createElementNS(SVG_NS, 'g');
   svg.appendChild(dotsGroup);
 
+  const anomalyDotsGroup = document.createElementNS(SVG_NS, 'g');
+  anomalyDotsGroup.setAttribute('class', 'sstep-anomaly-dots');
+  svg.appendChild(anomalyDotsGroup);
+
   const hoverLine = document.createElementNS(SVG_NS, 'line');
   hoverLine.setAttribute('class', 'trend-hover-line');
   hoverLine.setAttribute('y1', '10');
@@ -732,10 +783,12 @@ export function createSessionLineChart() {
   const tipMainLeft = h('strong', { className: 'trend-tip-tokens text-mono' });
   const tipMainRight = h('span', { className: 'trend-tip-cost text-mono' });
   const tipSub = h('div', { className: 'trend-tip-sub text-mono', hidden: true });
+  const tipAnomaly = h('div', { className: 'trend-tip-anomaly text-mono', hidden: true });
   const tooltipEl = h('div', { className: 'trend-tooltip', hidden: true }, [
     h('div', { className: 'trend-tip-head' }, [tipHeadLeft, tipHeadRight]),
     h('div', { className: 'trend-tip-main' }, [tipMainLeft, tipMainRight]),
     tipSub,
+    tipAnomaly,
   ]);
 
   const xAxisEl = h('div', { className: 'trend-x-axis' });
@@ -783,6 +836,7 @@ export function createSessionLineChart() {
       clearHover();
       return;
     }
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     hoveredIdx = idx;
     const pt = currentPoints[idx];
     patchAttr(hoverLine, 'hidden', false);
@@ -792,7 +846,12 @@ export function createSessionLineChart() {
     patchAttr(hoverDot, 'hidden', false);
     patchAttr(hoverDot, 'cx', pt.x.toFixed(1));
     patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
-    patchStyleVar(hoverDot, '--hover-dot-color', pt.hoverColor || 'var(--ctx-cached)');
+    const hoverAccent = pt.anomalySummary
+      ? pt.anomalySeverity === 'danger'
+        ? 'var(--metric-danger)'
+        : 'var(--metric-warn)'
+      : pt.hoverColor || 'var(--ctx-cached)';
+    patchStyleVar(hoverDot, '--hover-dot-color', hoverAccent);
 
     patchAttr(peakPill, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', false);
@@ -808,11 +867,30 @@ export function createSessionLineChart() {
     if (pt.subDetail) {
       patchText(tipSub, pt.subDetail);
     }
+    patchAttr(tipAnomaly, 'hidden', !pt.anomalySummary);
+    if (pt.anomalySummary) {
+      patchText(tipAnomaly, pt.anomalySummary);
+      patchClasses(tipAnomaly, { 'is-danger': pt.anomalySeverity === 'danger' });
+    }
 
     const rawPct = (pt.x / viewW) * 100;
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    if (wasHidden) {
+      patchClasses(tooltipEl, { 'is-tracking': false });
+      void tooltipEl.offsetWidth;
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          if (!tooltipEl.hasAttribute('hidden')) {
+            patchClasses(tooltipEl, { 'is-tracking': true });
+          }
+        });
+      } else {
+        patchClasses(tooltipEl, { 'is-tracking': true });
+      }
+    }
 
     for (const [tIdx, el] of tickElsByIdx.entries()) {
       patchClasses(el, { 'is-hovered': tIdx === idx });
@@ -824,6 +902,7 @@ export function createSessionLineChart() {
     patchAttr(hoverLine, 'hidden', true);
     patchAttr(hoverDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
+    patchClasses(tooltipEl, { 'is-tracking': false });
     if (currentPoints.some((p) => p.valid)) {
       patchAttr(peakPill, 'hidden', false);
     }
@@ -938,6 +1017,7 @@ export function createSessionLineChart() {
       while (multiAreaGroup.firstChild) multiAreaGroup.removeChild(multiAreaGroup.firstChild);
       while (multiLineGroup.firstChild) multiLineGroup.removeChild(multiLineGroup.firstChild);
       while (dotsGroup.firstChild) dotsGroup.removeChild(dotsGroup.firstChild);
+      while (anomalyDotsGroup.firstChild) anomalyDotsGroup.removeChild(anomalyDotsGroup.firstChild);
       while (xAxisEl.firstChild) xAxisEl.removeChild(xAxisEl.firstChild);
       patchAttr(modelLegendEl, 'hidden', true);
       patchAttr(peakPill, 'hidden', true);
@@ -1054,7 +1134,7 @@ export function createSessionLineChart() {
         valid = !st.isCompactionStep && Number.isFinite(st.tokPerSec) && st.tokPerSec > 0;
         value = valid ? Number(st.tokPerSec) : 0;
         secondaryRight = Number.isFinite(st.ttftSec)
-          ? t('chart.step.ttftShort', { sec: st.ttftSec.toFixed(1) })
+          ? t('chart.step.ttftShort', { sec: formatMetric(st.ttftSec, '') })
           : '';
         subDetail = valid
           ? t('chart.step.outAndCtx', {
@@ -1066,7 +1146,7 @@ export function createSessionLineChart() {
       } else if (metric === 'ttft') {
         valid = !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0;
         value = valid ? Number(st.ttftSec) : 0;
-        secondaryRight = Number.isFinite(st.tokPerSec) ? `${st.tokPerSec.toFixed(1)} tok/s` : '';
+        secondaryRight = Number.isFinite(st.tokPerSec) ? formatSpeedMetric(st.tokPerSec, ' tok/s') : '';
         subDetail = valid
           ? t('chart.step.ctxAndCache', {
               ctxTok: formatTokens(ctxTok),
@@ -1105,6 +1185,7 @@ export function createSessionLineChart() {
       }
 
       const dotColor = modelColorMap.get(gk) || accentColor;
+      const anomalySummary = formatStepAnomalyInlineSummary(st.anomaly);
       return {
         idx,
         st,
@@ -1117,6 +1198,8 @@ export function createSessionLineChart() {
         value,
         secondaryRight,
         subDetail,
+        anomalySummary,
+        anomalySeverity: st.anomaly?.severity || '',
       };
     });
 
@@ -1152,7 +1235,10 @@ export function createSessionLineChart() {
     const sig =
       `${locale}|${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
       points
-        .map((p) => `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}`)
+        .map(
+          (p) =>
+            `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}:${p.st?.anomalySig || ''}`
+        )
         .join('|');
 
     if (sig !== lastSig) {
@@ -1160,6 +1246,7 @@ export function createSessionLineChart() {
       while (multiAreaGroup.firstChild) multiAreaGroup.removeChild(multiAreaGroup.firstChild);
       while (multiLineGroup.firstChild) multiLineGroup.removeChild(multiLineGroup.firstChild);
       while (dotsGroup.firstChild) dotsGroup.removeChild(dotsGroup.firstChild);
+      while (anomalyDotsGroup.firstChild) anomalyDotsGroup.removeChild(anomalyDotsGroup.firstChild);
 
       if (isMultiCompare) {
         patchAttr(linePath, 'd', '');
@@ -1253,6 +1340,19 @@ export function createSessionLineChart() {
             dotsGroup.appendChild(dot);
           }
         }
+      }
+
+      for (const pt of points) {
+        if (!pt.valid || !pt.anomalySummary) continue;
+        const aDot = document.createElementNS(SVG_NS, 'circle');
+        aDot.setAttribute('cx', pt.x.toFixed(1));
+        aDot.setAttribute('cy', pt.y.toFixed(1));
+        aDot.setAttribute('r', '2.9');
+        aDot.setAttribute(
+          'class',
+          `sstep-anomaly-dot${pt.anomalySeverity === 'danger' ? ' is-danger' : ''}`
+        );
+        anomalyDotsGroup.appendChild(aDot);
       }
 
       const tickIndices = computeStepTickIndices(points.length);
@@ -1482,10 +1582,12 @@ export function createModelFitChart() {
   const tipMainLeft = h('strong', { className: 'trend-tip-tokens text-mono' });
   const tipMainRight = h('span', { className: 'trend-tip-cost text-mono' });
   const tipSub = h('div', { className: 'trend-tip-sub text-mono', hidden: true });
+  const tipAnomaly = h('div', { className: 'trend-tip-anomaly text-mono', hidden: true });
   const tooltipEl = h('div', { className: 'trend-tooltip', hidden: true }, [
     h('div', { className: 'trend-tip-head' }, [tipHeadLeft, tipHeadRight]),
     h('div', { className: 'trend-tip-main' }, [tipMainLeft, tipMainRight]),
     tipSub,
+    tipAnomaly,
   ]);
 
   const fitMethodLabelEl = h('span', { text: t('chart.fit.loess') });
@@ -1576,7 +1678,12 @@ export function createModelFitChart() {
     patchAttr(hoverRawDot, 'hidden', false);
     patchAttr(hoverRawDot, 'cx', sp.x.toFixed(1));
     patchAttr(hoverRawDot, 'cy', sp.rawY.toFixed(1));
+    patchClasses(hoverRawDot, {
+      'is-anomaly': Boolean(sp.anomalySummary),
+      'is-danger': Boolean(sp.anomalySummary && sp.anomalySeverity === 'danger'),
+    });
 
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     patchAttr(tooltipEl, 'hidden', false);
     patchText(tipHeadLeft, sp.stepTag);
     patchText(tipHeadRight, sp.modelText);
@@ -1607,11 +1714,30 @@ export function createModelFitChart() {
         })
       );
     }
+    patchAttr(tipAnomaly, 'hidden', !sp.anomalySummary);
+    if (sp.anomalySummary) {
+      patchText(tipAnomaly, sp.anomalySummary);
+      patchClasses(tipAnomaly, { 'is-danger': sp.anomalySeverity === 'danger' });
+    }
 
     const rawPct = (sp.x / viewW) * 100;
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    if (wasHidden) {
+      patchClasses(tooltipEl, { 'is-tracking': false });
+      void tooltipEl.offsetWidth;
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          if (!tooltipEl.hasAttribute('hidden')) {
+            patchClasses(tooltipEl, { 'is-tracking': true });
+          }
+        });
+      } else {
+        patchClasses(tooltipEl, { 'is-tracking': true });
+      }
+    }
   }
 
   function clearHover() {
@@ -1620,6 +1746,7 @@ export function createModelFitChart() {
     patchAttr(hoverFitDot, 'hidden', true);
     patchAttr(hoverRawDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
+    patchClasses(tooltipEl, { 'is-tracking': false });
   }
 
   plotStage.addEventListener('mousemove', (e) => {
@@ -1627,14 +1754,19 @@ export function createModelFitChart() {
     const rect = svg.getBoundingClientRect();
     if (!rect || rect.width <= 0) return;
     const relX = ((e.clientX - rect.left) / rect.width) * viewW;
-    let bestIdx = 0;
-    let bestDist = Math.abs(currentSamples[0].x - relX);
-    for (let i = 1; i < currentSamples.length; i++) {
-      const d = Math.abs(currentSamples[i].x - relX);
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
+    let lo = 0;
+    let hi = currentSamples.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (currentSamples[mid].x < relX) lo = mid + 1;
+      else hi = mid;
+    }
+    let bestIdx = lo;
+    if (
+      lo > 0 &&
+      Math.abs(currentSamples[lo - 1].x - relX) <= Math.abs(currentSamples[lo].x - relX)
+    ) {
+      bestIdx = lo - 1;
     }
     showHoverAt(bestIdx);
   });
@@ -1871,6 +2003,8 @@ export function createModelFitChart() {
           rawVal,
           stepTag: formatStepAxisTag(st, showAgentPrefix),
           modelText: disp.baseText || disp.text,
+          anomalySummary: formatStepAnomalyInlineSummary(st.anomaly),
+          anomalySeverity: st.anomaly?.severity || '',
         });
       }
     }
@@ -2024,7 +2158,12 @@ export function createModelFitChart() {
           .map(
             (s) =>
               `${s.key}:${s.colorVar}:` +
-              s.samples.map((p) => `${p.xVal}:${p.rawVal.toFixed(3)}:${p.fitVal.toFixed(3)}`).join(',')
+              s.samples
+                .map(
+                  (p) =>
+                    `${p.xVal}:${p.rawVal.toFixed(3)}:${p.fitVal.toFixed(3)}:${p.st?.anomalySig || ''}`
+                )
+                .join(',')
           )
           .join('||');
 
@@ -2048,16 +2187,33 @@ export function createModelFitChart() {
 
         const dotRadius =
           combinedSamples.length > 80 ? '1.8' : combinedSamples.length > 36 ? '2.1' : '2.4';
+        const dedupOverdraw = combinedSamples.length > 200;
+        const scatterTarget =
+          typeof document.createDocumentFragment === 'function'
+            ? document.createDocumentFragment()
+            : scatterGroup;
+        const anomalyOverlayDots = [];
 
         for (const s of seriesList) {
+          const binCounts = dedupOverdraw ? new Map() : null;
           for (const sp of s.samples) {
+            if (sp.anomalySummary) {
+              anomalyOverlayDots.push(sp);
+              continue;
+            }
+            if (binCounts) {
+              const binKey = (Math.round(sp.x * 2) << 11) ^ Math.round(sp.rawY * 2);
+              const prevCnt = binCounts.get(binKey) || 0;
+              if (prevCnt >= 6) continue;
+              binCounts.set(binKey, prevCnt + 1);
+            }
             const dot = document.createElementNS(SVG_NS, 'circle');
             dot.setAttribute('cx', sp.x.toFixed(1));
             dot.setAttribute('cy', sp.rawY.toFixed(1));
             dot.setAttribute('r', dotRadius);
             dot.setAttribute('class', 'sstep-scatter-dot is-multi');
             patchStyleVar(dot, '--sstep-fit-accent', s.colorVar);
-            scatterGroup.appendChild(dot);
+            scatterTarget.appendChild(dot);
           }
 
           if (s.samples.length === 1) {
@@ -2106,6 +2262,20 @@ export function createModelFitChart() {
             patchStyleVar(curveEl, '--sstep-fit-accent', s.colorVar);
             multiCurveGroup.appendChild(curveEl);
           }
+        }
+        for (const sp of anomalyOverlayDots) {
+          const aDot = document.createElementNS(SVG_NS, 'circle');
+          aDot.setAttribute('cx', sp.x.toFixed(1));
+          aDot.setAttribute('cy', sp.rawY.toFixed(1));
+          aDot.setAttribute('r', '2.9');
+          aDot.setAttribute(
+            'class',
+            `sstep-scatter-dot is-anomaly${sp.anomalySeverity === 'danger' ? ' is-danger' : ''}`
+          );
+          scatterTarget.appendChild(aDot);
+        }
+        if (scatterTarget !== scatterGroup) {
+          scatterGroup.appendChild(scatterTarget);
         }
 
         while (multiLegendEl.firstChild) multiLegendEl.removeChild(multiLegendEl.firstChild);
@@ -2220,7 +2390,11 @@ export function createModelFitChart() {
 
     const sig =
       `single|${locale}|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
-      samples.map((s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}`).join('|');
+      samples
+        .map(
+          (s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}:${s.st?.anomalySig || ''}`
+        )
+        .join('|');
 
     if (sig !== lastSig) {
       lastSig = sig;
@@ -2239,13 +2413,43 @@ export function createModelFitChart() {
       // 2. 绘制半透明冷蓝灰实心观测散点（自然呈现局部密度，不抢夺拟合曲线焦点）
       while (scatterGroup.firstChild) scatterGroup.removeChild(scatterGroup.firstChild);
       const dotRadius = samples.length > 80 ? '1.8' : samples.length > 36 ? '2.1' : '2.4';
+      const binCounts = samples.length > 200 ? new Map() : null;
+      const scatterTarget =
+        typeof document.createDocumentFragment === 'function'
+          ? document.createDocumentFragment()
+          : scatterGroup;
+      const singleAnomalyDots = [];
       for (const s of samples) {
+        if (s.anomalySummary) {
+          singleAnomalyDots.push(s);
+          continue;
+        }
+        if (binCounts) {
+          const binKey = (Math.round(s.x * 2) << 11) ^ Math.round(s.rawY * 2);
+          const prevCnt = binCounts.get(binKey) || 0;
+          if (prevCnt >= 6) continue;
+          binCounts.set(binKey, prevCnt + 1);
+        }
         const dot = document.createElementNS(SVG_NS, 'circle');
         dot.setAttribute('cx', s.x.toFixed(1));
         dot.setAttribute('cy', s.rawY.toFixed(1));
         dot.setAttribute('r', dotRadius);
         dot.setAttribute('class', 'sstep-scatter-dot');
-        scatterGroup.appendChild(dot);
+        scatterTarget.appendChild(dot);
+      }
+      for (const s of singleAnomalyDots) {
+        const aDot = document.createElementNS(SVG_NS, 'circle');
+        aDot.setAttribute('cx', s.x.toFixed(1));
+        aDot.setAttribute('cy', s.rawY.toFixed(1));
+        aDot.setAttribute('r', '2.9');
+        aDot.setAttribute(
+          'class',
+          `sstep-scatter-dot is-anomaly${s.anomalySeverity === 'danger' ? ' is-danger' : ''}`
+        );
+        scatterTarget.appendChild(aDot);
+      }
+      if (scatterTarget !== scatterGroup) {
+        scatterGroup.appendChild(scatterTarget);
       }
 
       // 3. 绘制 95% CI 置信带闭合多边形与回归拟合曲线（绝不向底部 X 轴填充面积！）

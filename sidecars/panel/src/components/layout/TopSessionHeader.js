@@ -11,7 +11,10 @@ import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 import {
   fetchTelemetry,
   formatAgentBadgeText,
+  formatConversationMeta,
   normalizeClientUpdateMode,
+  resolveHostRouteMatch,
+  selectConversation,
   telemetryStore,
   triggerPluginUpdate,
 } from '../../store/telemetryStore.js';
@@ -19,16 +22,7 @@ import { uiStore } from '../../store/uiStore.js';
 import { CustomSelect } from '../ui/CustomSelect.js';
 
 function formatConvOptionMeta(c) {
-  if (!c) return '';
-  const subs = Number(c.subagentCount || 0);
-  if (subs > 0) {
-    return t('header.convMetaWithSubs', {
-      main: c.stepCount || 0,
-      subs,
-      total: c.totalStepCount || c.stepCount || 0,
-    });
-  }
-  return t('header.convMetaSteps', { count: c.stepCount || 0 });
+  return formatConversationMeta(c);
 }
 
 export const TopSessionHeader = defineComponent({
@@ -40,8 +34,7 @@ export const TopSessionHeader = defineComponent({
       options: [{ value: '', label: t('header.followLatest') }],
       onUpdateModelValue: (nextConvId) => {
         uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-        telemetryStore.setState({ selectedConversationId: nextConvId });
-        fetchTelemetry({ force: false });
+        void selectConversation(nextConvId);
       },
     });
 
@@ -106,10 +99,49 @@ export const TopSessionHeader = defineComponent({
     const headerEl = h('header', { className: 'top-session-stack' }, [headerRowEl]);
 
     let lastActiveCascadeId = '';
+    let lastAppliedHostChildRouteId = '';
 
-    function syncSessionScopeOnCascadeChange(telemetry) {
+    function syncSessionScopeOnCascadeChange(telemetry, telSlice = telemetryStore.getState()) {
       const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
       if (!currentCascadeId) return;
+
+      const selectedId = String(telSlice?.selectedConversationId || '').trim();
+      const hostRouteId = String(telSlice?.hostRouteConversationId || '').trim();
+      const hostRouteLower = hostRouteId.toLowerCase();
+
+      if (!selectedId && hostRouteLower) {
+        const routeMatch = resolveHostRouteMatch(telemetry, hostRouteId);
+        if (routeMatch?.isChildRoute && routeMatch.childAgent?.agentId) {
+          lastActiveCascadeId = currentCascadeId;
+          if (lastAppliedHostChildRouteId !== hostRouteLower) {
+            lastAppliedHostChildRouteId = hostRouteLower;
+            const targetAgentId = routeMatch.childAgent.agentId;
+            const uiSt = uiStore.getState();
+            if (
+              uiSt.selectedAgentScope !== targetAgentId ||
+              uiSt.ctxInspectorAgentId !== targetAgentId
+            ) {
+              uiStore.setState({
+                selectedAgentScope: targetAgentId,
+                ctxInspectorAgentId: targetAgentId,
+              });
+            }
+          }
+          return;
+        }
+        if (lastAppliedHostChildRouteId && !routeMatch?.isChildRoute) {
+          lastAppliedHostChildRouteId = '';
+          const uiSt = uiStore.getState();
+          if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
+            uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
+          }
+          lastActiveCascadeId = currentCascadeId;
+          return;
+        }
+      } else if (lastAppliedHostChildRouteId) {
+        lastAppliedHostChildRouteId = '';
+      }
+
       if (lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
         lastActiveCascadeId = currentCascadeId;
         const uiSt = uiStore.getState();
@@ -133,34 +165,44 @@ export const TopSessionHeader = defineComponent({
       const actConv = telemetry?.activeConversation;
       const convs = telemetry?.conversations || [];
       const hostRouteId = telSt.hostRouteConversationId || '';
-      const hostMatchedConv = hostRouteId
-        ? convs.find((c) => c.cascadeId === hostRouteId) ||
-          (actConv?.cascadeId === hostRouteId ? actConv : null)
-        : null;
+      const routeMatch = hostRouteId ? resolveHostRouteMatch(telemetry, hostRouteId) : null;
+      const hostMatchedConv = routeMatch?.rootConv || null;
+      const childRouteBadge =
+        routeMatch?.isChildRoute && routeMatch.childAgent
+          ? formatAgentBadgeText(routeMatch.childAgent)
+          : '';
+      const hostBaseTitle = hostMatchedConv?.title || hostRouteId.slice(0, 8);
+      const hostDisplayTitle = childRouteBadge
+        ? `${hostBaseTitle} · ${childRouteBadge}`
+        : hostBaseTitle;
       const defaultOptLabel = hostRouteId
         ? t('header.currentWindowNamed', {
-            title: hostMatchedConv?.title || hostRouteId.slice(0, 8),
+            title: hostDisplayTitle,
           })
         : convs[0]?.title
           ? t('header.latestNamed', { title: convs[0].title })
           : t('header.followLatest');
       const defaultOptMeta = hostRouteId
         ? hostMatchedConv
-          ? formatConvOptionMeta({
-              stepCount: hostMatchedConv.stepCount,
-              subagentCount: hostMatchedConv.subagentCount,
-              totalStepCount: hostMatchedConv.totalStepCount ?? hostMatchedConv.totalStepsAllAgents,
-            })
+          ? formatConvOptionMeta(hostMatchedConv)
           : ''
         : convs[0]
           ? formatConvOptionMeta(convs[0])
           : '';
       const options = [
-        { value: '', label: defaultOptLabel, meta: defaultOptMeta },
+        {
+          value: '',
+          label: defaultOptLabel,
+          meta: defaultOptMeta,
+          ...(hostMatchedConv?.swarmTitle ? { title: hostMatchedConv.swarmTitle } : {}),
+        },
         ...convs.map((c) => ({
           value: c.cascadeId,
           label: c.title || c.cascadeId.slice(0, 8),
           meta: formatConvOptionMeta(c),
+          ...(c.swarmTitle && c.swarmTitle !== c.title
+            ? { title: `${c.title || c.cascadeId.slice(0, 8)} · ${c.swarmTitle}` }
+            : {}),
         })),
       ];
       const lockedId = telSt.selectedConversationId;
@@ -170,13 +212,7 @@ export const TopSessionHeader = defineComponent({
           isLoadedLocked && actConv?.title
             ? actConv.title
             : t('header.lockedSession', { id: String(lockedId).slice(0, 8) });
-        const lockedMeta = isLoadedLocked
-          ? formatConvOptionMeta({
-              stepCount: actConv.stepCount,
-              subagentCount: actConv.subagentCount,
-              totalStepCount: actConv.totalStepsAllAgents,
-            })
-          : t('header.lockedMeta');
+        const lockedMeta = isLoadedLocked ? formatConvOptionMeta(actConv) : t('header.lockedMeta');
         options.splice(1, 0, {
           value: lockedId,
           label: lockedTitle,
@@ -283,7 +319,7 @@ export const TopSessionHeader = defineComponent({
         telemetry: st.telemetry,
       }),
       (slice) => {
-        syncSessionScopeOnCascadeChange(slice.telemetry);
+        syncSessionScopeOnCascadeChange(slice.telemetry, slice);
         renderHeaderState();
       }
     );

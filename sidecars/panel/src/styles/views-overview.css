@@ -172,12 +172,22 @@
   background: var(--surface-panel);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
+  outline: none;
   cursor: pointer;
   white-space: nowrap;
   transition:
     border-color var(--dur-instant) var(--ease-fast),
     color var(--dur-instant) var(--ease-fast),
     background-color var(--dur-instant) var(--ease-fast);
+}
+
+.live-sub-toggle-chevron {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.live-sub-toggle.is-expanded .live-sub-toggle-chevron {
+  transform: rotate(0deg);
 }
 
 .live-sub-toggle:hover {
@@ -260,15 +270,31 @@
   flex-shrink: 0;
 }
 
-.live-sub-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.live-sub-scroll-host {
   padding-top: 9px;
   margin-top: 3px;
   margin-left: 18px;
   border-top: 1px dashed var(--border-hairline);
   min-width: 0;
+}
+
+.live-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 8px;
+  min-width: 0;
+  max-height: 196px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.live-sub-list::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
 }
 
 .live-sub-row {
@@ -284,6 +310,14 @@
 
 .live-sub-row.is-done {
   opacity: 0.72;
+}
+
+.live-sub-row.is-waiting-sub {
+  opacity: 0.86;
+}
+
+.live-sub-row.is-killed-sub {
+  opacity: 0.56;
 }
 
 .live-sub-left {
@@ -424,6 +458,48 @@
     width var(--dur-normal) var(--ease-fast) 0.05s;
 }
 
+/* 块状微圆角风格上下文进度条（保持 6px 紧凑高度 + 色块间 2px 轻间隙 + 每段 2px 边缘圆润处理） */
+.progress-track.ctx-segment-meter {
+  height: 6px;
+  border-radius: 3px;
+  align-items: stretch;
+}
+
+.progress-track.ctx-segment-meter .progress-seg {
+  flex: 0 1 auto;
+  box-sizing: border-box;
+  width: 0%;
+  min-width: 0;
+  margin-left: 0;
+  border-radius: 2px;
+  transition:
+    background-color 0.08s ease,
+    width var(--dur-normal) var(--ease-fast),
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter.is-reordering .progress-seg {
+  transition:
+    background-color 0.05s ease,
+    width var(--dur-normal) var(--ease-fast) 0.05s,
+    margin-left var(--dur-fast) var(--ease-fast),
+    filter 120ms ease;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active {
+  width: var(--seg-w, 0%);
+  min-width: 3px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active.has-sep {
+  margin-left: 2px;
+}
+
+.progress-track.ctx-segment-meter .progress-seg.is-active:hover {
+  filter: brightness(1.12);
+}
+
 .progress-seg.seg-assistant {
   background-color: var(--ctx-assistant);
 }
@@ -537,7 +613,7 @@
 /* --- 6. 上下文窗口内联代理切换器与代理徽章 (Scheme B Context Inspector & Agent Badges) --- */
 .ctx-inspector-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   width: 100%;
   padding: 0;
   background: transparent;
@@ -559,6 +635,7 @@
   min-height: calc(20px * var(--ui-font-scale, 1));
   padding: 1px 6px;
   border: 1px solid var(--border-hairline);
+  outline: none;
   background: var(--surface-panel);
   color: var(--text-secondary);
   font-size: var(--fs-md);
@@ -591,6 +668,14 @@
 .ctx-agent-pill.is-more-toggle:hover {
   border-style: solid;
   color: var(--text-primary);
+}
+
+.ctx-toggle-chevron {
+  flex-shrink: 0;
+}
+
+.ctx-agent-pill.is-more-toggle.is-expanded .ctx-toggle-chevron {
+  transform: rotate(180deg);
 }
 
 .panel-title .agent-badge {

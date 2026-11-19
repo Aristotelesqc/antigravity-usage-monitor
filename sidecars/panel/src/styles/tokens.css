@@ -89,16 +89,16 @@
   --metric-danger-soft: color-mix(in srgb, var(--metric-danger) 14%, transparent);
 
   /* Context Window 10-Channel Palette */
-  --ctx-assistant: hsl(217 82% 54%);
-  --ctx-tool-results: hsl(192 82% 43%);
-  --ctx-user-input: hsl(245 72% 62%);
-  --ctx-subagent-msg: hsl(280 70% 58%);
-  --ctx-checkpoint: hsl(38 90% 50%);
-  --ctx-system-tools: hsl(22 86% 50%);
-  --ctx-mcp-tools: hsl(316 72% 54%);
-  --ctx-skills: hsl(145 64% 38%);
-  --ctx-system-prompt: hsl(168 72% 40%);
-  --ctx-user-rules: hsl(346 78% 54%);
+  --ctx-assistant: hsl(215 62% 52%);
+  --ctx-tool-results: hsl(172 68% 40%);
+  --ctx-user-input: hsl(256 76% 62%);
+  --ctx-subagent-msg: hsl(286 64% 58%);
+  --ctx-checkpoint: hsl(42 90% 49%);
+  --ctx-system-tools: hsl(24 86% 52%);
+  --ctx-mcp-tools: hsl(336 78% 58%);
+  --ctx-skills: hsl(150 60% 41%);
+  --ctx-system-prompt: hsl(214 26% 54%);
+  --ctx-user-rules: hsl(352 78% 56%);
 
   /* Legacy 4-Channel Palette (retained for compatibility) */
   --ctx-cached: hsl(217 82% 51%);
@@ -121,6 +121,21 @@
   --space-3: 8px;
   --space-4: 10px;
   --space-5: 12px;
+}
+
+:root[data-color-scheme="dark"],
+:host([data-color-scheme="dark"]),
+[data-color-scheme="dark"] {
+  --ctx-assistant: hsl(216 30% 58%);
+  --ctx-tool-results: hsl(168 72% 54%);
+  --ctx-user-input: hsl(258 86% 73%);
+  --ctx-subagent-msg: hsl(288 72% 70%);
+  --ctx-checkpoint: hsl(43 94% 58%);
+  --ctx-system-tools: hsl(24 90% 62%);
+  --ctx-mcp-tools: hsl(338 82% 69%);
+  --ctx-skills: hsl(150 64% 55%);
+  --ctx-system-prompt: hsl(214 28% 68%);
+  --ctx-user-rules: hsl(354 82% 66%);
 }
 
 :root[data-font-scale="sm"],

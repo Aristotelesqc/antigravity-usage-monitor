@@ -5,6 +5,7 @@
  */
 
 import { defineComponent } from '../../core/component.js';
+import { isModernUiActiveForElement } from '../../core/appearance.js';
 import {
   h,
   patchAttr,
@@ -30,8 +31,8 @@ const CTX_ASCII_CHAR_PX = 6.1;
 const CTX_PILL_GAP_PX = 4;
 const CTX_DEFAULT_BAR_WIDTH_PX = 310;
 
-function estimateCtxPillWidth(text) {
-  let w = CTX_PILL_BASE_PAD_PX;
+function estimateCtxPillWidth(text, withChevron = false) {
+  let w = CTX_PILL_BASE_PAD_PX + (withChevron ? 14 : 0);
   for (const ch of String(text || '')) {
     w += ch.charCodeAt(0) > 255 ? CTX_CJK_CHAR_PX : CTX_ASCII_CHAR_PX;
   }
@@ -244,8 +245,29 @@ export const ContextWindowWidget = defineComponent({
 
     let latestData = null;
     let ctxPillsExpanded = false;
+    let isCollapsingCtxPills = false;
+    let ctxCollapseTimer = null;
     let lastCascadeId = '';
     let cachedBarWidth = 0;
+
+    function clearCtxExpandAnim() {
+      if (ctxCollapseTimer) {
+        clearTimeout(ctxCollapseTimer);
+        ctxCollapseTimer = null;
+      }
+      isCollapsingCtxPills = false;
+      ctxInspectorBar.ontransitionend = null;
+      ctxInspectorBar.style.height = '';
+      ctxInspectorBar.style.overflow = '';
+      ctxInspectorBar.style.transition = '';
+      for (const child of ctxPillGroup.children) {
+        child.onanimationend = null;
+        patchClasses(child, {
+          'is-pill-entering': false,
+          'is-pill-collapsing': false,
+        });
+      }
+    }
 
     function update({ data } = {}) {
       latestData = data || null;
@@ -277,6 +299,7 @@ export const ContextWindowWidget = defineComponent({
         const currentCascadeId = data.activeConversation?.cascadeId || '';
         if (currentCascadeId && currentCascadeId !== lastCascadeId) {
           if (lastCascadeId) {
+            clearCtxExpandAnim();
             ctxPillsExpanded = false;
           }
           lastCascadeId = currentCascadeId;
@@ -308,7 +331,10 @@ export const ContextWindowWidget = defineComponent({
 
       if (interactiveInspector) {
         patchAttr(ctxInspectorBar, 'hidden', !hasSubagents);
-        if (hasSubagents && ctxAgent) {
+        if (!hasSubagents && isCollapsingCtxPills) {
+          clearCtxExpandAnim();
+        }
+        if (hasSubagents && ctxAgent && !isCollapsingCtxPills) {
           const activeBadgeText = formatAgentBadgeText({
             agentKind:
               aggregated?.activeAgentKind ||
@@ -355,7 +381,7 @@ export const ContextWindowWidget = defineComponent({
 
           if (needsCollapse && !ctxPillsExpanded) {
             const toggleSample = t('ctx.expandMore', { count: allAgentPills.length });
-            const toggleReservePx = CTX_PILL_GAP_PX + estimateCtxPillWidth(toggleSample);
+            const toggleReservePx = CTX_PILL_GAP_PX + estimateCtxPillWidth(toggleSample, true);
             let usedW = firstPillWidth;
             let fitCount = 0;
             for (let i = 0; i < allAgentPills.length; i += 1) {
@@ -386,6 +412,7 @@ export const ContextWindowWidget = defineComponent({
               title: t('ctx.expandMoreTitle', { count: allAgentPills.length - 1 }),
               isActive: false,
               isMoreToggle: true,
+              isExpanded: false,
               mode: 'toggle-expand',
             });
           } else {
@@ -397,6 +424,7 @@ export const ContextWindowWidget = defineComponent({
                 title: t('ctx.collapseTitle'),
                 isActive: false,
                 isMoreToggle: true,
+                isExpanded: true,
                 mode: 'toggle-expand',
               });
             }
@@ -405,22 +433,117 @@ export const ContextWindowWidget = defineComponent({
           patchKeyedList(ctxPillGroup, pillItems, {
             keyFn: (item) => item.key,
             sigFn: (item) =>
-              `${item.key}:${item.label}:${item.isActive}:${item.isMoreToggle}:${item.mode}:${item.title}`,
+              `${item.key}:${item.label}:${item.isActive}:${item.isMoreToggle}:${Boolean(item.isExpanded)}:${item.mode}:${item.title}`,
             createRow: () => {
-              const btn = h('button', { type: 'button', className: 'ctx-agent-pill' });
-              return { el: btn, refs: { btn } };
+              const labelSpan = h('span', { className: 'ctx-pill-label' });
+              const chevronEl = createSvgIcon('chevron-down', {
+                size: 11,
+                className: 'ctx-toggle-chevron',
+              });
+              patchAttr(chevronEl, 'hidden', true);
+              const btn = h('button', { type: 'button', className: 'ctx-agent-pill' }, [
+                labelSpan,
+                chevronEl,
+              ]);
+              return { el: btn, refs: { btn, labelSpan, chevronEl } };
             },
             updateRow: (refs, item) => {
-              patchText(refs.btn, item.label);
+              patchText(refs.labelSpan, item.label);
+              patchAttr(refs.chevronEl, 'hidden', !item.isMoreToggle);
               patchAttr(refs.btn, 'title', item.title);
+              patchAttr(refs.btn, 'data-pill-key', item.key);
               patchClasses(refs.btn, {
                 'is-active': item.isActive,
                 'is-more-toggle': Boolean(item.isMoreToggle),
+                'is-expanded': Boolean(item.isExpanded),
+                'is-pill-collapsing': false,
               });
               refs.btn.onclick = () => {
                 if (item.mode === 'toggle-expand') {
-                  ctxPillsExpanded = !ctxPillsExpanded;
-                  if (latestData) update({ data: latestData });
+                  const modern = isModernUiActiveForElement(ctxPanel);
+                  const startH = Number(ctxInspectorBar.offsetHeight || 0);
+                  clearCtxExpandAnim();
+                  if (!modern || !(startH > 0)) {
+                    ctxPillsExpanded = !ctxPillsExpanded;
+                    if (latestData) update({ data: latestData });
+                    return;
+                  }
+
+                  if (!ctxPillsExpanded) {
+                    const prevKeys = new Set(
+                      Array.from(ctxPillGroup.children, (el) => el.getAttribute?.('data-pill-key') || '')
+                    );
+                    ctxPillsExpanded = true;
+                    if (latestData) update({ data: latestData });
+                    const endH = Number(ctxPillGroup.offsetHeight || 0);
+                    for (const child of ctxPillGroup.children) {
+                      const k = child.getAttribute?.('data-pill-key') || '';
+                      if (k && k !== '__toggle_more__' && !prevKeys.has(k)) {
+                        patchClasses(child, { 'is-pill-entering': true });
+                        child.onanimationend = () => {
+                          child.onanimationend = null;
+                          patchClasses(child, { 'is-pill-entering': false });
+                        };
+                      }
+                    }
+                    if (endH > startH + 1) {
+                      ctxInspectorBar.style.height = `${startH}px`;
+                      ctxInspectorBar.style.overflow = 'hidden';
+                      void ctxInspectorBar.offsetHeight;
+                      ctxInspectorBar.style.transition =
+                        'height 220ms cubic-bezier(0.16, 1, 0.3, 1)';
+                      ctxInspectorBar.style.height = `${endH}px`;
+                      const finishExpand = () => clearCtxExpandAnim();
+                      ctxInspectorBar.ontransitionend = (ev) => {
+                        if (
+                          ev?.target === ctxInspectorBar &&
+                          (!ev.propertyName || ev.propertyName === 'height')
+                        ) {
+                          finishExpand();
+                        }
+                      };
+                      ctxCollapseTimer = setTimeout(finishExpand, 260);
+                    }
+                  } else {
+                    const firstPill = ctxPillGroup.children[0] || null;
+                    const firstTop = Number(firstPill?.offsetTop || 0);
+                    let firstRowH = Number(firstPill?.offsetHeight || 20);
+                    for (const child of ctxPillGroup.children) {
+                      const top = Number(child.offsetTop || 0);
+                      if (top <= firstTop + 4) {
+                        const bottom = top - firstTop + Number(child.offsetHeight || 0);
+                        if (bottom > firstRowH) firstRowH = bottom;
+                      }
+                    }
+                    const targetH = Math.max(18, firstRowH);
+                    ctxPillsExpanded = false;
+                    isCollapsingCtxPills = true;
+                    patchClasses(refs.btn, { 'is-expanded': false });
+                    for (const child of ctxPillGroup.children) {
+                      if (Number(child.offsetTop || 0) > firstTop + 4) {
+                        patchClasses(child, { 'is-pill-collapsing': true });
+                      }
+                    }
+                    ctxInspectorBar.style.height = `${startH}px`;
+                    ctxInspectorBar.style.overflow = 'hidden';
+                    void ctxInspectorBar.offsetHeight;
+                    ctxInspectorBar.style.transition =
+                      'height 200ms cubic-bezier(0.16, 1, 0.3, 1)';
+                    ctxInspectorBar.style.height = `${targetH}px`;
+                    const finishCollapse = () => {
+                      clearCtxExpandAnim();
+                      if (latestData) update({ data: latestData });
+                    };
+                    ctxInspectorBar.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === ctxInspectorBar &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishCollapse();
+                      }
+                    };
+                    ctxCollapseTimer = setTimeout(finishCollapse, 240);
+                  }
                 } else {
                   setCtxAgentId(item.key);
                 }
@@ -499,6 +622,7 @@ export const ContextWindowWidget = defineComponent({
     }
 
     onCleanup(() => {
+      clearCtxExpandAnim();
       if (ro) ro.disconnect();
       ctxSegmentBar.destroy();
     });

@@ -649,4 +649,17 @@ test('per-pool cycle5h and cycleWeekly isolate each pool by its own reset window
     p.quotas.weekly.costUsd,
     +(geminiPool.cycleWeekly.costUsd + argonPool.cycleWeekly.costUsd + claudePool.cycleWeekly.costUsd).toFixed(2)
   );
+
+  // Consumption preset 'cycle' and selected range 'cycle' match quotas.weekly across heterogeneous pool reset windows
+  assert.equal(p.consumption.presets.cycle.account.calls, 5);
+  assert.equal(p.consumption.presets.cycle.account.totalTokens, 155_000);
+
+  const pCycle = await h.buildTelemetryPayloadInternal('multiCycleConv', false, { range: 'cycle' });
+  assert.equal(pCycle.consumption.selectedRange.key, 'cycle');
+  assert.equal(pCycle.consumption.account.calls, 5);
+  assert.equal(pCycle.consumption.account.totalTokens, 155_000);
+  const cycleModelsTok = pCycle.modelBreakdown.reduce((sum, m) => sum + m.totalTokens, 0);
+  assert.equal(cycleModelsTok, 155_000);
+  const cycleSourcesTok = pCycle.consumption.sourcesBreakdown.reduce((sum, s) => sum + s.totalTokens, 0);
+  assert.equal(cycleSourcesTok, 155_000);
 });

@@ -504,6 +504,7 @@ export function buildBundle(panelDir = PANEL_DIR) {
     'src/styles/views-tables.css',
     'src/styles/views-settings.css',
     'src/styles/overlay.css',
+    'src/styles/modern-ui.css',
   ];
 
   const cssBundle =

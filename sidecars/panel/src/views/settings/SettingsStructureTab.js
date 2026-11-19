@@ -7,7 +7,7 @@
  */
 
 import { defineComponent } from '../../core/component.js';
-import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
+import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
 import { getEffectiveLocale, t } from '../../i18n/index.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
 import {
@@ -177,10 +177,29 @@ export const SettingsStructureTab = defineComponent({
           'aria-selected': item.key === activeThirdTab ? 'true' : 'false',
           'data-structure-tab': item.key,
           onClick: () => {
+            applyActiveThirdTab(item.key);
             if (uiStore.getState().settingsStructureTab !== item.key) {
               uiStore.setState({ settingsStructureTab: item.key });
-            } else {
-              applyActiveThirdTab(item.key);
+            }
+          },
+          onKeydown: (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const curIdx = Math.max(
+                0,
+                STRUCTURE_THIRD_TABS.findIndex((it) => it.key === item.key)
+              );
+              const delta = e.key === 'ArrowRight' ? 1 : -1;
+              const nextIdx =
+                (curIdx + delta + STRUCTURE_THIRD_TABS.length) % STRUCTURE_THIRD_TABS.length;
+              const nextItem = STRUCTURE_THIRD_TABS[nextIdx];
+              if (nextItem) {
+                applyActiveThirdTab(nextItem.key);
+                if (uiStore.getState().settingsStructureTab !== nextItem.key) {
+                  uiStore.setState({ settingsStructureTab: nextItem.key });
+                }
+                thirdNavBtnMap.get(nextItem.key)?.btn?.focus?.();
+              }
             }
           },
         },
@@ -190,6 +209,7 @@ export const SettingsStructureTab = defineComponent({
       return btn;
     });
 
+    const thirdNavGlider = h('div', { className: 'thirdnav-glider', 'aria-hidden': 'true' });
     const thirdNavBar = h(
       'div',
       {
@@ -197,7 +217,15 @@ export const SettingsStructureTab = defineComponent({
         role: 'tablist',
         'aria-label': t('settings.str.thirdTabAria'),
       },
-      thirdNavBtns
+      [thirdNavGlider, ...thirdNavBtns]
+    );
+    patchStyleVar(
+      thirdNavBar,
+      '--active-third-index',
+      Math.max(
+        0,
+        STRUCTURE_THIRD_TABS.findIndex((it) => it.key === activeThirdTab)
+      )
     );
 
     // --- Pane 1: 挂载与胶囊栏 (`mount`) ---
@@ -973,6 +1001,11 @@ export const SettingsStructureTab = defineComponent({
     function applyActiveThirdTab(nextRawTab) {
       const nextTab = normalizeStructureTabKey(nextRawTab);
       activeThirdTab = nextTab;
+      const activeIdx = Math.max(
+        0,
+        STRUCTURE_THIRD_TABS.findIndex((it) => it.key === nextTab)
+      );
+      patchStyleVar(thirdNavBar, '--active-third-index', activeIdx);
       for (const [key, entry] of thirdNavBtnMap.entries()) {
         const isActive = key === nextTab;
         patchClasses(entry.btn, { 'is-active': isActive });
