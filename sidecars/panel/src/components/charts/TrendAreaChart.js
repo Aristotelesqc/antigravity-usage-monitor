@@ -403,6 +403,34 @@ export function createTrendAreaChart() {
   let hoveredIdx = -1;
   let hoveredCellEl = null;
   let lastRenderSig = '';
+  let tipTrackRaf = 0;
+
+  function cancelTipTrackRaf() {
+    if (tipTrackRaf && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(tipTrackRaf);
+    }
+    tipTrackRaf = 0;
+  }
+
+  function armTooltipTracking(wasHidden) {
+    if (!wasHidden) return;
+    patchClasses(tooltipEl, { 'is-tracking': false });
+    patchClasses(hoverDot, { 'is-tracking': false });
+    void tooltipEl.offsetWidth;
+    cancelTipTrackRaf();
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      tipTrackRaf = window.requestAnimationFrame(() => {
+        tipTrackRaf = 0;
+        if (!tooltipEl.hasAttribute('hidden')) {
+          patchClasses(tooltipEl, { 'is-tracking': true });
+          patchClasses(hoverDot, { 'is-tracking': true });
+        }
+      });
+    } else {
+      patchClasses(tooltipEl, { 'is-tracking': true });
+      patchClasses(hoverDot, { 'is-tracking': true });
+    }
+  }
 
   function populateTooltipContent(slot) {
     patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
@@ -458,6 +486,7 @@ export function createTrendAreaChart() {
       clearHover();
       return;
     }
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     hoveredIdx = idx;
     const slot = currentSlots[idx];
     const pt = currentPts[idx];
@@ -470,19 +499,31 @@ export function createTrendAreaChart() {
     patchAttr(hoverDot, 'cx', pt.x.toFixed(1));
     patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
 
+    const isLineLow = pt.y < Math.round((TOP_Y + BOTTOM_Y) / 2);
     patchAttr(peakPill, 'hidden', true);
     patchClasses(tooltipEl, {
       'is-hm-bottom': false,
       'is-hm-top': false,
-      'is-line-low': pt.y < Math.round((TOP_Y + BOTTOM_Y) / 2),
+      'is-line-low': isLineLow,
     });
     patchAttr(tooltipEl, 'hidden', false);
     populateTooltipContent(slot);
+
+    let tipY = 0;
+    if (isLineLow) {
+      const wrapH = Number(chartWrap.offsetHeight || 0);
+      const tipH = Number(tooltipEl.offsetHeight || 0);
+      if (wrapH > 0 && tipH > 0) {
+        tipY = Math.max(0, wrapH - tipH - 22);
+      }
+    }
 
     const rawPct = (pt.x / viewW) * 100;
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', `${Math.round(tipY)}px`);
+    armTooltipTracking(wasHidden);
 
     for (const [tIdx, el] of tickElsByIdx.entries()) {
       patchClasses(el, { 'is-hovered': tIdx === idx });
@@ -510,6 +551,7 @@ export function createTrendAreaChart() {
     const row = Number(targetCell.getAttribute('data-hm-row') || 0);
     const col = Number(targetCell.getAttribute('data-hm-col') || 0);
 
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     // 上半区（周一~周四）浮层停靠热力图下方，下半区（周五~周日）停靠热力图上方，互不遮挡被悬停格子且永不越界裁剪
     patchClasses(tooltipEl, {
       'is-hm-bottom': row <= 3,
@@ -536,14 +578,23 @@ export function createTrendAreaChart() {
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    armTooltipTracking(wasHidden);
   }
 
   function clearHover() {
+    cancelTipTrackRaf();
     hoveredIdx = -1;
     patchAttr(hoverLine, 'hidden', true);
     patchAttr(hoverDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
-    patchClasses(tooltipEl, { 'is-hm-bottom': false, 'is-hm-top': false, 'is-line-low': false });
+    patchClasses(tooltipEl, {
+      'is-hm-bottom': false,
+      'is-hm-top': false,
+      'is-line-low': false,
+      'is-tracking': false,
+    });
+    patchClasses(hoverDot, { 'is-tracking': false });
     if (!currentIsHeatmap) {
       patchAttr(peakPill, 'hidden', false);
     }
@@ -755,6 +806,7 @@ export function createTrendAreaChart() {
   }
 
   function destroy() {
+    cancelTipTrackRaf();
     resizeObs?.disconnect();
     resizeObs = null;
     if (onWinResize && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {

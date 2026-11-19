@@ -19,6 +19,7 @@ import {
   PANEL_SCALE_FACTORS,
   applyAppearanceToRoot,
   normalizeClientFontScale,
+  normalizeClientModernUi,
 } from '../../core/appearance.js';
 import {
   h,
@@ -1397,6 +1398,7 @@ export function mountWindowOverlay() {
     onSelectSession: inspectSessionInMonitor,
     onLayoutChange: () => {
       if (multiOpen) {
+        patchClasses(multiPanelEl, { 'is-instant': true });
         positionFloatingElements();
       }
     },
@@ -1454,9 +1456,23 @@ export function mountWindowOverlay() {
     applyAppearanceToRoot(capsuleHost, settings, { includeFontScale: false });
     applyAppearanceToRoot(portalHost, settings, { includeFontScale: true });
     const scaleKey = normalizeClientFontScale(settings?.fontScale);
-    popoverEl.setAttribute?.('data-font-scale', scaleKey);
-    hoverTipEl.setAttribute?.('data-font-scale', scaleKey);
-    multiPanelEl.setAttribute?.('data-font-scale', scaleKey);
+    const isModernUi = normalizeClientModernUi(settings?.experimentalModernUi);
+    const colorScheme = portalHost.getAttribute?.('data-color-scheme') || 'light';
+    for (const el of [popoverEl, hoverTipEl, multiPanelEl]) {
+      if (el.getAttribute?.('data-font-scale') !== scaleKey) {
+        el.setAttribute?.('data-font-scale', scaleKey);
+      }
+      if (el.getAttribute?.('data-color-scheme') !== colorScheme) {
+        el.setAttribute?.('data-color-scheme', colorScheme);
+      }
+      if (isModernUi) {
+        if (el.getAttribute?.('data-modern-ui') !== 'true') {
+          el.setAttribute?.('data-modern-ui', 'true');
+        }
+      } else if (el.hasAttribute?.('data-modern-ui')) {
+        el.removeAttribute?.('data-modern-ui');
+      }
+    }
   }
 
   portalShadow.appendChild(multiPanelEl);
@@ -1591,6 +1607,7 @@ export function mountWindowOverlay() {
 
   function ensureWorkbenchThemeObserved() {
     const wb = syncWorkbenchThemeVars();
+    syncPortalAppearance(telemetryStore.getState().telemetry?.settings);
     if (wb && wb !== observedWorkbench && themeObserver) {
       observedWorkbench = wb;
       try {
@@ -2620,12 +2637,25 @@ export function mountWindowOverlay() {
     if (typeof MutationObserver !== 'undefined') {
       themeObserver = new MutationObserver(() => {
         syncWorkbenchThemeVars();
+        syncPortalAppearance(telemetryStore.getState().telemetry?.settings);
       });
       if (document.head) {
         themeObserver.observe(document.head, {
           childList: true,
           characterData: true,
           subtree: true,
+        });
+      }
+      if (document.documentElement) {
+        themeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
+        });
+      }
+      if (document.body) {
+        themeObserver.observe(document.body, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
         });
       }
       if (document.body) {

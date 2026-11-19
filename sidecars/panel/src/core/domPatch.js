@@ -131,7 +131,11 @@ const keyedListState = new WeakMap();
  * Keyed incremental list reconciler.
  * Reuses existing DOM nodes by key and patches only changed items in-place.
  */
-export function patchKeyedList(container, items, { keyFn, sigFn, createRow, updateRow }) {
+export function patchKeyedList(
+  container,
+  items,
+  { keyFn = (_, i) => i, sigFn, createRow, updateRow, destroyRow } = {}
+) {
   if (!container) return;
   let map = keyedListState.get(container);
   if (!map) {
@@ -175,6 +179,7 @@ export function patchKeyedList(container, items, { keyFn, sigFn, createRow, upda
       if (record.el.parentNode === container) {
         container.removeChild(record.el);
       }
+      destroyRow?.(record.refs, record.el);
       map.delete(oldKey);
     }
   }

@@ -6,7 +6,9 @@
 
 import { defineComponent } from '../../core/component.js';
 import {
+  applyAppearanceToRoot,
   normalizeClientFontScale,
+  normalizeClientModernUi,
   normalizeClientThemeAccent,
 } from '../../core/appearance.js';
 import { h, patchAttr, patchClasses, patchText } from '../../core/domPatch.js';
@@ -39,6 +41,13 @@ function getFontScaleOptions() {
   ];
 }
 
+function getModernUiOptions() {
+  return [
+    { value: 'off', label: t('settings.gen.modernUiOff') },
+    { value: 'on', label: t('settings.gen.modernUiOn') },
+  ];
+}
+
 function getUpdateModeOptions() {
   return [
     { value: 'manual', label: t('settings.gen.updateManual') },
@@ -66,6 +75,7 @@ export const SettingsGeneralTab = defineComponent({
     let draftLanguage = 'zh-CN';
     let draftThemeAccent = 'host';
     let draftFontScale = 'md';
+    let draftModernUi = false;
     let draftPluginUpdateMode = 'manual';
     let latestSettings = null;
     let latestCloudStatus = null;
@@ -122,6 +132,14 @@ export const SettingsGeneralTab = defineComponent({
     const fontHintEl = h('span', {
       className: 'settings-hint-text',
       text: t('settings.gen.fontHint'),
+    });
+    const modernUiLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.gen.modernUi'),
+    });
+    const modernUiHintEl = h('span', {
+      className: 'settings-hint-text',
+      text: t('settings.gen.modernUiHint'),
     });
 
     const languageSwitch = SegmentedControl({
@@ -181,6 +199,38 @@ export const SettingsGeneralTab = defineComponent({
       },
     });
 
+    const modernUiSwitch = SegmentedControl({
+      ariaLabel: t('settings.gen.modernUi'),
+      modelValue: 'off',
+      options: getModernUiOptions(),
+      onUpdateModelValue: async (val) => {
+        const nextModernUi = val === 'on';
+        draftModernUi = nextModernUi;
+        modernUiSwitch.setValue(nextModernUi ? 'on' : 'off');
+        if (typeof document !== 'undefined' && document.documentElement) {
+          applyAppearanceToRoot(
+            document.documentElement,
+            {
+              ...(latestSettings || {}),
+              themeAccent: draftThemeAccent,
+              fontScale: draftFontScale,
+              experimentalModernUi: nextModernUi,
+            },
+            { includeFontScale: true }
+          );
+        }
+        showAppearanceFeedback(t('settings.saving'), 0);
+        try {
+          await saveSettingsPatch({ experimentalModernUi: nextModernUi });
+          showAppearanceFeedback(t('settings.saved'), 1500);
+          props.onLayoutChange?.();
+        } catch {
+          if (latestSettings) renderSettings(latestSettings);
+          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+        }
+      },
+    });
+
     const appearancePanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
         h('span', { className: 'panel-title' }, [
@@ -192,6 +242,7 @@ export const SettingsGeneralTab = defineComponent({
       h('div', { className: 'form-row' }, [langLabelEl, languageSwitch.el]),
       h('div', { className: 'form-row' }, [accentLabelEl, themeColorPicker.el]),
       h('div', { className: 'form-row' }, [fontLabelEl, fontScaleSwitch.el, fontHintEl]),
+      h('div', { className: 'form-row' }, [modernUiLabelEl, modernUiSwitch.el, modernUiHintEl]),
     ]);
 
     // --- Card 2: 版本更新 ---
@@ -350,6 +401,7 @@ export const SettingsGeneralTab = defineComponent({
       draftLanguage = normalizeI18nLanguage(settings.language);
       draftThemeAccent = normalizeClientThemeAccent(settings.themeAccent);
       draftFontScale = normalizeClientFontScale(settings.fontScale);
+      draftModernUi = normalizeClientModernUi(settings.experimentalModernUi);
       draftPluginUpdateMode = normalizeClientUpdateMode(
         settings.pluginUpdateMode,
         settings.autoUpdatePlugin
@@ -363,6 +415,10 @@ export const SettingsGeneralTab = defineComponent({
       fontScaleSwitch.setProps({
         modelValue: draftFontScale,
         options: getFontScaleOptions(),
+      });
+      modernUiSwitch.setProps({
+        modelValue: draftModernUi ? 'on' : 'off',
+        options: getModernUiOptions(),
       });
       autoUpdateSelect.setProps({
         modelValue: draftPluginUpdateMode,
@@ -425,6 +481,8 @@ export const SettingsGeneralTab = defineComponent({
       patchText(accentLabelEl, t('settings.gen.themeAccent'));
       patchText(fontLabelEl, t('settings.gen.fontScale'));
       patchText(fontHintEl, t('settings.gen.fontHint'));
+      patchText(modernUiLabelEl, t('settings.gen.modernUi'));
+      patchText(modernUiHintEl, t('settings.gen.modernUiHint'));
       patchText(updateTitleEl, t('settings.gen.updateTitle'));
       patchText(updateModeLabelEl, t('settings.gen.updateMode'));
       patchText(pricingCellLabelEl, t('settings.gen.pricingLabel'));
@@ -440,6 +498,11 @@ export const SettingsGeneralTab = defineComponent({
       fontScaleSwitch.setProps({
         modelValue: draftFontScale,
         options: getFontScaleOptions(),
+      });
+      modernUiSwitch.setProps({
+        ariaLabel: t('settings.gen.modernUi'),
+        modelValue: draftModernUi ? 'on' : 'off',
+        options: getModernUiOptions(),
       });
       autoUpdateSelect.setProps({
         modelValue: draftPluginUpdateMode,
@@ -458,6 +521,7 @@ export const SettingsGeneralTab = defineComponent({
       languageSwitch.destroy();
       themeColorPicker.destroy();
       fontScaleSwitch.destroy();
+      modernUiSwitch.destroy();
       autoUpdateSelect.destroy();
     });
 
@@ -467,6 +531,7 @@ export const SettingsGeneralTab = defineComponent({
         languageSwitch,
         themeColorPicker,
         fontScaleSwitch,
+        modernUiSwitch,
         autoUpdateSelect,
         syncPricingBtn,
         updatePluginBtn,

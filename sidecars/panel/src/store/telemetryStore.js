@@ -14,7 +14,11 @@ import {
   getAgentBadgeClass,
 } from '../core/formatters.js';
 import { normalizeI18nLanguage, t } from '../i18n/index.js';
-import { normalizeClientFontScale, normalizeClientThemeAccent } from '../core/appearance.js';
+import {
+  normalizeClientFontScale,
+  normalizeClientModernUi,
+  normalizeClientThemeAccent,
+} from '../core/appearance.js';
 import {
   DEFAULT_HOVER_MODULES,
   DEFAULT_OVERVIEW_METRICS,
@@ -195,6 +199,7 @@ export function isEquivalentTelemetry(prev, next) {
   if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
   if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
   if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if (Boolean(pSet?.experimentalModernUi) !== Boolean(nSet?.experimentalModernUi)) return false;
   if ((prev.hostPlatform || '') !== (next.hostPlatform || '')) return false;
   if (Boolean(pSet?.contextWindowRiskAccepted) !== Boolean(nSet?.contextWindowRiskAccepted)) {
     return false;
@@ -894,6 +899,9 @@ export async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'fontScale')) {
     safePatch.fontScale = normalizeClientFontScale(safePatch.fontScale);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'experimentalModernUi')) {
+    safePatch.experimentalModernUi = normalizeClientModernUi(safePatch.experimentalModernUi);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
     safePatch.weeklyLimitMode = normalizeWeeklyLimitMode(safePatch.weeklyLimitMode);

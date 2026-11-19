@@ -1370,11 +1370,29 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     assert.equal(structurePane.hasAttribute('hidden'), true);
     assert.equal(otherPane.hasAttribute('hidden'), true);
 
-    // --- Tab 0: 常规 (languageSwitch, themeAccent, fontScaleSwitch, pluginUpdateMode) ---
+    // --- Tab 0: 常规 (languageSwitch, themeAccent, fontScaleSwitch, modernUiSwitch, pluginUpdateMode) ---
     const generalSegControls = generalPane.querySelectorAll('.segmented');
-    assert.equal(generalSegControls.length, 2, 'General tab has Language and FontScale segmented controls');
+    assert.equal(
+      generalSegControls.length,
+      3,
+      'General tab has Language, FontScale, and Experimental Modern UI segmented controls'
+    );
     const langBtns = generalSegControls[0].querySelectorAll('.seg-btn');
     const fontScaleBtns = generalSegControls[1].querySelectorAll('.seg-btn');
+    const modernUiBtns = generalSegControls[2].querySelectorAll('.seg-btn');
+    assert.equal(modernUiBtns.length, 2, 'Experimental Modern UI switch has 关闭 / 开启');
+
+    modernUiBtns[1].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.experimentalModernUi, true);
+    assert.equal(portalHost.getAttribute('data-modern-ui'), 'true');
+    assert.equal(capsuleHost.getAttribute('data-modern-ui'), 'true');
+    assert.equal(popoverEl.getAttribute('data-modern-ui'), 'true');
+    modernUiBtns[0].dispatchEvent({ type: 'click', stopPropagation() {} });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(mockSettings.experimentalModernUi, false);
+    assert.equal(portalHost.hasAttribute('data-modern-ui'), false);
+    assert.equal(popoverEl.hasAttribute('data-modern-ui'), false);
     assert.equal(langBtns.length, 3, 'Language switch has 简体中文 / English / 跟随宿主');
     assert.equal(langBtns[0].textContent, '简体中文');
     assert.equal(langBtns[0].classList.contains('is-active'), true, 'Default language is zh-CN');
@@ -2053,10 +2071,13 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
       'Heatmap palette uses unified project blue tokens instead of hardcoded green'
     );
 
-    // Click '全部' (option index 5 in ConsumptionView timeFilterSwitch) to load 120-day series
+    // Click '全部' ('all' in ConsumptionView timeFilterSwitch) to load 120-day series
     const consPane = allPanes[1];
     const consTimeSegBtns = consPane.querySelectorAll('.seg-btn');
-    consTimeSegBtns[5].dispatchEvent({ type: 'click', stopPropagation() {} });
+    const allRangeBtn =
+      consTimeSegBtns.find((btn) => btn.getAttribute('data-seg-value') === 'all') ||
+      consTimeSegBtns[6];
+    allRangeBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
     await new Promise((r) => setTimeout(r, 35));
 
     assert.equal(plotStageEl.hasAttribute('hidden'), true, 'Line chart hidden when trend exceeds 90 days');

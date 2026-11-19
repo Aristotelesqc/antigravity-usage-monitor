@@ -783,6 +783,7 @@ export function createSessionLineChart() {
       clearHover();
       return;
     }
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     hoveredIdx = idx;
     const pt = currentPoints[idx];
     patchAttr(hoverLine, 'hidden', false);
@@ -813,6 +814,20 @@ export function createSessionLineChart() {
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    if (wasHidden) {
+      patchClasses(tooltipEl, { 'is-tracking': false });
+      void tooltipEl.offsetWidth;
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          if (!tooltipEl.hasAttribute('hidden')) {
+            patchClasses(tooltipEl, { 'is-tracking': true });
+          }
+        });
+      } else {
+        patchClasses(tooltipEl, { 'is-tracking': true });
+      }
+    }
 
     for (const [tIdx, el] of tickElsByIdx.entries()) {
       patchClasses(el, { 'is-hovered': tIdx === idx });
@@ -824,6 +839,7 @@ export function createSessionLineChart() {
     patchAttr(hoverLine, 'hidden', true);
     patchAttr(hoverDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
+    patchClasses(tooltipEl, { 'is-tracking': false });
     if (currentPoints.some((p) => p.valid)) {
       patchAttr(peakPill, 'hidden', false);
     }
@@ -1577,6 +1593,7 @@ export function createModelFitChart() {
     patchAttr(hoverRawDot, 'cx', sp.x.toFixed(1));
     patchAttr(hoverRawDot, 'cy', sp.rawY.toFixed(1));
 
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     patchAttr(tooltipEl, 'hidden', false);
     patchText(tipHeadLeft, sp.stepTag);
     patchText(tipHeadRight, sp.modelText);
@@ -1612,6 +1629,20 @@ export function createModelFitChart() {
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    if (wasHidden) {
+      patchClasses(tooltipEl, { 'is-tracking': false });
+      void tooltipEl.offsetWidth;
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          if (!tooltipEl.hasAttribute('hidden')) {
+            patchClasses(tooltipEl, { 'is-tracking': true });
+          }
+        });
+      } else {
+        patchClasses(tooltipEl, { 'is-tracking': true });
+      }
+    }
   }
 
   function clearHover() {
@@ -1620,6 +1651,7 @@ export function createModelFitChart() {
     patchAttr(hoverFitDot, 'hidden', true);
     patchAttr(hoverRawDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
+    patchClasses(tooltipEl, { 'is-tracking': false });
   }
 
   plotStage.addEventListener('mousemove', (e) => {

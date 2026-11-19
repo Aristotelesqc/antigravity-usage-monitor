@@ -14,6 +14,25 @@
   gap: 6px;
 }
 
+.cons-overview-head .segmented {
+  gap: 1px;
+}
+
+.cons-overview-head .seg-btn {
+  padding: 2px 6px;
+}
+
+.cons-custom-range-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
 .cons-badge {
   font-size: var(--fs-md);
   font-weight: 500;

@@ -26,6 +26,7 @@ import {
   SUPPORTED_LANGUAGES,
   THEME_ACCENT_KEYS,
   TOPBAR_SLOT_KEYS,
+  normalizeExperimentalModernUi,
   normalizeFontScale,
   normalizeHoverModules,
   normalizeLanguageSetting,
@@ -67,6 +68,7 @@ export {
   SUPPORTED_LANGUAGES,
   THEME_ACCENT_KEYS,
   TOPBAR_SLOT_KEYS,
+  normalizeExperimentalModernUi,
   normalizeFontScale,
   normalizeHoverModules,
   normalizeLanguageSetting,
@@ -108,6 +110,7 @@ export const DEFAULT_SETTINGS_SCHEMA = Object.freeze({
   language: 'zh-CN',
   themeAccent: 'host',
   fontScale: 'md',
+  experimentalModernUi: false,
   weeklyTokenBudget: 150000000,
   weeklyCostBudget: 100,
   weeklyLimitMode: 'official',
@@ -174,6 +177,7 @@ export function normalizeFullSettings(rawInput) {
     language: normalizeLanguageSetting(safeRaw.language),
     themeAccent: normalizeThemeAccent(safeRaw.themeAccent),
     fontScale: normalizeFontScale(safeRaw.fontScale),
+    experimentalModernUi: normalizeExperimentalModernUi(safeRaw.experimentalModernUi),
     weeklyTokenBudget: schemaSanitizePositiveNum(
       safeRaw.weeklyTokenBudget ?? safeRaw.weeklyTokenLimit,
       DEFAULT_SETTINGS_SCHEMA.weeklyTokenBudget

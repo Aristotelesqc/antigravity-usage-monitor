@@ -2,7 +2,7 @@
 'use strict';
 
 // --- shared/settings-normalization.mjs ---
-const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort } = (() => {
+const { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort, normalizeExperimentalModernUi } = (() => {
 /**
  * @fileoverview 前后端与 CLI 共用的偏好设置枚举常量、默认值与无状态纯函数归一化规则。
  */
@@ -451,7 +451,21 @@ function normalizeStandalonePort(port) {
   if (num >= 1024 && num <= 65535) return num;
   return 0;
 }
-return { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort };
+
+/**
+ * 归一化实验性现代化新 UI 开关（默认 `false`）。
+ *
+ * @param {unknown} val
+ * @returns {boolean}
+ */
+function normalizeExperimentalModernUi(val) {
+  if (typeof val === 'string') {
+    const lower = val.trim().toLowerCase();
+    return lower === 'true' || lower === '1' || lower === 'on';
+  }
+  return Boolean(val);
+}
+return { SUPPORTED_LANGUAGES, THEME_ACCENT_KEYS, FONT_SCALE_KEYS, TOPBAR_SLOT_KEYS, DEFAULT_TOPBAR_SLOTS, MIN_TOPBAR_SLOTS, MAX_TOPBAR_SLOTS, OVERVIEW_MODULE_KEYS, DEFAULT_OVERVIEW_MODULES, DEFAULT_HOVER_MODULES, OVERVIEW_METRIC_KEYS, DEFAULT_OVERVIEW_METRICS, STEP_TABLE_COLUMN_KEYS, DEFAULT_STEP_TABLE_COLUMNS, DEFAULT_STEP_TOKEN_COMBO_FORMAT, STEP_TOKEN_SEGMENT_ALIASES, POPOVER_WIDTH_MODES, MIN_POPOVER_WIDTH, MAX_POPOVER_WIDTH, DEFAULT_POPOVER_WIDTH, normalizeLanguageSetting, normalizeThemeAccent, normalizeFontScale, normalizeModelDisplayMode, normalizeOrchestratorIdMode, normalizePopoverWidthMode, normalizePopoverWidth, parseStepTokenComboSegments, normalizeStepTokenComboFormat, normalizePluginUpdateMode, normalizeWindowMountMode, normalizeWeeklyLimitMode, normalizeTopbarCapsuleSlots, normalizeOverviewMetrics, normalizeOverviewModules, normalizeHoverModules, normalizeStepTableColumns, normalizeStandalonePort, normalizeExperimentalModernUi };
 })();
 
 // --- shared/telemetry-display-rules.mjs ---
@@ -1171,9 +1185,9 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   // Context Window Widget
   'ctx.followActive': '跟随活跃 ({badge})',
   'ctx.followActiveTitle': '自动展示当前正在运行或最新活跃的代理上下文窗口',
-  'ctx.expandMore': '+{count} 展开 ▾',
+  'ctx.expandMore': '+{count} 展开',
   'ctx.expandMoreTitle': '展开全部 {count} 个子代理的上下文窗口胶囊',
-  'ctx.collapse': '收起 ▴',
+  'ctx.collapse': '收起',
   'ctx.collapseTitle': '折叠多余子代理胶囊',
   'ctx.ch.assistant': '模型回复',
   'ctx.ch.assistantTitle': '模型推理思考、回复正文与工具调用入参',
@@ -1225,14 +1239,15 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'live.doneWithSteps': '已完成 ({steps} 步)',
   'live.waitingWithSteps': '待命中 ({steps} 步)',
   'live.killedWithSteps': '已终止 ({steps} 步)',
-  'live.subToggleRunning': '子代理 {run}/{total} {arrow}',
-  'live.subToggleIdle': '子代理 ({total}) {arrow}',
-  'live.swarmToggleRunning': '蜂群 {run}/{total} {arrow}',
-  'live.swarmToggleIdle': '蜂群 ({total}) {arrow}',
+  'live.subToggleRunning': '子代理 {run}/{total}',
+  'live.subToggleIdle': '子代理 ({total})',
+  'live.swarmToggleRunning': '蜂群 {run}/{total}',
+  'live.swarmToggleIdle': '蜂群 ({total})',
   'live.subCollapseTitle': '点击收起子代理列表',
   'live.subExpandTitle': '点击展开查看子代理缩略状态',
 
   // Consumption View
+  'cons.rangeCycle': '周期',
   'cons.rangeToday': '今天',
   'cons.range24h': '1天',
   'cons.range7d': '7天',
@@ -1432,6 +1447,10 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'settings.gen.fontLg': '大',
   'settings.gen.fontXl': '特大',
   'settings.gen.fontHint': '等比缩放侧边栏与展开面板字号，顶栏及输入框内嵌胶囊保持紧凑定高',
+  'settings.gen.modernUi': '新 UI（实验性）',
+  'settings.gen.modernUiOff': '关闭',
+  'settings.gen.modernUiOn': '开启',
+  'settings.gen.modernUiHint': '去除大部分线框，采用柔和分层底色与更流畅的现代过渡动画',
   'settings.gen.updateTitle': '版本更新',
   'settings.gen.updateMode': '更新方式',
   'settings.gen.updateManual': '仅提示新版本，手动更新',
@@ -1837,9 +1856,9 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   // Context Window Widget
   'ctx.followActive': 'Follow Active ({badge})',
   'ctx.followActiveTitle': 'Automatically inspect the active or running agent context window',
-  'ctx.expandMore': '+{count} More ▾',
+  'ctx.expandMore': '+{count} More',
   'ctx.expandMoreTitle': 'Expand all {count} subagent context pills',
-  'ctx.collapse': 'Less ▴',
+  'ctx.collapse': 'Less',
   'ctx.collapseTitle': 'Collapse extra subagent pills',
   'ctx.ch.assistant': 'Assistant',
   'ctx.ch.assistantTitle': 'Model reasoning, responses, and tool call arguments',
@@ -1891,14 +1910,15 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'live.doneWithSteps': 'Done ({steps} steps)',
   'live.waitingWithSteps': 'Waiting ({steps} steps)',
   'live.killedWithSteps': 'Killed ({steps} steps)',
-  'live.subToggleRunning': 'Subagents {run}/{total} {arrow}',
-  'live.subToggleIdle': 'Subagents ({total}) {arrow}',
-  'live.swarmToggleRunning': 'Swarm {run}/{total} {arrow}',
-  'live.swarmToggleIdle': 'Swarm ({total}) {arrow}',
+  'live.subToggleRunning': 'Subagents {run}/{total}',
+  'live.subToggleIdle': 'Subagents ({total})',
+  'live.swarmToggleRunning': 'Swarm {run}/{total}',
+  'live.swarmToggleIdle': 'Swarm ({total})',
   'live.subCollapseTitle': 'Collapse subagent list',
   'live.subExpandTitle': 'Expand subagent activity list',
 
   // Consumption View
+  'cons.rangeCycle': 'Cycle',
   'cons.rangeToday': 'Today',
   'cons.range24h': '24h',
   'cons.range7d': '7d',
@@ -2098,6 +2118,10 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'settings.gen.fontLg': 'Large',
   'settings.gen.fontXl': 'XL',
   'settings.gen.fontHint': 'Scales sidebar and popover typography while keeping the inline capsule compact',
+  'settings.gen.modernUi': 'Modern UI (Experimental)',
+  'settings.gen.modernUiOff': 'Off',
+  'settings.gen.modernUiOn': 'On',
+  'settings.gen.modernUiHint': 'Removes most borders in favor of soft tonal surfaces and smoother animations',
   'settings.gen.updateTitle': 'Updates & Pricing',
   'settings.gen.updateMode': 'Update Policy',
   'settings.gen.updateManual': 'Notify only, update manually',
@@ -2425,7 +2449,7 @@ return { I18N_DICTIONARIES, normalizeI18nLanguage, detectHostSystemLocale, i18nS
 })();
 
 // --- src/core/appearance.js ---
-const { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, applyAppearanceToRoot } = (() => {
+const { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, normalizeClientModernUi, isModernUiActiveForElement, parseCssColorLuminance, detectHostColorScheme, applyAppearanceToRoot } = (() => {
 /**
  * @fileoverview Theme accent palette & panel font-scale appearance engine.
  * Applies CSS custom properties cleanly to Sidebar `:root` and Shadow DOM hosts,
@@ -2466,23 +2490,342 @@ function normalizeClientFontScale(raw) {
   return Object.prototype.hasOwnProperty.call(FONT_SCALE_FACTORS, val) ? val : 'md';
 }
 
+function normalizeClientModernUi(raw) {
+  if (typeof raw === 'string') {
+    const lower = raw.trim().toLowerCase();
+    return lower === 'true' || lower === '1' || lower === 'on';
+  }
+  return Boolean(raw);
+}
+
+/**
+ * Check whether `el` (or its Shadow DOM host / document root) is currently under `[data-modern-ui="true"]`.
+ *
+ * @param {Node | null | undefined} el
+ * @returns {boolean}
+ */
+function isModernUiActiveForElement(el) {
+  let cur = el || null;
+  while (cur) {
+    if (typeof cur.getAttribute === 'function' && cur.getAttribute('data-modern-ui') === 'true') {
+      return true;
+    }
+    if (cur.parentNode) {
+      cur = cur.parentNode;
+    } else if (cur.host) {
+      cur = cur.host;
+    } else {
+      break;
+    }
+  }
+  if (typeof document !== 'undefined' && document.documentElement) {
+    return document.documentElement.getAttribute?.('data-modern-ui') === 'true';
+  }
+  return false;
+}
+
+const LIGHT_THEME_CLASSES = new Set([
+  'light',
+  'vs-light',
+  'vscode-light',
+  'hc-light',
+  'vscode-high-contrast-light',
+]);
+
+const DARK_THEME_CLASSES = new Set([
+  'dark',
+  'vs-dark',
+  'vscode-dark',
+  'hc-black',
+  'vscode-high-contrast',
+]);
+
+function hslToRgb(hDeg, sPct, lPct) {
+  const h = (((hDeg % 360) + 360) % 360) / 360;
+  const s = Math.max(0, Math.min(1, sPct / 100));
+  const l = Math.max(0, Math.min(1, lPct / 100));
+  if (s === 0) {
+    const v = l * 255;
+    return [v, v, v];
+  }
+  const hue2rgb = (p, q, t) => {
+    let tt = t;
+    if (tt < 0) tt += 1;
+    if (tt > 1) tt -= 1;
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+    if (tt < 1 / 2) return q;
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return [
+    hue2rgb(p, q, h + 1 / 3) * 255,
+    hue2rgb(p, q, h) * 255,
+    hue2rgb(p, q, h - 1 / 3) * 255,
+  ];
+}
+
+function parseAlphaToken(rawAlpha) {
+  if (rawAlpha == null || rawAlpha === '') return 1;
+  const str = String(rawAlpha).trim();
+  if (!str) return 1;
+  if (str.endsWith('%')) {
+    const pct = parseFloat(str);
+    return Number.isFinite(pct) ? pct / 100 : 1;
+  }
+  const num = parseFloat(str);
+  return Number.isFinite(num) ? num : 1;
+}
+
+/**
+ * Parse `#hex`, `rgb()/rgba()`, or `hsl()/hsla()` into perceptual luminance `[0, 1]`.
+ * Returns `null` when transparent (`alpha <= 0.15`) or unparseable.
+ *
+ * @param {string | null | undefined} rawColor
+ * @returns {number | null}
+ */
+function parseCssColorLuminance(rawColor) {
+  const str = String(rawColor ?? '').trim().toLowerCase();
+  if (!str || str === 'transparent' || str === 'none' || str === 'inherit' || str === 'initial') {
+    return null;
+  }
+
+  if (str.startsWith('#')) {
+    const hex = str.slice(1);
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let a = 1;
+    if (hex.length === 3 || hex.length === 4) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+      if (hex.length === 4) a = parseInt(hex[3] + hex[3], 16) / 255;
+    } else if (hex.length === 6 || hex.length === 8) {
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+      if (hex.length === 8) a = parseInt(hex.slice(6, 8), 16) / 255;
+    } else {
+      return null;
+    }
+    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b) || a <= 0.15) {
+      return null;
+    }
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  }
+
+  const rgbMatch = str.match(/^rgba?\(([^)]+)\)$/);
+  if (rgbMatch) {
+    const body = rgbMatch[1].trim();
+    const [channelsPart, slashAlpha] = body.split('/');
+    const parts = channelsPart
+      .trim()
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    if (parts.length < 3) return null;
+    const parseChan = (tok) =>
+      tok.endsWith('%') ? (parseFloat(tok) / 100) * 255 : parseFloat(tok);
+    const r = parseChan(parts[0]);
+    const g = parseChan(parts[1]);
+    const b = parseChan(parts[2]);
+    const a = slashAlpha !== undefined ? parseAlphaToken(slashAlpha) : parseAlphaToken(parts[3]);
+    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b) || a <= 0.15) {
+      return null;
+    }
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  }
+
+  const hslMatch = str.match(/^hsla?\(([^)]+)\)$/);
+  if (hslMatch) {
+    const body = hslMatch[1].trim();
+    const [channelsPart, slashAlpha] = body.split('/');
+    const parts = channelsPart
+      .trim()
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    if (parts.length < 3) return null;
+    const h = parseFloat(parts[0]);
+    const s = parseFloat(parts[1]);
+    const l = parseFloat(parts[2]);
+    const a = slashAlpha !== undefined ? parseAlphaToken(slashAlpha) : parseAlphaToken(parts[3]);
+    if (!Number.isFinite(h) || !Number.isFinite(s) || !Number.isFinite(l) || a <= 0.15) {
+      return null;
+    }
+    const [r, g, b] = hslToRgb(h, s, l);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  }
+
+  return null;
+}
+
+function readStyleProp(el, cs, prop) {
+  if (prop.startsWith('--')) {
+    const inlineVal =
+      typeof el?.style?.getPropertyValue === 'function'
+        ? el.style.getPropertyValue(prop)
+        : el?.style?.[prop];
+    if (inlineVal && String(inlineVal).trim()) return String(inlineVal).trim();
+    const compVal = cs?.getPropertyValue?.(prop);
+    return compVal ? String(compVal).trim() : '';
+  }
+  const inlineVal = el?.style?.[prop];
+  if (inlineVal && String(inlineVal).trim()) return String(inlineVal).trim();
+  const compVal = cs?.[prop];
+  return compVal ? String(compVal).trim() : '';
+}
+
+/**
+ * Detect whether the active host surface is `'light'` or `'dark'`.
+ * Inspects explicit Antigravity / VS Code theme classes & attributes first,
+ * then actual computed surface/text luminance, then `prefers-color-scheme`.
+ *
+ * @param {HTMLElement | null | undefined} [targetEl]
+ * @returns {'light' | 'dark'}
+ */
+function detectHostColorScheme(targetEl = null) {
+  const doc = typeof document !== 'undefined' ? document : null;
+  const win = typeof window !== 'undefined' ? window : null;
+  let workbenchEl = null;
+  try {
+    workbenchEl =
+      typeof doc?.querySelector === 'function' ? doc.querySelector('.monaco-workbench') : null;
+  } catch {
+    workbenchEl = null;
+  }
+
+  const candidates = [];
+  for (const el of [doc?.body, doc?.documentElement, workbenchEl, targetEl]) {
+    if (el && !candidates.includes(el)) {
+      candidates.push(el);
+    }
+  }
+
+  // 1. Explicit host theme attributes & class tokens (never read our own data-color-scheme)
+  for (const el of candidates) {
+    const vscodeKind = String(el.getAttribute?.('data-vscode-theme-kind') || '')
+      .trim()
+      .toLowerCase();
+    if (vscodeKind) {
+      if (vscodeKind.includes('light')) return 'light';
+      if (vscodeKind.includes('dark') || vscodeKind.includes('high-contrast')) return 'dark';
+    }
+    const dataTheme = String(
+      el.getAttribute?.('data-theme') || el.getAttribute?.('data-color-mode') || ''
+    )
+      .trim()
+      .toLowerCase();
+    if (dataTheme === 'light' || dataTheme.endsWith('-light')) return 'light';
+    if (dataTheme === 'dark' || dataTheme.endsWith('-dark')) return 'dark';
+
+    const rawCls = typeof el.className === 'string' ? el.className : '';
+    if (rawCls) {
+      const tokens = rawCls.trim().toLowerCase().split(/\s+/);
+      for (const tok of tokens) {
+        if (LIGHT_THEME_CLASSES.has(tok)) return 'light';
+        if (DARK_THEME_CLASSES.has(tok)) return 'dark';
+      }
+    }
+  }
+
+  // 2. Computed / inline surface background luminance
+  const bgTargets = [];
+  for (const el of [targetEl, doc?.body, doc?.documentElement, workbenchEl]) {
+    if (el && !bgTargets.includes(el)) {
+      bgTargets.push(el);
+    }
+  }
+  const bgProps = [
+    '--background',
+    '--card',
+    '--vscode-sideBar-background',
+    '--vscode-editor-background',
+    'backgroundColor',
+  ];
+  for (const el of bgTargets) {
+    let cs = null;
+    try {
+      cs = typeof win?.getComputedStyle === 'function' ? win.getComputedStyle(el) : null;
+    } catch {
+      cs = null;
+    }
+    for (const prop of bgProps) {
+      const lum = parseCssColorLuminance(readStyleProp(el, cs, prop));
+      if (lum !== null) {
+        return lum > 0.52 ? 'light' : 'dark';
+      }
+    }
+  }
+
+  // 3. Computed / inline foreground text luminance
+  const fgProps = ['--foreground', '--vscode-foreground', '--vscode-editor-foreground', 'color'];
+  for (const el of bgTargets) {
+    let cs = null;
+    try {
+      cs = typeof win?.getComputedStyle === 'function' ? win.getComputedStyle(el) : null;
+    } catch {
+      cs = null;
+    }
+    for (const prop of fgProps) {
+      const lum = parseCssColorLuminance(readStyleProp(el, cs, prop));
+      if (lum !== null) {
+        return lum < 0.48 ? 'light' : 'dark';
+      }
+    }
+  }
+
+  // 4. OS media query fallback
+  try {
+    if (win?.matchMedia?.('(prefers-color-scheme: dark)')?.matches) {
+      return 'dark';
+    }
+  } catch {
+    // ignore matchMedia errors
+  }
+
+  return 'light';
+}
+
+function setAttrIfChanged(el, name, value) {
+  if (!el || typeof el.setAttribute !== 'function') return;
+  if (typeof el.getAttribute === 'function' && el.getAttribute(name) === value) return;
+  el.setAttribute(name, value);
+}
+
+function removeAttrIfPresent(el, name) {
+  if (!el || typeof el.removeAttribute !== 'function') return;
+  if (typeof el.hasAttribute === 'function' && !el.hasAttribute(name)) return;
+  el.removeAttribute(name);
+}
+
 function setOrClearStyleVar(el, propName, value) {
   if (!el || !el.style) return;
+  const cur =
+    typeof el.style.getPropertyValue === 'function'
+      ? el.style.getPropertyValue(propName)
+      : el.style[propName] || '';
   if (value) {
+    if (cur === value) return;
     if (typeof el.style.setProperty === 'function') {
       el.style.setProperty(propName, value);
     } else {
       el.style[propName] = value;
     }
-  } else if (typeof el.style.removeProperty === 'function') {
-    el.style.removeProperty(propName);
-  } else if (typeof el.style.setProperty === 'function') {
-    el.style.setProperty(propName, '');
+  } else if (cur) {
+    if (typeof el.style.removeProperty === 'function') {
+      el.style.removeProperty(propName);
+    } else if (typeof el.style.setProperty === 'function') {
+      el.style.setProperty(propName, '');
+    } else {
+      el.style[propName] = '';
+    }
   }
 }
 
 /**
- * Synchronize theme accent and (optionally) font scale tokens onto a root/host element.
+ * Synchronize theme accent, host color scheme polarity, and (optionally) font scale tokens
+ * onto a root/host element.
  *
  * @param {HTMLElement | null | undefined} targetEl
  * @param {object | null | undefined} settings
@@ -2500,7 +2843,17 @@ function applyAppearanceToRoot(targetEl, settings, { includeFontScale = true } =
     setOrClearStyleVar(targetEl, '--user-accent-primary', '');
     setOrClearStyleVar(targetEl, '--user-accent-contrast', '');
   }
-  targetEl.setAttribute?.('data-accent', preset.key);
+  setAttrIfChanged(targetEl, 'data-accent', preset.key);
+
+  const colorScheme = detectHostColorScheme(targetEl);
+  setAttrIfChanged(targetEl, 'data-color-scheme', colorScheme);
+
+  const isModernUi = normalizeClientModernUi(settings?.experimentalModernUi);
+  if (isModernUi) {
+    setAttrIfChanged(targetEl, 'data-modern-ui', 'true');
+  } else {
+    removeAttrIfPresent(targetEl, 'data-modern-ui');
+  }
 
   if (includeFontScale) {
     const scaleKey = normalizeClientFontScale(settings?.fontScale);
@@ -2508,16 +2861,14 @@ function applyAppearanceToRoot(targetEl, settings, { includeFontScale = true } =
     const panelFactor = PANEL_SCALE_FACTORS[scaleKey] ?? 1;
     setOrClearStyleVar(targetEl, '--ui-font-scale', factor === 1 ? '' : String(factor));
     setOrClearStyleVar(targetEl, '--ui-panel-scale', panelFactor === 1 ? '' : String(panelFactor));
-    targetEl.setAttribute?.('data-font-scale', scaleKey);
+    setAttrIfChanged(targetEl, 'data-font-scale', scaleKey);
   } else {
     setOrClearStyleVar(targetEl, '--ui-font-scale', '');
     setOrClearStyleVar(targetEl, '--ui-panel-scale', '');
-    if (typeof targetEl.removeAttribute === 'function') {
-      targetEl.removeAttribute('data-font-scale');
-    }
+    removeAttrIfPresent(targetEl, 'data-font-scale');
   }
 }
-return { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, applyAppearanceToRoot };
+return { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normalizeClientThemeAccent, normalizeClientFontScale, normalizeClientModernUi, isModernUiActiveForElement, parseCssColorLuminance, detectHostColorScheme, applyAppearanceToRoot };
 })();
 
 // --- src/core/domPatch.js ---
@@ -2655,7 +3006,11 @@ const keyedListState = new WeakMap();
  * Keyed incremental list reconciler.
  * Reuses existing DOM nodes by key and patches only changed items in-place.
  */
-function patchKeyedList(container, items, { keyFn, sigFn, createRow, updateRow }) {
+function patchKeyedList(
+  container,
+  items,
+  { keyFn = (_, i) => i, sigFn, createRow, updateRow, destroyRow } = {}
+) {
   if (!container) return;
   let map = keyedListState.get(container);
   if (!map) {
@@ -2699,6 +3054,7 @@ function patchKeyedList(container, items, { keyFn, sigFn, createRow, updateRow }
       if (record.el.parentNode === container) {
         container.removeChild(record.el);
       }
+      destroyRow?.(record.refs, record.el);
       map.delete(oldKey);
     }
   }
@@ -4069,6 +4425,7 @@ function isEquivalentTelemetry(prev, next) {
   if ((pSet?.language ?? 'zh-CN') !== (nSet?.language ?? 'zh-CN')) return false;
   if ((pSet?.themeAccent ?? 'host') !== (nSet?.themeAccent ?? 'host')) return false;
   if ((pSet?.fontScale ?? 'md') !== (nSet?.fontScale ?? 'md')) return false;
+  if (Boolean(pSet?.experimentalModernUi) !== Boolean(nSet?.experimentalModernUi)) return false;
   if ((prev.hostPlatform || '') !== (next.hostPlatform || '')) return false;
   if (Boolean(pSet?.contextWindowRiskAccepted) !== Boolean(nSet?.contextWindowRiskAccepted)) {
     return false;
@@ -4768,6 +5125,9 @@ async function saveSettingsPatch(patch) {
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'fontScale')) {
     safePatch.fontScale = normalizeClientFontScale(safePatch.fontScale);
+  }
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'experimentalModernUi')) {
+    safePatch.experimentalModernUi = normalizeClientModernUi(safePatch.experimentalModernUi);
   }
   if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
     safePatch.weeklyLimitMode = normalizeWeeklyLimitMode(safePatch.weeklyLimitMode);
@@ -6203,54 +6563,215 @@ return { CustomScrollbar };
 // --- src/components/ui/SegmentedControl.js ---
 const { SegmentedControl } = (() => {
 /**
- * @fileoverview Micro-bezel (2px radius) SegmentedControl switcher
- * for time-range filtering, context limit selection, and sub-table switching.
+ * @fileoverview Sliding SegmentedControl switcher with variable-width GPU glider.
+ * Measures active button geometry via ResizeObserver so both inline variable-width
+ * segments (e.g. "今天 / 1天 / ... / 自定义", "按步查看 (1520) / 总汇总") and equal-width
+ * grid bars ("常规 / 结构 / 其他") glide smoothly without stretching from 0px on tab reveal.
  */
 
 
 const SegmentedControl = defineComponent({
   name: 'SegmentedControl',
-  setup({ getProps, setProps, emit }) {
-    const rootEl = h('div', {
-      className: 'segmented',
-      role: 'group',
-      'aria-label': getProps().ariaLabel || '分段切换器',
-    });
+  setup({ getProps, setProps, emit, onCleanup }) {
+    const gliderEl = h('div', { className: 'seg-glider', 'aria-hidden': 'true' });
+    const rootEl = h(
+      'div',
+      {
+        className: 'segmented',
+        role: 'group',
+        'aria-label': getProps().ariaLabel || '分段切换器',
+      },
+      [gliderEl]
+    );
+
+    const btnMap = new Map();
+    let orderedBtns = [];
+    let activeBtnEl = null;
+    let observedBtnEl = null;
+    let hasMeasuredVisible = false;
+    let readyRafId = 0;
+
+    function cancelReadyRaf() {
+      if (readyRafId && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(readyRafId);
+      }
+      readyRafId = 0;
+    }
+
+    function syncGliderGeometry() {
+      if (!activeBtnEl) {
+        cancelReadyRaf();
+        hasMeasuredVisible = false;
+        patchClasses(rootEl, { 'has-glider': false });
+        patchClasses(gliderEl, { 'is-ready': false });
+        return;
+      }
+
+      const w = Number(activeBtnEl.offsetWidth || 0);
+      const h = Number(activeBtnEl.offsetHeight || 0);
+      if (!(w > 0 && h > 0)) {
+        // Hidden parent tab or headless Mock DOM: keep .seg-btn.is-active fallback background
+        // and snap cleanly on first real paint when tab becomes visible.
+        cancelReadyRaf();
+        hasMeasuredVisible = false;
+        patchClasses(rootEl, { 'has-glider': false });
+        patchClasses(gliderEl, { 'is-ready': false });
+        return;
+      }
+
+      const x = Number(activeBtnEl.offsetLeft || 0);
+      const y = Number(activeBtnEl.offsetTop || 0);
+      patchStyleVar(gliderEl, '--glider-x', `${x}px`);
+      patchStyleVar(gliderEl, '--glider-y', `${y}px`);
+      patchStyleVar(gliderEl, '--glider-w', `${w}px`);
+      patchStyleVar(gliderEl, '--glider-h', `${h}px`);
+      patchClasses(rootEl, { 'has-glider': true });
+
+      if (!hasMeasuredVisible) {
+        hasMeasuredVisible = true;
+        patchClasses(gliderEl, { 'is-ready': false });
+        void gliderEl.offsetWidth;
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          cancelReadyRaf();
+          readyRafId = window.requestAnimationFrame(() => {
+            readyRafId = 0;
+            if (hasMeasuredVisible) {
+              patchClasses(gliderEl, { 'is-ready': true });
+            }
+          });
+        } else {
+          patchClasses(gliderEl, { 'is-ready': true });
+        }
+      }
+    }
+
+    let resizeObs = null;
+    if (typeof ResizeObserver === 'function') {
+      resizeObs = new ResizeObserver(() => {
+        syncGliderGeometry();
+      });
+      resizeObs.observe(rootEl);
+    }
+
+    function updateObservedActiveButton(nextActiveBtn) {
+      if (!resizeObs || observedBtnEl === nextActiveBtn) return;
+      if (observedBtnEl) {
+        try {
+          resizeObs.unobserve(observedBtnEl);
+        } catch {
+          // ignore
+        }
+      }
+      observedBtnEl = nextActiveBtn || null;
+      if (observedBtnEl) {
+        try {
+          resizeObs.observe(observedBtnEl);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    function selectValue(nextVal) {
+      if (getProps().modelValue !== nextVal) {
+        setProps({ modelValue: nextVal });
+        emit('update:modelValue', nextVal);
+      }
+    }
 
     function syncSegments() {
-      const { options = [], modelValue } = getProps();
-      patchKeyedList(rootEl, options, {
-        keyFn: (opt) => opt.value,
-        sigFn: (opt) => `${opt.value}::${opt.label}::${opt.value === modelValue}`,
-        createRow: (opt) => {
-          const btn = h('button', {
+      const { options = [], modelValue, ariaLabel } = getProps();
+      if (ariaLabel) {
+        patchAttr(rootEl, 'aria-label', ariaLabel);
+      }
+
+      const validKeys = new Set(options.map((opt) => String(opt.value)));
+      for (const [key, btn] of btnMap.entries()) {
+        if (!validKeys.has(key)) {
+          if (btn.parentNode === rootEl) {
+            rootEl.removeChild(btn);
+          }
+          btnMap.delete(key);
+        }
+      }
+
+      orderedBtns = [];
+      let nextActiveBtn = null;
+
+      for (let i = 0; i < options.length; i++) {
+        const opt = options[i];
+        const key = String(opt.value);
+        let btn = btnMap.get(key);
+        if (!btn) {
+          btn = h('button', {
             type: 'button',
             className: 'seg-btn',
             onClick: (e) => {
               e.stopPropagation();
-              if (getProps().modelValue !== opt.value) {
-                setProps({ modelValue: opt.value });
-                emit('update:modelValue', opt.value);
+              selectValue(opt.value);
+            },
+            onKeydown: (e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                const curOpts = getProps().options || [];
+                if (!curOpts.length) return;
+                const curIdx = Math.max(
+                  0,
+                  curOpts.findIndex((o) => String(o.value) === key)
+                );
+                const delta = e.key === 'ArrowRight' ? 1 : -1;
+                const nextIdx = (curIdx + delta + curOpts.length) % curOpts.length;
+                const targetOpt = curOpts[nextIdx];
+                if (targetOpt) {
+                  selectValue(targetOpt.value);
+                  btnMap.get(String(targetOpt.value))?.focus?.();
+                }
               }
             },
           });
-          return { el: btn, refs: {} };
-        },
-        updateRow: (_refs, opt, _idx, el) => {
-          const active = opt.value === modelValue;
-          patchText(el, opt.label);
-          patchClasses(el, { 'is-active': active });
-          patchAttr(el, 'aria-pressed', active ? 'true' : 'false');
-          patchAttr(el, 'data-seg-value', opt.value);
-        },
-      });
+          btnMap.set(key, btn);
+        }
+
+        const active = opt.value === modelValue;
+        patchText(btn, opt.label);
+        patchClasses(btn, { 'is-active': active });
+        patchAttr(btn, 'aria-pressed', active ? 'true' : 'false');
+        patchAttr(btn, 'data-seg-value', opt.value);
+        orderedBtns.push(btn);
+        if (active) {
+          nextActiveBtn = btn;
+        }
+      }
+
+      // Ensure gliderEl remains index 0 and buttons follow in exact option order
+      if (rootEl.firstChild !== gliderEl) {
+        rootEl.insertBefore(gliderEl, rootEl.firstChild);
+      }
+      for (let i = 0; i < orderedBtns.length; i++) {
+        const targetNode = orderedBtns[i];
+        const currentAtSlot = rootEl.children[i + 1] || null;
+        if (currentAtSlot !== targetNode) {
+          rootEl.insertBefore(targetNode, currentAtSlot);
+        }
+      }
+
+      activeBtnEl = nextActiveBtn || orderedBtns[0] || null;
+      updateObservedActiveButton(activeBtnEl);
+      syncGliderGeometry();
     }
 
     syncSegments();
 
+    onCleanup(() => {
+      cancelReadyRaf();
+      resizeObs?.disconnect?.();
+      resizeObs = null;
+      observedBtnEl = null;
+    });
+
     return {
       el: rootEl,
-      refs: {},
+      refs: { gliderEl, refreshGlider: syncGliderGeometry },
       onPropsChange: syncSegments,
       getValue: () => getProps().modelValue,
     };
@@ -6813,6 +7334,34 @@ function createTrendAreaChart() {
   let hoveredIdx = -1;
   let hoveredCellEl = null;
   let lastRenderSig = '';
+  let tipTrackRaf = 0;
+
+  function cancelTipTrackRaf() {
+    if (tipTrackRaf && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(tipTrackRaf);
+    }
+    tipTrackRaf = 0;
+  }
+
+  function armTooltipTracking(wasHidden) {
+    if (!wasHidden) return;
+    patchClasses(tooltipEl, { 'is-tracking': false });
+    patchClasses(hoverDot, { 'is-tracking': false });
+    void tooltipEl.offsetWidth;
+    cancelTipTrackRaf();
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      tipTrackRaf = window.requestAnimationFrame(() => {
+        tipTrackRaf = 0;
+        if (!tooltipEl.hasAttribute('hidden')) {
+          patchClasses(tooltipEl, { 'is-tracking': true });
+          patchClasses(hoverDot, { 'is-tracking': true });
+        }
+      });
+    } else {
+      patchClasses(tooltipEl, { 'is-tracking': true });
+      patchClasses(hoverDot, { 'is-tracking': true });
+    }
+  }
 
   function populateTooltipContent(slot) {
     patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
@@ -6868,6 +7417,7 @@ function createTrendAreaChart() {
       clearHover();
       return;
     }
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     hoveredIdx = idx;
     const slot = currentSlots[idx];
     const pt = currentPts[idx];
@@ -6880,19 +7430,31 @@ function createTrendAreaChart() {
     patchAttr(hoverDot, 'cx', pt.x.toFixed(1));
     patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
 
+    const isLineLow = pt.y < Math.round((TOP_Y + BOTTOM_Y) / 2);
     patchAttr(peakPill, 'hidden', true);
     patchClasses(tooltipEl, {
       'is-hm-bottom': false,
       'is-hm-top': false,
-      'is-line-low': pt.y < Math.round((TOP_Y + BOTTOM_Y) / 2),
+      'is-line-low': isLineLow,
     });
     patchAttr(tooltipEl, 'hidden', false);
     populateTooltipContent(slot);
+
+    let tipY = 0;
+    if (isLineLow) {
+      const wrapH = Number(chartWrap.offsetHeight || 0);
+      const tipH = Number(tooltipEl.offsetHeight || 0);
+      if (wrapH > 0 && tipH > 0) {
+        tipY = Math.max(0, wrapH - tipH - 22);
+      }
+    }
 
     const rawPct = (pt.x / viewW) * 100;
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', `${Math.round(tipY)}px`);
+    armTooltipTracking(wasHidden);
 
     for (const [tIdx, el] of tickElsByIdx.entries()) {
       patchClasses(el, { 'is-hovered': tIdx === idx });
@@ -6920,6 +7482,7 @@ function createTrendAreaChart() {
     const row = Number(targetCell.getAttribute('data-hm-row') || 0);
     const col = Number(targetCell.getAttribute('data-hm-col') || 0);
 
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     // 上半区（周一~周四）浮层停靠热力图下方，下半区（周五~周日）停靠热力图上方，互不遮挡被悬停格子且永不越界裁剪
     patchClasses(tooltipEl, {
       'is-hm-bottom': row <= 3,
@@ -6946,14 +7509,23 @@ function createTrendAreaChart() {
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    armTooltipTracking(wasHidden);
   }
 
   function clearHover() {
+    cancelTipTrackRaf();
     hoveredIdx = -1;
     patchAttr(hoverLine, 'hidden', true);
     patchAttr(hoverDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
-    patchClasses(tooltipEl, { 'is-hm-bottom': false, 'is-hm-top': false, 'is-line-low': false });
+    patchClasses(tooltipEl, {
+      'is-hm-bottom': false,
+      'is-hm-top': false,
+      'is-line-low': false,
+      'is-tracking': false,
+    });
+    patchClasses(hoverDot, { 'is-tracking': false });
     if (!currentIsHeatmap) {
       patchAttr(peakPill, 'hidden', false);
     }
@@ -7165,6 +7737,7 @@ function createTrendAreaChart() {
   }
 
   function destroy() {
+    cancelTipTrackRaf();
     resizeObs?.disconnect();
     resizeObs = null;
     if (onWinResize && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
@@ -8221,6 +8794,7 @@ function createSessionLineChart() {
       clearHover();
       return;
     }
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     hoveredIdx = idx;
     const pt = currentPoints[idx];
     patchAttr(hoverLine, 'hidden', false);
@@ -8251,6 +8825,20 @@ function createSessionLineChart() {
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    if (wasHidden) {
+      patchClasses(tooltipEl, { 'is-tracking': false });
+      void tooltipEl.offsetWidth;
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          if (!tooltipEl.hasAttribute('hidden')) {
+            patchClasses(tooltipEl, { 'is-tracking': true });
+          }
+        });
+      } else {
+        patchClasses(tooltipEl, { 'is-tracking': true });
+      }
+    }
 
     for (const [tIdx, el] of tickElsByIdx.entries()) {
       patchClasses(el, { 'is-hovered': tIdx === idx });
@@ -8262,6 +8850,7 @@ function createSessionLineChart() {
     patchAttr(hoverLine, 'hidden', true);
     patchAttr(hoverDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
+    patchClasses(tooltipEl, { 'is-tracking': false });
     if (currentPoints.some((p) => p.valid)) {
       patchAttr(peakPill, 'hidden', false);
     }
@@ -9015,6 +9604,7 @@ function createModelFitChart() {
     patchAttr(hoverRawDot, 'cx', sp.x.toFixed(1));
     patchAttr(hoverRawDot, 'cy', sp.rawY.toFixed(1));
 
+    const wasHidden = tooltipEl.hasAttribute('hidden');
     patchAttr(tooltipEl, 'hidden', false);
     patchText(tipHeadLeft, sp.stepTag);
     patchText(tipHeadRight, sp.modelText);
@@ -9050,6 +9640,20 @@ function createModelFitChart() {
     const clampedPct = Math.max(1, Math.min(99, rawPct));
     patchStyleVar(tooltipEl, '--tip-x', `${clampedPct.toFixed(1)}%`);
     patchStyleVar(tooltipEl, '--tip-shift', `-${clampedPct.toFixed(1)}%`);
+    patchStyleVar(tooltipEl, '--tip-y', '0px');
+    if (wasHidden) {
+      patchClasses(tooltipEl, { 'is-tracking': false });
+      void tooltipEl.offsetWidth;
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          if (!tooltipEl.hasAttribute('hidden')) {
+            patchClasses(tooltipEl, { 'is-tracking': true });
+          }
+        });
+      } else {
+        patchClasses(tooltipEl, { 'is-tracking': true });
+      }
+    }
   }
 
   function clearHover() {
@@ -9058,6 +9662,7 @@ function createModelFitChart() {
     patchAttr(hoverFitDot, 'hidden', true);
     patchAttr(hoverRawDot, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', true);
+    patchClasses(tooltipEl, { 'is-tracking': false });
   }
 
   plotStage.addEventListener('mousemove', (e) => {
@@ -10433,8 +11038,8 @@ const CTX_ASCII_CHAR_PX = 6.1;
 const CTX_PILL_GAP_PX = 4;
 const CTX_DEFAULT_BAR_WIDTH_PX = 310;
 
-function estimateCtxPillWidth(text) {
-  let w = CTX_PILL_BASE_PAD_PX;
+function estimateCtxPillWidth(text, withChevron = false) {
+  let w = CTX_PILL_BASE_PAD_PX + (withChevron ? 14 : 0);
   for (const ch of String(text || '')) {
     w += ch.charCodeAt(0) > 255 ? CTX_CJK_CHAR_PX : CTX_ASCII_CHAR_PX;
   }
@@ -10647,8 +11252,29 @@ const ContextWindowWidget = defineComponent({
 
     let latestData = null;
     let ctxPillsExpanded = false;
+    let isCollapsingCtxPills = false;
+    let ctxCollapseTimer = null;
     let lastCascadeId = '';
     let cachedBarWidth = 0;
+
+    function clearCtxExpandAnim() {
+      if (ctxCollapseTimer) {
+        clearTimeout(ctxCollapseTimer);
+        ctxCollapseTimer = null;
+      }
+      isCollapsingCtxPills = false;
+      ctxInspectorBar.ontransitionend = null;
+      ctxInspectorBar.style.height = '';
+      ctxInspectorBar.style.overflow = '';
+      ctxInspectorBar.style.transition = '';
+      for (const child of ctxPillGroup.children) {
+        child.onanimationend = null;
+        patchClasses(child, {
+          'is-pill-entering': false,
+          'is-pill-collapsing': false,
+        });
+      }
+    }
 
     function update({ data } = {}) {
       latestData = data || null;
@@ -10680,6 +11306,7 @@ const ContextWindowWidget = defineComponent({
         const currentCascadeId = data.activeConversation?.cascadeId || '';
         if (currentCascadeId && currentCascadeId !== lastCascadeId) {
           if (lastCascadeId) {
+            clearCtxExpandAnim();
             ctxPillsExpanded = false;
           }
           lastCascadeId = currentCascadeId;
@@ -10711,7 +11338,10 @@ const ContextWindowWidget = defineComponent({
 
       if (interactiveInspector) {
         patchAttr(ctxInspectorBar, 'hidden', !hasSubagents);
-        if (hasSubagents && ctxAgent) {
+        if (!hasSubagents && isCollapsingCtxPills) {
+          clearCtxExpandAnim();
+        }
+        if (hasSubagents && ctxAgent && !isCollapsingCtxPills) {
           const activeBadgeText = formatAgentBadgeText({
             agentKind:
               aggregated?.activeAgentKind ||
@@ -10758,7 +11388,7 @@ const ContextWindowWidget = defineComponent({
 
           if (needsCollapse && !ctxPillsExpanded) {
             const toggleSample = t('ctx.expandMore', { count: allAgentPills.length });
-            const toggleReservePx = CTX_PILL_GAP_PX + estimateCtxPillWidth(toggleSample);
+            const toggleReservePx = CTX_PILL_GAP_PX + estimateCtxPillWidth(toggleSample, true);
             let usedW = firstPillWidth;
             let fitCount = 0;
             for (let i = 0; i < allAgentPills.length; i += 1) {
@@ -10789,6 +11419,7 @@ const ContextWindowWidget = defineComponent({
               title: t('ctx.expandMoreTitle', { count: allAgentPills.length - 1 }),
               isActive: false,
               isMoreToggle: true,
+              isExpanded: false,
               mode: 'toggle-expand',
             });
           } else {
@@ -10800,6 +11431,7 @@ const ContextWindowWidget = defineComponent({
                 title: t('ctx.collapseTitle'),
                 isActive: false,
                 isMoreToggle: true,
+                isExpanded: true,
                 mode: 'toggle-expand',
               });
             }
@@ -10808,22 +11440,117 @@ const ContextWindowWidget = defineComponent({
           patchKeyedList(ctxPillGroup, pillItems, {
             keyFn: (item) => item.key,
             sigFn: (item) =>
-              `${item.key}:${item.label}:${item.isActive}:${item.isMoreToggle}:${item.mode}:${item.title}`,
+              `${item.key}:${item.label}:${item.isActive}:${item.isMoreToggle}:${Boolean(item.isExpanded)}:${item.mode}:${item.title}`,
             createRow: () => {
-              const btn = h('button', { type: 'button', className: 'ctx-agent-pill' });
-              return { el: btn, refs: { btn } };
+              const labelSpan = h('span', { className: 'ctx-pill-label' });
+              const chevronEl = createSvgIcon('chevron-down', {
+                size: 11,
+                className: 'ctx-toggle-chevron',
+              });
+              patchAttr(chevronEl, 'hidden', true);
+              const btn = h('button', { type: 'button', className: 'ctx-agent-pill' }, [
+                labelSpan,
+                chevronEl,
+              ]);
+              return { el: btn, refs: { btn, labelSpan, chevronEl } };
             },
             updateRow: (refs, item) => {
-              patchText(refs.btn, item.label);
+              patchText(refs.labelSpan, item.label);
+              patchAttr(refs.chevronEl, 'hidden', !item.isMoreToggle);
               patchAttr(refs.btn, 'title', item.title);
+              patchAttr(refs.btn, 'data-pill-key', item.key);
               patchClasses(refs.btn, {
                 'is-active': item.isActive,
                 'is-more-toggle': Boolean(item.isMoreToggle),
+                'is-expanded': Boolean(item.isExpanded),
+                'is-pill-collapsing': false,
               });
               refs.btn.onclick = () => {
                 if (item.mode === 'toggle-expand') {
-                  ctxPillsExpanded = !ctxPillsExpanded;
-                  if (latestData) update({ data: latestData });
+                  const modern = isModernUiActiveForElement(ctxPanel);
+                  const startH = Number(ctxInspectorBar.offsetHeight || 0);
+                  clearCtxExpandAnim();
+                  if (!modern || !(startH > 0)) {
+                    ctxPillsExpanded = !ctxPillsExpanded;
+                    if (latestData) update({ data: latestData });
+                    return;
+                  }
+
+                  if (!ctxPillsExpanded) {
+                    const prevKeys = new Set(
+                      Array.from(ctxPillGroup.children, (el) => el.getAttribute?.('data-pill-key') || '')
+                    );
+                    ctxPillsExpanded = true;
+                    if (latestData) update({ data: latestData });
+                    const endH = Number(ctxPillGroup.offsetHeight || 0);
+                    for (const child of ctxPillGroup.children) {
+                      const k = child.getAttribute?.('data-pill-key') || '';
+                      if (k && k !== '__toggle_more__' && !prevKeys.has(k)) {
+                        patchClasses(child, { 'is-pill-entering': true });
+                        child.onanimationend = () => {
+                          child.onanimationend = null;
+                          patchClasses(child, { 'is-pill-entering': false });
+                        };
+                      }
+                    }
+                    if (endH > startH + 1) {
+                      ctxInspectorBar.style.height = `${startH}px`;
+                      ctxInspectorBar.style.overflow = 'hidden';
+                      void ctxInspectorBar.offsetHeight;
+                      ctxInspectorBar.style.transition =
+                        'height 220ms cubic-bezier(0.16, 1, 0.3, 1)';
+                      ctxInspectorBar.style.height = `${endH}px`;
+                      const finishExpand = () => clearCtxExpandAnim();
+                      ctxInspectorBar.ontransitionend = (ev) => {
+                        if (
+                          ev?.target === ctxInspectorBar &&
+                          (!ev.propertyName || ev.propertyName === 'height')
+                        ) {
+                          finishExpand();
+                        }
+                      };
+                      ctxCollapseTimer = setTimeout(finishExpand, 260);
+                    }
+                  } else {
+                    const firstPill = ctxPillGroup.children[0] || null;
+                    const firstTop = Number(firstPill?.offsetTop || 0);
+                    let firstRowH = Number(firstPill?.offsetHeight || 20);
+                    for (const child of ctxPillGroup.children) {
+                      const top = Number(child.offsetTop || 0);
+                      if (top <= firstTop + 4) {
+                        const bottom = top - firstTop + Number(child.offsetHeight || 0);
+                        if (bottom > firstRowH) firstRowH = bottom;
+                      }
+                    }
+                    const targetH = Math.max(18, firstRowH);
+                    ctxPillsExpanded = false;
+                    isCollapsingCtxPills = true;
+                    patchClasses(refs.btn, { 'is-expanded': false });
+                    for (const child of ctxPillGroup.children) {
+                      if (Number(child.offsetTop || 0) > firstTop + 4) {
+                        patchClasses(child, { 'is-pill-collapsing': true });
+                      }
+                    }
+                    ctxInspectorBar.style.height = `${startH}px`;
+                    ctxInspectorBar.style.overflow = 'hidden';
+                    void ctxInspectorBar.offsetHeight;
+                    ctxInspectorBar.style.transition =
+                      'height 200ms cubic-bezier(0.16, 1, 0.3, 1)';
+                    ctxInspectorBar.style.height = `${targetH}px`;
+                    const finishCollapse = () => {
+                      clearCtxExpandAnim();
+                      if (latestData) update({ data: latestData });
+                    };
+                    ctxInspectorBar.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === ctxInspectorBar &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishCollapse();
+                      }
+                    };
+                    ctxCollapseTimer = setTimeout(finishCollapse, 240);
+                  }
                 } else {
                   setCtxAgentId(item.key);
                 }
@@ -10902,6 +11629,7 @@ const ContextWindowWidget = defineComponent({
     }
 
     onCleanup(() => {
+      clearCtxExpandAnim();
       if (ro) ro.disconnect();
       ctxSegmentBar.destroy();
     });
@@ -11444,6 +12172,38 @@ const LiveActivityWidget = defineComponent({
       }
     }
 
+    function readComputedPx(el, prop, fallback) {
+      if (!el || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return fallback;
+      }
+      try {
+        const val = parseFloat(window.getComputedStyle(el)?.[prop]);
+        return Number.isFinite(val) ? val : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function clearSubExpandAnim(refs) {
+      if (!refs) return;
+      if (refs.subAnimTimer) {
+        clearTimeout(refs.subAnimTimer);
+        refs.subAnimTimer = null;
+      }
+      refs.isCollapsingSubs = false;
+      const host = refs.subScroll?.el;
+      if (host) {
+        host.ontransitionend = null;
+        patchClasses(host, { 'is-sub-animating': false });
+        host.style.height = '';
+        host.style.paddingTop = '';
+        host.style.marginTop = '';
+        host.style.opacity = '';
+        host.style.overflow = '';
+        host.style.transition = '';
+      }
+    }
+
     function createLiveTaskCard() {
       const dotIcon = createSvgIcon('dot', { size: 11 });
       patchClasses(dotIcon, { 'is-pulsing': true });
@@ -11466,12 +12226,23 @@ const LiveActivityWidget = defineComponent({
             text: '',
           })
         : null;
-      const subToggleBtn = h('button', {
-        type: 'button',
-        className: 'live-sub-toggle',
-        hidden: true,
-        text: t('live.subToggleIdle', { total: 0, arrow: '▸' }),
+      const subToggleLabel = h('span', {
+        className: 'live-sub-toggle-label',
+        text: t('live.subToggleIdle', { total: 0 }),
       });
+      const subToggleChevron = createSvgIcon('chevron-down', {
+        size: 11,
+        className: 'live-sub-toggle-chevron',
+      });
+      const subToggleBtn = h(
+        'button',
+        {
+          type: 'button',
+          className: 'live-sub-toggle',
+          hidden: true,
+        },
+        [subToggleLabel, subToggleChevron]
+      );
       const elapsedEl = h('span', {
         className: 'live-activity-elapsed text-mono',
         text: '0s',
@@ -11520,7 +12291,16 @@ const LiveActivityWidget = defineComponent({
       ]);
 
       const subListEl = h('div', { className: 'live-sub-list', hidden: true });
-      const cardEl = h('div', { className: 'live-task-card' }, [headerEl, mainRowEl, subListEl]);
+      const subScroll = CustomScrollbar({
+        contentEl: subListEl,
+        className: 'live-sub-scroll-host',
+      });
+      patchAttr(subScroll.el, 'hidden', true);
+      const cardEl = h('div', { className: 'live-task-card' }, [
+        headerEl,
+        mainRowEl,
+        subScroll.el,
+      ]);
 
       return {
         el: cardEl,
@@ -11531,6 +12311,8 @@ const LiveActivityWidget = defineComponent({
           hereTagEl,
           metricsEl,
           subToggleBtn,
+          subToggleLabel,
+          subToggleChevron,
           elapsedEl,
           mainBadge,
           mainPhase,
@@ -11538,6 +12320,9 @@ const LiveActivityWidget = defineComponent({
           mainSep,
           mainDetail,
           subListEl,
+          subScroll,
+          subAnimTimer: null,
+          isCollapsingSubs: false,
         },
       };
     }
@@ -11599,7 +12384,12 @@ const LiveActivityWidget = defineComponent({
       patchAttr(liveActivityBar, 'hidden', !hasRunningTasks);
       if (!hasRunningTasks) {
         stopLiveTicker();
-        patchKeyedList(liveActivityBar, [], {});
+        patchKeyedList(liveActivityBar, [], {
+          destroyRow: (refs) => {
+            clearSubExpandAnim(refs);
+            refs?.subScroll?.destroy?.();
+          },
+        });
         return;
       }
 
@@ -11726,19 +12516,16 @@ const LiveActivityWidget = defineComponent({
           patchAttr(refs.mainBadge, 'hidden', subCount === 0);
           patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
           if (subCount > 0) {
-            const arrow = isExpanded ? '▾' : '▸';
             const toggleText =
               runSubCount > 0
                 ? t(isPureSwarm ? 'live.swarmToggleRunning' : 'live.subToggleRunning', {
                     run: runSubCount,
                     total: subCount,
-                    arrow,
                   })
                 : t(isPureSwarm ? 'live.swarmToggleIdle' : 'live.subToggleIdle', {
                     total: subCount,
-                    arrow,
                   });
-            patchText(refs.subToggleBtn, toggleText);
+            patchText(refs.subToggleLabel, toggleText);
             patchClasses(refs.subToggleBtn, { 'is-expanded': isExpanded });
             if (interactive) {
               patchAttr(
@@ -11748,11 +12535,108 @@ const LiveActivityWidget = defineComponent({
               );
               refs.subToggleBtn.onclick = (e) => {
                 e.stopPropagation();
-                manualSubExpandMap.set(item.cascadeId, !isExpanded);
-                if (latestUpdateArgs) update(latestUpdateArgs);
-                onLayoutChange?.();
+                const nextExpanded = !resolveIsExpanded(item);
+                const host = refs.subScroll.el;
+                const curH = Number(host.offsetHeight || 0);
+                const curPadTop = readComputedPx(host, 'paddingTop', 6);
+                const curMarginTop = readComputedPx(host, 'marginTop', 3);
+                const curOpacity = readComputedPx(host, 'opacity', 1);
+                const parentGap = readComputedPx(refs.cardEl, 'rowGap', 7);
+                const collapsedMarginTop = -Math.max(0, Math.round(parentGap));
+                const wasMidAnim = Boolean(refs.subAnimTimer);
+                clearSubExpandAnim(refs);
+                manualSubExpandMap.set(item.cascadeId, nextExpanded);
+
+                const modern = isModernUiActiveForElement(refs.cardEl);
+                if (!modern) {
+                  if (latestUpdateArgs) update(latestUpdateArgs);
+                  onLayoutChange?.();
+                  return;
+                }
+
+                if (nextExpanded) {
+                  if (latestUpdateArgs) update(latestUpdateArgs);
+                  const endH = Number(host.offsetHeight || host.scrollHeight || 0);
+                  const endPadTop = readComputedPx(host, 'paddingTop', 6);
+                  const endMarginTop = readComputedPx(host, 'marginTop', 3);
+                  const fromH = wasMidAnim && curH > 0 ? curH : 0;
+                  const fromPadTop = wasMidAnim && curH > 0 ? curPadTop : 0;
+                  const fromMarginTop = wasMidAnim && curH > 0 ? curMarginTop : collapsedMarginTop;
+                  const fromOpacity = wasMidAnim && curH > 0 ? curOpacity : 0;
+                  if (endH > 0) {
+                    patchClasses(host, { 'is-sub-animating': true });
+                    host.style.height = `${fromH}px`;
+                    host.style.paddingTop = `${fromPadTop}px`;
+                    host.style.marginTop = `${fromMarginTop}px`;
+                    host.style.opacity = `${fromOpacity}`;
+                    host.style.overflow = 'hidden';
+                    void host.offsetHeight;
+                    host.style.transition =
+                      'height 220ms cubic-bezier(0.16, 1, 0.3, 1), padding-top 220ms cubic-bezier(0.16, 1, 0.3, 1), margin-top 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease-out';
+                    host.style.height = `${endH}px`;
+                    host.style.paddingTop = `${endPadTop}px`;
+                    host.style.marginTop = `${endMarginTop}px`;
+                    host.style.opacity = '1';
+                    const finishExpand = () => {
+                      clearSubExpandAnim(refs);
+                      refs.subScroll.refresh();
+                      onLayoutChange?.();
+                    };
+                    host.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === host &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishExpand();
+                      }
+                    };
+                    refs.subAnimTimer = setTimeout(finishExpand, 260);
+                  } else {
+                    onLayoutChange?.();
+                  }
+                } else {
+                  patchClasses(refs.subToggleBtn, { 'is-expanded': false });
+                  patchAttr(refs.subToggleBtn, 'title', t('live.subExpandTitle'));
+                  if (curH > 0) {
+                    refs.isCollapsingSubs = true;
+                    patchClasses(host, { 'is-sub-animating': true });
+                    host.style.height = `${curH}px`;
+                    host.style.paddingTop = `${curPadTop}px`;
+                    host.style.marginTop = `${curMarginTop}px`;
+                    host.style.opacity = `${curOpacity}`;
+                    host.style.overflow = 'hidden';
+                    void host.offsetHeight;
+                    host.style.transition =
+                      'height 200ms cubic-bezier(0.16, 1, 0.3, 1), padding-top 200ms cubic-bezier(0.16, 1, 0.3, 1), margin-top 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease-out';
+                    host.style.height = '0px';
+                    host.style.paddingTop = '0px';
+                    host.style.marginTop = `${collapsedMarginTop}px`;
+                    host.style.opacity = '0';
+                    const finishCollapse = () => {
+                      clearSubExpandAnim(refs);
+                      patchAttr(host, 'hidden', true);
+                      patchAttr(refs.subListEl, 'hidden', true);
+                      if (latestUpdateArgs) update(latestUpdateArgs);
+                      onLayoutChange?.();
+                    };
+                    host.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === host &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishCollapse();
+                      }
+                    };
+                    refs.subAnimTimer = setTimeout(finishCollapse, 240);
+                  } else {
+                    if (latestUpdateArgs) update(latestUpdateArgs);
+                    onLayoutChange?.();
+                  }
+                }
               };
             }
+          } else if (refs.isCollapsingSubs) {
+            clearSubExpandAnim(refs);
           }
 
           const mainLabel = formatLiveActivityLabel(act, 'live.thinking');
@@ -11783,7 +12667,10 @@ const LiveActivityWidget = defineComponent({
           }
 
           const showSubs = subCount > 0 && isExpanded;
-          patchAttr(refs.subListEl, 'hidden', !showSubs);
+          if (!refs.isCollapsingSubs) {
+            patchAttr(refs.subScroll.el, 'hidden', !showSubs);
+            patchAttr(refs.subListEl, 'hidden', !showSubs);
+          }
           if (showSubs) {
             const rawSubItems = item.subagents || [];
             const getSubSortRank = (s) => {
@@ -11898,7 +12785,12 @@ const LiveActivityWidget = defineComponent({
                 }
               },
             });
+            refs.subScroll.refresh();
           }
+        },
+        destroyRow: (refs) => {
+          clearSubExpandAnim(refs);
+          refs?.subScroll?.destroy?.();
         },
       });
 
@@ -11913,6 +12805,12 @@ const LiveActivityWidget = defineComponent({
 
     onCleanup(() => {
       stopLiveTicker();
+      patchKeyedList(liveActivityBar, [], {
+        destroyRow: (refs) => {
+          clearSubExpandAnim(refs);
+          refs?.subScroll?.destroy?.();
+        },
+      });
     });
 
     return {
@@ -13081,6 +13979,43 @@ const StepTableWidget = defineComponent({
     const hoverRows = new WeakMap();
     let lastRenderedRows = null;
     let lastRenderOptions = '';
+    let trackedCascadeId = null;
+    const seenStepKeys = new Set();
+    const maxSeenStepByAgent = new Map();
+    const activeEnterTimers = new Map();
+
+    function getStepRowIdentity(st, fallbackCascadeId) {
+      const agentKey = String(st?.agentCascadeId || fallbackCascadeId || 'conv');
+      const stepNum = Number(st?.stepIndex);
+      const rowKey = `${agentKey}-${st?.stepIndex}`;
+      return { agentKey, stepNum, rowKey };
+    }
+
+    function absorbStepsIntoBaseline(stepList, fallbackCascadeId) {
+      if (!Array.isArray(stepList)) return;
+      for (const st of stepList) {
+        if (!st || typeof st !== 'object') continue;
+        const { agentKey, stepNum, rowKey } = getStepRowIdentity(st, fallbackCascadeId);
+        seenStepKeys.add(rowKey);
+        if (Number.isFinite(stepNum)) {
+          const prevMax = maxSeenStepByAgent.get(agentKey);
+          if (prevMax === undefined || stepNum > prevMax) {
+            maxSeenStepByAgent.set(agentKey, stepNum);
+          }
+        }
+      }
+    }
+
+    function clearRowEnterState(tr) {
+      if (!tr) return;
+      const timer = activeEnterTimers.get(tr);
+      if (timer) {
+        clearTimeout(timer);
+        activeEnterTimers.delete(tr);
+      }
+      tr.onanimationend = null;
+      patchClasses(tr, { 'is-step-entering': false });
+    }
 
     function enterStepCell(event) {
       const { badge, prompt } = hoverRows.get(this);
@@ -13121,8 +14056,37 @@ const StepTableWidget = defineComponent({
         showStepSpeedColor = false,
         stepTokenComboFormat = undefined,
         displaySettings = {},
+        allConversationSteps = null,
+        allowNewRowFade = false,
       } = {}
     ) {
+      const normCascadeId = String(cascadeId || '');
+      let enteringRowKeys = null;
+      if (!normCascadeId || trackedCascadeId === null || normCascadeId !== trackedCascadeId) {
+        trackedCascadeId = normCascadeId || null;
+        seenStepKeys.clear();
+        maxSeenStepByAgent.clear();
+        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+      } else if (!allowNewRowFade || standalone) {
+        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+      } else {
+        for (const st of tableSteps) {
+          if (!st || typeof st !== 'object') continue;
+          const { agentKey, stepNum, rowKey } = getStepRowIdentity(st, normCascadeId);
+          if (!seenStepKeys.has(rowKey)) {
+            const prevMax = maxSeenStepByAgent.get(agentKey);
+            if (prevMax === undefined || !Number.isFinite(stepNum) || stepNum > prevMax) {
+              enteringRowKeys ??= new Set();
+              enteringRowKeys.add(rowKey);
+            }
+          }
+        }
+        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+      }
+
       const colOrderSig = colKeys.join(',');
       const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
       const renderOptions = JSON.stringify([
@@ -13374,6 +14338,21 @@ const StepTableWidget = defineComponent({
             hoverTd.onmousemove = firstColKey === 'step' ? moveInStepCell : moveAlongTurnRail;
             hoverTd.onmouseleave = hideTurnTip;
           }
+
+          if (enteringRowKeys?.has(item.rowKey)) {
+            clearRowEnterState(tr);
+            patchClasses(tr, { 'is-step-entering': true });
+            tr.onanimationend = (ev) => {
+              if (!ev || !ev.target || ev.target === tr) {
+                clearRowEnterState(tr);
+              }
+            };
+            const timer = setTimeout(() => clearRowEnterState(tr), 960);
+            activeEnterTimers.set(tr, timer);
+          }
+        },
+        destroyRow: (_refs, tr) => {
+          clearRowEnterState(tr);
         },
       });
       lastRenderOptions = renderOptions;
@@ -13383,6 +14362,9 @@ const StepTableWidget = defineComponent({
     onCleanup(() => {
       stepsTablePane.removeEventListener('scroll', hideTurnTip);
       stepsTbody.removeEventListener('mouseleave', hideTurnTip);
+      for (const tr of [...activeEnterTimers.keys()]) {
+        clearRowEnterState(tr);
+      }
     });
 
     return {
@@ -14937,6 +15919,13 @@ function getFontScaleOptions() {
   ];
 }
 
+function getModernUiOptions() {
+  return [
+    { value: 'off', label: t('settings.gen.modernUiOff') },
+    { value: 'on', label: t('settings.gen.modernUiOn') },
+  ];
+}
+
 function getUpdateModeOptions() {
   return [
     { value: 'manual', label: t('settings.gen.updateManual') },
@@ -14964,6 +15953,7 @@ const SettingsGeneralTab = defineComponent({
     let draftLanguage = 'zh-CN';
     let draftThemeAccent = 'host';
     let draftFontScale = 'md';
+    let draftModernUi = false;
     let draftPluginUpdateMode = 'manual';
     let latestSettings = null;
     let latestCloudStatus = null;
@@ -15020,6 +16010,14 @@ const SettingsGeneralTab = defineComponent({
     const fontHintEl = h('span', {
       className: 'settings-hint-text',
       text: t('settings.gen.fontHint'),
+    });
+    const modernUiLabelEl = h('span', {
+      className: 'form-label',
+      text: t('settings.gen.modernUi'),
+    });
+    const modernUiHintEl = h('span', {
+      className: 'settings-hint-text',
+      text: t('settings.gen.modernUiHint'),
     });
 
     const languageSwitch = SegmentedControl({
@@ -15079,6 +16077,38 @@ const SettingsGeneralTab = defineComponent({
       },
     });
 
+    const modernUiSwitch = SegmentedControl({
+      ariaLabel: t('settings.gen.modernUi'),
+      modelValue: 'off',
+      options: getModernUiOptions(),
+      onUpdateModelValue: async (val) => {
+        const nextModernUi = val === 'on';
+        draftModernUi = nextModernUi;
+        modernUiSwitch.setValue(nextModernUi ? 'on' : 'off');
+        if (typeof document !== 'undefined' && document.documentElement) {
+          applyAppearanceToRoot(
+            document.documentElement,
+            {
+              ...(latestSettings || {}),
+              themeAccent: draftThemeAccent,
+              fontScale: draftFontScale,
+              experimentalModernUi: nextModernUi,
+            },
+            { includeFontScale: true }
+          );
+        }
+        showAppearanceFeedback(t('settings.saving'), 0);
+        try {
+          await saveSettingsPatch({ experimentalModernUi: nextModernUi });
+          showAppearanceFeedback(t('settings.saved'), 1500);
+          props.onLayoutChange?.();
+        } catch {
+          if (latestSettings) renderSettings(latestSettings);
+          showAppearanceFeedback(t('settings.saveFailed'), 2500);
+        }
+      },
+    });
+
     const appearancePanel = h('section', { className: 'panel' }, [
       h('div', { className: 'panel-header' }, [
         h('span', { className: 'panel-title' }, [
@@ -15090,6 +16120,7 @@ const SettingsGeneralTab = defineComponent({
       h('div', { className: 'form-row' }, [langLabelEl, languageSwitch.el]),
       h('div', { className: 'form-row' }, [accentLabelEl, themeColorPicker.el]),
       h('div', { className: 'form-row' }, [fontLabelEl, fontScaleSwitch.el, fontHintEl]),
+      h('div', { className: 'form-row' }, [modernUiLabelEl, modernUiSwitch.el, modernUiHintEl]),
     ]);
 
     // --- Card 2: 版本更新 ---
@@ -15248,6 +16279,7 @@ const SettingsGeneralTab = defineComponent({
       draftLanguage = normalizeI18nLanguage(settings.language);
       draftThemeAccent = normalizeClientThemeAccent(settings.themeAccent);
       draftFontScale = normalizeClientFontScale(settings.fontScale);
+      draftModernUi = normalizeClientModernUi(settings.experimentalModernUi);
       draftPluginUpdateMode = normalizeClientUpdateMode(
         settings.pluginUpdateMode,
         settings.autoUpdatePlugin
@@ -15261,6 +16293,10 @@ const SettingsGeneralTab = defineComponent({
       fontScaleSwitch.setProps({
         modelValue: draftFontScale,
         options: getFontScaleOptions(),
+      });
+      modernUiSwitch.setProps({
+        modelValue: draftModernUi ? 'on' : 'off',
+        options: getModernUiOptions(),
       });
       autoUpdateSelect.setProps({
         modelValue: draftPluginUpdateMode,
@@ -15323,6 +16359,8 @@ const SettingsGeneralTab = defineComponent({
       patchText(accentLabelEl, t('settings.gen.themeAccent'));
       patchText(fontLabelEl, t('settings.gen.fontScale'));
       patchText(fontHintEl, t('settings.gen.fontHint'));
+      patchText(modernUiLabelEl, t('settings.gen.modernUi'));
+      patchText(modernUiHintEl, t('settings.gen.modernUiHint'));
       patchText(updateTitleEl, t('settings.gen.updateTitle'));
       patchText(updateModeLabelEl, t('settings.gen.updateMode'));
       patchText(pricingCellLabelEl, t('settings.gen.pricingLabel'));
@@ -15338,6 +16376,11 @@ const SettingsGeneralTab = defineComponent({
       fontScaleSwitch.setProps({
         modelValue: draftFontScale,
         options: getFontScaleOptions(),
+      });
+      modernUiSwitch.setProps({
+        ariaLabel: t('settings.gen.modernUi'),
+        modelValue: draftModernUi ? 'on' : 'off',
+        options: getModernUiOptions(),
       });
       autoUpdateSelect.setProps({
         modelValue: draftPluginUpdateMode,
@@ -15356,6 +16399,7 @@ const SettingsGeneralTab = defineComponent({
       languageSwitch.destroy();
       themeColorPicker.destroy();
       fontScaleSwitch.destroy();
+      modernUiSwitch.destroy();
       autoUpdateSelect.destroy();
     });
 
@@ -15365,6 +16409,7 @@ const SettingsGeneralTab = defineComponent({
         languageSwitch,
         themeColorPicker,
         fontScaleSwitch,
+        modernUiSwitch,
         autoUpdateSelect,
         syncPricingBtn,
         updatePluginBtn,
@@ -15515,10 +16560,29 @@ const SettingsStructureTab = defineComponent({
           'aria-selected': item.key === activeThirdTab ? 'true' : 'false',
           'data-structure-tab': item.key,
           onClick: () => {
+            applyActiveThirdTab(item.key);
             if (uiStore.getState().settingsStructureTab !== item.key) {
               uiStore.setState({ settingsStructureTab: item.key });
-            } else {
-              applyActiveThirdTab(item.key);
+            }
+          },
+          onKeydown: (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+              e.preventDefault();
+              const curIdx = Math.max(
+                0,
+                STRUCTURE_THIRD_TABS.findIndex((it) => it.key === item.key)
+              );
+              const delta = e.key === 'ArrowRight' ? 1 : -1;
+              const nextIdx =
+                (curIdx + delta + STRUCTURE_THIRD_TABS.length) % STRUCTURE_THIRD_TABS.length;
+              const nextItem = STRUCTURE_THIRD_TABS[nextIdx];
+              if (nextItem) {
+                applyActiveThirdTab(nextItem.key);
+                if (uiStore.getState().settingsStructureTab !== nextItem.key) {
+                  uiStore.setState({ settingsStructureTab: nextItem.key });
+                }
+                thirdNavBtnMap.get(nextItem.key)?.btn?.focus?.();
+              }
             }
           },
         },
@@ -15528,6 +16592,7 @@ const SettingsStructureTab = defineComponent({
       return btn;
     });
 
+    const thirdNavGlider = h('div', { className: 'thirdnav-glider', 'aria-hidden': 'true' });
     const thirdNavBar = h(
       'div',
       {
@@ -15535,7 +16600,15 @@ const SettingsStructureTab = defineComponent({
         role: 'tablist',
         'aria-label': t('settings.str.thirdTabAria'),
       },
-      thirdNavBtns
+      [thirdNavGlider, ...thirdNavBtns]
+    );
+    patchStyleVar(
+      thirdNavBar,
+      '--active-third-index',
+      Math.max(
+        0,
+        STRUCTURE_THIRD_TABS.findIndex((it) => it.key === activeThirdTab)
+      )
     );
 
     // --- Pane 1: 挂载与胶囊栏 (`mount`) ---
@@ -16311,6 +17384,11 @@ const SettingsStructureTab = defineComponent({
     function applyActiveThirdTab(nextRawTab) {
       const nextTab = normalizeStructureTabKey(nextRawTab);
       activeThirdTab = nextTab;
+      const activeIdx = Math.max(
+        0,
+        STRUCTURE_THIRD_TABS.findIndex((it) => it.key === nextTab)
+      );
+      patchStyleVar(thirdNavBar, '--active-third-index', activeIdx);
       for (const [key, entry] of thirdNavBtnMap.entries()) {
         const isActive = key === nextTab;
         patchClasses(entry.btn, { 'is-active': isActive });
@@ -17595,6 +18673,7 @@ const { ConsumptionView } = (() => {
 /** 消耗统计顶栏支持的时间范围预设项 */
 function getConsumptionTimeRangeOptions() {
   return [
+    { value: 'cycle', label: t('cons.rangeCycle') },
     { value: 'today', label: t('cons.rangeToday') },
     { value: '24h', label: t('cons.range24h') },
     { value: '7d', label: t('cons.range7d') },
@@ -17683,8 +18762,7 @@ const ConsumptionView = defineComponent({
     const customRangeBar = h(
       'div',
       {
-        style:
-          'display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background: var(--surface-subtle); border: 1px solid var(--border-hairline); border-radius: var(--radius-xs);',
+        className: 'cons-custom-range-bar',
         hidden: true,
       },
       [
@@ -17886,6 +18964,7 @@ const ConsumptionView = defineComponent({
         activeHoverTargetEl = null;
       }
       patchAttr(breakdownPopoverEl, 'hidden', true);
+      patchClasses(breakdownPopoverEl, { 'is-tracking': false });
     }
 
     function positionBreakdownPopover(anchorEl, pointerClientX = null) {
@@ -17961,8 +19040,22 @@ const ConsumptionView = defineComponent({
         },
       });
 
+      const wasHidden = breakdownPopoverEl.hasAttribute('hidden');
       patchAttr(breakdownPopoverEl, 'hidden', false);
       positionBreakdownPopover(anchorEl, pointerClientX);
+      if (wasHidden) {
+        patchClasses(breakdownPopoverEl, { 'is-tracking': false });
+        void breakdownPopoverEl.offsetWidth;
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => {
+            if (!breakdownPopoverEl.hasAttribute('hidden')) {
+              patchClasses(breakdownPopoverEl, { 'is-tracking': true });
+            }
+          });
+        } else {
+          patchClasses(breakdownPopoverEl, { 'is-tracking': true });
+        }
+      }
     }
 
     function createMonthModelSegment() {
@@ -19009,7 +20102,6 @@ const StepsDetailView = defineComponent({
       collapseAll: true,
       multiUnit: t('steps.unitAgent'),
       modelValue: selectedAgentScopes,
-      icon: 'layers',
       placeholder: t('steps.allAgents'),
       className: 'steps-inline-scope-select',
       options: [{ value: 'all', label: t('steps.allAgents') }],
@@ -19292,7 +20384,7 @@ const StepsDetailView = defineComponent({
       }
     }
 
-    function renderStepsData(slice) {
+    function renderStepsData(slice, { allowNewRowFade = false } = {}) {
       if (!slice) return;
       const uiSt = uiStore.getState();
       const locale = getEffectiveLocale();
@@ -19518,6 +20610,12 @@ const StepsDetailView = defineComponent({
         ],
       });
 
+      const allConversationSteps = hasSubagents
+        ? aggregated?.recentSteps || []
+        : slice.recentSteps || [];
+      const shouldAnimateNewRows = Boolean(
+        allowNewRowFade && slice.experimentalModernUi && !showModels
+      );
       if (!showModels) {
         const colKeys = normalizeClientStepColumns(slice.stepTableColumns);
         renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
@@ -19529,6 +20627,8 @@ const StepsDetailView = defineComponent({
           showStepSpeedColor: slice.showStepSpeedColor === true,
           stepTokenComboFormat: slice.stepTokenComboFormat,
           displaySettings,
+          allConversationSteps,
+          allowNewRowFade: shouldAnimateNewRows,
         });
         stepsScroll.refresh();
       }
@@ -19859,6 +20959,7 @@ const StepsDetailView = defineComponent({
           st.telemetry?.settings?.stepTokenComboFormat
         ),
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
+        experimentalModernUi: Boolean(st.telemetry?.settings?.experimentalModernUi),
       }),
       (slice) => {
         latestSlice = slice;
@@ -19870,7 +20971,9 @@ const StepsDetailView = defineComponent({
           return;
         }
         isDirty = false;
-        renderStepsData(slice);
+        renderStepsData(slice, {
+          allowNewRowFade: uiStore.getState().stepsSubTab === 'steps',
+        });
       }
     );
 
@@ -21686,6 +22789,7 @@ function mountWindowOverlay() {
     onSelectSession: inspectSessionInMonitor,
     onLayoutChange: () => {
       if (multiOpen) {
+        patchClasses(multiPanelEl, { 'is-instant': true });
         positionFloatingElements();
       }
     },
@@ -21743,9 +22847,23 @@ function mountWindowOverlay() {
     applyAppearanceToRoot(capsuleHost, settings, { includeFontScale: false });
     applyAppearanceToRoot(portalHost, settings, { includeFontScale: true });
     const scaleKey = normalizeClientFontScale(settings?.fontScale);
-    popoverEl.setAttribute?.('data-font-scale', scaleKey);
-    hoverTipEl.setAttribute?.('data-font-scale', scaleKey);
-    multiPanelEl.setAttribute?.('data-font-scale', scaleKey);
+    const isModernUi = normalizeClientModernUi(settings?.experimentalModernUi);
+    const colorScheme = portalHost.getAttribute?.('data-color-scheme') || 'light';
+    for (const el of [popoverEl, hoverTipEl, multiPanelEl]) {
+      if (el.getAttribute?.('data-font-scale') !== scaleKey) {
+        el.setAttribute?.('data-font-scale', scaleKey);
+      }
+      if (el.getAttribute?.('data-color-scheme') !== colorScheme) {
+        el.setAttribute?.('data-color-scheme', colorScheme);
+      }
+      if (isModernUi) {
+        if (el.getAttribute?.('data-modern-ui') !== 'true') {
+          el.setAttribute?.('data-modern-ui', 'true');
+        }
+      } else if (el.hasAttribute?.('data-modern-ui')) {
+        el.removeAttribute?.('data-modern-ui');
+      }
+    }
   }
 
   portalShadow.appendChild(multiPanelEl);
@@ -21880,6 +22998,7 @@ function mountWindowOverlay() {
 
   function ensureWorkbenchThemeObserved() {
     const wb = syncWorkbenchThemeVars();
+    syncPortalAppearance(telemetryStore.getState().telemetry?.settings);
     if (wb && wb !== observedWorkbench && themeObserver) {
       observedWorkbench = wb;
       try {
@@ -22909,12 +24028,25 @@ function mountWindowOverlay() {
     if (typeof MutationObserver !== 'undefined') {
       themeObserver = new MutationObserver(() => {
         syncWorkbenchThemeVars();
+        syncPortalAppearance(telemetryStore.getState().telemetry?.settings);
       });
       if (document.head) {
         themeObserver.observe(document.head, {
           childList: true,
           characterData: true,
           subtree: true,
+        });
+      }
+      if (document.documentElement) {
+        themeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
+        });
+      }
+      if (document.body) {
+        themeObserver.observe(document.body, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
         });
       }
       if (document.body) {
@@ -23155,10 +24287,48 @@ async function bootstrapApp(mountTarget = document.getElementById('app-root')) {
     syncDocAppearance
   );
 
+  let hostThemeObserver = null;
+  let colorSchemeMql = null;
+  const onHostThemeChange = () => {
+    syncDocAppearance(telemetryStore.getState().telemetry?.settings);
+  };
+  try {
+    if (typeof MutationObserver !== 'undefined' && typeof document !== 'undefined') {
+      hostThemeObserver = new MutationObserver(onHostThemeChange);
+      if (document.documentElement) {
+        hostThemeObserver.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
+        });
+      }
+      if (document.body) {
+        hostThemeObserver.observe(document.body, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'data-theme', 'data-vscode-theme-kind'],
+        });
+      }
+      if (document.head) {
+        hostThemeObserver.observe(document.head, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+      }
+    }
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      colorSchemeMql = window.matchMedia('(prefers-color-scheme: dark)');
+      colorSchemeMql?.addEventListener?.('change', onHostThemeChange);
+    }
+  } catch {
+    // ignore observer setup errors in constrained environments
+  }
+
   const stopPolling = startAsyncTelemetryLoop(2000);
   return {
     appInstance,
     stopPolling: () => {
+      hostThemeObserver?.disconnect?.();
+      colorSchemeMql?.removeEventListener?.('change', onHostThemeChange);
       unsubAppearance();
       stopPolling();
     },

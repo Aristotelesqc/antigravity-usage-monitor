@@ -1152,7 +1152,11 @@ test('Frontend Swarm formatters, bilingual i18n, LiveActivityWidget priority sor
   liveWidget.refs.pauseTicker();
 
   const toggleBtn = liveWidget.el.querySelector('.live-sub-toggle');
-  assert.equal(toggleBtn?.textContent, '蜂群 1/4 ▾');
+  assert.equal(toggleBtn?.textContent, '蜂群 1/4');
+  assert.ok(
+    toggleBtn?.querySelector('.live-sub-toggle-chevron'),
+    'Swarm toggle button renders pure vector SVG chevron icon'
+  );
   const hereTag = liveWidget.el.querySelector('.wm-session-tag.is-here');
   assert.ok(hereTag && !hereTag.hasAttribute('hidden'), 'Child worker host route must light up is-here tag');
 

@@ -220,7 +220,6 @@ export const StepsDetailView = defineComponent({
       collapseAll: true,
       multiUnit: t('steps.unitAgent'),
       modelValue: selectedAgentScopes,
-      icon: 'layers',
       placeholder: t('steps.allAgents'),
       className: 'steps-inline-scope-select',
       options: [{ value: 'all', label: t('steps.allAgents') }],
@@ -503,7 +502,7 @@ export const StepsDetailView = defineComponent({
       }
     }
 
-    function renderStepsData(slice) {
+    function renderStepsData(slice, { allowNewRowFade = false } = {}) {
       if (!slice) return;
       const uiSt = uiStore.getState();
       const locale = getEffectiveLocale();
@@ -729,6 +728,12 @@ export const StepsDetailView = defineComponent({
         ],
       });
 
+      const allConversationSteps = hasSubagents
+        ? aggregated?.recentSteps || []
+        : slice.recentSteps || [];
+      const shouldAnimateNewRows = Boolean(
+        allowNewRowFade && slice.experimentalModernUi && !showModels
+      );
       if (!showModels) {
         const colKeys = normalizeClientStepColumns(slice.stepTableColumns);
         renderStepTable(tableSteps, slice.cascadeId, colKeys, locale, {
@@ -740,6 +745,8 @@ export const StepsDetailView = defineComponent({
           showStepSpeedColor: slice.showStepSpeedColor === true,
           stepTokenComboFormat: slice.stepTokenComboFormat,
           displaySettings,
+          allConversationSteps,
+          allowNewRowFade: shouldAnimateNewRows,
         });
         stepsScroll.refresh();
       }
@@ -1070,6 +1077,7 @@ export const StepsDetailView = defineComponent({
           st.telemetry?.settings?.stepTokenComboFormat
         ),
         stepTableColumns: st.telemetry?.settings?.stepTableColumns,
+        experimentalModernUi: Boolean(st.telemetry?.settings?.experimentalModernUi),
       }),
       (slice) => {
         latestSlice = slice;
@@ -1081,7 +1089,9 @@ export const StepsDetailView = defineComponent({
           return;
         }
         isDirty = false;
-        renderStepsData(slice);
+        renderStepsData(slice, {
+          allowNewRowFade: uiStore.getState().stepsSubTab === 'steps',
+        });
       }
     );
 

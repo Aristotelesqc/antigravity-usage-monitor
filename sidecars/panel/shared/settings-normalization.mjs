@@ -446,3 +446,17 @@ export function normalizeStandalonePort(port) {
   if (num >= 1024 && num <= 65535) return num;
   return 0;
 }
+
+/**
+ * 归一化实验性现代化新 UI 开关（默认 `false`）。
+ *
+ * @param {unknown} val
+ * @returns {boolean}
+ */
+export function normalizeExperimentalModernUi(val) {
+  if (typeof val === 'string') {
+    const lower = val.trim().toLowerCase();
+    return lower === 'true' || lower === '1' || lower === 'on';
+  }
+  return Boolean(val);
+}

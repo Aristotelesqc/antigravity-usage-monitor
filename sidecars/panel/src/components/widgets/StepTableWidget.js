@@ -131,6 +131,43 @@ export const StepTableWidget = defineComponent({
     const hoverRows = new WeakMap();
     let lastRenderedRows = null;
     let lastRenderOptions = '';
+    let trackedCascadeId = null;
+    const seenStepKeys = new Set();
+    const maxSeenStepByAgent = new Map();
+    const activeEnterTimers = new Map();
+
+    function getStepRowIdentity(st, fallbackCascadeId) {
+      const agentKey = String(st?.agentCascadeId || fallbackCascadeId || 'conv');
+      const stepNum = Number(st?.stepIndex);
+      const rowKey = `${agentKey}-${st?.stepIndex}`;
+      return { agentKey, stepNum, rowKey };
+    }
+
+    function absorbStepsIntoBaseline(stepList, fallbackCascadeId) {
+      if (!Array.isArray(stepList)) return;
+      for (const st of stepList) {
+        if (!st || typeof st !== 'object') continue;
+        const { agentKey, stepNum, rowKey } = getStepRowIdentity(st, fallbackCascadeId);
+        seenStepKeys.add(rowKey);
+        if (Number.isFinite(stepNum)) {
+          const prevMax = maxSeenStepByAgent.get(agentKey);
+          if (prevMax === undefined || stepNum > prevMax) {
+            maxSeenStepByAgent.set(agentKey, stepNum);
+          }
+        }
+      }
+    }
+
+    function clearRowEnterState(tr) {
+      if (!tr) return;
+      const timer = activeEnterTimers.get(tr);
+      if (timer) {
+        clearTimeout(timer);
+        activeEnterTimers.delete(tr);
+      }
+      tr.onanimationend = null;
+      patchClasses(tr, { 'is-step-entering': false });
+    }
 
     function enterStepCell(event) {
       const { badge, prompt } = hoverRows.get(this);
@@ -171,8 +208,37 @@ export const StepTableWidget = defineComponent({
         showStepSpeedColor = false,
         stepTokenComboFormat = undefined,
         displaySettings = {},
+        allConversationSteps = null,
+        allowNewRowFade = false,
       } = {}
     ) {
+      const normCascadeId = String(cascadeId || '');
+      let enteringRowKeys = null;
+      if (!normCascadeId || trackedCascadeId === null || normCascadeId !== trackedCascadeId) {
+        trackedCascadeId = normCascadeId || null;
+        seenStepKeys.clear();
+        maxSeenStepByAgent.clear();
+        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+      } else if (!allowNewRowFade || standalone) {
+        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+      } else {
+        for (const st of tableSteps) {
+          if (!st || typeof st !== 'object') continue;
+          const { agentKey, stepNum, rowKey } = getStepRowIdentity(st, normCascadeId);
+          if (!seenStepKeys.has(rowKey)) {
+            const prevMax = maxSeenStepByAgent.get(agentKey);
+            if (prevMax === undefined || !Number.isFinite(stepNum) || stepNum > prevMax) {
+              enteringRowKeys ??= new Set();
+              enteringRowKeys.add(rowKey);
+            }
+          }
+        }
+        absorbStepsIntoBaseline(allConversationSteps, normCascadeId);
+        absorbStepsIntoBaseline(tableSteps, normCascadeId);
+      }
+
       const colOrderSig = colKeys.join(',');
       const normTokenFmt = normalizeClientStepTokenComboFormat(stepTokenComboFormat);
       const renderOptions = JSON.stringify([
@@ -424,6 +490,21 @@ export const StepTableWidget = defineComponent({
             hoverTd.onmousemove = firstColKey === 'step' ? moveInStepCell : moveAlongTurnRail;
             hoverTd.onmouseleave = hideTurnTip;
           }
+
+          if (enteringRowKeys?.has(item.rowKey)) {
+            clearRowEnterState(tr);
+            patchClasses(tr, { 'is-step-entering': true });
+            tr.onanimationend = (ev) => {
+              if (!ev || !ev.target || ev.target === tr) {
+                clearRowEnterState(tr);
+              }
+            };
+            const timer = setTimeout(() => clearRowEnterState(tr), 960);
+            activeEnterTimers.set(tr, timer);
+          }
+        },
+        destroyRow: (_refs, tr) => {
+          clearRowEnterState(tr);
         },
       });
       lastRenderOptions = renderOptions;
@@ -433,6 +514,9 @@ export const StepTableWidget = defineComponent({
     onCleanup(() => {
       stepsTablePane.removeEventListener('scroll', hideTurnTip);
       stepsTbody.removeEventListener('mouseleave', hideTurnTip);
+      for (const tr of [...activeEnterTimers.keys()]) {
+        clearRowEnterState(tr);
+      }
     });
 
     return {

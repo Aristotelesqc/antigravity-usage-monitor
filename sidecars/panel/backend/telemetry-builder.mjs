@@ -1232,6 +1232,9 @@ export async function buildTelemetryPayloadInternal(
     weeklyResetMs: accountWeeklyResetMs || parseIsoMs(activeLiveWeekly?.resetTime),
   };
 
+  const isCustomWeeklyMode =
+    settings.weeklyLimitMode === 'custom_tokens' || settings.weeklyLimitMode === 'custom_cost';
+
   // 5. 多时间窗口聚合（预设窗口 + 当前选定窗口 + 趋势 + 月序列 + 来源与模型拆解 + 各配额池独立周期统计）
   const {
     selectedWindow,
@@ -1252,6 +1255,7 @@ export async function buildTelemetryPayloadInternal(
   } = aggregateMultiWindowUsage({
     filterOpts,
     cycleAnchors,
+    isCustomWeeklyMode,
     currentAccountName: accountScope,
     activeCascadeId,
     activeFamilyCascadeIds,
@@ -1321,8 +1325,6 @@ export async function buildTelemetryPayloadInternal(
           +((weekBucket.totalTokens / Math.max(1000, settings.weeklyTokenBudget)) * 100).toFixed(1)
         );
 
-  const isCustomWeeklyMode =
-    settings.weeklyLimitMode === 'custom_tokens' || settings.weeklyLimitMode === 'custom_cost';
   const useOfficialWeekly = Boolean(activeLiveWeekly) && !isCustomWeeklyMode;
 
   const weeklyUsedPct = useOfficialWeekly

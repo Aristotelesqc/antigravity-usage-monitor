@@ -6,6 +6,7 @@
  */
 
 import { defineComponent } from '../../core/component.js';
+import { isModernUiActiveForElement } from '../../core/appearance.js';
 import {
   h,
   patchAttr,
@@ -29,6 +30,7 @@ import {
   telemetryStore,
 } from '../../store/telemetryStore.js';
 import { uiStore } from '../../store/uiStore.js';
+import { CustomScrollbar } from '../ui/CustomScrollbar.js';
 
 export function buildFallbackRunningConversations(
   data,
@@ -197,6 +199,38 @@ export const LiveActivityWidget = defineComponent({
       }
     }
 
+    function readComputedPx(el, prop, fallback) {
+      if (!el || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return fallback;
+      }
+      try {
+        const val = parseFloat(window.getComputedStyle(el)?.[prop]);
+        return Number.isFinite(val) ? val : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function clearSubExpandAnim(refs) {
+      if (!refs) return;
+      if (refs.subAnimTimer) {
+        clearTimeout(refs.subAnimTimer);
+        refs.subAnimTimer = null;
+      }
+      refs.isCollapsingSubs = false;
+      const host = refs.subScroll?.el;
+      if (host) {
+        host.ontransitionend = null;
+        patchClasses(host, { 'is-sub-animating': false });
+        host.style.height = '';
+        host.style.paddingTop = '';
+        host.style.marginTop = '';
+        host.style.opacity = '';
+        host.style.overflow = '';
+        host.style.transition = '';
+      }
+    }
+
     function createLiveTaskCard() {
       const dotIcon = createSvgIcon('dot', { size: 11 });
       patchClasses(dotIcon, { 'is-pulsing': true });
@@ -219,12 +253,23 @@ export const LiveActivityWidget = defineComponent({
             text: '',
           })
         : null;
-      const subToggleBtn = h('button', {
-        type: 'button',
-        className: 'live-sub-toggle',
-        hidden: true,
-        text: t('live.subToggleIdle', { total: 0, arrow: '▸' }),
+      const subToggleLabel = h('span', {
+        className: 'live-sub-toggle-label',
+        text: t('live.subToggleIdle', { total: 0 }),
       });
+      const subToggleChevron = createSvgIcon('chevron-down', {
+        size: 11,
+        className: 'live-sub-toggle-chevron',
+      });
+      const subToggleBtn = h(
+        'button',
+        {
+          type: 'button',
+          className: 'live-sub-toggle',
+          hidden: true,
+        },
+        [subToggleLabel, subToggleChevron]
+      );
       const elapsedEl = h('span', {
         className: 'live-activity-elapsed text-mono',
         text: '0s',
@@ -273,7 +318,16 @@ export const LiveActivityWidget = defineComponent({
       ]);
 
       const subListEl = h('div', { className: 'live-sub-list', hidden: true });
-      const cardEl = h('div', { className: 'live-task-card' }, [headerEl, mainRowEl, subListEl]);
+      const subScroll = CustomScrollbar({
+        contentEl: subListEl,
+        className: 'live-sub-scroll-host',
+      });
+      patchAttr(subScroll.el, 'hidden', true);
+      const cardEl = h('div', { className: 'live-task-card' }, [
+        headerEl,
+        mainRowEl,
+        subScroll.el,
+      ]);
 
       return {
         el: cardEl,
@@ -284,6 +338,8 @@ export const LiveActivityWidget = defineComponent({
           hereTagEl,
           metricsEl,
           subToggleBtn,
+          subToggleLabel,
+          subToggleChevron,
           elapsedEl,
           mainBadge,
           mainPhase,
@@ -291,6 +347,9 @@ export const LiveActivityWidget = defineComponent({
           mainSep,
           mainDetail,
           subListEl,
+          subScroll,
+          subAnimTimer: null,
+          isCollapsingSubs: false,
         },
       };
     }
@@ -352,7 +411,12 @@ export const LiveActivityWidget = defineComponent({
       patchAttr(liveActivityBar, 'hidden', !hasRunningTasks);
       if (!hasRunningTasks) {
         stopLiveTicker();
-        patchKeyedList(liveActivityBar, [], {});
+        patchKeyedList(liveActivityBar, [], {
+          destroyRow: (refs) => {
+            clearSubExpandAnim(refs);
+            refs?.subScroll?.destroy?.();
+          },
+        });
         return;
       }
 
@@ -479,19 +543,16 @@ export const LiveActivityWidget = defineComponent({
           patchAttr(refs.mainBadge, 'hidden', subCount === 0);
           patchAttr(refs.subToggleBtn, 'hidden', subCount === 0);
           if (subCount > 0) {
-            const arrow = isExpanded ? '▾' : '▸';
             const toggleText =
               runSubCount > 0
                 ? t(isPureSwarm ? 'live.swarmToggleRunning' : 'live.subToggleRunning', {
                     run: runSubCount,
                     total: subCount,
-                    arrow,
                   })
                 : t(isPureSwarm ? 'live.swarmToggleIdle' : 'live.subToggleIdle', {
                     total: subCount,
-                    arrow,
                   });
-            patchText(refs.subToggleBtn, toggleText);
+            patchText(refs.subToggleLabel, toggleText);
             patchClasses(refs.subToggleBtn, { 'is-expanded': isExpanded });
             if (interactive) {
               patchAttr(
@@ -501,11 +562,108 @@ export const LiveActivityWidget = defineComponent({
               );
               refs.subToggleBtn.onclick = (e) => {
                 e.stopPropagation();
-                manualSubExpandMap.set(item.cascadeId, !isExpanded);
-                if (latestUpdateArgs) update(latestUpdateArgs);
-                onLayoutChange?.();
+                const nextExpanded = !resolveIsExpanded(item);
+                const host = refs.subScroll.el;
+                const curH = Number(host.offsetHeight || 0);
+                const curPadTop = readComputedPx(host, 'paddingTop', 6);
+                const curMarginTop = readComputedPx(host, 'marginTop', 3);
+                const curOpacity = readComputedPx(host, 'opacity', 1);
+                const parentGap = readComputedPx(refs.cardEl, 'rowGap', 7);
+                const collapsedMarginTop = -Math.max(0, Math.round(parentGap));
+                const wasMidAnim = Boolean(refs.subAnimTimer);
+                clearSubExpandAnim(refs);
+                manualSubExpandMap.set(item.cascadeId, nextExpanded);
+
+                const modern = isModernUiActiveForElement(refs.cardEl);
+                if (!modern) {
+                  if (latestUpdateArgs) update(latestUpdateArgs);
+                  onLayoutChange?.();
+                  return;
+                }
+
+                if (nextExpanded) {
+                  if (latestUpdateArgs) update(latestUpdateArgs);
+                  const endH = Number(host.offsetHeight || host.scrollHeight || 0);
+                  const endPadTop = readComputedPx(host, 'paddingTop', 6);
+                  const endMarginTop = readComputedPx(host, 'marginTop', 3);
+                  const fromH = wasMidAnim && curH > 0 ? curH : 0;
+                  const fromPadTop = wasMidAnim && curH > 0 ? curPadTop : 0;
+                  const fromMarginTop = wasMidAnim && curH > 0 ? curMarginTop : collapsedMarginTop;
+                  const fromOpacity = wasMidAnim && curH > 0 ? curOpacity : 0;
+                  if (endH > 0) {
+                    patchClasses(host, { 'is-sub-animating': true });
+                    host.style.height = `${fromH}px`;
+                    host.style.paddingTop = `${fromPadTop}px`;
+                    host.style.marginTop = `${fromMarginTop}px`;
+                    host.style.opacity = `${fromOpacity}`;
+                    host.style.overflow = 'hidden';
+                    void host.offsetHeight;
+                    host.style.transition =
+                      'height 220ms cubic-bezier(0.16, 1, 0.3, 1), padding-top 220ms cubic-bezier(0.16, 1, 0.3, 1), margin-top 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease-out';
+                    host.style.height = `${endH}px`;
+                    host.style.paddingTop = `${endPadTop}px`;
+                    host.style.marginTop = `${endMarginTop}px`;
+                    host.style.opacity = '1';
+                    const finishExpand = () => {
+                      clearSubExpandAnim(refs);
+                      refs.subScroll.refresh();
+                      onLayoutChange?.();
+                    };
+                    host.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === host &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishExpand();
+                      }
+                    };
+                    refs.subAnimTimer = setTimeout(finishExpand, 260);
+                  } else {
+                    onLayoutChange?.();
+                  }
+                } else {
+                  patchClasses(refs.subToggleBtn, { 'is-expanded': false });
+                  patchAttr(refs.subToggleBtn, 'title', t('live.subExpandTitle'));
+                  if (curH > 0) {
+                    refs.isCollapsingSubs = true;
+                    patchClasses(host, { 'is-sub-animating': true });
+                    host.style.height = `${curH}px`;
+                    host.style.paddingTop = `${curPadTop}px`;
+                    host.style.marginTop = `${curMarginTop}px`;
+                    host.style.opacity = `${curOpacity}`;
+                    host.style.overflow = 'hidden';
+                    void host.offsetHeight;
+                    host.style.transition =
+                      'height 200ms cubic-bezier(0.16, 1, 0.3, 1), padding-top 200ms cubic-bezier(0.16, 1, 0.3, 1), margin-top 200ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease-out';
+                    host.style.height = '0px';
+                    host.style.paddingTop = '0px';
+                    host.style.marginTop = `${collapsedMarginTop}px`;
+                    host.style.opacity = '0';
+                    const finishCollapse = () => {
+                      clearSubExpandAnim(refs);
+                      patchAttr(host, 'hidden', true);
+                      patchAttr(refs.subListEl, 'hidden', true);
+                      if (latestUpdateArgs) update(latestUpdateArgs);
+                      onLayoutChange?.();
+                    };
+                    host.ontransitionend = (ev) => {
+                      if (
+                        ev?.target === host &&
+                        (!ev.propertyName || ev.propertyName === 'height')
+                      ) {
+                        finishCollapse();
+                      }
+                    };
+                    refs.subAnimTimer = setTimeout(finishCollapse, 240);
+                  } else {
+                    if (latestUpdateArgs) update(latestUpdateArgs);
+                    onLayoutChange?.();
+                  }
+                }
               };
             }
+          } else if (refs.isCollapsingSubs) {
+            clearSubExpandAnim(refs);
           }
 
           const mainLabel = formatLiveActivityLabel(act, 'live.thinking');
@@ -536,7 +694,10 @@ export const LiveActivityWidget = defineComponent({
           }
 
           const showSubs = subCount > 0 && isExpanded;
-          patchAttr(refs.subListEl, 'hidden', !showSubs);
+          if (!refs.isCollapsingSubs) {
+            patchAttr(refs.subScroll.el, 'hidden', !showSubs);
+            patchAttr(refs.subListEl, 'hidden', !showSubs);
+          }
           if (showSubs) {
             const rawSubItems = item.subagents || [];
             const getSubSortRank = (s) => {
@@ -651,7 +812,12 @@ export const LiveActivityWidget = defineComponent({
                 }
               },
             });
+            refs.subScroll.refresh();
           }
+        },
+        destroyRow: (refs) => {
+          clearSubExpandAnim(refs);
+          refs?.subScroll?.destroy?.();
         },
       });
 
@@ -666,6 +832,12 @@ export const LiveActivityWidget = defineComponent({
 
     onCleanup(() => {
       stopLiveTicker();
+      patchKeyedList(liveActivityBar, [], {
+        destroyRow: (refs) => {
+          clearSubExpandAnim(refs);
+          refs?.subScroll?.destroy?.();
+        },
+      });
     });
 
     return {

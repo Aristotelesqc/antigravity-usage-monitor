@@ -172,12 +172,22 @@
   background: var(--surface-panel);
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-xs);
+  outline: none;
   cursor: pointer;
   white-space: nowrap;
   transition:
     border-color var(--dur-instant) var(--ease-fast),
     color var(--dur-instant) var(--ease-fast),
     background-color var(--dur-instant) var(--ease-fast);
+}
+
+.live-sub-toggle-chevron {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+}
+
+.live-sub-toggle.is-expanded .live-sub-toggle-chevron {
+  transform: rotate(0deg);
 }
 
 .live-sub-toggle:hover {
@@ -260,34 +270,31 @@
   flex-shrink: 0;
 }
 
-.live-sub-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.live-sub-scroll-host {
   padding-top: 9px;
-  padding-right: 4px;
   margin-top: 3px;
   margin-left: 18px;
   border-top: 1px dashed var(--border-hairline);
   min-width: 0;
+}
+
+.live-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 8px;
+  min-width: 0;
   max-height: 196px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-subtle) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .live-sub-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.live-sub-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.live-sub-list::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: 999px;
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
 }
 
 .live-sub-row {
@@ -564,7 +571,7 @@
 /* --- 6. 上下文窗口内联代理切换器与代理徽章 (Scheme B Context Inspector & Agent Badges) --- */
 .ctx-inspector-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   width: 100%;
   padding: 0;
   background: transparent;
@@ -586,6 +593,7 @@
   min-height: calc(20px * var(--ui-font-scale, 1));
   padding: 1px 6px;
   border: 1px solid var(--border-hairline);
+  outline: none;
   background: var(--surface-panel);
   color: var(--text-secondary);
   font-size: var(--fs-md);
@@ -618,6 +626,14 @@
 .ctx-agent-pill.is-more-toggle:hover {
   border-style: solid;
   color: var(--text-primary);
+}
+
+.ctx-toggle-chevron {
+  flex-shrink: 0;
+}
+
+.ctx-agent-pill.is-more-toggle.is-expanded .ctx-toggle-chevron {
+  transform: rotate(180deg);
 }
 
 .panel-title .agent-badge {

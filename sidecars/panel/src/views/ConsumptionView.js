@@ -47,6 +47,7 @@ import { SegmentedControl } from '../components/ui/SegmentedControl.js';
 /** 消耗统计顶栏支持的时间范围预设项 */
 function getConsumptionTimeRangeOptions() {
   return [
+    { value: 'cycle', label: t('cons.rangeCycle') },
     { value: 'today', label: t('cons.rangeToday') },
     { value: '24h', label: t('cons.range24h') },
     { value: '7d', label: t('cons.range7d') },
@@ -135,8 +136,7 @@ export const ConsumptionView = defineComponent({
     const customRangeBar = h(
       'div',
       {
-        style:
-          'display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 8px; background: var(--surface-subtle); border: 1px solid var(--border-hairline); border-radius: var(--radius-xs);',
+        className: 'cons-custom-range-bar',
         hidden: true,
       },
       [
@@ -338,6 +338,7 @@ export const ConsumptionView = defineComponent({
         activeHoverTargetEl = null;
       }
       patchAttr(breakdownPopoverEl, 'hidden', true);
+      patchClasses(breakdownPopoverEl, { 'is-tracking': false });
     }
 
     function positionBreakdownPopover(anchorEl, pointerClientX = null) {
@@ -413,8 +414,22 @@ export const ConsumptionView = defineComponent({
         },
       });
 
+      const wasHidden = breakdownPopoverEl.hasAttribute('hidden');
       patchAttr(breakdownPopoverEl, 'hidden', false);
       positionBreakdownPopover(anchorEl, pointerClientX);
+      if (wasHidden) {
+        patchClasses(breakdownPopoverEl, { 'is-tracking': false });
+        void breakdownPopoverEl.offsetWidth;
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => {
+            if (!breakdownPopoverEl.hasAttribute('hidden')) {
+              patchClasses(breakdownPopoverEl, { 'is-tracking': true });
+            }
+          });
+        } else {
+          patchClasses(breakdownPopoverEl, { 'is-tracking': true });
+        }
+      }
     }
 
     function createMonthModelSegment() {
