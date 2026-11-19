@@ -698,4 +698,14 @@ export const I18N_MESSAGES_ZH_CN = Object.freeze({
   'chart.trend.hmActivePeak': '活跃 {active}/{total} 天 · 峰值 {label} · {tokens}',
   'chart.trend.hmActiveZero': '活跃 0/{total} 天',
   'chart.trend.peakPill': '峰值 {label} · {tokens}',
+
+  // DateTime Picker & UI Controls
+  'dt.weekdays': '一,二,三,四,五,六,日',
+  'dt.prevMonth': '上个月',
+  'dt.nextMonth': '下个月',
+  'dt.timeLabel': '时 / 分',
+  'num.dec': '减少数值',
+  'num.inc': '增加数值',
+  'ctrl.segmented': '分段切换器',
+  'nav.mainAria': '主功能视图分割导航',
 });

@@ -7,6 +7,7 @@
 import { defineComponent } from '../../core/component.js';
 import { h, patchAttr, patchClasses, patchStyleVar, patchText } from '../../core/domPatch.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
+import { t } from '../../i18n/index.js';
 
 export const TopLongPillNav = defineComponent({
   name: 'TopLongPillNav',
@@ -17,7 +18,7 @@ export const TopLongPillNav = defineComponent({
       {
         className: 'long-pill-nav',
         role: 'tablist',
-        'aria-label': '主功能视图分割导航',
+        'aria-label': t('nav.mainAria'),
       },
       [glider]
     );

@@ -698,4 +698,14 @@ export const I18N_MESSAGES_EN_US = Object.freeze({
   'chart.trend.hmActivePeak': 'Active {active}/{total}d · Peak {label} · {tokens}',
   'chart.trend.hmActiveZero': 'Active 0/{total}d',
   'chart.trend.peakPill': 'Peak {label} · {tokens}',
+
+  // DateTime Picker & UI Controls
+  'dt.weekdays': 'M,T,W,T,F,S,S',
+  'dt.prevMonth': 'Previous month',
+  'dt.nextMonth': 'Next month',
+  'dt.timeLabel': 'Hr / Min',
+  'num.dec': 'Decrease value',
+  'num.inc': 'Increase value',
+  'ctrl.segmented': 'Segmented control',
+  'nav.mainAria': 'Main view navigation',
 });

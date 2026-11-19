@@ -7,6 +7,7 @@
 import { defineComponent } from '../../core/component.js';
 import { h, patchAttr } from '../../core/domPatch.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
+import { t } from '../../i18n/index.js';
 
 export const CustomNumberInput = defineComponent({
   name: 'CustomNumberInput',
@@ -37,7 +38,7 @@ export const CustomNumberInput = defineComponent({
       {
         type: 'button',
         className: 'num-step-btn',
-        'aria-label': '减少数值',
+        'aria-label': t('num.dec'),
         onClick: (e) => {
           e.preventDefault();
           applyStep(-1, e.shiftKey ? 10 : 1);
@@ -51,7 +52,7 @@ export const CustomNumberInput = defineComponent({
       {
         type: 'button',
         className: 'num-step-btn',
-        'aria-label': '增加数值',
+        'aria-label': t('num.inc'),
         onClick: (e) => {
           e.preventDefault();
           applyStep(1, e.shiftKey ? 10 : 1);

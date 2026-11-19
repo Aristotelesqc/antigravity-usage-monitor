@@ -15,8 +15,7 @@ import {
 } from '../../core/domPatch.js';
 import { formatCompactDateTime } from '../../core/formatters.js';
 import { createSvgIcon } from '../../icons/SvgIcon.js';
-
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
+import { t } from '../../i18n/index.js';
 
 function buildCalendarDays(viewYear, viewMonth, selectedDate) {
   const firstDay = new Date(viewYear, viewMonth, 1);
@@ -77,7 +76,7 @@ export const CustomDateTimePicker = defineComponent({
       {
         type: 'button',
         className: 'icon-btn',
-        'aria-label': '上个月',
+        'aria-label': t('dt.prevMonth'),
         onClick: (e) => {
           e.stopPropagation();
           viewMonth -= 1;
@@ -96,7 +95,7 @@ export const CustomDateTimePicker = defineComponent({
       {
         type: 'button',
         className: 'icon-btn',
-        'aria-label': '下个月',
+        'aria-label': t('dt.nextMonth'),
         onClick: (e) => {
           e.stopPropagation();
           viewMonth += 1;
@@ -112,11 +111,8 @@ export const CustomDateTimePicker = defineComponent({
 
     const navBar = h('div', { className: 'dt-nav' }, [prevMonthBtn, monthTitle, nextMonthBtn]);
 
-    const weekdayRow = h(
-      'div',
-      { className: 'dt-weekdays' },
-      WEEKDAYS.map((w) => h('span', { className: 'dt-weekday', text: w }))
-    );
+    const weekdayEls = String(t('dt.weekdays')).split(',').map((w) => h('span', { className: 'dt-weekday', text: w }));
+    const weekdayRow = h('div', { className: 'dt-weekdays' }, weekdayEls);
 
     const daysGrid = h('div', { className: 'dt-days' });
 
@@ -136,8 +132,9 @@ export const CustomDateTimePicker = defineComponent({
       emit('update:modelValue', nextMs);
     }
 
+    const timeLabelSpan = h('span', { className: 'text-muted', text: t('dt.timeLabel') });
     const timeRow = h('div', { className: 'dt-time-row' }, [
-      h('span', { className: 'text-muted', text: '时 / 分' }),
+      timeLabelSpan,
       h('div', { className: 'dt-time-controls' }, [
         h('div', { className: 'dt-mini-step' }, [
           h('button', {
@@ -250,6 +247,11 @@ export const CustomDateTimePicker = defineComponent({
     }
 
     function renderCalendar() {
+      patchAttr(prevMonthBtn, 'aria-label', t('dt.prevMonth'));
+      patchAttr(nextMonthBtn, 'aria-label', t('dt.nextMonth'));
+      patchText(timeLabelSpan, t('dt.timeLabel'));
+      const wLabels = String(t('dt.weekdays')).split(',');
+      weekdayEls.forEach((el, idx) => patchText(el, wLabels[idx] || ''));
       const cur = new Date(getProps().modelValue || Date.now());
       const pad = (n) => String(n).padStart(2, '0');
       patchText(monthTitle, `${viewYear}-${pad(viewMonth + 1)}`);

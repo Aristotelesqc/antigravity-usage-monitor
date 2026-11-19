@@ -192,17 +192,17 @@ export const I18N_MESSAGES_FR_FR = Object.freeze({
   'live.subExpandTitle': 'Développer la liste des sous-agents',
 
   // Consumption View
-  'cons.rangeToday': 'Aujourd’hui',
+  'cons.rangeToday': 'Auj.',
   'cons.range24h': '24h',
   'cons.range7d': '7j',
   'cons.range14d': '14j',
   'cons.range30d': '30j',
   'cons.rangeAll': 'Tout',
-  'cons.rangeCustom': 'Personnalisé',
+  'cons.rangeCustom': 'Perso',
   'cons.rangeAria': 'Période des statistiques d’utilisation',
   'cons.applyFilter': 'Appliquer',
   'cons.rangeTo': 'au',
-  'cons.overviewTitle': 'Aperçu de la consommation',
+  'cons.overviewTitle': 'Consommation',
   'cons.totalTokens': 'Total des tokens',
   'cons.estCost': 'Coût estimé',
   'cons.cacheHitRate': 'Taux de cache',
@@ -623,4 +623,14 @@ export const I18N_MESSAGES_FR_FR = Object.freeze({
   'chart.trend.hmActivePeak': 'Actif {active}/{total}j · Pic {label} · {tokens}',
   'chart.trend.hmActiveZero': 'Actif 0/{total}j',
   'chart.trend.peakPill': 'Pic {label} · {tokens}',
+
+  // DateTime Picker & UI Controls
+  'dt.weekdays': 'L,M,M,J,V,S,D',
+  'dt.prevMonth': 'Mois précédent',
+  'dt.nextMonth': 'Mois suivant',
+  'dt.timeLabel': 'H / Min',
+  'num.dec': 'Diminuer la valeur',
+  'num.inc': 'Augmenter la valeur',
+  'ctrl.segmented': 'Sélecteur',
+  'nav.mainAria': 'Navigation principale',
 });

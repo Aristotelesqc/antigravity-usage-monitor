@@ -99,14 +99,14 @@ function extractBearerToken(authHeader) {
 
 function renderTokenLoginHtml(hasError = false) {
   const errHtml = hasError
-    ? '<p class="err">访问令牌无效，请核对后重新输入。</p>'
+    ? '<p class="err">Jeton d’accès invalide, veuillez vérifier et réessayer. / Invalid access token.</p>'
     : '';
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>用量监控 · 访问验证</title>
+  <title>Usage Monitor · Authentification</title>
   <style>
     :root { color-scheme: dark light; }
     * { box-sizing: border-box; }
@@ -161,10 +161,10 @@ function renderTokenLoginHtml(hasError = false) {
 <body>
   <form class="card" method="POST" action="/api/standalone-auth">
     <h1>Antigravity Usage Monitor</h1>
-    <p>当前独立监控服务已启用访问令牌保护，请输入 Token 继续。</p>
+    <p>Ce serveur de suivi est protégé par un jeton d’accès. Saisir le jeton pour continuer.</p>
     ${errHtml}
-    <input type="password" name="token" placeholder="输入 --token 访问密钥" autocomplete="current-password" required autofocus>
-    <button type="submit">验证并进入面板</button>
+    <input type="password" name="token" placeholder="Saisir la clé --token" autocomplete="current-password" required autofocus>
+    <button type="submit">Valider et ouvrir le moniteur</button>
   </form>
 </body>
 </html>`;

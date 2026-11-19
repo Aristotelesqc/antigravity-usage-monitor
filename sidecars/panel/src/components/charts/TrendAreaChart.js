@@ -14,7 +14,7 @@ import {
   patchStyleVar,
   patchText,
 } from '../../core/domPatch.js';
-import { formatTokensPrecise, formatUsd } from '../../core/formatters.js';
+import { formatTokensPrecise, formatTrendFullLabel, formatUsd } from '../../core/formatters.js';
 import { SVG_NS } from '../../icons/SvgIcon.js';
 import { getEffectiveLocale, t } from '../../i18n/index.js';
 
@@ -433,7 +433,7 @@ export function createTrendAreaChart() {
   }
 
   function populateTooltipContent(slot) {
-    patchText(tipTimeEl, slot.fullLabel || slot.label || '--');
+    patchText(tipTimeEl, formatTrendFullLabel(slot));
     patchText(
       tipCallsEl,
       t('cons.callsCount', { calls: Math.max(0, Math.floor(Number(slot.calls) || 0)) })
@@ -1044,7 +1044,7 @@ export function createTrendAreaChart() {
         const tickEl = h('span', {
           className: `trend-x-tick text-mono${isFirst ? ' is-start' : isLast ? ' is-end' : ''}`,
           text: slot.label || '',
-          title: slot.fullLabel || slot.label || '',
+          title: formatTrendFullLabel(slot),
         });
         patchStyleVar(tickEl, '--tick-x', `${pct.toFixed(2)}%`);
         tickEl.onclick = () => showLineHoverAtIndex(tIdx);

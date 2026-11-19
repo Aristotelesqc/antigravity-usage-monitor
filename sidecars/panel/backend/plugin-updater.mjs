@@ -90,6 +90,13 @@ export function setSidecarRestartHandler(handler) {
  *
  * @param {number} [delayMs=350] 延迟毫秒数，确保当前 HTTP 响应先发回前端
  */
+function updaterMsg(fr, en, zh) {
+  const lang = loadSettings().language;
+  if (lang === 'zh-CN') return zh;
+  if (lang === 'en-US') return en;
+  return fr;
+}
+
 export function scheduleSidecarRestart(delayMs = 350) {
   const activeAddr = lsRuntimeEndpoint.addr || LS_ADDR;
   if (!activeAddr || activeAddr === 'test.invalid') return;
@@ -264,7 +271,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
       if (hasGit) {
         // 0. 开发仓库（非 ~/.gemini/config/plugins/）一律禁止后台自动更新
         if (isAuto && !isInstalledPluginDir) {
-          const msg = '当前处于本地开发仓库，已自动禁用后台静默更新';
+          const msg = updaterMsg('Dépôt de développement local détecté : MàJ auto désactivée', 'Local development repository detected; auto-update disabled', '当前处于本地开发仓库，已自动禁用后台静默更新');
           const result = {
             ok: false,
             skipped: true,
@@ -284,8 +291,8 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
         const isDirty = statusRes.stdout.trim().length > 0;
         if (isDirty) {
           const msg = isInstalledPluginDir
-            ? '本地文件有改动，已跳过覆盖更新'
-            : '开发目录有未提交修改，已跳过更新';
+            ? updaterMsg('Fichiers locaux modifiés : mise à jour ignorée', 'Local file changes detected; overwrite skipped', '本地文件有改动，已跳过覆盖更新')
+            : updaterMsg('Modifications non commitées dans le dossier de dev : MàJ ignorée', 'Uncommitted changes in dev directory; update skipped', '开发目录有未提交修改，已跳过更新');
           pluginUpdateState.lastError = isAuto ? null : msg;
           pluginUpdateState.lastResult = {
             ok: false,
@@ -314,7 +321,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
           currentBranch === 'main' ||
           /^release\/[0-9A-Za-z._-]+$/.test(currentBranch);
         if (!isAllowedBranch) {
-          const msg = `当前分支为 ${currentBranch}，已跳过更新`;
+          const msg = updaterMsg(`Branche actuelle : ${currentBranch} — mise à jour ignorée`, `Current branch is ${currentBranch}; update skipped`, `当前分支为 ${currentBranch}，已跳过更新`);
           pluginUpdateState.lastError = isAuto ? null : msg;
           pluginUpdateState.lastResult = {
             ok: false,
@@ -380,7 +387,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
 
         // 5. 强制版本门禁：远端版本无法确认或不高于当前版本时，严禁执行 git pull 降级/覆盖
         if (!remoteVersion || compareSemver(remoteVersion, previousVersion) <= 0) {
-          const msg = `当前已是最新版本 (v${previousVersion})`;
+          const msg = updaterMsg(`Déjà à jour (v${previousVersion})`, `Already up to date (v${previousVersion})`, `当前已是最新版本 (v${previousVersion})`);
           const result = {
             ok: false,
             skipped: true,
@@ -408,7 +415,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
             remoteRef,
           ]);
         } catch {
-          const msg = '本地分支存在未推送提交，已跳过更新';
+          const msg = updaterMsg('Commits locaux non poussés détectés : mise à jour ignorée', 'Local branch has unpushed commits; update skipped', '本地分支存在未推送提交，已跳过更新');
           pluginUpdateState.lastError = isAuto ? null : msg;
           pluginUpdateState.lastResult = {
             ok: false,
@@ -434,7 +441,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
           previousVersion,
           currentVersion,
           restarting: true,
-          message: `已升级至 v${currentVersion}，正在重启面板…`,
+          message: updaterMsg(`Mis à jour vers v${currentVersion}, redémarrage du panneau…`, `Updated to v${currentVersion}, restarting panel…`, `已升级至 v${currentVersion}，正在重启面板…`),
           updatedAtMs: Date.now(),
         };
         pluginUpdateState.lastResult = result;
@@ -445,7 +452,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
       // Release ZIP 归档更新通道（适用于无 .git 的压缩包安装目录）
       const targetVersion = cloudSyncState.latestPluginVersion || '';
       if (!isValidSemver(targetVersion) || compareSemver(targetVersion, previousVersion) <= 0) {
-        const msg = `当前已是最新版本 (v${previousVersion})`;
+        const msg = updaterMsg(`Déjà à jour (v${previousVersion})`, `Already up to date (v${previousVersion})`, `当前已是最新版本 (v${previousVersion})`);
         const result = {
           ok: false,
           skipped: true,
@@ -480,12 +487,12 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
             signal: AbortSignal.timeout(25000),
           });
           if (!res.ok) {
-            throw new Error(`下载更新包失败 (HTTP ${res.status})`);
+            throw new Error(updaterMsg(`Échec du téléchargement (HTTP ${res.status})`, `Update download failed (HTTP ${res.status})`, `下载更新包失败 (HTTP ${res.status})`));
           }
           const buf = Buffer.from(await res.arrayBuffer());
           // 校验 ZIP 文件头魔数 ('PK') 与最小合理体积
           if (buf.length < 1024 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
-            throw new Error('下载的更新包格式校验未通过');
+            throw new Error(updaterMsg('Archive de mise à jour invalide', 'Downloaded update archive failed validation', '下载的更新包格式校验未通过'));
           }
           writeFileSync(zipFile, buf);
 
@@ -508,7 +515,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
             !existsSync(join(extractedRoot, 'sidecars', 'panel', 'styles.css')) ||
             !existsSync(join(extractedRoot, 'sidecars', 'panel', 'index.html'))
           ) {
-            throw new Error('更新包缺少核心插件文件');
+            throw new Error(updaterMsg('Fichiers principaux manquants dans l’archive', 'Update archive missing core plugin files', '更新包缺少核心插件文件'));
           }
 
           const extractedManifest = loadJson(join(extractedRoot, 'plugin.json'), null);
@@ -521,7 +528,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
             : '';
           if (!extractedVer || compareSemver(extractedVer, previousVersion) <= 0) {
             throw new Error(
-              `下载包版本 (v${extractedVer || '未知'}) 不高于当前已安装版本 (v${previousVersion})，已拒绝降级覆盖`
+              updaterMsg(`Version téléchargée (v${extractedVer || '?'}) non supérieure à v${previousVersion}, rétrogradation refusée`, `Downloaded version (v${extractedVer || 'unknown'}) is not newer than v${previousVersion}`, `下载包版本 (v${extractedVer || '未知'}) 不高于当前已安装版本 (v${previousVersion})，已拒绝降级覆盖`)
             );
           }
           if (
@@ -529,7 +536,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
             compareSemver(targetVersion, extractedVer) > 0
           ) {
             throw new Error(
-              `Release 压缩包版本 (v${extractedVer}) 尚未同步至 v${targetVersion}，切换至主干归档源`
+              updaterMsg(`Archive Release (v${extractedVer}) pas encore synchronisée avec v${targetVersion}, repli sur main`, `Release archive (v${extractedVer}) not yet synced to v${targetVersion}, falling back to main`, `Release 压缩包版本 (v${extractedVer}) 尚未同步至 v${targetVersion}，切换至主干归档源`)
             );
           }
 
@@ -574,7 +581,7 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
             previousVersion,
             currentVersion,
             restarting: true,
-            message: `已下载并更新至 v${currentVersion}，正在重载面板…`,
+            message: updaterMsg(`Téléchargé et mis à jour vers v${currentVersion}, rechargement…`, `Downloaded and updated to v${currentVersion}, reloading…`, `已下载并更新至 v${currentVersion}，正在重载面板…`),
             updatedAtMs: Date.now(),
           };
           pluginUpdateState.lastResult = result;
@@ -589,9 +596,9 @@ export async function performPluginUpdate({ isAuto = false } = {}) {
           }
         }
       }
-      throw lastZipErr || new Error('未能下载可用的插件更新包');
+      throw lastZipErr || new Error(updaterMsg('Impossible de télécharger un paquet de mise à jour valide', 'Failed to download a valid update package', '未能下载可用的插件更新包'));
     } catch (err) {
-      const errMsg = err?.message || '插件更新失败';
+      const errMsg = err?.message || updaterMsg('Échec de la mise à jour du plugin', 'Plugin update failed', '插件更新失败');
       pluginUpdateState.lastError = errMsg;
       const result = {
         ok: false,
@@ -689,7 +696,7 @@ export async function syncCloudCatalog({ force = false, urls = CLOUD_CATALOG_URL
           lastErr = err;
         }
       }
-      cloudSyncState.lastError = lastErr?.message || '云端价格表同步失败';
+      cloudSyncState.lastError = lastErr?.message || updaterMsg('Échec de synchronisation du catalogue cloud', 'Cloud pricing sync failed', '云端价格表同步失败');
       return getCloudStatus();
     } finally {
       cloudSyncState.isSyncing = false;

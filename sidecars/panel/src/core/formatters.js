@@ -6,6 +6,8 @@
 import { getEffectiveLocale, isEnglishLocale, isFrenchLocale, t } from '../i18n/index.js';
 
 const FR_MONTH_SHORT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+const EN_WDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const FR_WDAY_SHORT = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
 import {
   normalizeModelDisplayMode,
   normalizeOrchestratorIdMode,
@@ -98,6 +100,28 @@ export function formatDateSpanBadge(startMs, endMs) {
     return `${s.getFullYear()}年${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getFullYear()}年${e.getMonth() + 1}月${e.getDate()}日`;
   }
   return `${s.getMonth() + 1}月${s.getDate()}日 ~ ${e.getMonth() + 1}月${e.getDate()}日`;
+}
+
+export function formatTrendFullLabel(slot) {
+  if (!slot || typeof slot !== 'object') return '--';
+  const locale = getEffectiveLocale();
+  const sMs = Number(slot.startMs || 0);
+  if (locale === 'zh-CN' || !Number.isFinite(sMs) || sMs <= 0) {
+    return slot.fullLabel || slot.label || '--';
+  }
+  const sd = new Date(sMs);
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const mon = (locale === 'fr-FR' ? FR_MONTH_SHORT : EN_MONTH_SHORT)[sd.getMonth()] || '';
+  const dayPart = locale === 'fr-FR' ? `${sd.getDate()} ${mon}` : `${mon} ${sd.getDate()}`;
+  if (slot.granularity === 'hour') {
+    const eMs = Number(slot.endMs || 0);
+    const ed = Number.isFinite(eMs) && eMs > sMs ? new Date(eMs) : new Date(sMs + 3600000);
+    return `${dayPart} ${pad2(sd.getHours())}:00 - ${pad2(ed.getHours())}:00`;
+  }
+  const wday = (locale === 'fr-FR' ? FR_WDAY_SHORT : EN_WDAY_SHORT)[sd.getDay()] || '';
+  const hasYear = /\b\d{4}\b|\d{4}年/.test(String(slot.fullLabel || ''));
+  const yearSuffix = hasYear ? ` ${sd.getFullYear()}` : '';
+  return `${dayPart}${yearSuffix} (${wday})`;
 }
 
 export function formatUsd(amount, { precise = false } = {}) {
