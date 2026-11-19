@@ -343,7 +343,8 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 }
 
 [data-modern-ui="true"] .agent-badge,
-[data-modern-ui="true"] .agent-badge.is-clickable:hover {
+[data-modern-ui="true"] .agent-badge.is-clickable:hover,
+[data-modern-ui="true"] .step-anomaly-tag {
   border: none;
 }
 
@@ -456,6 +457,7 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 }
 
 [data-modern-ui="true"] .trend-tip-sub,
+[data-modern-ui="true"] .trend-tip-anomaly,
 [data-modern-ui="true"] .cons-pop-models {
   border-top: none;
   padding-top: 3px;
@@ -516,6 +518,28 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
   background: var(--modern-surface-hover);
 }
 
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-warn,
+[data-modern-ui="true"] .data-table:not(.is-virtualized) tbody tr.is-anomaly-warn:nth-child(even),
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-warn {
+  background: color-mix(in srgb, var(--metric-warn) 12%, transparent);
+}
+
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-warn:hover,
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-warn:hover {
+  background: color-mix(in srgb, var(--metric-warn) 19%, transparent);
+}
+
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-danger,
+[data-modern-ui="true"] .data-table:not(.is-virtualized) tbody tr.is-anomaly-danger:nth-child(even),
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-danger {
+  background: color-mix(in srgb, var(--metric-danger) 14%, transparent);
+}
+
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-danger:hover,
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-danger:hover {
+  background: color-mix(in srgb, var(--metric-danger) 21%, transparent);
+}
+
 [data-modern-ui="true"] .steps-inline-scope-select .select-trigger,
 [data-modern-ui="true"] .steps-inline-model-select .select-trigger,
 [data-modern-ui="true"] .sstep-fit-model-select .select-trigger {
@@ -548,6 +572,22 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 [data-modern-ui="true"] .smodel-card.is-fit-active {
   border: none;
   background: var(--accent-primary-soft);
+}
+
+[data-modern-ui="true"] .steps-anomaly-filterbar,
+[data-modern-ui="true"] .steps-anomaly-strip {
+  border: none;
+  border-radius: var(--radius-xs);
+  background: var(--metric-warn-soft);
+}
+
+[data-modern-ui="true"] .steps-anomaly-filterbar {
+  margin: 4px 2px 2px;
+}
+
+[data-modern-ui="true"] .sstep-anomaly-dot,
+[data-modern-ui="true"] .sstep-scatter-dot.is-anomaly {
+  fill: var(--modern-surface-card);
 }
 
 /* --- 6. 设置表单、折叠面板、槽位排序与输入控件去边框 --- */
@@ -630,11 +670,17 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 
 [data-modern-ui="true"] .trend-tooltip,
 [data-modern-ui="true"] .cons-breakdown-popover,
-[data-modern-ui="true"] .turn-prompt-tip {
+[data-modern-ui="true"] .turn-prompt-tip,
+[data-modern-ui="true"] .step-anomaly-tip {
   border: none;
   background: var(--modern-surface-card);
   box-shadow: var(--shadow-popover);
   animation: anim-modern-tip-fade 150ms var(--ease-modern);
+}
+
+[data-modern-ui="true"] .step-anomaly-tip-list,
+[data-modern-ui="true"] .step-anomaly-tip-hint {
+  border-top-color: var(--modern-surface-hover);
 }
 
 [data-modern-ui="true"] .trend-tooltip:not(.is-hm-top):not(.is-hm-bottom) {
@@ -740,8 +786,16 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 [data-modern-ui="true"] .wm-multi-label[data-od-active="1"] {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   height: 18px;
   line-height: 18px;
+}
+
+:host([data-modern-ui="true"]) .wm-slot-text.wm-ctx-pct[data-od-active="1"],
+:host([data-modern-ui="true"]) .wm-multi-label[data-od-active="1"],
+[data-modern-ui="true"] .wm-slot-text.wm-ctx-pct[data-od-active="1"],
+[data-modern-ui="true"] .wm-multi-label[data-od-active="1"] {
+  justify-content: flex-start;
 }
 
 :host([data-modern-ui="true"]) .wm-od-digit,

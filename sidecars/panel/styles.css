@@ -3197,6 +3197,248 @@ html[data-standalone="true"] .app-shell {
   animation: anim-popover-in var(--dur-instant) var(--ease-fast);
 }
 
+/* --- 2.6 单步异常整行语义着色、模型汇总微标、筛选条与悬停诊断卡 --- */
+.data-table tbody tr.is-anomaly-warn {
+  background: color-mix(in srgb, var(--metric-warn) 11%, transparent);
+}
+
+.data-table tbody tr.is-anomaly-warn:hover {
+  background: color-mix(in srgb, var(--metric-warn) 18%, transparent);
+}
+
+.data-table tbody tr.is-anomaly-warn td:first-child {
+  box-shadow: inset 2px 0 0 var(--metric-warn);
+}
+
+.data-table tbody tr.is-anomaly-warn td:first-child > span:not(.agent-badge):not(.turn-rail) {
+  color: var(--metric-warn);
+  font-weight: 600;
+}
+
+.data-table tbody tr.is-anomaly-danger {
+  background: color-mix(in srgb, var(--metric-danger) 13%, transparent);
+}
+
+.data-table tbody tr.is-anomaly-danger:hover {
+  background: color-mix(in srgb, var(--metric-danger) 20%, transparent);
+}
+
+.data-table tbody tr.is-anomaly-danger td:first-child {
+  box-shadow: inset 2px 0 0 var(--metric-danger);
+}
+
+.data-table tbody tr.is-anomaly-danger td:first-child > span:not(.agent-badge):not(.turn-rail) {
+  color: var(--metric-danger);
+  font-weight: 600;
+}
+
+.step-anomaly-tag {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin-left: 4px;
+  padding: 0 3.5px;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  line-height: 1.35;
+  border-radius: 3px;
+  color: var(--metric-warn);
+  background: var(--metric-warn-soft);
+  border: 1px solid color-mix(in srgb, var(--metric-warn) 34%, transparent);
+  cursor: help;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.step-anomaly-tag.is-danger {
+  color: var(--metric-danger);
+  background: var(--metric-danger-soft);
+  border-color: color-mix(in srgb, var(--metric-danger) 36%, transparent);
+}
+
+.step-anomaly-tag[hidden] {
+  display: none !important;
+}
+
+.smodel-anomaly-tag {
+  margin-left: 0;
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    background-color var(--dur-instant) var(--ease-fast),
+    border-color var(--dur-instant) var(--ease-fast);
+}
+
+.smodel-anomaly-tag:hover {
+  background: color-mix(in srgb, var(--metric-warn) 22%, transparent);
+}
+
+.smodel-anomaly-tag.is-danger:hover {
+  background: color-mix(in srgb, var(--metric-danger) 22%, transparent);
+}
+
+.step-anomaly-tip {
+  position: absolute;
+  z-index: 46;
+  max-width: min(300px, calc(100% - 16px));
+  min-width: 176px;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  line-height: 1.38;
+  color: var(--text-primary);
+  background: var(--surface-panel);
+  border: 1px solid color-mix(in srgb, var(--metric-warn) 42%, var(--border-strong));
+  border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-popover);
+  pointer-events: none;
+  animation: anim-popover-in var(--dur-instant) var(--ease-fast);
+}
+
+.step-anomaly-tip.is-danger {
+  border-color: color-mix(in srgb, var(--metric-danger) 46%, var(--border-strong));
+}
+
+.step-anomaly-tip[hidden],
+.step-anomaly-tip-sub[hidden],
+.step-anomaly-tip-list[hidden],
+.step-anomaly-tip-hint[hidden] {
+  display: none !important;
+}
+
+.step-anomaly-tip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.step-anomaly-tip-title {
+  font-weight: 600;
+  color: var(--metric-warn);
+  white-space: nowrap;
+}
+
+.step-anomaly-tip.is-danger .step-anomaly-tip-title {
+  color: var(--metric-danger);
+}
+
+.step-anomaly-tip-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.step-anomaly-tip-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.step-anomaly-tip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.step-anomaly-tip-row {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.step-anomaly-tip-row.is-danger {
+  color: var(--metric-danger);
+}
+
+.step-anomaly-tip-detail {
+  font-size: var(--fs-2xs);
+  line-height: 1.35;
+  color: var(--text-muted);
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.step-anomaly-tip-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  padding-top: 3px;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.steps-anomaly-filterbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border-hairline);
+  background: color-mix(in srgb, var(--metric-warn) 8%, var(--surface-panel));
+  font-size: var(--fs-xs);
+}
+
+.steps-anomaly-filterbar[hidden] {
+  display: none !important;
+}
+
+.steps-anomaly-filter-label {
+  font-weight: 600;
+  color: var(--metric-warn);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.steps-anomaly-filter-clear {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: var(--fs-xs);
+}
+
+.steps-anomaly-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--metric-warn) 26%, var(--border-hairline));
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--metric-warn) 7%, var(--surface-panel));
+}
+
+.steps-anomaly-strip[hidden] {
+  display: none !important;
+}
+
+.steps-anomaly-strip-meta {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--metric-warn);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.steps-anomaly-strip-meta:hover {
+  text-decoration: underline;
+}
+
+.steps-anomaly-strip-tags {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 /* --- 3. 按模型汇总分析视图：双趋势图与极简模型总览 (Models Analytics Pane) --- */
 .models-analytics-pane {
   display: flex;
@@ -3417,6 +3659,47 @@ html[data-standalone="true"] .app-shell {
   stroke: var(--text-primary);
   stroke-width: 1.6;
   pointer-events: none;
+}
+
+.sstep-hover-raw-dot.is-anomaly {
+  stroke: var(--metric-warn);
+  stroke-width: 1.85;
+}
+
+.sstep-hover-raw-dot.is-danger {
+  stroke: var(--metric-danger);
+}
+
+.sstep-anomaly-dot,
+.sstep-scatter-dot.is-anomaly {
+  fill: var(--surface-panel);
+  fill-opacity: 1;
+  stroke: var(--metric-warn);
+  stroke-width: 1.6;
+  pointer-events: none;
+}
+
+.sstep-anomaly-dot.is-danger,
+.sstep-scatter-dot.is-anomaly.is-danger {
+  stroke: var(--metric-danger);
+}
+
+.trend-tip-anomaly {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border-hairline);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--metric-warn);
+  white-space: nowrap;
+}
+
+.trend-tip-anomaly.is-danger {
+  color: var(--metric-danger);
+}
+
+.trend-tip-anomaly[hidden] {
+  display: none !important;
 }
 
 .sstep-empty-hint {
@@ -5819,7 +6102,8 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 }
 
 [data-modern-ui="true"] .agent-badge,
-[data-modern-ui="true"] .agent-badge.is-clickable:hover {
+[data-modern-ui="true"] .agent-badge.is-clickable:hover,
+[data-modern-ui="true"] .step-anomaly-tag {
   border: none;
 }
 
@@ -5932,6 +6216,7 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 }
 
 [data-modern-ui="true"] .trend-tip-sub,
+[data-modern-ui="true"] .trend-tip-anomaly,
 [data-modern-ui="true"] .cons-pop-models {
   border-top: none;
   padding-top: 3px;
@@ -5992,6 +6277,28 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
   background: var(--modern-surface-hover);
 }
 
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-warn,
+[data-modern-ui="true"] .data-table:not(.is-virtualized) tbody tr.is-anomaly-warn:nth-child(even),
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-warn {
+  background: color-mix(in srgb, var(--metric-warn) 12%, transparent);
+}
+
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-warn:hover,
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-warn:hover {
+  background: color-mix(in srgb, var(--metric-warn) 19%, transparent);
+}
+
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-danger,
+[data-modern-ui="true"] .data-table:not(.is-virtualized) tbody tr.is-anomaly-danger:nth-child(even),
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-danger {
+  background: color-mix(in srgb, var(--metric-danger) 14%, transparent);
+}
+
+[data-modern-ui="true"] .data-table tbody tr.is-anomaly-danger:hover,
+[data-modern-ui="true"] .data-table.is-virtualized tbody tr.is-stripe-even.is-anomaly-danger:hover {
+  background: color-mix(in srgb, var(--metric-danger) 21%, transparent);
+}
+
 [data-modern-ui="true"] .steps-inline-scope-select .select-trigger,
 [data-modern-ui="true"] .steps-inline-model-select .select-trigger,
 [data-modern-ui="true"] .sstep-fit-model-select .select-trigger {
@@ -6024,6 +6331,22 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 [data-modern-ui="true"] .smodel-card.is-fit-active {
   border: none;
   background: var(--accent-primary-soft);
+}
+
+[data-modern-ui="true"] .steps-anomaly-filterbar,
+[data-modern-ui="true"] .steps-anomaly-strip {
+  border: none;
+  border-radius: var(--radius-xs);
+  background: var(--metric-warn-soft);
+}
+
+[data-modern-ui="true"] .steps-anomaly-filterbar {
+  margin: 4px 2px 2px;
+}
+
+[data-modern-ui="true"] .sstep-anomaly-dot,
+[data-modern-ui="true"] .sstep-scatter-dot.is-anomaly {
+  fill: var(--modern-surface-card);
 }
 
 /* --- 6. 设置表单、折叠面板、槽位排序与输入控件去边框 --- */
@@ -6106,11 +6429,17 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 
 [data-modern-ui="true"] .trend-tooltip,
 [data-modern-ui="true"] .cons-breakdown-popover,
-[data-modern-ui="true"] .turn-prompt-tip {
+[data-modern-ui="true"] .turn-prompt-tip,
+[data-modern-ui="true"] .step-anomaly-tip {
   border: none;
   background: var(--modern-surface-card);
   box-shadow: var(--shadow-popover);
   animation: anim-modern-tip-fade 150ms var(--ease-modern);
+}
+
+[data-modern-ui="true"] .step-anomaly-tip-list,
+[data-modern-ui="true"] .step-anomaly-tip-hint {
+  border-top-color: var(--modern-surface-hover);
 }
 
 [data-modern-ui="true"] .trend-tooltip:not(.is-hm-top):not(.is-hm-bottom) {
@@ -6216,8 +6545,16 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
 [data-modern-ui="true"] .wm-multi-label[data-od-active="1"] {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   height: 18px;
   line-height: 18px;
+}
+
+:host([data-modern-ui="true"]) .wm-slot-text.wm-ctx-pct[data-od-active="1"],
+:host([data-modern-ui="true"]) .wm-multi-label[data-od-active="1"],
+[data-modern-ui="true"] .wm-slot-text.wm-ctx-pct[data-od-active="1"],
+[data-modern-ui="true"] .wm-multi-label[data-od-active="1"] {
+  justify-content: flex-start;
 }
 
 :host([data-modern-ui="true"]) .wm-od-digit,

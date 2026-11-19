@@ -13,7 +13,11 @@ import {
   patchKeyedList,
   patchText,
 } from '../../core/domPatch.js';
-import { resolveModelDisplayInfo, speedReasonText } from '../../core/formatters.js';
+import {
+  buildStepAnomalyDiagnostic,
+  resolveModelDisplayInfo,
+  speedReasonText,
+} from '../../core/formatters.js';
 import { getEffectiveLocale, t } from '../../i18n/index.js';
 import {
   DEFAULT_STEP_COLUMN_KEYS,
@@ -198,9 +202,14 @@ function buildColumnSizerSpec(tableSteps, colKeys, wantedSet, cellCtx) {
 
     if (needTps) {
       const tpsVal = Number(st.tokPerSec);
-      if (Number.isFinite(tpsVal) && tpsVal > maxTpsVal) {
-        maxTpsVal = tpsVal;
-        maxTpsObj = st;
+      if (Number.isFinite(tpsVal) && tpsVal >= 0) {
+        const tpsScore =
+          (tpsVal >= 100 ? String(Math.round(tpsVal)).length : tpsVal.toFixed(1).length) * 1e6 +
+          tpsVal;
+        if (tpsScore > maxTpsVal) {
+          maxTpsVal = tpsScore;
+          maxTpsObj = st;
+        }
       }
       if (st.selectedSpeedReason) {
         reasonCandidates.add(st.selectedSpeedReason);
@@ -415,8 +424,31 @@ export const StepTableWidget = defineComponent({
     });
     const hideTurnTip = () => patchAttr(turnTipEl, 'hidden', true);
 
+    const anomalyTipTitleEl = h('div', { className: 'step-anomaly-tip-title' });
+    const anomalyTipSubEl = h('div', { className: 'step-anomaly-tip-sub text-mono', hidden: true });
+    const anomalyTipHeadEl = h('div', { className: 'step-anomaly-tip-head' }, [
+      anomalyTipTitleEl,
+      anomalyTipSubEl,
+    ]);
+    const anomalyTipListEl = h('div', { className: 'step-anomaly-tip-list' });
+    const anomalyTipHintEl = h('div', { className: 'step-anomaly-tip-hint', hidden: true });
+    const anomalyTipEl = h(
+      'div',
+      {
+        className: 'step-anomaly-tip',
+        role: 'tooltip',
+        hidden: true,
+      },
+      [anomalyTipHeadEl, anomalyTipListEl, anomalyTipHintEl]
+    );
+    const hideAnomalyTip = () => patchAttr(anomalyTipEl, 'hidden', true);
+
     const standaloneHostEl = standalone
-      ? h('div', { className: 'step-table-preview-host' }, [stepsTablePane, turnTipEl])
+      ? h('div', { className: 'step-table-preview-host' }, [
+          stepsTablePane,
+          turnTipEl,
+          anomalyTipEl,
+        ])
       : null;
 
     let boundsContainerGetter =
@@ -430,40 +462,85 @@ export const StepTableWidget = defineComponent({
       }
     }
 
+    function positionFloatingTip(tipEl, anchorEl) {
+      const boundsEl = boundsContainerGetter?.();
+      if (
+        !boundsEl ||
+        typeof boundsEl.getBoundingClientRect !== 'function' ||
+        typeof anchorEl?.getBoundingClientRect !== 'function'
+      ) {
+        return;
+      }
+      const panelRect = boundsEl.getBoundingClientRect();
+      const anchorRect = anchorEl.getBoundingClientRect();
+      if (!(panelRect.width > 0 && panelRect.height > 0)) return;
+      const tipH = tipEl.offsetHeight || 56;
+      const tipW = tipEl.offsetWidth || 220;
+      const placeAbove =
+        panelRect.bottom - anchorRect.bottom < tipH + 10 &&
+        anchorRect.top - panelRect.top > tipH + 6;
+      const topPx = placeAbove
+        ? Math.max(4, Math.round(anchorRect.top - panelRect.top - tipH - 5))
+        : Math.round(anchorRect.bottom - panelRect.top + 5);
+      const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
+      const leftPx = Math.min(
+        maxLeft,
+        Math.max(6, Math.round(anchorRect.left - panelRect.left))
+      );
+      tipEl.style.top = `${topPx}px`;
+      tipEl.style.left = `${leftPx}px`;
+    }
+
     function showTurnTip(anchorCell, promptText) {
       const text = String(promptText || '').trim();
-      const boundsEl = boundsContainerGetter?.();
       if (!anchorCell || !text) {
         hideTurnTip();
         return;
       }
+      hideAnomalyTip();
       patchText(turnTipEl, text);
       patchAttr(turnTipEl, 'hidden', false);
-      if (
-        boundsEl &&
-        typeof boundsEl.getBoundingClientRect === 'function' &&
-        typeof anchorCell.getBoundingClientRect === 'function'
-      ) {
-        const panelRect = boundsEl.getBoundingClientRect();
-        const cellRect = anchorCell.getBoundingClientRect();
-        if (panelRect.width > 0 && panelRect.height > 0) {
-          const tipH = turnTipEl.offsetHeight || 36;
-          const tipW = turnTipEl.offsetWidth || 180;
-          const placeAbove =
-            panelRect.bottom - cellRect.bottom < tipH + 10 &&
-            cellRect.top - panelRect.top > tipH + 6;
-          const topPx = placeAbove
-            ? Math.max(4, Math.round(cellRect.top - panelRect.top - tipH - 4))
-            : Math.round(cellRect.bottom - panelRect.top + 4);
-          const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
-          const leftPx = Math.min(
-            maxLeft,
-            Math.max(6, Math.round(cellRect.left - panelRect.left + 4))
-          );
-          turnTipEl.style.top = `${topPx}px`;
-          turnTipEl.style.left = `${leftPx}px`;
-        }
+      positionFloatingTip(turnTipEl, anchorCell);
+    }
+
+    function showAnomalyTip(anchorEl, diag) {
+      if (!anchorEl || !diag || !diag.title) {
+        hideAnomalyTip();
+        return;
       }
+      hideTurnTip();
+      patchClasses(anomalyTipEl, { 'is-danger': diag.severity === 'danger' });
+      patchText(anomalyTipTitleEl, diag.title);
+      patchAttr(anomalyTipSubEl, 'hidden', !diag.sub);
+      if (diag.sub) patchText(anomalyTipSubEl, diag.sub);
+
+      while (anomalyTipListEl.firstChild) {
+        anomalyTipListEl.removeChild(anomalyTipListEl.firstChild);
+      }
+      const rows = Array.isArray(diag.rows) ? diag.rows : [];
+      for (const row of rows) {
+        const lineEl = h('div', {
+          className: `step-anomaly-tip-row${row.danger ? ' is-danger' : ''}`,
+          text: row.text,
+        });
+        const itemChildren = [lineEl];
+        if (row.detail) {
+          itemChildren.push(
+            h('div', {
+              className: 'step-anomaly-tip-detail text-mono',
+              text: row.detail,
+            })
+          );
+        }
+        anomalyTipListEl.appendChild(h('div', { className: 'step-anomaly-tip-item' }, itemChildren));
+      }
+      patchAttr(anomalyTipListEl, 'hidden', rows.length === 0);
+
+      patchAttr(anomalyTipHintEl, 'hidden', !diag.hint);
+      if (diag.hint) patchText(anomalyTipHintEl, diag.hint);
+
+      patchAttr(anomalyTipEl, 'hidden', false);
+      positionFloatingTip(anomalyTipEl, anchorEl);
     }
 
     const hoverRows = new WeakMap();
@@ -598,15 +675,30 @@ export const StepTableWidget = defineComponent({
     }
 
     function moveInStepCell(event) {
-      if (event?.target === hoverRows.get(this).badge) hideTurnTip();
+      const { badge } = hoverRows.get(this);
+      if (event?.target === badge) hideTurnTip();
     }
 
     function moveAlongTurnRail(event) {
-      const { badge, prompt } = hoverRows.get(this);
+      const { badge, prompt, anomalyStep } = hoverRows.get(this);
       const rect = this.getBoundingClientRect?.();
       const relX = rect ? (event?.clientX ?? 0) - rect.left : 0;
-      if (event?.target !== badge && relX <= 18) showTurnTip(this, prompt);
-      else hideTurnTip();
+      if (event?.target !== badge && relX <= 18) {
+        showTurnTip(this, prompt);
+      } else {
+        hideTurnTip();
+        if (anomalyStep) {
+          showAnomalyTip(this, buildStepAnomalyDiagnostic(anomalyStep));
+        }
+      }
+    }
+
+    function leaveStepCell(event) {
+      const entry = hoverRows.get(this);
+      hideTurnTip();
+      if (entry?.anomalyStep && entry.tr && event?.relatedTarget && entry.tr.contains?.(event.relatedTarget)) {
+        showAnomalyTip(this, buildStepAnomalyDiagnostic(entry.anomalyStep));
+      }
     }
 
     function clearCellHover(cell) {
@@ -898,7 +990,8 @@ export const StepTableWidget = defineComponent({
             ? `${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`
             : '';
           const stripeSig = isVirtualized ? (item.isStripeEven ? 'E' : 'O') : 'N';
-          return `${locale}:${colOrderSig}:${stripeSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
+          const anomalySig = st.anomalySig || '';
+          return `${locale}:${colOrderSig}:${stripeSig}:${badgeSig}:${anomalySig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: (item) => {
           if (item.isSizer) {
@@ -1140,6 +1233,24 @@ export const StepTableWidget = defineComponent({
             refs.agentBadgeEl.onclick = null;
           }
 
+          const hasStepAnomaly = Boolean(st?.anomaly && Number(st.anomaly.count) > 0);
+          const isAnomalyDanger = Boolean(hasStepAnomaly && st.anomaly.severity === 'danger');
+          const isAnomalyWarn = Boolean(hasStepAnomaly && !isAnomalyDanger);
+          patchClasses(tr, {
+            'is-anomaly-warn': isAnomalyWarn,
+            'is-anomaly-danger': isAnomalyDanger,
+          });
+          if (hasStepAnomaly) {
+            const anchorEl = firstTd || tr;
+            tr.onmouseenter = () => {
+              showAnomalyTip(anchorEl, buildStepAnomalyDiagnostic(st));
+            };
+            tr.onmouseleave = hideAnomalyTip;
+          } else {
+            tr.onmouseenter = null;
+            tr.onmouseleave = null;
+          }
+
           patchAttr(refs.railEl, 'hidden', !showRowRail);
           if (showRowRail) {
             const marker = isStart ? ' is-origin' : !hasUp && hasDown ? ' is-cap' : '';
@@ -1154,10 +1265,16 @@ export const StepTableWidget = defineComponent({
           if (refs.hoverTd !== hoverTd) clearCellHover(refs.hoverTd);
           refs.hoverTd = hoverTd;
           if (hoverTd) {
-            hoverRows.set(hoverTd, { badge: refs.agentBadgeEl, prompt });
-            hoverTd.onmouseenter = firstColKey === 'step' ? enterStepCell : null;
-            hoverTd.onmousemove = firstColKey === 'step' ? moveInStepCell : moveAlongTurnRail;
-            hoverTd.onmouseleave = hideTurnTip;
+            hoverRows.set(hoverTd, {
+              badge: refs.agentBadgeEl,
+              prompt,
+              anomalyStep: hasStepAnomaly ? st : null,
+              tr,
+            });
+            const useWholeCellTurnTip = firstColKey === 'step' && !hasStepAnomaly;
+            hoverTd.onmouseenter = useWholeCellTurnTip ? enterStepCell : null;
+            hoverTd.onmousemove = useWholeCellTurnTip ? moveInStepCell : moveAlongTurnRail;
+            hoverTd.onmouseleave = leaveStepCell;
           }
 
           if (enteringRowKeys?.has(item.rowKey)) {
@@ -1179,7 +1296,14 @@ export const StepTableWidget = defineComponent({
           }
           clearRowEnterState(tr);
           if (!refs?.isSpacer && !refs?.isSizer && tr) {
-            patchClasses(tr, { 'is-stripe-even': false, 'is-step-entering': false });
+            patchClasses(tr, {
+              'is-stripe-even': false,
+              'is-step-entering': false,
+              'is-anomaly-warn': false,
+              'is-anomaly-danger': false,
+            });
+            tr.onmouseenter = null;
+            tr.onmouseleave = null;
             if (refs.agentBadgeEl) {
               refs.agentBadgeEl.onclick = null;
             }
@@ -1209,6 +1333,7 @@ export const StepTableWidget = defineComponent({
 
     function onPaneScroll() {
       hideTurnTip();
+      hideAnomalyTip();
       if (!activeDataset?.isVirtualized) return;
       if (typeof requestAnimationFrame === 'function') {
         if (scrollRafId) return;
@@ -1221,8 +1346,13 @@ export const StepTableWidget = defineComponent({
       }
     }
 
+    function onTbodyLeave() {
+      hideTurnTip();
+      hideAnomalyTip();
+    }
+
     stepsTablePane.addEventListener('scroll', onPaneScroll, { passive: true });
-    stepsTbody.addEventListener('mouseleave', hideTurnTip);
+    stepsTbody.addEventListener('mouseleave', onTbodyLeave);
 
     let paneResizeObs = null;
     if (typeof ResizeObserver === 'function') {
@@ -1424,7 +1554,7 @@ export const StepTableWidget = defineComponent({
 
     onCleanup(() => {
       stepsTablePane.removeEventListener('scroll', onPaneScroll);
-      stepsTbody.removeEventListener('mouseleave', hideTurnTip);
+      stepsTbody.removeEventListener('mouseleave', onTbodyLeave);
       if (scrollRafId && typeof cancelAnimationFrame === 'function') {
         cancelAnimationFrame(scrollRafId);
         scrollRafId = 0;
@@ -1449,10 +1579,13 @@ export const StepTableWidget = defineComponent({
         stepsTheadRow,
         stepsTbody,
         turnTipEl,
+        anomalyTipEl,
         syncTableHeaderColumns,
         renderStepTable,
         refreshViewport,
         hideTurnTip,
+        showAnomalyTip,
+        hideAnomalyTip,
         setBoundsElGetter,
       },
     };

@@ -291,6 +291,11 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
       ttftSumSec: 0,
       ttftSampleCount: 0,
       speedAccumulator: createSpeedAccumulator(),
+      anomalySteps: 0,
+      anomalyCount: 0,
+      anomalyDangerCount: 0,
+      anomalyTotalDelaySec: 0,
+      anomalyByKind: {},
     });
   }
   const agg = perModelStats.get(modelGroupKey);
@@ -313,6 +318,28 @@ function accumulateStepIntoModelMap(perModelStats, st, mInfo, stepCost) {
   ) {
     agg.ttftSumSec += st.nativeTtftSec;
     agg.ttftSampleCount += 1;
+  }
+
+  if (st?.anomaly && Number(st.anomaly.count) > 0) {
+    agg.anomalySteps += 1;
+    agg.anomalyCount += Number(st.anomaly.count);
+    if (st.anomaly.severity === 'danger') {
+      agg.anomalyDangerCount += 1;
+    }
+    if (Number(st.anomaly.totalDelaySec) > 0) {
+      agg.anomalyTotalDelaySec += Number(st.anomaly.totalDelaySec);
+    }
+    if (st.anomaly.kinds && typeof st.anomaly.kinds === 'object') {
+      for (const [k, v] of Object.entries(st.anomaly.kinds)) {
+        const cnt = Number(v || 0);
+        if (cnt > 0) {
+          agg.anomalyByKind[k] = (agg.anomalyByKind[k] || 0) + cnt;
+        }
+      }
+    } else if (st.anomaly.primaryKind) {
+      agg.anomalyByKind[st.anomaly.primaryKind] =
+        (agg.anomalyByKind[st.anomaly.primaryKind] || 0) + Number(st.anomaly.count);
+    }
   }
 
   agg.calls += 1;
@@ -342,6 +369,11 @@ function finalizeModelBreakdownMap(perModelStats) {
         fallbackModelId,
         ttftSumSec,
         ttftSampleCount,
+        anomalySteps,
+        anomalyCount,
+        anomalyDangerCount,
+        anomalyTotalDelaySec,
+        anomalyByKind,
         ...m
       }) => {
         const sortedUpstream = Array.from((upstreamModelCounts || new Map()).entries())
@@ -355,6 +387,7 @@ function finalizeModelBreakdownMap(perModelStats) {
           promptTokens > 0 ? +((m.cacheReadTokens / promptTokens) * 100).toFixed(1) : 0;
         const avgTtftSec =
           ttftSampleCount > 0 ? roundMetric(ttftSumSec / ttftSampleCount) : null;
+        const hasAnomalies = Number(anomalyCount || 0) > 0;
         return {
           ...m,
           upstreamName: primaryUpstream,
@@ -365,6 +398,15 @@ function finalizeModelBreakdownMap(perModelStats) {
           ttftSampleCount,
           avgTokPerSec: roundMetric(finishedSpeed.avgTokPerSec),
           speedSummary: finishedSpeed,
+          ...(hasAnomalies
+            ? {
+                anomalySteps: Number(anomalySteps || 0),
+                anomalyCount: Number(anomalyCount || 0),
+                anomalyDangerCount: Number(anomalyDangerCount || 0),
+                anomalyTotalDelaySec: +(Number(anomalyTotalDelaySec || 0)).toFixed(1),
+                anomalyByKind: anomalyByKind || {},
+              }
+            : {}),
         };
       }
     );

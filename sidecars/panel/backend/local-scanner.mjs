@@ -783,11 +783,23 @@ function loadOfflineTranscriptConversation(conv, diskFiles, externalByLower, loc
         }
         continue;
       }
+      if (sq.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE') {
+        sqliteRawSteps.push({
+          type: sq.type,
+          status: sq.status,
+          ...(sq.errorMessage ? { errorMessage: sq.errorMessage } : {}),
+          ...(typeof tLine?.error === 'string' && tLine.error ? { error: tLine.error } : {}),
+          ...(typeof tLine?.content === 'string' && tLine.content ? { content: tLine.content } : {}),
+          metadata: sq.metadata,
+        });
+        continue;
+      }
 
-      if (sq.metadata?.modelUsage) {
+      const rawUsage = sq.metadata?.modelUsage || sq.metadata?.retryInfos?.[0]?.usage;
+      if (rawUsage) {
         const deepStep = extMatch?.steps?.[modelOrdinal] || null;
         modelOrdinal += 1;
-        const mu = { ...sq.metadata.modelUsage };
+        const mu = { ...rawUsage };
         if (!mu.model) {
           const fallbackModel = String(
             tLine?.model || tLine?.generator_model || deepStep?.modelKey || ''
@@ -822,7 +834,9 @@ function loadOfflineTranscriptConversation(conv, diskFiles, externalByLower, loc
         upperType === 'CORTEX_STEP_TYPE_USER_INPUT' ||
         (line.userInput && typeof line.userInput === 'object') ||
         upperType === 'SYSTEM_MESSAGE' ||
-        upperType === 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE'
+        upperType === 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE' ||
+        upperType === 'ERROR_MESSAGE' ||
+        upperType === 'CORTEX_STEP_TYPE_ERROR_MESSAGE'
       ) {
         sqliteRawSteps.push(line);
       } else if (
@@ -830,14 +844,19 @@ function loadOfflineTranscriptConversation(conv, diskFiles, externalByLower, loc
         line.cache_read_tokens !== undefined ||
         line.output_tokens !== undefined
       ) {
+        const tailStatus = String(line.status || '').trim().toUpperCase();
         sqliteRawSteps.push({
           type:
             upperType === 'CHECKPOINT' || upperType === 'CORTEX_STEP_TYPE_CHECKPOINT'
               ? 'CORTEX_STEP_TYPE_CHECKPOINT'
               : String(line.type || 'PLANNER_RESPONSE'),
-          status: /CANCEL/i.test(String(line.status || ''))
+          status: /CANCEL/.test(tailStatus)
             ? 'CORTEX_STEP_STATUS_CANCELED'
-            : 'CORTEX_STEP_STATUS_DONE',
+            : /ERROR/.test(tailStatus)
+              ? 'CORTEX_STEP_STATUS_ERROR'
+              : /INTERRUPT/.test(tailStatus)
+                ? 'CORTEX_STEP_STATUS_INTERRUPTED'
+                : 'CORTEX_STEP_STATUS_DONE',
           plannerResponse: {
             response: typeof line.content === 'string' ? line.content : '',
             thinking: typeof line.thinking === 'string' ? line.thinking : '',
@@ -873,7 +892,9 @@ function loadOfflineTranscriptConversation(conv, diskFiles, externalByLower, loc
         upperType === 'CORTEX_STEP_TYPE_USER_INPUT' ||
         (line.userInput && typeof line.userInput === 'object') ||
         upperType === 'SYSTEM_MESSAGE' ||
-        upperType === 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE'
+        upperType === 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE' ||
+        upperType === 'ERROR_MESSAGE' ||
+        upperType === 'CORTEX_STEP_TYPE_ERROR_MESSAGE'
       ) {
         syntheticSteps.push(line);
         continue;
@@ -898,7 +919,11 @@ function loadOfflineTranscriptConversation(conv, diskFiles, externalByLower, loc
       const rawStatus = String(line.status || '').trim().toUpperCase();
       const mappedStatus = /CANCEL/.test(rawStatus)
         ? 'CORTEX_STEP_STATUS_CANCELED'
-        : 'CORTEX_STEP_STATUS_DONE';
+        : /ERROR/.test(rawStatus)
+          ? 'CORTEX_STEP_STATUS_ERROR'
+          : /INTERRUPT/.test(rawStatus)
+            ? 'CORTEX_STEP_STATUS_INTERRUPTED'
+            : 'CORTEX_STEP_STATUS_DONE';
       const finishedAt = String(
         line.finished_generating_at ||
           line.finishedGeneratingAt ||
@@ -1931,6 +1956,7 @@ export async function enumerateAndSyncConversations({
               turnRailTelemetry: true,
               wakeupTurnTelemetry: true,
               contextGroupsTelemetry: 2,
+              anomalyTelemetry: 1,
               steps: stepsWithOwners,
               subagentRefs,
             };
@@ -1964,6 +1990,7 @@ export async function enumerateAndSyncConversations({
               !prev.speedClearedTelemetry ||
               !prev.turnRailTelemetry ||
               !prev.contextGroupsTelemetry ||
+              !prev.anomalyTelemetry ||
               metaChanged ||
               !isDeepStrictEqual(prev.steps, stepsWithOwners);
 
@@ -2033,6 +2060,7 @@ export async function enumerateAndSyncConversations({
                   speedClearedTelemetry: true,
                   turnRailTelemetry: true,
                   contextGroupsTelemetry: 2,
+                  anomalyTelemetry: 1,
                   steps: offlineStepsWithOwners,
                   subagentRefs: offlineFallback.subagentRefs,
                 };
@@ -2163,6 +2191,7 @@ export async function enumerateAndSyncConversations({
     if (!cached.contextLimitTelemetry && lowerCid === contextTelemetryCascadeId) return true;
     if (
       (!cached.turnRailTelemetry ||
+        !cached.anomalyTelemetry ||
         hasMissingTurnRailFields(cached) ||
         needsWakeupTurnRefresh(conv, cached) ||
         hasDroppedContextGroups(cached)) &&
@@ -2345,6 +2374,7 @@ export async function enumerateAndSyncConversations({
             !hasMissingStepFields(existingSubCache) &&
             (!isSelectedSubFamily ||
               (Boolean(existingSubCache.turnRailTelemetry) &&
+                Boolean(existingSubCache.anomalyTelemetry) &&
                 !hasMissingTurnRailFields(existingSubCache) &&
                 !needsWakeupTurnRefresh(subConv, existingSubCache) &&
                 !hasDroppedContextGroups(existingSubCache)));

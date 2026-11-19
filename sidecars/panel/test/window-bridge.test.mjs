@@ -2474,7 +2474,7 @@ test('Compiled app.js mounts dual Shadow DOM hosts, tracks /c/<uuid> routes, pro
     smodelCards = modelsAnalyticsPane.querySelectorAll('.smodel-card');
     assert.equal(smodelCards.length, 1, 'Scoped to subagent #1 model only');
     assert.equal(smodelCards[0].querySelector('.smodel-name').textContent, 'gemini-3-flash');
-    assert.match(fitCard.querySelector('.cons-badge').textContent, /^1步 · 均 145\.0 tok\/s$/);
+    assert.match(fitCard.querySelector('.cons-badge').textContent, /^1步 · 均 145 tok\/s$/);
     assert.equal(
       lineModelSelectEl.hasAttribute('hidden'),
       true,

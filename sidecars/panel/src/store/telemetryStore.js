@@ -603,6 +603,7 @@ export function isEquivalentTelemetry(prev, next) {
         bs?.contextTokens !== as?.contextTokens ||
         bs?.cacheHitPct !== as?.cacheHitPct ||
         bs?.selectedSpeedReason !== as?.selectedSpeedReason ||
+        bs?.anomalySig !== as?.anomalySig ||
         bs?.turnIndex !== as?.turnIndex ||
         bs?.rootTurnIndex !== as?.rootTurnIndex ||
         bs?.isTurnStart !== as?.isTurnStart ||
@@ -659,6 +660,7 @@ export function isEquivalentTelemetry(prev, next) {
       before.contextTokens !== after.contextTokens ||
       before.cacheHitPct !== after.cacheHitPct ||
       before.selectedSpeedReason !== after.selectedSpeedReason ||
+      before.anomalySig !== after.anomalySig ||
       before.turnIndex !== after.turnIndex ||
       before.rootTurnIndex !== after.rootTurnIndex ||
       before.isTurnStart !== after.isTurnStart ||
@@ -711,7 +713,9 @@ export function isEquivalentTelemetry(prev, next) {
         a[k]?.costUsd !== b[k]?.costUsd ||
         a[k]?.unpricedCalls !== b[k]?.unpricedCalls ||
         a[k]?.totalTokens !== b[k]?.totalTokens ||
-        a[k]?.calls !== b[k]?.calls
+        a[k]?.calls !== b[k]?.calls ||
+        Number(a[k]?.anomalyCount || 0) !== Number(b[k]?.anomalyCount || 0) ||
+        Number(a[k]?.anomalySteps || 0) !== Number(b[k]?.anomalySteps || 0)
       ) {
         return false;
       }
@@ -750,6 +754,9 @@ export function isEquivalentTelemetry(prev, next) {
   }
 
   // 7. 比对按模型汇总明细与数据来源汇总明细
+  if (!areModelSlicesEqual(pAct?.modelBreakdown, nAct?.modelBreakdown)) {
+    return false;
+  }
   if (!areModelSlicesEqual(prev.modelBreakdown, next.modelBreakdown)) {
     return false;
   }

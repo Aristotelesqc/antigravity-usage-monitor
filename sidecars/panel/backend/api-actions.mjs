@@ -79,7 +79,7 @@ function projectDisplayStep(st) {
   const {
     stepIndex, createdAtMs, isCompactionStep, modelKey, modelShort, modelLabel,
     modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
-    streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
+    streamDurationSec, selectedSpeedReason, anomaly, anomalySig, contextTokens, inputTokens, cacheReadTokens,
     outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, inCostUsd,
     cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentKind, agentOrdinal,
     agentCustomRole, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
@@ -91,7 +91,9 @@ function projectDisplayStep(st) {
   return {
     stepIndex, createdAtMs, isCompactionStep, modelKey, modelShort, modelLabel,
     modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
-    streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
+    streamDurationSec, selectedSpeedReason,
+    ...(anomaly ? { anomaly, anomalySig } : {}),
+    contextTokens, inputTokens, cacheReadTokens,
     outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, inCostUsd,
     cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentKind, agentOrdinal,
     agentCustomRole, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
@@ -104,7 +106,9 @@ function projectDisplayStep(st) {
 
 const MAX_DISPLAY_STEP_CACHE_ENTRIES = 8;
 const displayStepsCache = new Map();
-const displayStepFields = Object.keys(projectDisplayStep({}));
+const displayStepFields = Object.keys(projectDisplayStep({ anomaly: true, anomalySig: '' })).filter(
+  (k) => k !== 'anomaly'
+);
 
 function haveSameDisplaySteps(previous, current) {
   if (!previous || !current) return previous === current;

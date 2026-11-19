@@ -25,6 +25,12 @@ export function formatMetric(value, unit = '') {
   return Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : '—';
 }
 
+export function formatSpeedMetric(value, unit = ' tok/s') {
+  if (!Number.isFinite(value)) return '—';
+  const numStr = value >= 100 ? String(Math.round(value)) : value.toFixed(1);
+  return `${numStr}${unit}`;
+}
+
 export function formatCachePct(value) {
   if (value == null || !Number.isFinite(Number(value))) return '—';
   const num = Math.max(0, Math.min(100, +Number(value).toFixed(1)));
@@ -98,6 +104,8 @@ const SPEED_REASON_LABELS = {
   __proto__: null,
   incomplete_or_invalid_timing: 'fmt.speedIncomplete',
   canceled: 'fmt.speedCanceled',
+  error: 'fmt.speedError',
+  interrupted: 'fmt.speedInterrupted',
   compaction_timing_unavailable: 'fmt.speedCompactionTimingUnavailable',
   invalid_output_tokens: 'fmt.speedInvalidOutput',
   inconsistent_timing: 'fmt.speedInconsistent',
@@ -108,6 +116,135 @@ const SPEED_REASON_LABELS = {
 export function speedReasonText(reason) {
   const label = SPEED_REASON_LABELS[reason];
   return label ? t(label) : '';
+}
+
+const ANOMALY_KIND_ORDER = Object.freeze([
+  'rate_limit',
+  'timeout',
+  'capacity',
+  'disconnect',
+  'upstream',
+  'model_output',
+  'safety',
+  'auth_or_model',
+  'error',
+]);
+
+export function formatAnomalyKindLabel(kind) {
+  const k = String(kind || 'error');
+  const key = `steps.anomalyKind.${k}`;
+  const text = t(key);
+  return text === key ? t('steps.anomalyKind.error') : text;
+}
+
+export function formatAnomalyTagText(primaryKind, count = 1) {
+  const n = Math.max(1, Math.floor(Number(count) || 1));
+  const k = String(primaryKind || 'error');
+  if (k === 'capacity' && n === 1) return t('steps.anomalyTag.capacitySingle');
+  if (k === 'upstream' && n === 1) return t('steps.anomalyTag.upstreamSingle');
+  const key = `steps.anomalyTag.${k}`;
+  const formatted = t(key, { n });
+  return formatted === key ? t('steps.anomalyTag.error', { n }) : formatted;
+}
+
+export function resolveModelAnomalySummary(m) {
+  const count = Math.max(0, Number(m?.anomalyCount || 0));
+  const steps = Math.max(0, Number(m?.anomalySteps || 0));
+  if (count <= 0 && steps <= 0) return null;
+  const byKind = m?.anomalyByKind && typeof m.anomalyByKind === 'object' ? m.anomalyByKind : {};
+  const entries = Object.entries(byKind)
+    .map(([k, v]) => [k, Math.max(0, Number(v || 0))])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      const pa = ANOMALY_KIND_ORDER.indexOf(a[0]);
+      const pb = ANOMALY_KIND_ORDER.indexOf(b[0]);
+      return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb);
+    });
+  const totalCount = count || entries.reduce((sum, [, v]) => sum + v, 0) || steps;
+  const primaryKind = entries.length === 1 ? entries[0][0] : entries.length > 1 ? 'mixed' : 'error';
+  const severity =
+    Number(m?.anomalyDangerCount || 0) > 0 ||
+    entries.some(([k]) => k === 'rate_limit' || k === 'auth_or_model')
+      ? 'danger'
+      : 'warn';
+  return {
+    count: totalCount,
+    steps: steps || totalCount,
+    totalDelaySec: Math.max(0, Number(m?.anomalyTotalDelaySec || 0)),
+    primaryKind,
+    severity,
+    entries,
+    tagText: formatAnomalyTagText(primaryKind, totalCount),
+  };
+}
+
+export function formatStepAnomalyInlineSummary(anomaly) {
+  if (!anomaly || !(Number(anomaly.count) > 0)) return '';
+  const tag = formatAnomalyTagText(anomaly.primaryKind, anomaly.count);
+  const label = formatAnomalyKindLabel(anomaly.primaryKind);
+  const delaySec = Number(anomaly.totalDelaySec || 0);
+  const delayPart = delaySec > 0 ? ` · ${t('steps.anomalyDelayPart', { sec: delaySec })}` : '';
+  return `${tag} · ${label}${delayPart}`;
+}
+
+export function buildStepAnomalyDiagnostic(st) {
+  const a = st?.anomaly;
+  if (!a || !(Number(a.count) > 0)) return null;
+  const title = t('steps.anomalyStepTitle', {
+    step: Number(st.stepIndex ?? 0),
+    count: Number(a.count),
+  });
+  const delaySec = Number(a.totalDelaySec || 0);
+  const sub = delaySec > 0 ? t('steps.anomalyDelayPart', { sec: delaySec }) : '';
+  const events = Array.isArray(a.events) ? a.events : [];
+  const rows = events.map((ev, idx) => {
+    const label = formatAnomalyKindLabel(ev.kind);
+    const parts = [`#${ev.attempt || idx + 1} ${label}`];
+    if (Number(ev.delaySec) > 0) {
+      parts.push(t('steps.anomalyDelayPart', { sec: ev.delaySec }));
+    }
+    if (ev.terminal) {
+      parts.push(t('steps.anomalyTerminalTag'));
+    }
+    return {
+      text: parts.join(' · '),
+      detail: ev.message || '',
+      danger: Boolean(ev.terminal || ev.kind === 'rate_limit' || ev.kind === 'auth_or_model'),
+    };
+  });
+  return {
+    title,
+    sub,
+    rows,
+    hint: '',
+    severity: a.severity === 'danger' ? 'danger' : 'warn',
+  };
+}
+
+export function buildModelAnomalyDiagnostic(m) {
+  const sum = resolveModelAnomalySummary(m);
+  if (!sum) return null;
+  const title = t('steps.anomalyModelTitle', {
+    model: m?.displayText || m?.shortName || m?.label || '—',
+    count: sum.count,
+  });
+  const subParts = [t('steps.anomalyModelSub', { steps: sum.steps })];
+  if (sum.totalDelaySec > 0) {
+    subParts.push(t('steps.anomalyDelayPart', { sec: sum.totalDelaySec }));
+  }
+  const rows = sum.entries.map(([k, v]) => ({
+    text: t('steps.anomalyModelKindRow', { kind: formatAnomalyKindLabel(k), count: v }),
+    detail: '',
+    danger: k === 'rate_limit' || k === 'auth_or_model',
+  }));
+  return {
+    title,
+    sub: subParts.join(' · '),
+    rows,
+    hint: t('steps.anomalyModelClickHint'),
+    severity: sum.severity,
+  };
 }
 
 export function sampleSummary(summary) {
@@ -389,6 +526,12 @@ export function mergeModelsByDisplayName(models = [], settings = {}, options = {
         ttftWeightedSum: hasTtft ? Number(m.avgTtftSec) * ttftWeight : 0,
         ttftWeight: hasTtft ? ttftWeight : 0,
         ttftSampleCount,
+        anomalySteps: Math.max(0, Number(m.anomalySteps || 0)),
+        anomalyCount: Math.max(0, Number(m.anomalyCount || 0)),
+        anomalyDangerCount: Math.max(0, Number(m.anomalyDangerCount || 0)),
+        anomalyTotalDelaySec: Math.max(0, Number(m.anomalyTotalDelaySec || 0)),
+        anomalyByKind:
+          m.anomalyByKind && typeof m.anomalyByKind === 'object' ? { ...m.anomalyByKind } : {},
       };
       if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
       byDisplay.set(key, acc);
@@ -416,6 +559,17 @@ export function mergeModelsByDisplayName(models = [], settings = {}, options = {
     acc.totalTokens += totTok;
     acc.costUsd += costUsd;
     acc.unpricedCalls += unpricedCalls;
+
+    acc.anomalySteps += Math.max(0, Number(m.anomalySteps || 0));
+    acc.anomalyCount += Math.max(0, Number(m.anomalyCount || 0));
+    acc.anomalyDangerCount += Math.max(0, Number(m.anomalyDangerCount || 0));
+    acc.anomalyTotalDelaySec += Math.max(0, Number(m.anomalyTotalDelaySec || 0));
+    if (m.anomalyByKind && typeof m.anomalyByKind === 'object') {
+      for (const [ak, av] of Object.entries(m.anomalyByKind)) {
+        const cnt = Math.max(0, Number(av || 0));
+        if (cnt > 0) acc.anomalyByKind[ak] = (acc.anomalyByKind[ak] || 0) + cnt;
+      }
+    }
 
     if (hasSpeed) {
       acc.speedWeightedSum += Number(m.avgTokPerSec) * speedWeight;
@@ -467,6 +621,15 @@ export function mergeModelsByDisplayName(models = [], settings = {}, options = {
       avgTokPerSec,
       avgTtftSec,
       ttftSampleCount: acc.ttftSampleCount,
+      ...(acc.anomalyCount > 0
+        ? {
+            anomalySteps: acc.anomalySteps,
+            anomalyCount: acc.anomalyCount,
+            anomalyDangerCount: acc.anomalyDangerCount,
+            anomalyTotalDelaySec: +acc.anomalyTotalDelaySec.toFixed(1),
+            anomalyByKind: acc.anomalyByKind,
+          }
+        : {}),
       speedSummary: acc.baseItem.speedSummary
         ? {
             ...acc.baseItem.speedSummary,

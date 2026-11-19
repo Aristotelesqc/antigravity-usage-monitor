@@ -1077,6 +1077,8 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'fmt.pending': '待定',
   'fmt.speedIncomplete': '计时不完整',
   'fmt.speedCanceled': '已取消',
+  'fmt.speedError': '调用报错',
+  'fmt.speedInterrupted': '连接中断',
   'fmt.speedCompactionTimingUnavailable': '压缩无计时',
   'fmt.speedInvalidOutput': '无有效输出',
   'fmt.speedInconsistent': '耗时数据异常',
@@ -1339,6 +1341,38 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'steps.fitInactiveCardTitle': '点击在上方拟合图查看 {text}（按住 Ctrl/Shift 点击可多选同图对比）',
   'steps.turnMediaOnly': '[图片/附件提问]',
   'steps.turnMediaSuffix': '[附图]',
+  'steps.anomalyTag.timeout': '超时{n}',
+  'steps.anomalyTag.rate_limit': '限流{n}',
+  'steps.anomalyTag.capacity': '503×{n}',
+  'steps.anomalyTag.capacitySingle': '503',
+  'steps.anomalyTag.disconnect': '断连{n}',
+  'steps.anomalyTag.upstream': '500×{n}',
+  'steps.anomalyTag.upstreamSingle': '500',
+  'steps.anomalyTag.model_output': '纠偏{n}',
+  'steps.anomalyTag.safety': '过滤{n}',
+  'steps.anomalyTag.auth_or_model': '受限{n}',
+  'steps.anomalyTag.error': '报错{n}',
+  'steps.anomalyTag.mixed': '异常{n}',
+  'steps.anomalyKind.timeout': '流空闲 / 连接超时',
+  'steps.anomalyKind.rate_limit': '429 限流 / 配额耗尽',
+  'steps.anomalyKind.capacity': '503 上游算力不足',
+  'steps.anomalyKind.disconnect': '连接中断 / 断流',
+  'steps.anomalyKind.upstream': '上游 5xx 内部错误',
+  'steps.anomalyKind.model_output': '模型输出 / 工具参数无效',
+  'steps.anomalyKind.safety': '内容安全过滤',
+  'steps.anomalyKind.auth_or_model': '请求受限 / 模型不可用',
+  'steps.anomalyKind.error': '调用异常',
+  'steps.anomalyKind.canceled': '用户取消',
+  'steps.anomalyStepTitle': '#{step} · 异常 {count} 次',
+  'steps.anomalyDelayPart': '退避 {sec}s',
+  'steps.anomalyTerminalTag': '中止',
+  'steps.anomalyModelTitle': '{model} · 异常 {count} 次',
+  'steps.anomalyModelSub': '涉及 {steps} 步',
+  'steps.anomalyModelKindRow': '{kind}：{count} 次',
+  'steps.anomalyModelClickHint': '点击前往「按步查看」筛选异常步',
+  'steps.anomalySummaryMeta': '异常 {count} 次（{steps} 步）',
+  'steps.anomalyFilterLabel': '仅看异常 ({count})',
+  'steps.anomalyFilterAll': '返回全部步骤',
 
   // Step Table Columns (Headers & Option Labels)
   'stepCol.step.th': '步序',
@@ -1748,6 +1782,8 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'fmt.pending': 'N/A',
   'fmt.speedIncomplete': 'Incomplete timing',
   'fmt.speedCanceled': 'Canceled',
+  'fmt.speedError': 'Call error',
+  'fmt.speedInterrupted': 'Interrupted',
   'fmt.speedCompactionTimingUnavailable': 'Untimed compaction',
   'fmt.speedInvalidOutput': 'No valid output',
   'fmt.speedInconsistent': 'Invalid timing',
@@ -2010,6 +2046,38 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'steps.fitInactiveCardTitle': 'Click to inspect {text} in Trend Fit (Ctrl/Shift-click to compare)',
   'steps.turnMediaOnly': '[Media Attachment]',
   'steps.turnMediaSuffix': '[Media]',
+  'steps.anomalyTag.timeout': 'TO{n}',
+  'steps.anomalyTag.rate_limit': '429×{n}',
+  'steps.anomalyTag.capacity': '503×{n}',
+  'steps.anomalyTag.capacitySingle': '503',
+  'steps.anomalyTag.disconnect': 'Drop{n}',
+  'steps.anomalyTag.upstream': '500×{n}',
+  'steps.anomalyTag.upstreamSingle': '500',
+  'steps.anomalyTag.model_output': 'Fix{n}',
+  'steps.anomalyTag.safety': 'Safe{n}',
+  'steps.anomalyTag.auth_or_model': 'Err{n}',
+  'steps.anomalyTag.error': 'Err{n}',
+  'steps.anomalyTag.mixed': 'Warn{n}',
+  'steps.anomalyKind.timeout': 'Stream Idle / Connect Timeout',
+  'steps.anomalyKind.rate_limit': '429 Rate Limit / Quota Reached',
+  'steps.anomalyKind.capacity': '503 No Capacity Available',
+  'steps.anomalyKind.disconnect': 'Connection Reset / Stream Interrupted',
+  'steps.anomalyKind.upstream': 'Upstream 5xx Internal Error',
+  'steps.anomalyKind.model_output': 'Invalid Model Output / Tool Call',
+  'steps.anomalyKind.safety': 'Content Safety Filter',
+  'steps.anomalyKind.auth_or_model': 'Request / Model Rejected',
+  'steps.anomalyKind.error': 'Call Error',
+  'steps.anomalyKind.canceled': 'Canceled by User',
+  'steps.anomalyStepTitle': '#{step} · {count} Retries / Errors',
+  'steps.anomalyDelayPart': 'Backoff {sec}s',
+  'steps.anomalyTerminalTag': 'Stopped',
+  'steps.anomalyModelTitle': '{model} · {count} Retries / Errors',
+  'steps.anomalyModelSub': '{steps} steps affected',
+  'steps.anomalyModelKindRow': '{kind}: {count}',
+  'steps.anomalyModelClickHint': 'Click to filter anomalous steps',
+  'steps.anomalySummaryMeta': '{count} retries/errors ({steps} steps)',
+  'steps.anomalyFilterLabel': 'Anomalies Only ({count})',
+  'steps.anomalyFilterAll': 'Show All Steps',
 
   // Step Table Columns (Headers & Option Labels)
   'stepCol.step.th': 'Step',
@@ -3351,7 +3419,7 @@ return { defineComponent };
 })();
 
 // --- src/core/formatters.js ---
-const { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap } = (() => {
+const { formatMetric, formatSpeedMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, formatAnomalyKindLabel, formatAnomalyTagText, resolveModelAnomalySummary, formatStepAnomalyInlineSummary, buildStepAnomalyDiagnostic, buildModelAnomalyDiagnostic, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap } = (() => {
 /**
  * @fileoverview Pure formatting utilities for speed metrics, token counts,
  * USD estimates, countdown timers, and custom datetime displays.
@@ -3365,6 +3433,12 @@ const EN_MONTH_SHORT = Object.freeze([
 
 function formatMetric(value, unit = '') {
   return Number.isFinite(value) ? `${value.toFixed(1)}${unit}` : '—';
+}
+
+function formatSpeedMetric(value, unit = ' tok/s') {
+  if (!Number.isFinite(value)) return '—';
+  const numStr = value >= 100 ? String(Math.round(value)) : value.toFixed(1);
+  return `${numStr}${unit}`;
 }
 
 function formatCachePct(value) {
@@ -3440,6 +3514,8 @@ const SPEED_REASON_LABELS = {
   __proto__: null,
   incomplete_or_invalid_timing: 'fmt.speedIncomplete',
   canceled: 'fmt.speedCanceled',
+  error: 'fmt.speedError',
+  interrupted: 'fmt.speedInterrupted',
   compaction_timing_unavailable: 'fmt.speedCompactionTimingUnavailable',
   invalid_output_tokens: 'fmt.speedInvalidOutput',
   inconsistent_timing: 'fmt.speedInconsistent',
@@ -3450,6 +3526,135 @@ const SPEED_REASON_LABELS = {
 function speedReasonText(reason) {
   const label = SPEED_REASON_LABELS[reason];
   return label ? t(label) : '';
+}
+
+const ANOMALY_KIND_ORDER = Object.freeze([
+  'rate_limit',
+  'timeout',
+  'capacity',
+  'disconnect',
+  'upstream',
+  'model_output',
+  'safety',
+  'auth_or_model',
+  'error',
+]);
+
+function formatAnomalyKindLabel(kind) {
+  const k = String(kind || 'error');
+  const key = `steps.anomalyKind.${k}`;
+  const text = t(key);
+  return text === key ? t('steps.anomalyKind.error') : text;
+}
+
+function formatAnomalyTagText(primaryKind, count = 1) {
+  const n = Math.max(1, Math.floor(Number(count) || 1));
+  const k = String(primaryKind || 'error');
+  if (k === 'capacity' && n === 1) return t('steps.anomalyTag.capacitySingle');
+  if (k === 'upstream' && n === 1) return t('steps.anomalyTag.upstreamSingle');
+  const key = `steps.anomalyTag.${k}`;
+  const formatted = t(key, { n });
+  return formatted === key ? t('steps.anomalyTag.error', { n }) : formatted;
+}
+
+function resolveModelAnomalySummary(m) {
+  const count = Math.max(0, Number(m?.anomalyCount || 0));
+  const steps = Math.max(0, Number(m?.anomalySteps || 0));
+  if (count <= 0 && steps <= 0) return null;
+  const byKind = m?.anomalyByKind && typeof m.anomalyByKind === 'object' ? m.anomalyByKind : {};
+  const entries = Object.entries(byKind)
+    .map(([k, v]) => [k, Math.max(0, Number(v || 0))])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      const pa = ANOMALY_KIND_ORDER.indexOf(a[0]);
+      const pb = ANOMALY_KIND_ORDER.indexOf(b[0]);
+      return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb);
+    });
+  const totalCount = count || entries.reduce((sum, [, v]) => sum + v, 0) || steps;
+  const primaryKind = entries.length === 1 ? entries[0][0] : entries.length > 1 ? 'mixed' : 'error';
+  const severity =
+    Number(m?.anomalyDangerCount || 0) > 0 ||
+    entries.some(([k]) => k === 'rate_limit' || k === 'auth_or_model')
+      ? 'danger'
+      : 'warn';
+  return {
+    count: totalCount,
+    steps: steps || totalCount,
+    totalDelaySec: Math.max(0, Number(m?.anomalyTotalDelaySec || 0)),
+    primaryKind,
+    severity,
+    entries,
+    tagText: formatAnomalyTagText(primaryKind, totalCount),
+  };
+}
+
+function formatStepAnomalyInlineSummary(anomaly) {
+  if (!anomaly || !(Number(anomaly.count) > 0)) return '';
+  const tag = formatAnomalyTagText(anomaly.primaryKind, anomaly.count);
+  const label = formatAnomalyKindLabel(anomaly.primaryKind);
+  const delaySec = Number(anomaly.totalDelaySec || 0);
+  const delayPart = delaySec > 0 ? ` · ${t('steps.anomalyDelayPart', { sec: delaySec })}` : '';
+  return `${tag} · ${label}${delayPart}`;
+}
+
+function buildStepAnomalyDiagnostic(st) {
+  const a = st?.anomaly;
+  if (!a || !(Number(a.count) > 0)) return null;
+  const title = t('steps.anomalyStepTitle', {
+    step: Number(st.stepIndex ?? 0),
+    count: Number(a.count),
+  });
+  const delaySec = Number(a.totalDelaySec || 0);
+  const sub = delaySec > 0 ? t('steps.anomalyDelayPart', { sec: delaySec }) : '';
+  const events = Array.isArray(a.events) ? a.events : [];
+  const rows = events.map((ev, idx) => {
+    const label = formatAnomalyKindLabel(ev.kind);
+    const parts = [`#${ev.attempt || idx + 1} ${label}`];
+    if (Number(ev.delaySec) > 0) {
+      parts.push(t('steps.anomalyDelayPart', { sec: ev.delaySec }));
+    }
+    if (ev.terminal) {
+      parts.push(t('steps.anomalyTerminalTag'));
+    }
+    return {
+      text: parts.join(' · '),
+      detail: ev.message || '',
+      danger: Boolean(ev.terminal || ev.kind === 'rate_limit' || ev.kind === 'auth_or_model'),
+    };
+  });
+  return {
+    title,
+    sub,
+    rows,
+    hint: '',
+    severity: a.severity === 'danger' ? 'danger' : 'warn',
+  };
+}
+
+function buildModelAnomalyDiagnostic(m) {
+  const sum = resolveModelAnomalySummary(m);
+  if (!sum) return null;
+  const title = t('steps.anomalyModelTitle', {
+    model: m?.displayText || m?.shortName || m?.label || '—',
+    count: sum.count,
+  });
+  const subParts = [t('steps.anomalyModelSub', { steps: sum.steps })];
+  if (sum.totalDelaySec > 0) {
+    subParts.push(t('steps.anomalyDelayPart', { sec: sum.totalDelaySec }));
+  }
+  const rows = sum.entries.map(([k, v]) => ({
+    text: t('steps.anomalyModelKindRow', { kind: formatAnomalyKindLabel(k), count: v }),
+    detail: '',
+    danger: k === 'rate_limit' || k === 'auth_or_model',
+  }));
+  return {
+    title,
+    sub: subParts.join(' · '),
+    rows,
+    hint: t('steps.anomalyModelClickHint'),
+    severity: sum.severity,
+  };
 }
 
 function sampleSummary(summary) {
@@ -3730,6 +3935,12 @@ function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
         ttftWeightedSum: hasTtft ? Number(m.avgTtftSec) * ttftWeight : 0,
         ttftWeight: hasTtft ? ttftWeight : 0,
         ttftSampleCount,
+        anomalySteps: Math.max(0, Number(m.anomalySteps || 0)),
+        anomalyCount: Math.max(0, Number(m.anomalyCount || 0)),
+        anomalyDangerCount: Math.max(0, Number(m.anomalyDangerCount || 0)),
+        anomalyTotalDelaySec: Math.max(0, Number(m.anomalyTotalDelaySec || 0)),
+        anomalyByKind:
+          m.anomalyByKind && typeof m.anomalyByKind === 'object' ? { ...m.anomalyByKind } : {},
       };
       if (m.upstreamName) acc.upstreamSet.add(m.upstreamName);
       byDisplay.set(key, acc);
@@ -3757,6 +3968,17 @@ function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
     acc.totalTokens += totTok;
     acc.costUsd += costUsd;
     acc.unpricedCalls += unpricedCalls;
+
+    acc.anomalySteps += Math.max(0, Number(m.anomalySteps || 0));
+    acc.anomalyCount += Math.max(0, Number(m.anomalyCount || 0));
+    acc.anomalyDangerCount += Math.max(0, Number(m.anomalyDangerCount || 0));
+    acc.anomalyTotalDelaySec += Math.max(0, Number(m.anomalyTotalDelaySec || 0));
+    if (m.anomalyByKind && typeof m.anomalyByKind === 'object') {
+      for (const [ak, av] of Object.entries(m.anomalyByKind)) {
+        const cnt = Math.max(0, Number(av || 0));
+        if (cnt > 0) acc.anomalyByKind[ak] = (acc.anomalyByKind[ak] || 0) + cnt;
+      }
+    }
 
     if (hasSpeed) {
       acc.speedWeightedSum += Number(m.avgTokPerSec) * speedWeight;
@@ -3808,6 +4030,15 @@ function mergeModelsByDisplayName(models = [], settings = {}, options = {}) {
       avgTokPerSec,
       avgTtftSec,
       ttftSampleCount: acc.ttftSampleCount,
+      ...(acc.anomalyCount > 0
+        ? {
+            anomalySteps: acc.anomalySteps,
+            anomalyCount: acc.anomalyCount,
+            anomalyDangerCount: acc.anomalyDangerCount,
+            anomalyTotalDelaySec: +acc.anomalyTotalDelaySec.toFixed(1),
+            anomalyByKind: acc.anomalyByKind,
+          }
+        : {}),
       speedSummary: acc.baseItem.speedSummary
         ? {
             ...acc.baseItem.speedSummary,
@@ -4176,7 +4407,7 @@ function buildDeterministicModelColorMap(models = []) {
 
   return colorMap;
 }
-return { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap };
+return { formatMetric, formatSpeedMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, formatAnomalyKindLabel, formatAnomalyTagText, resolveModelAnomalySummary, formatStepAnomalyInlineSummary, buildStepAnomalyDiagnostic, buildModelAnomalyDiagnostic, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail, getCanonicalModelColorSeed, resolveDeterministicModelColor, buildDeterministicModelColorMap };
 })();
 
 // --- src/core/httpClient.js ---
@@ -5020,6 +5251,7 @@ function isEquivalentTelemetry(prev, next) {
         bs?.contextTokens !== as?.contextTokens ||
         bs?.cacheHitPct !== as?.cacheHitPct ||
         bs?.selectedSpeedReason !== as?.selectedSpeedReason ||
+        bs?.anomalySig !== as?.anomalySig ||
         bs?.turnIndex !== as?.turnIndex ||
         bs?.rootTurnIndex !== as?.rootTurnIndex ||
         bs?.isTurnStart !== as?.isTurnStart ||
@@ -5076,6 +5308,7 @@ function isEquivalentTelemetry(prev, next) {
       before.contextTokens !== after.contextTokens ||
       before.cacheHitPct !== after.cacheHitPct ||
       before.selectedSpeedReason !== after.selectedSpeedReason ||
+      before.anomalySig !== after.anomalySig ||
       before.turnIndex !== after.turnIndex ||
       before.rootTurnIndex !== after.rootTurnIndex ||
       before.isTurnStart !== after.isTurnStart ||
@@ -5128,7 +5361,9 @@ function isEquivalentTelemetry(prev, next) {
         a[k]?.costUsd !== b[k]?.costUsd ||
         a[k]?.unpricedCalls !== b[k]?.unpricedCalls ||
         a[k]?.totalTokens !== b[k]?.totalTokens ||
-        a[k]?.calls !== b[k]?.calls
+        a[k]?.calls !== b[k]?.calls ||
+        Number(a[k]?.anomalyCount || 0) !== Number(b[k]?.anomalyCount || 0) ||
+        Number(a[k]?.anomalySteps || 0) !== Number(b[k]?.anomalySteps || 0)
       ) {
         return false;
       }
@@ -5167,6 +5402,9 @@ function isEquivalentTelemetry(prev, next) {
   }
 
   // 7. 比对按模型汇总明细与数据来源汇总明细
+  if (!areModelSlicesEqual(pAct?.modelBreakdown, nAct?.modelBreakdown)) {
+    return false;
+  }
   if (!areModelSlicesEqual(prev.modelBreakdown, next.modelBreakdown)) {
     return false;
   }
@@ -9458,7 +9696,7 @@ function formatChartMetricValue(metric, val) {
     case 'context':
       return `${formatTokensPrecise(val)} tok`;
     case 'tps':
-      return `${val.toFixed(1)} tok/s`;
+      return formatSpeedMetric(val, ' tok/s');
     case 'ttft':
       return `${val.toFixed(1)}s`;
     case 'cache':
@@ -9477,7 +9715,7 @@ function formatChartMetricCompact(metric, val) {
     case 'context':
       return formatTokens(val);
     case 'tps':
-      return `${val.toFixed(1)} tok/s`;
+      return formatSpeedMetric(val, ' tok/s');
     case 'ttft':
       return `${val.toFixed(1)}s`;
     case 'cache':
@@ -9567,6 +9805,10 @@ function createSessionLineChart() {
   const dotsGroup = document.createElementNS(SVG_NS, 'g');
   svg.appendChild(dotsGroup);
 
+  const anomalyDotsGroup = document.createElementNS(SVG_NS, 'g');
+  anomalyDotsGroup.setAttribute('class', 'sstep-anomaly-dots');
+  svg.appendChild(anomalyDotsGroup);
+
   const hoverLine = document.createElementNS(SVG_NS, 'line');
   hoverLine.setAttribute('class', 'trend-hover-line');
   hoverLine.setAttribute('y1', '10');
@@ -9593,10 +9835,12 @@ function createSessionLineChart() {
   const tipMainLeft = h('strong', { className: 'trend-tip-tokens text-mono' });
   const tipMainRight = h('span', { className: 'trend-tip-cost text-mono' });
   const tipSub = h('div', { className: 'trend-tip-sub text-mono', hidden: true });
+  const tipAnomaly = h('div', { className: 'trend-tip-anomaly text-mono', hidden: true });
   const tooltipEl = h('div', { className: 'trend-tooltip', hidden: true }, [
     h('div', { className: 'trend-tip-head' }, [tipHeadLeft, tipHeadRight]),
     h('div', { className: 'trend-tip-main' }, [tipMainLeft, tipMainRight]),
     tipSub,
+    tipAnomaly,
   ]);
 
   const xAxisEl = h('div', { className: 'trend-x-axis' });
@@ -9654,7 +9898,12 @@ function createSessionLineChart() {
     patchAttr(hoverDot, 'hidden', false);
     patchAttr(hoverDot, 'cx', pt.x.toFixed(1));
     patchAttr(hoverDot, 'cy', pt.y.toFixed(1));
-    patchStyleVar(hoverDot, '--hover-dot-color', pt.hoverColor || 'var(--ctx-cached)');
+    const hoverAccent = pt.anomalySummary
+      ? pt.anomalySeverity === 'danger'
+        ? 'var(--metric-danger)'
+        : 'var(--metric-warn)'
+      : pt.hoverColor || 'var(--ctx-cached)';
+    patchStyleVar(hoverDot, '--hover-dot-color', hoverAccent);
 
     patchAttr(peakPill, 'hidden', true);
     patchAttr(tooltipEl, 'hidden', false);
@@ -9669,6 +9918,11 @@ function createSessionLineChart() {
     patchAttr(tipSub, 'hidden', !pt.subDetail);
     if (pt.subDetail) {
       patchText(tipSub, pt.subDetail);
+    }
+    patchAttr(tipAnomaly, 'hidden', !pt.anomalySummary);
+    if (pt.anomalySummary) {
+      patchText(tipAnomaly, pt.anomalySummary);
+      patchClasses(tipAnomaly, { 'is-danger': pt.anomalySeverity === 'danger' });
     }
 
     const rawPct = (pt.x / viewW) * 100;
@@ -9815,6 +10069,7 @@ function createSessionLineChart() {
       while (multiAreaGroup.firstChild) multiAreaGroup.removeChild(multiAreaGroup.firstChild);
       while (multiLineGroup.firstChild) multiLineGroup.removeChild(multiLineGroup.firstChild);
       while (dotsGroup.firstChild) dotsGroup.removeChild(dotsGroup.firstChild);
+      while (anomalyDotsGroup.firstChild) anomalyDotsGroup.removeChild(anomalyDotsGroup.firstChild);
       while (xAxisEl.firstChild) xAxisEl.removeChild(xAxisEl.firstChild);
       patchAttr(modelLegendEl, 'hidden', true);
       patchAttr(peakPill, 'hidden', true);
@@ -9943,7 +10198,7 @@ function createSessionLineChart() {
       } else if (metric === 'ttft') {
         valid = !st.isCompactionStep && Number.isFinite(st.ttftSec) && st.ttftSec >= 0;
         value = valid ? Number(st.ttftSec) : 0;
-        secondaryRight = Number.isFinite(st.tokPerSec) ? `${st.tokPerSec.toFixed(1)} tok/s` : '';
+        secondaryRight = Number.isFinite(st.tokPerSec) ? formatSpeedMetric(st.tokPerSec, ' tok/s') : '';
         subDetail = valid
           ? t('chart.step.ctxAndCache', {
               ctxTok: formatTokens(ctxTok),
@@ -9982,6 +10237,7 @@ function createSessionLineChart() {
       }
 
       const dotColor = modelColorMap.get(gk) || accentColor;
+      const anomalySummary = formatStepAnomalyInlineSummary(st.anomaly);
       return {
         idx,
         st,
@@ -9994,6 +10250,8 @@ function createSessionLineChart() {
         value,
         secondaryRight,
         subDetail,
+        anomalySummary,
+        anomalySeverity: st.anomaly?.severity || '',
       };
     });
 
@@ -10029,7 +10287,10 @@ function createSessionLineChart() {
     const sig =
       `${locale}|${viewW}|${metric}|${showAgentPrefix}|${isMultiCompare ? 'multi' : 'single'}:${targetKeys.join(',')}|${colorSig}|` +
       points
-        .map((p) => `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}`)
+        .map(
+          (p) =>
+            `${p.stepTag}:${p.modelText}:${p.valid ? p.value.toFixed(4) : 'x'}:${p.st?.anomalySig || ''}`
+        )
         .join('|');
 
     if (sig !== lastSig) {
@@ -10037,6 +10298,7 @@ function createSessionLineChart() {
       while (multiAreaGroup.firstChild) multiAreaGroup.removeChild(multiAreaGroup.firstChild);
       while (multiLineGroup.firstChild) multiLineGroup.removeChild(multiLineGroup.firstChild);
       while (dotsGroup.firstChild) dotsGroup.removeChild(dotsGroup.firstChild);
+      while (anomalyDotsGroup.firstChild) anomalyDotsGroup.removeChild(anomalyDotsGroup.firstChild);
 
       if (isMultiCompare) {
         patchAttr(linePath, 'd', '');
@@ -10130,6 +10392,19 @@ function createSessionLineChart() {
             dotsGroup.appendChild(dot);
           }
         }
+      }
+
+      for (const pt of points) {
+        if (!pt.valid || !pt.anomalySummary) continue;
+        const aDot = document.createElementNS(SVG_NS, 'circle');
+        aDot.setAttribute('cx', pt.x.toFixed(1));
+        aDot.setAttribute('cy', pt.y.toFixed(1));
+        aDot.setAttribute('r', '2.9');
+        aDot.setAttribute(
+          'class',
+          `sstep-anomaly-dot${pt.anomalySeverity === 'danger' ? ' is-danger' : ''}`
+        );
+        anomalyDotsGroup.appendChild(aDot);
       }
 
       const tickIndices = computeStepTickIndices(points.length);
@@ -10359,10 +10634,12 @@ function createModelFitChart() {
   const tipMainLeft = h('strong', { className: 'trend-tip-tokens text-mono' });
   const tipMainRight = h('span', { className: 'trend-tip-cost text-mono' });
   const tipSub = h('div', { className: 'trend-tip-sub text-mono', hidden: true });
+  const tipAnomaly = h('div', { className: 'trend-tip-anomaly text-mono', hidden: true });
   const tooltipEl = h('div', { className: 'trend-tooltip', hidden: true }, [
     h('div', { className: 'trend-tip-head' }, [tipHeadLeft, tipHeadRight]),
     h('div', { className: 'trend-tip-main' }, [tipMainLeft, tipMainRight]),
     tipSub,
+    tipAnomaly,
   ]);
 
   const fitMethodLabelEl = h('span', { text: t('chart.fit.loess') });
@@ -10453,6 +10730,10 @@ function createModelFitChart() {
     patchAttr(hoverRawDot, 'hidden', false);
     patchAttr(hoverRawDot, 'cx', sp.x.toFixed(1));
     patchAttr(hoverRawDot, 'cy', sp.rawY.toFixed(1));
+    patchClasses(hoverRawDot, {
+      'is-anomaly': Boolean(sp.anomalySummary),
+      'is-danger': Boolean(sp.anomalySummary && sp.anomalySeverity === 'danger'),
+    });
 
     const wasHidden = tooltipEl.hasAttribute('hidden');
     patchAttr(tooltipEl, 'hidden', false);
@@ -10484,6 +10765,11 @@ function createModelFitChart() {
           pct: Number(sp.st?.cacheHitPct ?? 0),
         })
       );
+    }
+    patchAttr(tipAnomaly, 'hidden', !sp.anomalySummary);
+    if (sp.anomalySummary) {
+      patchText(tipAnomaly, sp.anomalySummary);
+      patchClasses(tipAnomaly, { 'is-danger': sp.anomalySeverity === 'danger' });
     }
 
     const rawPct = (sp.x / viewW) * 100;
@@ -10769,6 +11055,8 @@ function createModelFitChart() {
           rawVal,
           stepTag: formatStepAxisTag(st, showAgentPrefix),
           modelText: disp.baseText || disp.text,
+          anomalySummary: formatStepAnomalyInlineSummary(st.anomaly),
+          anomalySeverity: st.anomaly?.severity || '',
         });
       }
     }
@@ -10922,7 +11210,12 @@ function createModelFitChart() {
           .map(
             (s) =>
               `${s.key}:${s.colorVar}:` +
-              s.samples.map((p) => `${p.xVal}:${p.rawVal.toFixed(3)}:${p.fitVal.toFixed(3)}`).join(',')
+              s.samples
+                .map(
+                  (p) =>
+                    `${p.xVal}:${p.rawVal.toFixed(3)}:${p.fitVal.toFixed(3)}:${p.st?.anomalySig || ''}`
+                )
+                .join(',')
           )
           .join('||');
 
@@ -10951,10 +11244,15 @@ function createModelFitChart() {
           typeof document.createDocumentFragment === 'function'
             ? document.createDocumentFragment()
             : scatterGroup;
+        const anomalyOverlayDots = [];
 
         for (const s of seriesList) {
           const binCounts = dedupOverdraw ? new Map() : null;
           for (const sp of s.samples) {
+            if (sp.anomalySummary) {
+              anomalyOverlayDots.push(sp);
+              continue;
+            }
             if (binCounts) {
               const binKey = (Math.round(sp.x * 2) << 11) ^ Math.round(sp.rawY * 2);
               const prevCnt = binCounts.get(binKey) || 0;
@@ -11016,6 +11314,17 @@ function createModelFitChart() {
             patchStyleVar(curveEl, '--sstep-fit-accent', s.colorVar);
             multiCurveGroup.appendChild(curveEl);
           }
+        }
+        for (const sp of anomalyOverlayDots) {
+          const aDot = document.createElementNS(SVG_NS, 'circle');
+          aDot.setAttribute('cx', sp.x.toFixed(1));
+          aDot.setAttribute('cy', sp.rawY.toFixed(1));
+          aDot.setAttribute('r', '2.9');
+          aDot.setAttribute(
+            'class',
+            `sstep-scatter-dot is-anomaly${sp.anomalySeverity === 'danger' ? ' is-danger' : ''}`
+          );
+          scatterTarget.appendChild(aDot);
         }
         if (scatterTarget !== scatterGroup) {
           scatterGroup.appendChild(scatterTarget);
@@ -11133,7 +11442,11 @@ function createModelFitChart() {
 
     const sig =
       `single|${locale}|${viewW}|${targetKeys[0]}|${metric}|${showAgentPrefix}|${yScale.min.toFixed(4)}|${yScale.max.toFixed(4)}|` +
-      samples.map((s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}`).join('|');
+      samples
+        .map(
+          (s) => `${s.xVal}:${s.rawVal.toFixed(4)}:${s.fitVal.toFixed(4)}:${s.st?.anomalySig || ''}`
+        )
+        .join('|');
 
     if (sig !== lastSig) {
       lastSig = sig;
@@ -11157,7 +11470,12 @@ function createModelFitChart() {
         typeof document.createDocumentFragment === 'function'
           ? document.createDocumentFragment()
           : scatterGroup;
+      const singleAnomalyDots = [];
       for (const s of samples) {
+        if (s.anomalySummary) {
+          singleAnomalyDots.push(s);
+          continue;
+        }
         if (binCounts) {
           const binKey = (Math.round(s.x * 2) << 11) ^ Math.round(s.rawY * 2);
           const prevCnt = binCounts.get(binKey) || 0;
@@ -11170,6 +11488,17 @@ function createModelFitChart() {
         dot.setAttribute('r', dotRadius);
         dot.setAttribute('class', 'sstep-scatter-dot');
         scatterTarget.appendChild(dot);
+      }
+      for (const s of singleAnomalyDots) {
+        const aDot = document.createElementNS(SVG_NS, 'circle');
+        aDot.setAttribute('cx', s.x.toFixed(1));
+        aDot.setAttribute('cy', s.rawY.toFixed(1));
+        aDot.setAttribute('r', '2.9');
+        aDot.setAttribute(
+          'class',
+          `sstep-scatter-dot is-anomaly${s.anomalySeverity === 'danger' ? ' is-danger' : ''}`
+        );
+        scatterTarget.appendChild(aDot);
       }
       if (scatterTarget !== scatterGroup) {
         scatterGroup.appendChild(scatterTarget);
@@ -14094,7 +14423,7 @@ const STEP_COLUMN_REGISTRY = Object.freeze({
       return { td, refs: { wrapEl, speedMain, speedReason: null } };
     },
     updateCell: (refs, st, ctx) => {
-      patchText(refs.speedMain, formatMetric(st.tokPerSec, ' tok/s'));
+      patchText(refs.speedMain, formatSpeedMetric(st.tokPerSec, ' tok/s'));
       const hasValidSpeed =
         st.tokPerSec != null && Number.isFinite(Number(st.tokPerSec)) && Number(st.tokPerSec) > 0;
       const toneCls =
@@ -15087,9 +15416,14 @@ function buildColumnSizerSpec(tableSteps, colKeys, wantedSet, cellCtx) {
 
     if (needTps) {
       const tpsVal = Number(st.tokPerSec);
-      if (Number.isFinite(tpsVal) && tpsVal > maxTpsVal) {
-        maxTpsVal = tpsVal;
-        maxTpsObj = st;
+      if (Number.isFinite(tpsVal) && tpsVal >= 0) {
+        const tpsScore =
+          (tpsVal >= 100 ? String(Math.round(tpsVal)).length : tpsVal.toFixed(1).length) * 1e6 +
+          tpsVal;
+        if (tpsScore > maxTpsVal) {
+          maxTpsVal = tpsScore;
+          maxTpsObj = st;
+        }
       }
       if (st.selectedSpeedReason) {
         reasonCandidates.add(st.selectedSpeedReason);
@@ -15304,8 +15638,31 @@ const StepTableWidget = defineComponent({
     });
     const hideTurnTip = () => patchAttr(turnTipEl, 'hidden', true);
 
+    const anomalyTipTitleEl = h('div', { className: 'step-anomaly-tip-title' });
+    const anomalyTipSubEl = h('div', { className: 'step-anomaly-tip-sub text-mono', hidden: true });
+    const anomalyTipHeadEl = h('div', { className: 'step-anomaly-tip-head' }, [
+      anomalyTipTitleEl,
+      anomalyTipSubEl,
+    ]);
+    const anomalyTipListEl = h('div', { className: 'step-anomaly-tip-list' });
+    const anomalyTipHintEl = h('div', { className: 'step-anomaly-tip-hint', hidden: true });
+    const anomalyTipEl = h(
+      'div',
+      {
+        className: 'step-anomaly-tip',
+        role: 'tooltip',
+        hidden: true,
+      },
+      [anomalyTipHeadEl, anomalyTipListEl, anomalyTipHintEl]
+    );
+    const hideAnomalyTip = () => patchAttr(anomalyTipEl, 'hidden', true);
+
     const standaloneHostEl = standalone
-      ? h('div', { className: 'step-table-preview-host' }, [stepsTablePane, turnTipEl])
+      ? h('div', { className: 'step-table-preview-host' }, [
+          stepsTablePane,
+          turnTipEl,
+          anomalyTipEl,
+        ])
       : null;
 
     let boundsContainerGetter =
@@ -15319,40 +15676,85 @@ const StepTableWidget = defineComponent({
       }
     }
 
+    function positionFloatingTip(tipEl, anchorEl) {
+      const boundsEl = boundsContainerGetter?.();
+      if (
+        !boundsEl ||
+        typeof boundsEl.getBoundingClientRect !== 'function' ||
+        typeof anchorEl?.getBoundingClientRect !== 'function'
+      ) {
+        return;
+      }
+      const panelRect = boundsEl.getBoundingClientRect();
+      const anchorRect = anchorEl.getBoundingClientRect();
+      if (!(panelRect.width > 0 && panelRect.height > 0)) return;
+      const tipH = tipEl.offsetHeight || 56;
+      const tipW = tipEl.offsetWidth || 220;
+      const placeAbove =
+        panelRect.bottom - anchorRect.bottom < tipH + 10 &&
+        anchorRect.top - panelRect.top > tipH + 6;
+      const topPx = placeAbove
+        ? Math.max(4, Math.round(anchorRect.top - panelRect.top - tipH - 5))
+        : Math.round(anchorRect.bottom - panelRect.top + 5);
+      const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
+      const leftPx = Math.min(
+        maxLeft,
+        Math.max(6, Math.round(anchorRect.left - panelRect.left))
+      );
+      tipEl.style.top = `${topPx}px`;
+      tipEl.style.left = `${leftPx}px`;
+    }
+
     function showTurnTip(anchorCell, promptText) {
       const text = String(promptText || '').trim();
-      const boundsEl = boundsContainerGetter?.();
       if (!anchorCell || !text) {
         hideTurnTip();
         return;
       }
+      hideAnomalyTip();
       patchText(turnTipEl, text);
       patchAttr(turnTipEl, 'hidden', false);
-      if (
-        boundsEl &&
-        typeof boundsEl.getBoundingClientRect === 'function' &&
-        typeof anchorCell.getBoundingClientRect === 'function'
-      ) {
-        const panelRect = boundsEl.getBoundingClientRect();
-        const cellRect = anchorCell.getBoundingClientRect();
-        if (panelRect.width > 0 && panelRect.height > 0) {
-          const tipH = turnTipEl.offsetHeight || 36;
-          const tipW = turnTipEl.offsetWidth || 180;
-          const placeAbove =
-            panelRect.bottom - cellRect.bottom < tipH + 10 &&
-            cellRect.top - panelRect.top > tipH + 6;
-          const topPx = placeAbove
-            ? Math.max(4, Math.round(cellRect.top - panelRect.top - tipH - 4))
-            : Math.round(cellRect.bottom - panelRect.top + 4);
-          const maxLeft = Math.max(6, Math.round(panelRect.width - tipW - 8));
-          const leftPx = Math.min(
-            maxLeft,
-            Math.max(6, Math.round(cellRect.left - panelRect.left + 4))
-          );
-          turnTipEl.style.top = `${topPx}px`;
-          turnTipEl.style.left = `${leftPx}px`;
-        }
+      positionFloatingTip(turnTipEl, anchorCell);
+    }
+
+    function showAnomalyTip(anchorEl, diag) {
+      if (!anchorEl || !diag || !diag.title) {
+        hideAnomalyTip();
+        return;
       }
+      hideTurnTip();
+      patchClasses(anomalyTipEl, { 'is-danger': diag.severity === 'danger' });
+      patchText(anomalyTipTitleEl, diag.title);
+      patchAttr(anomalyTipSubEl, 'hidden', !diag.sub);
+      if (diag.sub) patchText(anomalyTipSubEl, diag.sub);
+
+      while (anomalyTipListEl.firstChild) {
+        anomalyTipListEl.removeChild(anomalyTipListEl.firstChild);
+      }
+      const rows = Array.isArray(diag.rows) ? diag.rows : [];
+      for (const row of rows) {
+        const lineEl = h('div', {
+          className: `step-anomaly-tip-row${row.danger ? ' is-danger' : ''}`,
+          text: row.text,
+        });
+        const itemChildren = [lineEl];
+        if (row.detail) {
+          itemChildren.push(
+            h('div', {
+              className: 'step-anomaly-tip-detail text-mono',
+              text: row.detail,
+            })
+          );
+        }
+        anomalyTipListEl.appendChild(h('div', { className: 'step-anomaly-tip-item' }, itemChildren));
+      }
+      patchAttr(anomalyTipListEl, 'hidden', rows.length === 0);
+
+      patchAttr(anomalyTipHintEl, 'hidden', !diag.hint);
+      if (diag.hint) patchText(anomalyTipHintEl, diag.hint);
+
+      patchAttr(anomalyTipEl, 'hidden', false);
+      positionFloatingTip(anomalyTipEl, anchorEl);
     }
 
     const hoverRows = new WeakMap();
@@ -15487,15 +15889,30 @@ const StepTableWidget = defineComponent({
     }
 
     function moveInStepCell(event) {
-      if (event?.target === hoverRows.get(this).badge) hideTurnTip();
+      const { badge } = hoverRows.get(this);
+      if (event?.target === badge) hideTurnTip();
     }
 
     function moveAlongTurnRail(event) {
-      const { badge, prompt } = hoverRows.get(this);
+      const { badge, prompt, anomalyStep } = hoverRows.get(this);
       const rect = this.getBoundingClientRect?.();
       const relX = rect ? (event?.clientX ?? 0) - rect.left : 0;
-      if (event?.target !== badge && relX <= 18) showTurnTip(this, prompt);
-      else hideTurnTip();
+      if (event?.target !== badge && relX <= 18) {
+        showTurnTip(this, prompt);
+      } else {
+        hideTurnTip();
+        if (anomalyStep) {
+          showAnomalyTip(this, buildStepAnomalyDiagnostic(anomalyStep));
+        }
+      }
+    }
+
+    function leaveStepCell(event) {
+      const entry = hoverRows.get(this);
+      hideTurnTip();
+      if (entry?.anomalyStep && entry.tr && event?.relatedTarget && entry.tr.contains?.(event.relatedTarget)) {
+        showAnomalyTip(this, buildStepAnomalyDiagnostic(entry.anomalyStep));
+      }
     }
 
     function clearCellHover(cell) {
@@ -15787,7 +16204,8 @@ const StepTableWidget = defineComponent({
             ? `${cellCtx.scopeSigKey}:${st.agentId || 'main'}:${st.agentBadge || ''}:${st.agentLabel || ''}`
             : '';
           const stripeSig = isVirtualized ? (item.isStripeEven ? 'E' : 'O') : 'N';
-          return `${locale}:${colOrderSig}:${stripeSig}:${badgeSig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
+          const anomalySig = st.anomalySig || '';
+          return `${locale}:${colOrderSig}:${stripeSig}:${badgeSig}:${anomalySig}:${railActive}:${item.hasTurn}:${item.hasUp}:${item.hasDown}:${item.isStart}:${item.isLatest}:${item.prompt}:${parts}`;
         },
         createRow: (item) => {
           if (item.isSizer) {
@@ -16029,6 +16447,24 @@ const StepTableWidget = defineComponent({
             refs.agentBadgeEl.onclick = null;
           }
 
+          const hasStepAnomaly = Boolean(st?.anomaly && Number(st.anomaly.count) > 0);
+          const isAnomalyDanger = Boolean(hasStepAnomaly && st.anomaly.severity === 'danger');
+          const isAnomalyWarn = Boolean(hasStepAnomaly && !isAnomalyDanger);
+          patchClasses(tr, {
+            'is-anomaly-warn': isAnomalyWarn,
+            'is-anomaly-danger': isAnomalyDanger,
+          });
+          if (hasStepAnomaly) {
+            const anchorEl = firstTd || tr;
+            tr.onmouseenter = () => {
+              showAnomalyTip(anchorEl, buildStepAnomalyDiagnostic(st));
+            };
+            tr.onmouseleave = hideAnomalyTip;
+          } else {
+            tr.onmouseenter = null;
+            tr.onmouseleave = null;
+          }
+
           patchAttr(refs.railEl, 'hidden', !showRowRail);
           if (showRowRail) {
             const marker = isStart ? ' is-origin' : !hasUp && hasDown ? ' is-cap' : '';
@@ -16043,10 +16479,16 @@ const StepTableWidget = defineComponent({
           if (refs.hoverTd !== hoverTd) clearCellHover(refs.hoverTd);
           refs.hoverTd = hoverTd;
           if (hoverTd) {
-            hoverRows.set(hoverTd, { badge: refs.agentBadgeEl, prompt });
-            hoverTd.onmouseenter = firstColKey === 'step' ? enterStepCell : null;
-            hoverTd.onmousemove = firstColKey === 'step' ? moveInStepCell : moveAlongTurnRail;
-            hoverTd.onmouseleave = hideTurnTip;
+            hoverRows.set(hoverTd, {
+              badge: refs.agentBadgeEl,
+              prompt,
+              anomalyStep: hasStepAnomaly ? st : null,
+              tr,
+            });
+            const useWholeCellTurnTip = firstColKey === 'step' && !hasStepAnomaly;
+            hoverTd.onmouseenter = useWholeCellTurnTip ? enterStepCell : null;
+            hoverTd.onmousemove = useWholeCellTurnTip ? moveInStepCell : moveAlongTurnRail;
+            hoverTd.onmouseleave = leaveStepCell;
           }
 
           if (enteringRowKeys?.has(item.rowKey)) {
@@ -16068,7 +16510,14 @@ const StepTableWidget = defineComponent({
           }
           clearRowEnterState(tr);
           if (!refs?.isSpacer && !refs?.isSizer && tr) {
-            patchClasses(tr, { 'is-stripe-even': false, 'is-step-entering': false });
+            patchClasses(tr, {
+              'is-stripe-even': false,
+              'is-step-entering': false,
+              'is-anomaly-warn': false,
+              'is-anomaly-danger': false,
+            });
+            tr.onmouseenter = null;
+            tr.onmouseleave = null;
             if (refs.agentBadgeEl) {
               refs.agentBadgeEl.onclick = null;
             }
@@ -16098,6 +16547,7 @@ const StepTableWidget = defineComponent({
 
     function onPaneScroll() {
       hideTurnTip();
+      hideAnomalyTip();
       if (!activeDataset?.isVirtualized) return;
       if (typeof requestAnimationFrame === 'function') {
         if (scrollRafId) return;
@@ -16110,8 +16560,13 @@ const StepTableWidget = defineComponent({
       }
     }
 
+    function onTbodyLeave() {
+      hideTurnTip();
+      hideAnomalyTip();
+    }
+
     stepsTablePane.addEventListener('scroll', onPaneScroll, { passive: true });
-    stepsTbody.addEventListener('mouseleave', hideTurnTip);
+    stepsTbody.addEventListener('mouseleave', onTbodyLeave);
 
     let paneResizeObs = null;
     if (typeof ResizeObserver === 'function') {
@@ -16313,7 +16768,7 @@ const StepTableWidget = defineComponent({
 
     onCleanup(() => {
       stepsTablePane.removeEventListener('scroll', onPaneScroll);
-      stepsTbody.removeEventListener('mouseleave', hideTurnTip);
+      stepsTbody.removeEventListener('mouseleave', onTbodyLeave);
       if (scrollRafId && typeof cancelAnimationFrame === 'function') {
         cancelAnimationFrame(scrollRafId);
         scrollRafId = 0;
@@ -16338,10 +16793,13 @@ const StepTableWidget = defineComponent({
         stepsTheadRow,
         stepsTbody,
         turnTipEl,
+        anomalyTipEl,
         syncTableHeaderColumns,
         renderStepTable,
         refreshViewport,
         hideTurnTip,
+        showAnomalyTip,
+        hideAnomalyTip,
         setBoundsElGetter,
       },
     };
@@ -21997,6 +22455,11 @@ function mergeSelectedAgentUnits(units) {
           totalTokens: 0,
           costUsd: 0,
           unpricedCalls: 0,
+          anomalySteps: 0,
+          anomalyCount: 0,
+          anomalyDangerCount: 0,
+          anomalyTotalDelaySec: 0,
+          anomalyByKind: {},
           _speedWeightedSum: 0,
           _speedWeight: 0,
           _ttftWeightedSum: 0,
@@ -22036,6 +22499,16 @@ function mergeSelectedAgentUnits(units) {
       acc.totalTokens += totTok;
       acc.costUsd += costUsd;
       acc.unpricedCalls += unpricedCalls;
+      acc.anomalySteps += Math.max(0, Number(m.anomalySteps || 0));
+      acc.anomalyCount += Math.max(0, Number(m.anomalyCount || 0));
+      acc.anomalyDangerCount += Math.max(0, Number(m.anomalyDangerCount || 0));
+      acc.anomalyTotalDelaySec += Math.max(0, Number(m.anomalyTotalDelaySec || 0));
+      if (m.anomalyByKind && typeof m.anomalyByKind === 'object') {
+        for (const [kind, cnt] of Object.entries(m.anomalyByKind)) {
+          const n = Math.max(0, Number(cnt || 0));
+          if (n > 0) acc.anomalyByKind[kind] = (acc.anomalyByKind[kind] || 0) + n;
+        }
+      }
 
       if (Number.isFinite(Number(m.avgTokPerSec)) && Number(m.avgTokPerSec) > 0) {
         const w = Math.max(1, outTok || calls || 1);
@@ -22084,6 +22557,15 @@ function mergeSelectedAgentUnits(units) {
         avgTtftSec:
           acc._ttftWeight > 0 ? +(acc._ttftWeightedSum / acc._ttftWeight).toFixed(1) : null,
         cacheHitPct: promptTok > 0 ? +((acc.cacheReadTokens / promptTok) * 100).toFixed(1) : 0,
+        ...(acc.anomalyCount > 0
+          ? {
+              anomalySteps: acc.anomalySteps,
+              anomalyCount: acc.anomalyCount,
+              anomalyDangerCount: acc.anomalyDangerCount,
+              anomalyTotalDelaySec: +acc.anomalyTotalDelaySec.toFixed(1),
+              anomalyByKind: acc.anomalyByKind,
+            }
+          : {}),
       };
     })
     .sort((a, b) => b.totalTokens - a.totalTokens || b.calls - a.calls);
@@ -22117,6 +22599,8 @@ const StepsDetailView = defineComponent({
     let lastSyncedUiScope = uiStore.getState().selectedAgentScope || 'all';
     let selectedTableModels = ['__all__'];
     let selectedLineModels = ['__all__'];
+    let onlyAnomalies = false;
+    let anomalyKindFilter = '';
 
     function applyAgentScopesSelection(nextScopes) {
       selectedAgentScopes = nextScopes;
@@ -22191,7 +22675,10 @@ const StepsDetailView = defineComponent({
       stepsTheadRow,
       stepsTbody,
       turnTipEl,
+      anomalyTipEl,
       hideTurnTip,
+      showAnomalyTip,
+      hideAnomalyTip,
       syncTableHeaderColumns,
       renderStepTable,
       refreshViewport: refreshStepTableViewport,
@@ -22200,6 +22687,23 @@ const StepsDetailView = defineComponent({
       contentEl: stepsTablePane,
       className: 'table-scroll-host',
     });
+
+    const anomalyFilterLabelEl = h('span', { className: 'steps-anomaly-filter-label text-mono' });
+    const anomalyFilterClearBtn = h('button', {
+      type: 'button',
+      className: 'btn-ghost-sm steps-anomaly-filter-clear',
+      text: t('steps.anomalyFilterAll'),
+      onclick: () => {
+        onlyAnomalies = false;
+        anomalyKindFilter = '';
+        if (latestSlice) renderStepsData(latestSlice);
+      },
+    });
+    const anomalyFilterBarEl = h(
+      'div',
+      { className: 'steps-anomaly-filterbar', hidden: true },
+      [anomalyFilterLabelEl, anomalyFilterClearBtn]
+    );
 
     // --- 子视图 2：总汇总分析面板 ---
     let selectedLineMetric = 'totalTokens';
@@ -22303,6 +22807,24 @@ const StepsDetailView = defineComponent({
       className: 'cons-badge text-mono',
       text: t('cons.callsCount', { calls: 0 }),
     });
+    const modelsAnomalyMetaEl = h('button', {
+      type: 'button',
+      className: 'steps-anomaly-strip-meta text-mono',
+      onclick: () => {
+        hideAnomalyTip();
+        selectedTableModels = ['__all__'];
+        onlyAnomalies = true;
+        anomalyKindFilter = '';
+        uiStore.setState({ stepsSubTab: 'steps' });
+      },
+    });
+    const modelsAnomalyTagsEl = h('div', { className: 'steps-anomaly-strip-tags' });
+    const modelsAnomalyStripEl = h(
+      'div',
+      { className: 'steps-anomaly-strip', hidden: true },
+      [modelsAnomalyMetaEl, modelsAnomalyTagsEl]
+    );
+    let lastAnomalyStripSig = '';
     const modelsEmptyEl = h('div', {
       className: 'smodel-empty text-muted',
       text: t('steps.modelsEmpty'),
@@ -22310,6 +22832,7 @@ const StepsDetailView = defineComponent({
     const modelsListEl = h('div', { className: 'smodel-list' });
     const modelsSummarySection = h('div', { className: 'smodel-section' }, [
       h('div', { className: 'smodel-section-head' }, [modelsSectionTitleEl, modelsSummaryMeta]),
+      modelsAnomalyStripEl,
       modelsEmptyEl,
       modelsListEl,
     ]);
@@ -22319,6 +22842,8 @@ const StepsDetailView = defineComponent({
       modelFitCard,
       modelsSummarySection,
     ]);
+    const onModelsPaneScroll = () => hideAnomalyTip();
+    modelsAnalyticsPane.addEventListener('scroll', onModelsPaneScroll, { passive: true });
     const modelsScroll = CustomScrollbar({
       contentEl: modelsAnalyticsPane,
       className: 'table-scroll-host',
@@ -22344,9 +22869,11 @@ const StepsDetailView = defineComponent({
             subTabSwitch.el,
           ]),
         ]),
+        anomalyFilterBarEl,
         stepsScroll.el,
         modelsScroll.el,
         turnTipEl,
+        anomalyTipEl,
       ]
     );
     stepTableWidget.refs.setBoundsElGetter(() => panelEl);
@@ -22417,6 +22944,8 @@ const StepsDetailView = defineComponent({
       patchText(fitTitleEl, t('steps.fitTitle'));
       patchText(modelsSectionTitleEl, t('steps.modelsTitle'));
       patchText(modelsEmptyEl, t('steps.modelsEmpty'));
+      patchText(anomalyFilterClearBtn, t('steps.anomalyFilterAll'));
+      lastAnomalyStripSig = '';
       lineMetricSwitch.setProps({
         modelValue: selectedLineMetric,
         options: getLineMetricSwitchOptions(),
@@ -22450,6 +22979,8 @@ const StepsDetailView = defineComponent({
           lastSyncedUiScope = uiSt.selectedAgentScope || 'all';
           selectedTableModels = ['__all__'];
           selectedLineModels = ['__all__'];
+          onlyAnomalies = false;
+          anomalyKindFilter = '';
         }
         fitLockedCascadeId = currentCid;
         fitUserPicked = false;
@@ -22643,9 +23174,29 @@ const StepsDetailView = defineComponent({
       const tableModelFilterSet = selectedTableModels.includes('__all__')
         ? null
         : new Set(selectedTableModels);
-      const tableSteps = tableModelFilterSet
+      const modelFilteredSteps = tableModelFilterSet
         ? steps.filter((st) => tableModelFilterSet.has(getStepModelGroupKey(st)))
         : steps;
+      const tableSteps = onlyAnomalies
+        ? modelFilteredSteps.filter((st) => {
+            const a = st?.anomaly;
+            if (!a || !(Number(a.count) > 0)) return false;
+            if (anomalyKindFilter) {
+              return Number(a.kinds?.[anomalyKindFilter] || 0) > 0;
+            }
+            return true;
+          })
+        : modelFilteredSteps;
+
+      const showAnomalyFilterBar = !showModels && onlyAnomalies;
+      patchAttr(anomalyFilterBarEl, 'hidden', !showAnomalyFilterBar);
+      if (showAnomalyFilterBar) {
+        const baseLabel = t('steps.anomalyFilterLabel', { count: tableSteps.length });
+        const kindSuffix = anomalyKindFilter
+          ? ` · ${formatAnomalyKindLabel(anomalyKindFilter)}`
+          : '';
+        patchText(anomalyFilterLabelEl, `${baseLabel}${kindSuffix}`);
+      }
 
       const stepsTabLabel =
         tableSteps.length !== steps.length
@@ -22783,10 +23334,79 @@ const StepsDetailView = defineComponent({
 
       // 4. 极简模型总览列表增量对账
       const displayModels = mergeModelsByDisplayName(models, displaySettings, { fallback: '—' });
+      const needStepAnomalyFallback = displayModels.every((m) => !(Number(m?.anomalyCount) > 0));
+      let stepAnomalyByGroup = null;
+      if (needStepAnomalyFallback) {
+        for (const st of chronoSteps) {
+          const a = st?.anomaly;
+          if (!a || !(Number(a.count) > 0)) continue;
+          if (!stepAnomalyByGroup) stepAnomalyByGroup = new Map();
+          const gk = getStepModelGroupKey(st);
+          let acc = stepAnomalyByGroup.get(gk);
+          if (!acc) {
+            acc = {
+              anomalySteps: 0,
+              anomalyCount: 0,
+              anomalyDangerCount: 0,
+              anomalyTotalDelaySec: 0,
+              anomalyByKind: {},
+            };
+            stepAnomalyByGroup.set(gk, acc);
+          }
+          acc.anomalySteps += 1;
+          acc.anomalyCount += Number(a.count) || 0;
+          if (a.severity === 'danger') acc.anomalyDangerCount += 1;
+          acc.anomalyTotalDelaySec += Number(a.totalDelaySec) || 0;
+          if (a.kinds && typeof a.kinds === 'object') {
+            for (const [k, cnt] of Object.entries(a.kinds)) {
+              const n = Math.max(0, Number(cnt || 0));
+              if (n > 0) acc.anomalyByKind[k] = (acc.anomalyByKind[k] || 0) + n;
+            }
+          }
+        }
+      }
+      const resolveEffectiveAnomalyModel = (m) => {
+        if (Number(m?.anomalyCount) > 0 || !stepAnomalyByGroup) return m;
+        const gk = getStepModelGroupKey(m);
+        const groupKeys =
+          Array.isArray(m.sourceLabels) && m.sourceLabels.length > 0
+            ? Array.from(new Set(m.sourceLabels.map((lbl) => getStepModelGroupKey({ label: lbl }))))
+            : [gk];
+        let anomalySteps = 0;
+        let anomalyCount = 0;
+        let anomalyDangerCount = 0;
+        let anomalyTotalDelaySec = 0;
+        const anomalyByKind = {};
+        for (const key of groupKeys) {
+          const hit = stepAnomalyByGroup.get(key);
+          if (!hit) continue;
+          anomalySteps += hit.anomalySteps;
+          anomalyCount += hit.anomalyCount;
+          anomalyDangerCount += hit.anomalyDangerCount;
+          anomalyTotalDelaySec += hit.anomalyTotalDelaySec;
+          for (const [k, cnt] of Object.entries(hit.anomalyByKind)) {
+            anomalyByKind[k] = (anomalyByKind[k] || 0) + cnt;
+          }
+        }
+        if (anomalyCount <= 0) return m;
+        return {
+          ...m,
+          anomalySteps,
+          anomalyCount,
+          anomalyDangerCount,
+          anomalyTotalDelaySec: +anomalyTotalDelaySec.toFixed(1),
+          anomalyByKind,
+        };
+      };
+
       let sumCalls = 0;
       let sumTokens = 0;
       let sumCost = 0;
       let sumUnpriced = 0;
+      let sumAnomalyCount = 0;
+      let sumAnomalySteps = 0;
+      const sumAnomalyByKind = {};
+      const effectiveAnomalyModels = new Map();
       for (const m of displayModels) {
         sumCalls += Math.max(0, Number(m.calls || 0));
         sumTokens += Math.max(0, Number(m.totalTokens || 0));
@@ -22794,6 +23414,54 @@ const StepsDetailView = defineComponent({
         if (Number.isFinite(Number(m.costUsd))) {
           sumCost += Math.max(0, Number(m.costUsd));
         }
+        const effM = resolveEffectiveAnomalyModel(m);
+        effectiveAnomalyModels.set(m, effM);
+        const anomSum = resolveModelAnomalySummary(effM);
+        if (anomSum) {
+          sumAnomalyCount += anomSum.count;
+          sumAnomalySteps += anomSum.steps;
+          for (const [k, v] of anomSum.entries) {
+            sumAnomalyByKind[k] = (sumAnomalyByKind[k] || 0) + v;
+          }
+        }
+      }
+
+      if (sumAnomalyCount > 0) {
+        patchAttr(modelsAnomalyStripEl, 'hidden', false);
+        const sortedKinds = Object.entries(sumAnomalyByKind)
+          .filter(([, v]) => v > 0)
+          .sort((a, b) => b[1] - a[1]);
+        const stripSig = `${locale}:${sumAnomalyCount}:${sumAnomalySteps}:${sortedKinds.map(([k, v]) => `${k}=${v}`).join(',')}`;
+        if (stripSig !== lastAnomalyStripSig) {
+          lastAnomalyStripSig = stripSig;
+          patchText(
+            modelsAnomalyMetaEl,
+            t('steps.anomalySummaryMeta', { count: sumAnomalyCount, steps: sumAnomalySteps })
+          );
+          while (modelsAnomalyTagsEl.firstChild) {
+            modelsAnomalyTagsEl.removeChild(modelsAnomalyTagsEl.firstChild);
+          }
+          for (const [kind, cnt] of sortedKinds) {
+            const isDanger = kind === 'rate_limit' || kind === 'auth_or_model';
+            const btn = h('button', {
+              type: 'button',
+              className: `step-anomaly-tag smodel-anomaly-tag text-mono${isDanger ? ' is-danger' : ''}`,
+              text: formatAnomalyTagText(kind, cnt),
+              title: `${formatAnomalyKindLabel(kind)} · ${t('steps.anomalyModelClickHint')}`,
+              onclick: () => {
+                hideAnomalyTip();
+                selectedTableModels = ['__all__'];
+                onlyAnomalies = true;
+                anomalyKindFilter = kind;
+                uiStore.setState({ stepsSubTab: 'steps' });
+              },
+            });
+            modelsAnomalyTagsEl.appendChild(btn);
+          }
+        }
+      } else {
+        lastAnomalyStripSig = '';
+        patchAttr(modelsAnomalyStripEl, 'hidden', true);
       }
 
       if (displayModels.length === 0) {
@@ -22837,11 +23505,20 @@ const StepsDetailView = defineComponent({
               : [gk];
           const isActiveFit =
             hasMultipleModels && cardGroupKeys.some((k) => fitActiveKeySet.has(k));
-          return `${locale}:${m.displayText}:${m.displayTitle}:${m.calls}:${sumCalls}:${displayModels.length}:${m.avgTokPerSec}:${avgTtft}:${m.cacheHitPct}:${m.inputTokens}:${m.cacheReadTokens}:${m.thinkingTokens}:${m.responseTokens}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${isActiveFit}:${hasMultipleModels}`;
+          const effM = effectiveAnomalyModels.get(m) || m;
+          const anomSum = resolveModelAnomalySummary(effM);
+          const anomSig = anomSum
+            ? `${anomSum.count}:${anomSum.steps}:${anomSum.primaryKind}:${anomSum.severity}:${anomSum.totalDelaySec}`
+            : '';
+          return `${locale}:${m.displayText}:${m.displayTitle}:${m.calls}:${sumCalls}:${displayModels.length}:${m.avgTokPerSec}:${avgTtft}:${m.cacheHitPct}:${m.inputTokens}:${m.cacheReadTokens}:${m.thinkingTokens}:${m.responseTokens}:${m.totalTokens}:${m.costUsd}:${m.unpricedCalls}:${isActiveFit}:${hasMultipleModels}:${anomSig}`;
         },
         createRow: () => {
           const nameEl = h('strong', { className: 'smodel-name' });
           const callsPillEl = h('span', { className: 'smodel-calls-pill text-mono' });
+          const anomalyTagEl = h('span', {
+            className: 'step-anomaly-tag smodel-anomaly-tag text-mono',
+            hidden: true,
+          });
           const tokEl = h('span', { className: 'smodel-tok text-mono' });
           const costEl = h('strong', { className: 'smodel-cost text-mono' });
           const segBar = createFourSegmentBar();
@@ -22852,7 +23529,7 @@ const StepsDetailView = defineComponent({
 
           const cardEl = h('div', { className: 'smodel-card' }, [
             h('div', { className: 'smodel-head' }, [
-              h('div', { className: 'smodel-ident' }, [nameEl, callsPillEl]),
+              h('div', { className: 'smodel-ident' }, [nameEl, callsPillEl, anomalyTagEl]),
               h('div', { className: 'smodel-totals' }, [tokEl, costEl]),
             ]),
             segBar.el,
@@ -22861,7 +23538,7 @@ const StepsDetailView = defineComponent({
 
           return {
             el: cardEl,
-            refs: { nameEl, callsPillEl, tokEl, costEl, segBar, perfEl, splitEl },
+            refs: { nameEl, callsPillEl, anomalyTagEl, tokEl, costEl, segBar, perfEl, splitEl },
           };
         },
         updateRow: (refs, m, _idx, cardEl) => {
@@ -22885,6 +23562,29 @@ const StepsDetailView = defineComponent({
               ? t('steps.modelCallsShare', { calls, pct: callSharePct })
               : t('steps.modelCallsOnly', { calls })
           );
+
+          const effM = effectiveAnomalyModels.get(m) || m;
+          const anomSum = resolveModelAnomalySummary(effM);
+          patchAttr(refs.anomalyTagEl, 'hidden', !anomSum);
+          if (anomSum) {
+            patchText(refs.anomalyTagEl, anomSum.tagText);
+            patchClasses(refs.anomalyTagEl, { 'is-danger': anomSum.severity === 'danger' });
+            refs.anomalyTagEl.onmouseenter = () =>
+              showAnomalyTip(refs.anomalyTagEl, buildModelAnomalyDiagnostic(effM));
+            refs.anomalyTagEl.onmouseleave = hideAnomalyTip;
+            refs.anomalyTagEl.onclick = (e) => {
+              e?.stopPropagation?.();
+              hideAnomalyTip();
+              selectedTableModels = hasMultipleModels ? [...cardGroupKeys] : ['__all__'];
+              onlyAnomalies = true;
+              anomalyKindFilter = '';
+              uiStore.setState({ stepsSubTab: 'steps' });
+            };
+          } else {
+            refs.anomalyTagEl.onmouseenter = null;
+            refs.anomalyTagEl.onmouseleave = null;
+            refs.anomalyTagEl.onclick = null;
+          }
 
           const inTok = Math.max(0, Number(m.inputTokens || 0));
           const cacheTok = Math.max(0, Number(m.cacheReadTokens || 0));
@@ -22929,7 +23629,7 @@ const StepsDetailView = defineComponent({
           patchText(
             refs.perfEl,
             t('steps.modelPerfFoot', {
-              tps: formatMetric(m.avgTokPerSec, ' tok/s'),
+              tps: formatSpeedMetric(m.avgTokPerSec, ' tok/s'),
               ttft: formatMetric(resolvedAvgTtft, 's'),
               cache: resolvedCachePct,
             })
@@ -22990,7 +23690,9 @@ const StepsDetailView = defineComponent({
       (st) => st.stepsSubTab,
       (tab) => {
         hideTurnTip();
+        hideAnomalyTip();
         subTabSwitch.setValue(tab);
+        patchAttr(anomalyFilterBarEl, 'hidden', tab !== 'steps' || !onlyAnomalies);
         patchAttr(stepsScroll.el, 'hidden', tab !== 'steps');
         patchAttr(modelsScroll.el, 'hidden', tab !== 'models');
         if (getVisibleMonitorView() === 'steps' && latestSlice) {
@@ -23062,6 +23764,7 @@ const StepsDetailView = defineComponent({
         prevActiveView = uiSlice.activeView;
         if (uiSlice.activeView !== 'steps') {
           hideTurnTip();
+          hideAnomalyTip();
           fitPinnedWhileVisible = false;
           if (scopeChanged) isDirty = true;
           return;
@@ -23086,6 +23789,7 @@ const StepsDetailView = defineComponent({
     );
 
     onCleanup(() => {
+      modelsAnalyticsPane.removeEventListener('scroll', onModelsPaneScroll);
       unsubUi();
       unsubTelemetry();
       unsubView();
@@ -23111,6 +23815,9 @@ const StepsDetailView = defineComponent({
         stepsTheadRow,
         stepsTbody,
         turnTipEl,
+        anomalyTipEl,
+        anomalyFilterBarEl,
+        modelsAnomalyStripEl,
         modelsListEl,
         inlineScopeSelect,
         stepsModelSelect,
