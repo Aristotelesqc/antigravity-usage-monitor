@@ -199,7 +199,13 @@ export function patchWindowsShellOpenCommand(rawValue, { enabled = true } = {}) 
 function isLinuxAntigravityDesktopLeaf(leaf) {
   const lower = String(leaf || '').trim().toLowerCase();
   if (!lower || lower.includes('ide')) return false;
-  return /^antigravity(?:$|[-_.\d]|(?:\.appimage$))/i.test(lower);
+  return /^(?:google[-_])?antigravity(?:$|[-_.\d]|(?:\.appimage$))/i.test(lower);
+}
+
+function isWindowsVendorSubdirName(dirName) {
+  const lower = String(dirName || '').trim().toLowerCase();
+  if (!lower) return false;
+  return lower.includes('antigravity') || /^google(?:\b|[\s_-]|$)/i.test(lower);
 }
 
 function splitLinuxExecTokens(cmdBody) {
@@ -254,7 +260,17 @@ export function patchLinuxDesktopEntryText(rawText, { enabled = true } = {}) {
       binIdx = 1;
       while (binIdx < tokens.length) {
         const unquoted = stripOuterQuotes(tokens[binIdx].raw);
-        if (unquoted === '-S' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(unquoted)) {
+        if (unquoted === '-u' || unquoted === '--unset') {
+          binIdx += 2;
+          continue;
+        }
+        if (
+          unquoted === '-S' ||
+          unquoted === '-i' ||
+          unquoted === '--ignore-environment' ||
+          unquoted.startsWith('--unset=') ||
+          /^[A-Za-z_][A-Za-z0-9_]*=/.test(unquoted)
+        ) {
           binIdx += 1;
           continue;
         }
@@ -280,6 +296,15 @@ export function patchLinuxDesktopEntryText(rawText, { enabled = true } = {}) {
       }
       configured = true;
       changed = true;
+      const doubleDashMatch = rest.match(/^(.*?)(?:^|\s)(--(?:\s+.*)?)$/);
+      if (doubleDashMatch) {
+        const beforeDash = doubleDashMatch[1].trim();
+        const fromDash = doubleDashMatch[2].trim();
+        const mid = beforeDash
+          ? `${beforeDash} ${REMOTE_DEBUG_LAUNCH_FLAG}`
+          : REMOTE_DEBUG_LAUNCH_FLAG;
+        return `${prefix}${headThroughExe} ${mid} ${fromDash}`;
+      }
       const fieldCodeMatch = rest.match(/^(.*?)\s*(%[fFuUdDnNickvm](?:\s+%[fFuUdDnNickvm])*)\s*$/);
       if (fieldCodeMatch) {
         const beforeCodes = fieldCodeMatch[1].trim();
@@ -309,8 +334,24 @@ export function patchLinuxDesktopEntryText(rawText, { enabled = true } = {}) {
   };
 }
 
+function stripAppImageMountPathEntries(rawVal, { omitIfEmpty = false } = {}) {
+  const str = String(rawVal ?? '');
+  if (!str || !str.includes('/.mount_')) {
+    return str;
+  }
+  const parts = str.split(':').filter((entry) => {
+    const trimmed = entry.trim();
+    return trimmed && !trimmed.startsWith('/tmp/.mount_') && !trimmed.includes('/.mount_');
+  });
+  if (parts.length === 0 && omitIfEmpty) {
+    return null;
+  }
+  return parts.join(':');
+}
+
 /**
  * 清理 Sidecar / MCP 子进程继承的宿主会话私有环境变量，确保重拉后的客户端运行于纯净桌面上下文。
+ * 同时剔除 Linux AppImage 挂载期注入的临时变量与 `/tmp/.mount_*` 路径，防止旧挂载卸载后新进程加载失败。
  *
  * @param {Record<string, string|undefined>} [baseEnv=process.env]
  * @returns {Record<string, string>}
@@ -320,10 +361,24 @@ export function buildSanitizedDesktopRelaunchEnv(baseEnv = process.env) {
   for (const [key, val] of Object.entries(baseEnv || {})) {
     if (val === undefined || val === null) continue;
     if (
-      /^(?:ANTIGRAVITY_|CHROME_DEVTOOLS_MCP_|USAGE_MONITOR_|ELECTRON_RUN_AS_NODE$|NODE_OPTIONS$)/i.test(
+      /^(?:ANTIGRAVITY_|CHROME_DEVTOOLS_MCP_|USAGE_MONITOR_|ELECTRON_RUN_AS_NODE$|NODE_OPTIONS$|APPIMAGE$|APPDIR$|OWD$|ARGV0$|APPIMAGE_EXTRACT_AND_RUN$)/i.test(
         key
       )
     ) {
+      continue;
+    }
+    if (key === 'LD_LIBRARY_PATH') {
+      const cleanedLib = stripAppImageMountPathEntries(val, { omitIfEmpty: true });
+      if (cleanedLib !== null) {
+        clean[key] = cleanedLib;
+      }
+      continue;
+    }
+    if (key === 'PATH' && String(val).includes('/.mount_')) {
+      const cleanedPath = stripAppImageMountPathEntries(val, { omitIfEmpty: false });
+      if (cleanedPath) {
+        clean[key] = cleanedPath;
+      }
       continue;
     }
     clean[key] = String(val);
@@ -440,9 +495,11 @@ export function resolveDesktopHostExecutable({
   if (platform === 'win32') {
     const localAppData = env?.LOCALAPPDATA || join(homeDir, 'AppData', 'Local');
     const programFiles = env?.ProgramFiles || 'C:\\Program Files';
+    const programFilesX86 = String(env?.['ProgramFiles(x86)'] || '').trim();
     const winCandidates = [
       join(localAppData, 'Programs', 'Antigravity', 'Antigravity.exe'),
       join(programFiles, 'Antigravity', 'Antigravity.exe'),
+      ...(programFilesX86 ? [join(programFilesX86, 'Antigravity', 'Antigravity.exe')] : []),
       join(localAppData, 'Antigravity', 'Antigravity.exe'),
     ];
     for (const cand of winCandidates) {
@@ -469,9 +526,12 @@ export function resolveDesktopHostExecutable({
   } else {
     const linuxCandidates = [
       '/opt/Antigravity/antigravity',
+      '/opt/Antigravity/Antigravity',
       '/opt/antigravity/antigravity',
       '/usr/share/antigravity/antigravity',
       '/usr/bin/antigravity',
+      '/usr/bin/google-antigravity',
+      '/usr/local/bin/antigravity',
       join(homeDir, '.local', 'bin', 'antigravity'),
     ];
     for (const cand of linuxCandidates) {
@@ -577,11 +637,12 @@ export function inspectWindowsLnkBuffer(buf) {
 
 /**
  * 纯 Node.js 零子进程快速扫描当前机器上的 `Antigravity.exe` 快捷方式配置状态（耗时通常 `< 2ms`）。
- * 桌面与任务栏严格仅扫描顶层 `.lnk`（绝不进入用户项目文件夹或 `node_modules`），开始菜单仅检查顶层及 `Antigravity*` 一级子目录。
+ * 桌面与任务栏严格仅扫描顶层 `.lnk`（绝不进入用户项目文件夹或 `node_modules`），开始菜单仅检查顶层及 Antigravity/Google 一级厂商子目录。
  *
  * @param {{
  *   env?: Record<string, string|undefined>,
  *   homeDir?: string,
+ *   extraDirs?: string[],
  *   fsOps?: {
  *     readdirFn?: typeof readdirSync,
  *     statFn?: typeof statSync,
@@ -592,6 +653,7 @@ export function inspectWindowsLnkBuffer(buf) {
 export function probeWindowsShortcutsFast({
   env = process.env,
   homeDir = homedir(),
+  extraDirs = [],
   fsOps = null,
 } = {}) {
   const readdirFn = fsOps?.readdirFn || readdirSync;
@@ -605,6 +667,12 @@ export function probeWindowsShortcutsFast({
   const programData = String(env?.ProgramData || 'C:\\ProgramData').trim();
 
   const flatDirs = [];
+  if (Array.isArray(extraDirs)) {
+    for (const d of extraDirs) {
+      const clean = String(d || '').trim();
+      if (clean) flatDirs.push(clean);
+    }
+  }
   if (userProfile) {
     flatDirs.push(pathWin32.join(userProfile, 'Desktop'), pathWin32.join(userProfile, zhDesktop));
   }
@@ -637,7 +705,7 @@ export function probeWindowsShortcutsFast({
   const candidateLnks = [];
   const seenLnks = new Set();
 
-  const collectTopLevelLnks = (dirPath, expandAntigravitySubdirs = false) => {
+  const collectTopLevelLnks = (dirPath, expandVendorSubdirs = false) => {
     if (!dirPath) return;
     const normDir = dirPath.toLowerCase();
     if (seenDirs.has(normDir)) return;
@@ -659,9 +727,9 @@ export function probeWindowsShortcutsFast({
           candidateLnks.push(full);
         }
       } else if (
-        expandAntigravitySubdirs &&
+        expandVendorSubdirs &&
         ent.isDirectory?.() &&
-        name.toLowerCase().startsWith('antigravity')
+        isWindowsVendorSubdirName(name)
       ) {
         collectTopLevelLnks(pathWin32.join(dirPath, name), false);
       }
@@ -708,52 +776,59 @@ $enableFlag = $env:AGY_LAUNCH_ENABLED -eq '1'
 $updated = New-Object System.Collections.Generic.List[string]
 $configured = New-Object System.Collections.Generic.List[string]
 $readOnly = New-Object System.Collections.Generic.List[string]
+$discoveredDirs = New-Object System.Collections.Generic.List[string]
 $ws = $null
+$userDesktopDir = [Environment]::GetFolderPath('Desktop')
+$commonDesktopDir = [Environment]::GetFolderPath('CommonDesktopDirectory')
 $userProgramsDir = [Environment]::GetFolderPath('Programs')
+$commonProgramsDir = [Environment]::GetFolderPath('CommonPrograms')
+$userStartupDir = [Environment]::GetFolderPath('Startup')
 $zhDesktop = ([string][char]0x684C + [string][char]0x9762)
 
 $flatSpecs = New-Object System.Collections.Generic.List[object]
 $seenScanDir = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
-function Add-ScanDir([string]$dirPath, [bool]$isCommon, [string]$kind, [bool]$expandVendorSubdir) {
+function Add-ScanDir([string]$dirPath, [bool]$isCommon, [string]$kind, [bool]$expandVendorSubdir, [bool]$recordDiscovered) {
   if (-not $dirPath) { return }
   if (-not $seenScanDir.Add($dirPath)) { return }
   $exists = $false
   try { $exists = [bool](Test-Path -LiteralPath $dirPath -ErrorAction SilentlyContinue) } catch { $exists = $false }
   if (-not $exists) { return }
   $flatSpecs.Add(@{ Dir = $dirPath; IsCommon = $isCommon; Kind = $kind })
+  if ($recordDiscovered) { $discoveredDirs.Add($dirPath) }
   if ($expandVendorSubdir) {
     try {
-      foreach ($sub in @(Get-ChildItem -LiteralPath $dirPath -Directory -Filter 'Antigravity*' -ErrorAction SilentlyContinue)) {
-        if ($sub -and $sub.FullName -and $seenScanDir.Add([string]$sub.FullName)) {
+      foreach ($sub in @(Get-ChildItem -LiteralPath $dirPath -Directory -ErrorAction SilentlyContinue)) {
+        if ($sub -and $sub.Name -and ($sub.Name -match '(?i)antigravity|^google(?:\\b|[\\s_-]|$)') -and $sub.FullName -and $seenScanDir.Add([string]$sub.FullName)) {
           $flatSpecs.Add(@{ Dir = [string]$sub.FullName; IsCommon = $isCommon; Kind = $kind })
+          if ($recordDiscovered) { $discoveredDirs.Add([string]$sub.FullName) }
         }
       }
     } catch {}
   }
 }
 
+Add-ScanDir $userDesktopDir $false 'desktop' $false $true
 foreach ($d in @(
-  [Environment]::GetFolderPath('Desktop'),
   $(if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'Desktop' } else { '' }),
   $(if ($env:USERPROFILE) { Join-Path $env:USERPROFILE $zhDesktop } else { '' })
 )) {
-  Add-ScanDir $d $false 'desktop' $false
+  Add-ScanDir $d $false 'desktop' $false $false
 }
 foreach ($od in @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial)) {
   if ($od) {
-    Add-ScanDir (Join-Path $od 'Desktop') $false 'desktop' $false
-    Add-ScanDir (Join-Path $od $zhDesktop) $false 'desktop' $false
+    Add-ScanDir (Join-Path $od 'Desktop') $false 'desktop' $false $false
+    Add-ScanDir (Join-Path $od $zhDesktop) $false 'desktop' $false $false
   }
 }
-Add-ScanDir $userProgramsDir $false 'programs' $true
-Add-ScanDir ([Environment]::GetFolderPath('StartMenu')) $false 'startmenu' $false
-Add-ScanDir ([Environment]::GetFolderPath('Startup')) $false 'startup' $false
+Add-ScanDir $userProgramsDir $false 'programs' $true $true
+Add-ScanDir ([Environment]::GetFolderPath('StartMenu')) $false 'startmenu' $false $false
+Add-ScanDir $userStartupDir $false 'startup' $false $true
 if ($env:APPDATA) {
-  Add-ScanDir (Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar') $false 'taskbar' $false
+  Add-ScanDir (Join-Path $env:APPDATA 'Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar') $false 'taskbar' $false $false
 }
-Add-ScanDir ([Environment]::GetFolderPath('CommonDesktopDirectory')) $true 'desktop' $false
-Add-ScanDir ([Environment]::GetFolderPath('CommonPrograms')) $true 'programs' $true
+Add-ScanDir $commonDesktopDir $true 'desktop' $false $true
+Add-ScanDir $commonProgramsDir $true 'programs' $true $true
 
 $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($spec in $flatSpecs) {
@@ -829,14 +904,19 @@ foreach ($spec in $flatSpecs) {
   }
 }
 
-$runSubPath = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run'
-try {
-  $runReadKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($runSubPath, $false)
-  if ($runReadKey) {
+$runTargets = @(
+  @{ Root = [Microsoft.Win32.Registry]::CurrentUser; Label = 'HKCU'; SubPath = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run' },
+  @{ Root = [Microsoft.Win32.Registry]::LocalMachine; Label = 'HKLM'; SubPath = 'Software\\Microsoft\\Windows\\CurrentVersion\\Run' },
+  @{ Root = [Microsoft.Win32.Registry]::LocalMachine; Label = 'HKLM'; SubPath = 'Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Run' }
+)
+foreach ($rt in $runTargets) {
+  try {
+    $runReadKey = $rt.Root.OpenSubKey($rt.SubPath, $false)
+    if (-not $runReadKey) { continue }
     $runNames = @($runReadKey.GetValueNames())
     $runReadKey.Close()
     foreach ($valName in $runNames) {
-      $rk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($runSubPath, $false)
+      $rk = $rt.Root.OpenSubKey($rt.SubPath, $false)
       if (-not $rk) { continue }
       $rawCmd = [string]$rk.GetValue($valName, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
       $rk.Close()
@@ -846,94 +926,125 @@ try {
       $restPart = [string]$Matches[3]
       if ([System.IO.Path]::GetFileName($exeCandidate) -ine 'Antigravity.exe') { continue }
       $quotedExe = if ($Matches[1] -or $exeCandidate -match '\\s') { '"' + $exeCandidate + '"' } else { $exeCandidate }
+      $entryId = if ($rt.Label -eq 'HKLM') { "HKLM:Run:$($rt.SubPath)|$valName" } else { "HKCU:Run:$valName" }
       if ($enableFlag) {
         if ($restPart -match '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
-          $configured.Add("HKCU:Run:$valName")
+          $configured.Add($entryId)
           continue
         }
         $nextRest = ($restPart.Trim() + ' --remote-debugging-port=0').Trim()
         $nextVal = "$quotedExe $nextRest"
+        $saved = $false
         try {
-          $wk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($runSubPath, $true)
+          $wk = $rt.Root.OpenSubKey($rt.SubPath, $true)
           if ($wk) {
             $wk.SetValue($valName, $nextVal, [Microsoft.Win32.RegistryValueKind]::String)
             $wk.Close()
-            $updated.Add("HKCU:Run:$valName")
-            $configured.Add("HKCU:Run:$valName")
+            $saved = $true
           }
         } catch {}
+        if ($saved) {
+          $updated.Add($entryId)
+          $configured.Add($entryId)
+        } elseif ($rt.Label -eq 'HKLM') {
+          $readOnly.Add($entryId)
+        }
       } else {
         $strippedRest = ([regex]::Replace($restPart, '(?:^|\\s+)--remote-debugging-port=(?:"0"|''0''|0)(?=\\s|$)', ' ')).Trim()
         $nextVal = if ($strippedRest) { "$quotedExe $strippedRest" } else { $quotedExe }
         if ($nextVal -ne $rawCmd.Trim()) {
+          $saved = $false
           try {
-            $wk = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($runSubPath, $true)
+            $wk = $rt.Root.OpenSubKey($rt.SubPath, $true)
             if ($wk) {
               $wk.SetValue($valName, $nextVal, [Microsoft.Win32.RegistryValueKind]::String)
               $wk.Close()
-              $updated.Add("HKCU:Run:$valName")
+              $saved = $true
             }
           } catch {}
+          if ($saved) {
+            $updated.Add($entryId)
+          } elseif ($rt.Label -eq 'HKLM') {
+            $readOnly.Add($entryId)
+          }
         }
         if ($strippedRest -match '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
-          $configured.Add("HKCU:Run:$valName")
+          $configured.Add($entryId)
         }
       }
     }
-  }
-} catch {}
+  } catch {}
+}
 
 $exactClassSubKeys = @(
   'Software\\Classes\\antigravity\\shell\\open\\command',
   'Software\\Classes\\Applications\\Antigravity.exe\\shell\\open\\command',
   'Software\\Classes\\AntigravitySourceFile\\shell\\open\\command'
 )
-foreach ($relSubKey in $exactClassSubKeys) {
-  try {
-    $rOpen = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($relSubKey, $false)
-    if (-not $rOpen) { continue }
-    $rawOpen = [string]$rOpen.GetValue('', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-    $rOpen.Close()
-    if (-not $rawOpen) { continue }
-    if ($rawOpen -notmatch '^\\s*(?:"([^"]+)"|([^\\s"]+))(.*)$') { continue }
-    $exeCand = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
-    $restOpen = ([string]$Matches[3]).Trim()
-    if ([System.IO.Path]::GetFileName($exeCand) -ine 'Antigravity.exe') { continue }
-    $quotedOpenExe = if ($Matches[1] -or $exeCand -match '\\s') { '"' + $exeCand + '"' } else { $exeCand }
-    $fullKeyName = "HKEY_CURRENT_USER\\$relSubKey"
-    if ($enableFlag) {
-      if ($restOpen -match '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
-        $configured.Add($fullKeyName)
-        continue
-      }
-      $nextOpen = if ($restOpen) { "$quotedOpenExe --remote-debugging-port=0 $restOpen" } else { "$quotedOpenExe --remote-debugging-port=0" }
-      try {
-        $wOpen = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($relSubKey, $true)
-        if ($wOpen) {
-          $wOpen.SetValue('', $nextOpen, [Microsoft.Win32.RegistryValueKind]::String)
-          $wOpen.Close()
-          $updated.Add($fullKeyName)
+$classRoots = @(
+  @{ Root = [Microsoft.Win32.Registry]::CurrentUser; Label = 'HKCU'; FullPrefix = 'HKEY_CURRENT_USER' },
+  @{ Root = [Microsoft.Win32.Registry]::LocalMachine; Label = 'HKLM'; FullPrefix = 'HKEY_LOCAL_MACHINE' }
+)
+foreach ($cr in $classRoots) {
+  foreach ($relSubKey in $exactClassSubKeys) {
+    try {
+      $rOpen = $cr.Root.OpenSubKey($relSubKey, $false)
+      if (-not $rOpen) { continue }
+      $rawOpen = [string]$rOpen.GetValue('', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+      $rOpen.Close()
+      if (-not $rawOpen) { continue }
+      if ($rawOpen -notmatch '^\\s*(?:"([^"]+)"|([^\\s"]+))(.*)$') { continue }
+      $exeCand = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+      $restOpen = ([string]$Matches[3]).Trim()
+      if ([System.IO.Path]::GetFileName($exeCand) -ine 'Antigravity.exe') { continue }
+      $quotedOpenExe = if ($Matches[1] -or $exeCand -match '\\s') { '"' + $exeCand + '"' } else { $exeCand }
+      $fullKeyName = if ($cr.Label -eq 'HKLM') { "HKLM:Class:$relSubKey" } else { "$($cr.FullPrefix)\\$relSubKey" }
+      if ($enableFlag) {
+        if ($restOpen -match '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
           $configured.Add($fullKeyName)
+          continue
         }
-      } catch {}
-    } else {
-      $strippedOpen = ([regex]::Replace($restOpen, '(?:^|\\s+)--remote-debugging-port=(?:"0"|''0''|0)(?=\\s|$)', ' ')).Trim()
-      $nextOpen = if ($strippedOpen) { "$quotedOpenExe $strippedOpen" } else { $quotedOpenExe }
-      if ($nextOpen -ne $rawOpen.Trim()) {
+        $nextOpen = if ($restOpen) { "$quotedOpenExe --remote-debugging-port=0 $restOpen" } else { "$quotedOpenExe --remote-debugging-port=0" }
+        $saved = $false
         try {
-          $wOpen = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($relSubKey, $true)
+          $wOpen = $cr.Root.OpenSubKey($relSubKey, $true)
           if ($wOpen) {
             $wOpen.SetValue('', $nextOpen, [Microsoft.Win32.RegistryValueKind]::String)
             $wOpen.Close()
-            $updated.Add($fullKeyName)
+            $saved = $true
           }
         } catch {}
+        if ($saved) {
+          $updated.Add($fullKeyName)
+          $configured.Add($fullKeyName)
+        } elseif ($cr.Label -eq 'HKLM') {
+          $readOnly.Add($fullKeyName)
+        }
+      } else {
+        $strippedOpen = ([regex]::Replace($restOpen, '(?:^|\\s+)--remote-debugging-port=(?:"0"|''0''|0)(?=\\s|$)', ' ')).Trim()
+        $nextOpen = if ($strippedOpen) { "$quotedOpenExe $strippedOpen" } else { $quotedOpenExe }
+        if ($nextOpen -ne $rawOpen.Trim()) {
+          $saved = $false
+          try {
+            $wOpen = $cr.Root.OpenSubKey($relSubKey, $true)
+            if ($wOpen) {
+              $wOpen.SetValue('', $nextOpen, [Microsoft.Win32.RegistryValueKind]::String)
+              $wOpen.Close()
+              $saved = $true
+            }
+          } catch {}
+          if ($saved) {
+            $updated.Add($fullKeyName)
+          } elseif ($cr.Label -eq 'HKLM') {
+            $readOnly.Add($fullKeyName)
+          }
+        }
+        if ($strippedOpen -match '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
+          $configured.Add($fullKeyName)
+        }
       }
-      if ($strippedOpen -match '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
-        $configured.Add($fullKeyName)
-      }
-    }
-  } catch {}
+    } catch {}
+  }
 }
 
 [pscustomobject]@{
@@ -941,8 +1052,79 @@ foreach ($relSubKey in $exactClassSubKeys) {
   updatedPaths = @($updated)
   configuredPaths = @($configured)
   readOnlyPaths = @($readOnly)
+  discoveredDirs = @($discoveredDirs)
 } | ConvertTo-Json -Compress
 `.trim();
+
+const cachedDiscoveredWinDirsByHome = new Map();
+
+function getCachedWinDiscoveredDirs(homeDir) {
+  const key = String(homeDir || '').trim().toLowerCase();
+  return cachedDiscoveredWinDirsByHome.get(key) || [];
+}
+
+function rememberWinDiscoveredDirs(homeDir, dirs) {
+  if (!Array.isArray(dirs) || dirs.length === 0) return;
+  const key = String(homeDir || '').trim().toLowerCase();
+  const seen = new Set();
+  const list = [];
+  for (const d of dirs) {
+    const clean = String(d || '').trim();
+    if (!clean) continue;
+    const norm = clean.toLowerCase();
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      list.push(clean);
+    }
+  }
+  if (list.length > 0) {
+    cachedDiscoveredWinDirsByHome.set(key, list);
+  }
+}
+
+function collectLinuxDesktopCandidates(dirPath, ops, { filterByName = false, fallbackNames = [] } = {}) {
+  const files = [];
+  const seen = new Set();
+  const joinDir = (name) =>
+    dirPath.startsWith('/')
+      ? `${dirPath.replace(/\/+$/, '')}/${name}`
+      : join(dirPath, name);
+  const addName = (name) => {
+    const clean = String(name || '').trim();
+    if (!clean || !clean.toLowerCase().endsWith('.desktop')) return;
+    if (filterByName && !clean.toLowerCase().includes('antigravity')) return;
+    const full = joinDir(clean);
+    if (!seen.has(full)) {
+      seen.add(full);
+      files.push({ name: clean, full });
+    }
+  };
+
+  try {
+    const rawEntries = ops.readdirFn(dirPath);
+    if (Array.isArray(rawEntries)) {
+      let count = 0;
+      for (const entry of rawEntries) {
+        const name = typeof entry === 'string' ? entry : String(entry?.name || '');
+        if (!name || !name.toLowerCase().endsWith('.desktop')) continue;
+        count += 1;
+        if (count > 256) break;
+        addName(name);
+      }
+    }
+  } catch {
+    // 目录不存在或无读取权限时退回显式候选探测
+  }
+
+  for (const fallback of fallbackNames) {
+    const full = joinDir(fallback);
+    if (!seen.has(full) && ops.existsFn(full)) {
+      seen.add(full);
+      files.push({ name: fallback, full });
+    }
+  }
+  return files;
+}
 
 /**
  * 自动同步当前系统下用户空间启动入口（Windows `.lnk` / `HKCU:Run` / `HKCU:Classes`、Linux `.desktop`）中的 `--remote-debugging-port=0`。
@@ -1005,7 +1187,12 @@ export async function ensureDesktopLaunchEntriesConfigured({
   if (platform === 'win32') {
     // 稳态零子进程快检：当调试端口已活跃或处于周期复检且所有 `.lnk` 字节内均已含参数时，直接返回（<2ms，不拉起 PowerShell）
     if (!execFileFn && fastCheckIfActive) {
-      const fast = probeWindowsShortcutsFast({ env, homeDir, fsOps: ops });
+      const fast = probeWindowsShortcutsFast({
+        env,
+        homeDir,
+        extraDirs: getCachedWinDiscoveredDirs(homeDir),
+        fsOps: ops,
+      });
       if (enabled && fast.allConfigured) {
         return {
           checked: true,
@@ -1060,6 +1247,9 @@ export async function ensureDesktopLaunchEntriesConfigured({
       const readOnlyPaths = Array.isArray(parsed?.readOnlyPaths)
         ? parsed.readOnlyPaths.map(String).filter(Boolean)
         : [];
+      if (Array.isArray(parsed?.discoveredDirs) && parsed.discoveredDirs.length > 0) {
+        rememberWinDiscoveredDirs(homeDir, parsed.discoveredDirs);
+      }
       const hasReadOnlyShortcuts = enabled && readOnlyPaths.length > 0;
       return {
         checked: true,
@@ -1090,46 +1280,116 @@ export async function ensureDesktopLaunchEntriesConfigured({
   if (platform === 'linux') {
     const dataHome = env?.XDG_DATA_HOME || join(homeDir, '.local', 'share');
     const configHome = env?.XDG_CONFIG_HOME || join(homeDir, '.config');
-    const userDesktopFile = join(dataHome, 'applications', 'antigravity.desktop');
-    const systemDesktopFiles = [
-      '/usr/share/applications/antigravity.desktop',
-      '/usr/local/share/applications/antigravity.desktop',
-    ];
-    const autostartDesktopFile = join(configHome, 'autostart', 'antigravity.desktop');
+    const userAppsDir = join(dataHome, 'applications');
+    const userAutostartDir = join(configHome, 'autostart');
+    const systemAppsDirs = [];
+    const seenSysDirs = new Set([userAppsDir]);
+    const addSysAppsDir = (d) => {
+      const clean = String(d || '').trim();
+      if (!clean || seenSysDirs.has(clean)) return;
+      seenSysDirs.add(clean);
+      systemAppsDirs.push(clean);
+    };
+    addSysAppsDir('/usr/share/applications');
+    addSysAppsDir('/usr/local/share/applications');
+    const rawDataDirs = String(env?.XDG_DATA_DIRS || '').trim();
+    if (rawDataDirs) {
+      const dataDirParts = /^[A-Za-z]:[\\/]/.test(rawDataDirs)
+        ? rawDataDirs.split(';')
+        : rawDataDirs.split(':');
+      for (const base of dataDirParts) {
+        const cleanBase = base.trim();
+        if (cleanBase) {
+          addSysAppsDir(
+            cleanBase.startsWith('/')
+              ? `${cleanBase.replace(/\/+$/, '')}/applications`
+              : join(cleanBase, 'applications')
+          );
+        }
+      }
+    }
 
     const updatedPaths = [];
     const configuredPaths = [];
+    const handledUserFileNames = new Set();
+
+    const readDesktopTextSafe = (filePath) => {
+      try {
+        const st = ops.statFn(filePath);
+        if (st && Number(st.size) > 65536) return '';
+      } catch {
+        // 允许单测 mock 仅实现 existsFn/readFn 而不提供 statFn
+      }
+      try {
+        return String(ops.readFn(filePath, 'utf8') || '');
+      } catch {
+        return '';
+      }
+    };
 
     try {
-      let baseUserText = '';
-      if (ops.existsFn(userDesktopFile)) {
-        baseUserText = String(ops.readFn(userDesktopFile, 'utf8') || '');
-      } else if (enabled) {
-        const sysSource = systemDesktopFiles.find((p) => ops.existsFn(p));
-        if (sysSource) {
-          baseUserText = String(ops.readFn(sysSource, 'utf8') || '');
-        }
-      }
-      if (baseUserText) {
-        const patched = patchLinuxDesktopEntryText(baseUserText, { enabled });
+      const userCandidates = collectLinuxDesktopCandidates(userAppsDir, ops, {
+        filterByName: false,
+        fallbackNames: ['antigravity.desktop'],
+      });
+      for (const cand of userCandidates) {
+        const rawText = readDesktopTextSafe(cand.full);
+        if (!rawText) continue;
+        const patched = patchLinuxDesktopEntryText(rawText, { enabled });
+        if (!patched.matched) continue;
+        handledUserFileNames.add(cand.name.toLowerCase());
         if (patched.changed) {
-          writeTextFileAtomically(userDesktopFile, patched.text, ops);
-          updatedPaths.push(userDesktopFile);
+          writeTextFileAtomically(cand.full, patched.text, ops);
+          updatedPaths.push(cand.full);
         }
         if (patched.configured) {
-          configuredPaths.push(userDesktopFile);
+          configuredPaths.push(cand.full);
         }
       }
 
-      if (ops.existsFn(autostartDesktopFile)) {
-        const autoRaw = String(ops.readFn(autostartDesktopFile, 'utf8') || '');
+      if (enabled) {
+        for (const sysDir of systemAppsDirs) {
+          const sysCandidates = collectLinuxDesktopCandidates(sysDir, ops, {
+            filterByName: true,
+            fallbackNames: ['antigravity.desktop'],
+          });
+          for (const cand of sysCandidates) {
+            const nameKey = cand.name.toLowerCase();
+            if (handledUserFileNames.has(nameKey)) continue;
+            const rawText = readDesktopTextSafe(cand.full);
+            if (!rawText) continue;
+            const patched = patchLinuxDesktopEntryText(rawText, { enabled: true });
+            if (!patched.matched) continue;
+            handledUserFileNames.add(nameKey);
+            if (patched.changed) {
+              const targetUserFile = join(userAppsDir, cand.name);
+              writeTextFileAtomically(targetUserFile, patched.text, ops);
+              updatedPaths.push(targetUserFile);
+              if (patched.configured) {
+                configuredPaths.push(targetUserFile);
+              }
+            } else if (patched.configured) {
+              configuredPaths.push(cand.full);
+            }
+          }
+        }
+      }
+
+      const autostartCandidates = collectLinuxDesktopCandidates(userAutostartDir, ops, {
+        filterByName: false,
+        fallbackNames: ['antigravity.desktop'],
+      });
+      for (const cand of autostartCandidates) {
+        const autoRaw = readDesktopTextSafe(cand.full);
+        if (!autoRaw) continue;
         const patchedAuto = patchLinuxDesktopEntryText(autoRaw, { enabled });
+        if (!patchedAuto.matched) continue;
         if (patchedAuto.changed) {
-          writeTextFileAtomically(autostartDesktopFile, patchedAuto.text, ops);
-          updatedPaths.push(autostartDesktopFile);
+          writeTextFileAtomically(cand.full, patchedAuto.text, ops);
+          updatedPaths.push(cand.full);
         }
         if (patchedAuto.configured) {
-          configuredPaths.push(autostartDesktopFile);
+          configuredPaths.push(cand.full);
         }
       }
 
@@ -1221,13 +1481,33 @@ async function discoverRunningHostExecutable({
       if (bundlePath && /\.app$/i.test(bundlePath)) {
         return {
           found: true,
-          kind: 'desktop',
+          kind: /antigravity\s*ide\.app$/i.test(bundlePath) ? 'ide' : 'desktop',
           executablePath: bundlePath,
           appBundlePath: bundlePath,
         };
       }
     } catch {
-      // 忽略 AppleScript 探测异常
+      // 忽略 AppleScript 探测异常（例如 TCC 限制），回退无权限依赖的 ps 扫描
+    }
+    try {
+      const psOut = await runner('ps', ['-axo', 'comm='], { timeoutMs: 3000 });
+      for (const rawLine of String(psOut || '').split(/\r?\n/)) {
+        const line = rawLine.trim();
+        const m = line.match(/^(\/.+?\.app)\/Contents\/MacOS\/([^/]+)$/i);
+        if (!m) continue;
+        const bundlePath = m[1];
+        const binLeaf = m[2];
+        if (!/antigravity/i.test(bundlePath) && !/antigravity/i.test(binLeaf)) continue;
+        if (/helper/i.test(binLeaf)) continue;
+        return {
+          found: true,
+          kind: /antigravity\s*ide\.app$/i.test(bundlePath) ? 'ide' : 'desktop',
+          executablePath: line,
+          appBundlePath: bundlePath,
+        };
+      }
+    } catch {
+      // 忽略 ps 探测异常
     }
   } else if (platform === 'linux') {
     if (!execFileFn && typeof process.getuid === 'function') {
@@ -1239,7 +1519,9 @@ async function discoverRunningHostExecutable({
           try {
             const st = statSync(procDir);
             if (st.uid !== myUid) continue;
-            const exeTarget = String(readlinkSync(`${procDir}/exe`) || '').trim();
+            const exeTarget = String(readlinkSync(`${procDir}/exe`) || '')
+              .trim()
+              .replace(/\s+\(deleted\)$/, '');
             if (!exeTarget) continue;
             const leaf = basename(exeTarget);
             if (!isLinuxAntigravityDesktopLeaf(leaf)) continue;
@@ -1328,13 +1610,14 @@ export function buildWindowsRelaunchInnerScript(
     .join(', ');
 
   return `
+param([string]$HostElevated = '0')
 Start-Sleep -Milliseconds 480
 $exe = ${psSingleQuote(executablePath)}
 $procName = ${psSingleQuote(procName)}
 $psExe = ${psSingleQuote(psExe)}
 $staleList = @(${portLiterals})
 $readOnlyShortcuts = @(${roLiterals})
-$wasHostElevated = $env:AGY_HOST_WAS_ELEVATED -eq '1'
+$wasHostElevated = ($HostElevated -eq '1') -or ($env:AGY_HOST_WAS_ELEVATED -eq '1')
 $isSelfElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $mySid = (Get-Process -Id $PID).SessionId
 
@@ -1345,20 +1628,67 @@ if (-not $exe -or -not (Test-Path -LiteralPath $exe)) {
 
 function Patch-ShortcutList($paths) {
   if (-not $paths -or $paths.Count -eq 0) { return }
-  try {
-    $ws = New-Object -ComObject WScript.Shell
-    foreach ($lnk in $paths) {
-      if (-not $lnk -or -not (Test-Path -LiteralPath $lnk)) { continue }
+  $ws = $null
+  foreach ($item in $paths) {
+    if (-not $item) { continue }
+    if ($item.StartsWith('HKLM:Run:')) {
       try {
-        $sc = $ws.CreateShortcut($lnk)
-        $cur = [string]$sc.Arguments
-        if ($cur -notmatch '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
-          $sc.Arguments = ($cur.Trim() + ' --remote-debugging-port=0').Trim()
-          $sc.Save()
+        $restKey = $item.Substring(9)
+        $sepIdx = $restKey.IndexOf('|')
+        if ($sepIdx -gt 0) {
+          $subPath = $restKey.Substring(0, $sepIdx)
+          $valName = $restKey.Substring($sepIdx + 1)
+          $rk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($subPath, $false)
+          if ($rk) {
+            $rawCmd = [string]$rk.GetValue($valName, '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $rk.Close()
+            if ($rawCmd -match '^\\s*(?:"([^"]+)"|([^\\s"]+))(.*)$') {
+              $exeCand = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+              $restPart = [string]$Matches[3]
+              if ([System.IO.Path]::GetFileName($exeCand) -ieq 'Antigravity.exe' -and $restPart -notmatch '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
+                $qExe = if ($Matches[1] -or $exeCand -match '\\s') { '"' + $exeCand + '"' } else { $exeCand }
+                $nextVal = ($qExe + ' ' + ($restPart.Trim() + ' --remote-debugging-port=0').Trim()).Trim()
+                $wk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($subPath, $true)
+                if ($wk) { $wk.SetValue($valName, $nextVal, [Microsoft.Win32.RegistryValueKind]::String); $wk.Close() }
+              }
+            }
+          }
         }
       } catch {}
+      continue
     }
-  } catch {}
+    if ($item.StartsWith('HKLM:Class:')) {
+      try {
+        $relKey = $item.Substring(11)
+        $rk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relKey, $false)
+        if ($rk) {
+          $rawOpen = [string]$rk.GetValue('', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          $rk.Close()
+          if ($rawOpen -match '^\\s*(?:"([^"]+)"|([^\\s"]+))(.*)$') {
+            $exeCand = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+            $restOpen = ([string]$Matches[3]).Trim()
+            if ([System.IO.Path]::GetFileName($exeCand) -ieq 'Antigravity.exe' -and $restOpen -notmatch '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
+              $qExe = if ($Matches[1] -or $exeCand -match '\\s') { '"' + $exeCand + '"' } else { $exeCand }
+              $nextOpen = if ($restOpen) { "$qExe --remote-debugging-port=0 $restOpen" } else { "$qExe --remote-debugging-port=0" }
+              $wk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relKey, $true)
+              if ($wk) { $wk.SetValue('', $nextOpen, [Microsoft.Win32.RegistryValueKind]::String); $wk.Close() }
+            }
+          }
+        }
+      } catch {}
+      continue
+    }
+    if (-not (Test-Path -LiteralPath $item)) { continue }
+    try {
+      if (-not $ws) { $ws = New-Object -ComObject WScript.Shell }
+      $sc = $ws.CreateShortcut($item)
+      $cur = [string]$sc.Arguments
+      if ($cur -notmatch '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {
+        $sc.Arguments = ($cur.Trim() + ' --remote-debugging-port=0').Trim()
+        $sc.Save()
+      }
+    } catch {}
+  }
 }
 
 if ($readOnlyShortcuts.Count -gt 0) {
@@ -1368,20 +1698,70 @@ if ($readOnlyShortcuts.Count -gt 0) {
     $elevPatchPs1 = Join-Path ([System.IO.Path]::GetTempPath()) ("agy-monitor-uac-lnk-" + $PID + ".ps1")
     $roJoined = ($readOnlyShortcuts | ForEach-Object { "'" + ($_.Replace("'", "''")) + "'" }) -join ', '
     $elevBody = @(
-      "\$ws = New-Object -ComObject WScript.Shell",
-      "foreach (\$lnk in @($roJoined)) {",
-      "  if (\$lnk -and (Test-Path -LiteralPath \$lnk)) {",
-      "    try {",
-      "      \$sc = \$ws.CreateShortcut(\$lnk)",
-      "      \$cur = [string]\$sc.Arguments",
-      "      if (\$cur -notmatch '(?:^|\\s)--remote-debugging-port(?:=|\\s|$)') {",
-      "        \$sc.Arguments = (\$cur.Trim() + ' --remote-debugging-port=0').Trim()",
-      "        \$sc.Save()",
-      "      }",
-      "    } catch {}",
-      "  }",
-      "}",
-      "Remove-Item -LiteralPath \$PSCommandPath -Force -ErrorAction SilentlyContinue"
+      ('$targets = @(' + $roJoined + ')'),
+      '$ws = $null',
+      'foreach ($item in $targets) {',
+      '  if (-not $item) { continue }',
+      '  if ($item.StartsWith(''HKLM:Run:'')) {',
+      '    try {',
+      '      $restKey = $item.Substring(9)',
+      '      $sepIdx = $restKey.IndexOf(''|'')',
+      '      if ($sepIdx -gt 0) {',
+      '        $subPath = $restKey.Substring(0, $sepIdx)',
+      '        $valName = $restKey.Substring($sepIdx + 1)',
+      '        $rk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($subPath, $false)',
+      '        if ($rk) {',
+      '          $rawCmd = [string]$rk.GetValue($valName, '''', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)',
+      '          $rk.Close()',
+      '          if ($rawCmd -match ''^\\s*(?:"([^"]+)"|([^\\s"]+))(.*)$'') {',
+      '            $exeCand = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }',
+      '            $restPart = [string]$Matches[3]',
+      '            if ([System.IO.Path]::GetFileName($exeCand) -ieq ''Antigravity.exe'' -and $restPart -notmatch ''(?:^|\\s)--remote-debugging-port(?:=|\\s|$)'') {',
+      '              $qExe = if ($Matches[1] -or $exeCand -match ''\\s'') { ''"'' + $exeCand + ''"'' } else { $exeCand }',
+      '              $nextVal = ($qExe + '' '' + ($restPart.Trim() + '' --remote-debugging-port=0'').Trim()).Trim()',
+      '              $wk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($subPath, $true)',
+      '              if ($wk) { $wk.SetValue($valName, $nextVal, [Microsoft.Win32.RegistryValueKind]::String); $wk.Close() }',
+      '            }',
+      '          }',
+      '        }',
+      '      }',
+      '    } catch {}',
+      '    continue',
+      '  }',
+      '  if ($item.StartsWith(''HKLM:Class:'')) {',
+      '    try {',
+      '      $relKey = $item.Substring(11)',
+      '      $rk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relKey, $false)',
+      '      if ($rk) {',
+      '        $rawOpen = [string]$rk.GetValue('''', '''', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)',
+      '        $rk.Close()',
+      '        if ($rawOpen -match ''^\\s*(?:"([^"]+)"|([^\\s"]+))(.*)$'') {',
+      '          $exeCand = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }',
+      '          $restOpen = ([string]$Matches[3]).Trim()',
+      '          if ([System.IO.Path]::GetFileName($exeCand) -ieq ''Antigravity.exe'' -and $restOpen -notmatch ''(?:^|\\s)--remote-debugging-port(?:=|\\s|$)'') {',
+      '            $qExe = if ($Matches[1] -or $exeCand -match ''\\s'') { ''"'' + $exeCand + ''"'' } else { $exeCand }',
+      '            $nextOpen = if ($restOpen) { $qExe + '' --remote-debugging-port=0 '' + $restOpen } else { $qExe + '' --remote-debugging-port=0'' }',
+      '            $wk = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey($relKey, $true)',
+      '            if ($wk) { $wk.SetValue('''', $nextOpen, [Microsoft.Win32.RegistryValueKind]::String); $wk.Close() }',
+      '          }',
+      '        }',
+      '      }',
+      '    } catch {}',
+      '    continue',
+      '  }',
+      '  if (Test-Path -LiteralPath $item) {',
+      '    try {',
+      '      if (-not $ws) { $ws = New-Object -ComObject WScript.Shell }',
+      '      $sc = $ws.CreateShortcut($item)',
+      '      $cur = [string]$sc.Arguments',
+      '      if ($cur -notmatch ''(?:^|\\s)--remote-debugging-port(?:=|\\s|$)'') {',
+      '        $sc.Arguments = ($cur.Trim() + '' --remote-debugging-port=0'').Trim()',
+      '        $sc.Save()',
+      '      }',
+      '    } catch {}',
+      '  }',
+      '}',
+      'Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue'
     ) -join "\`r\`n"
     try {
       [System.IO.File]::WriteAllText($elevPatchPs1, $elevBody, (New-Object System.Text.UTF8Encoding($true)))
@@ -1422,13 +1802,17 @@ if ((& $findTargets).Count -gt 0 -and -not $isSelfElevated -and $exe -and (Test-
   $exeLit = "'" + $exe.Replace("'", "''") + "'"
   $procLit = "'" + $procName.Replace("'", "''") + "'"
   $elevKillBody = @(
-    "\$mySid = (Get-Process -Id \$PID).SessionId",
-    "Get-Process -Name $procLit -ErrorAction SilentlyContinue | Where-Object { \$_.SessionId -eq \$mySid } | Stop-Process -Force -ErrorAction SilentlyContinue",
-    "Start-Sleep -Milliseconds 600",
-    "foreach (\$fp in @($staleJoined)) { if (\$fp -and (Test-Path -LiteralPath \$fp)) { Remove-Item -LiteralPath \$fp -Force -ErrorAction SilentlyContinue } }",
-    "\$wd = Split-Path -Parent $exeLit",
-    "Start-Process -FilePath $exeLit -ArgumentList '--remote-debugging-port=0' -WorkingDirectory \$wd",
-    "Remove-Item -LiteralPath \$PSCommandPath -Force -ErrorAction SilentlyContinue"
+    ('$exe = ' + $exeLit),
+    ('$procName = ' + $procLit),
+    ('$staleList = @(' + $staleJoined + ')'),
+    '$mySid = (Get-Process -Id $PID).SessionId',
+    '$findTargets = { @(Get-Process -Name $procName -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $mySid -and (-not $_.Path -or -not $exe -or [string]::Equals($_.Path, $exe, [System.StringComparison]::OrdinalIgnoreCase)) }) }',
+    '& $findTargets | Stop-Process -Force -ErrorAction SilentlyContinue',
+    'for ($i = 0; $i -lt 25; $i++) { if ((& $findTargets).Count -eq 0) { break }; Start-Sleep -Milliseconds 200 }',
+    'foreach ($fp in $staleList) { if ($fp -and (Test-Path -LiteralPath $fp)) { Remove-Item -LiteralPath $fp -Force -ErrorAction SilentlyContinue } }',
+    '$wd = Split-Path -Parent $exe',
+    'Start-Process -FilePath $exe -ArgumentList ''--remote-debugging-port=0'' -WorkingDirectory $wd',
+    'Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue'
   ) -join "\`r\`n"
   try {
     [System.IO.File]::WriteAllText($elevRelaunchPs1, $elevKillBody, (New-Object System.Text.UTF8Encoding($true)))
@@ -1473,8 +1857,9 @@ const WIN_OUT_OF_JOB_DISPATCH_PS = `
 $ErrorActionPreference = 'Stop'
 $psBin = if ($env:AGY_PS_EXE) { $env:AGY_PS_EXE } else { 'powershell.exe' }
 $isElev = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$env:AGY_HOST_WAS_ELEVATED = if ($isElev) { '1' } else { '0' }
-$innerArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $env:AGY_RELAUNCH_PS1 + '"'
+$elevFlag = if ($isElev) { '1' } else { '0' }
+$env:AGY_HOST_WAS_ELEVATED = $elevFlag
+$innerArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $env:AGY_RELAUNCH_PS1 + '" -HostElevated ' + $elevFlag
 $fullCmd = '"' + $psBin + '" ' + $innerArgs
 
 if ($isElev) {
@@ -1613,18 +1998,23 @@ export async function triggerDesktopHostRelaunch({
 
   if (platform === 'darwin') {
     const appTarget = hostInfo.appBundlePath || hostInfo.executablePath;
-    const appName = hostInfo.kind === 'ide' ? 'Antigravity IDE' : 'Antigravity';
+    const bundleDerivedName = hostInfo.appBundlePath
+      ? basename(hostInfo.appBundlePath).replace(/\.app$/i, '').trim()
+      : '';
+    const appName =
+      bundleDerivedName || (hostInfo.kind === 'ide' ? 'Antigravity IDE' : 'Antigravity');
     const shScript = [
       'sleep 0.45',
-      `osascript -e 'tell application "${appName}" to quit' >/dev/null 2>&1 || true`,
-      `i=0; while [ $i -lt 25 ] && pgrep -x "${appName}" >/dev/null 2>&1; do sleep 0.2; i=$((i+1)); done`,
-      `if pgrep -x "${appName}" >/dev/null 2>&1; then killall "${appName}" >/dev/null 2>&1 || true; sleep 0.4; fi`,
-      'IFS=":"; for f in $AGY_STALE_PORT_FILES; do [ -n "$f" ] && rm -f "$f"; done',
+      'if osascript -e \'on run argv\' -e \'tell application (item 1 of argv) to quit\' -e \'end run\' -- "$AGY_APP_NAME" >/dev/null 2>&1; then i=0; while [ $i -lt 25 ] && pgrep -x "$AGY_APP_NAME" >/dev/null 2>&1; do sleep 0.2; i=$((i+1)); done; fi',
+      'if pgrep -x "$AGY_APP_NAME" >/dev/null 2>&1; then pkill -TERM -x "$AGY_APP_NAME" >/dev/null 2>&1 || killall -TERM "$AGY_APP_NAME" >/dev/null 2>&1 || true; j=0; while [ $j -lt 20 ] && pgrep -x "$AGY_APP_NAME" >/dev/null 2>&1; do sleep 0.2; j=$((j+1)); done; fi',
+      'if pgrep -x "$AGY_APP_NAME" >/dev/null 2>&1; then pkill -KILL -x "$AGY_APP_NAME" >/dev/null 2>&1 || killall -KILL "$AGY_APP_NAME" >/dev/null 2>&1 || true; k=0; while [ $k -lt 15 ] && pgrep -x "$AGY_APP_NAME" >/dev/null 2>&1; do sleep 0.2; k=$((k+1)); done; fi',
+      'old_ifs="$IFS"; set -f; IFS=":"; for f in $AGY_STALE_PORT_FILES; do [ -n "$f" ] && rm -f "$f"; done; set +f; IFS="$old_ifs"',
       'open -a "$AGY_RELAUNCH_APP" --args --remote-debugging-port=0 >/dev/null 2>&1',
     ].join('; ');
     await spawner('/bin/sh', ['-c', shScript], {
       env: {
         ...cleanEnv,
+        AGY_APP_NAME: appName,
         AGY_RELAUNCH_APP: appTarget,
         AGY_STALE_PORT_FILES: cleanStaleFiles.join(':'),
       },
@@ -1638,12 +2028,15 @@ export async function triggerDesktopHostRelaunch({
   }
 
   const procLeaf = basename(hostInfo.executablePath) || 'antigravity';
+  const procComm = procLeaf.slice(0, 15);
   const linuxScript = [
     'sleep 0.45',
     'uid="$(id -u)"',
-    'for pn in "$AGY_PROC_NAME" antigravity Antigravity; do [ -n "$pn" ] && pkill -u "$uid" -x "$pn" >/dev/null 2>&1 || true; done',
-    'i=0; while [ $i -lt 25 ] && (pgrep -u "$uid" -x "$AGY_PROC_NAME" >/dev/null 2>&1 || pgrep -u "$uid" -x antigravity >/dev/null 2>&1 || pgrep -u "$uid" -x Antigravity >/dev/null 2>&1); do sleep 0.2; i=$((i+1)); done',
-    'IFS=":"; for f in $AGY_STALE_PORT_FILES; do [ -n "$f" ] && rm -f "$f"; done',
+    'is_alive() { for pn in "$AGY_PROC_NAME" antigravity Antigravity "$AGY_PROC_COMM" google-antigravity; do [ -n "$pn" ] && pgrep -u "$uid" -x "$pn" >/dev/null 2>&1 && return 0; done; return 1; }',
+    'for pn in "$AGY_PROC_NAME" antigravity Antigravity "$AGY_PROC_COMM" google-antigravity; do [ -n "$pn" ] && pkill -TERM -u "$uid" -x "$pn" >/dev/null 2>&1 || true; done',
+    'i=0; while [ $i -lt 25 ] && is_alive; do sleep 0.2; i=$((i+1)); done',
+    'if is_alive; then for pn in "$AGY_PROC_NAME" antigravity Antigravity "$AGY_PROC_COMM" google-antigravity; do [ -n "$pn" ] && pkill -KILL -u "$uid" -x "$pn" >/dev/null 2>&1 || true; done; j=0; while [ $j -lt 15 ] && is_alive; do sleep 0.2; j=$((j+1)); done; fi',
+    'old_ifs="$IFS"; set -f; IFS=":"; for f in $AGY_STALE_PORT_FILES; do [ -n "$f" ] && rm -f "$f"; done; set +f; IFS="$old_ifs"',
     'nohup "$AGY_RELAUNCH_EXE" --remote-debugging-port=0 >/dev/null 2>&1 &',
   ].join('; ');
   await spawner('/bin/sh', ['-c', linuxScript], {
@@ -1651,6 +2044,7 @@ export async function triggerDesktopHostRelaunch({
       ...cleanEnv,
       AGY_RELAUNCH_EXE: hostInfo.executablePath,
       AGY_PROC_NAME: procLeaf,
+      AGY_PROC_COMM: procComm,
       AGY_STALE_PORT_FILES: cleanStaleFiles.join(':'),
     },
   });

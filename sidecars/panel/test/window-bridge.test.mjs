@@ -113,9 +113,40 @@ test('DevToolsActivePort parsing, cross-platform discovery (2.0 + IDE), and stri
   );
 
   const linuxPaths = resolveDevToolsPortCandidates({ XDG_CONFIG_HOME: '/home/dev/.config' }, 'linux', '/home/dev');
-  assert.equal(linuxPaths.length, 2);
+  assert.equal(linuxPaths.length, 4);
   assert.equal(linuxPaths[0], path.join('/home/dev/.config', 'Antigravity', 'DevToolsActivePort'));
   assert.equal(linuxPaths[1], path.join('/home/dev/.config', 'Antigravity IDE', 'DevToolsActivePort'));
+  assert.equal(linuxPaths[2], path.join('/home/dev/.config', 'antigravity', 'DevToolsActivePort'));
+  assert.equal(linuxPaths[3], path.join('/home/dev/.config', 'antigravity-ide', 'DevToolsActivePort'));
+
+  const linuxContainerPaths = resolveDevToolsPortCandidates(
+    { XDG_CONFIG_HOME: '/home/dev/.custom-cfg', VSCODE_PORTABLE: '/opt/ag-portable' },
+    'linux',
+    '/home/dev',
+    {
+      readdirFn: (dir) => {
+        if (dir === path.join('/home/dev', '.var', 'app')) {
+          return ['org.mozilla.firefox', 'com.google.Antigravity'];
+        }
+        if (dir === path.join('/home/dev', 'snap')) {
+          return ['firefox', 'antigravity'];
+        }
+        return [];
+      },
+    }
+  );
+  assert.ok(linuxContainerPaths.includes(path.join('/home/dev/.config', 'Antigravity', 'DevToolsActivePort')));
+  assert.ok(linuxContainerPaths.includes(path.join('/opt/ag-portable', 'user-data', 'DevToolsActivePort')));
+  assert.ok(
+    linuxContainerPaths.includes(
+      path.join('/home/dev', '.var', 'app', 'com.google.Antigravity', 'config', 'Antigravity', 'DevToolsActivePort')
+    )
+  );
+  assert.ok(
+    linuxContainerPaths.includes(
+      path.join('/home/dev', 'snap', 'antigravity', 'current', '.config', 'antigravity', 'DevToolsActivePort')
+    )
+  );
 
   assert.equal(
     isAntigravityMainPageTarget({
@@ -4991,8 +5022,10 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
 
   const visitedDirs = [];
   const fakeDesktopDir = 'C:\\Users\\Dev\\Desktop';
+  const fakeRedirectedDesktopDir = 'D:\\LocalizedDesktop';
   const fakeProgramsDir = 'C:\\Users\\Dev\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs';
   const fakeAgySubDir = `${fakeProgramsDir}\\Antigravity`;
+  const fakeGoogleSubDir = `${fakeProgramsDir}\\Google`;
   const fastProbeRes = probeWindowsShortcutsFast({
     env: {
       USERPROFILE: 'C:\\Users\\Dev',
@@ -5001,6 +5034,7 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
       ProgramData: 'C:\\ProgramData',
     },
     homeDir: 'C:\\Users\\Dev',
+    extraDirs: [fakeRedirectedDesktopDir],
     fsOps: {
       readdirFn: (dir) => {
         visitedDirs.push(dir);
@@ -5010,14 +5044,21 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
             { name: 'huge-repo-with-node_modules', isFile: () => false, isDirectory: () => true },
           ];
         }
+        if (dir === fakeRedirectedDesktopDir) {
+          return [{ name: 'Antigravity-Redir.lnk', isFile: () => true, isDirectory: () => false }];
+        }
         if (dir === fakeProgramsDir) {
           return [
             { name: 'Visual Studio 2022', isFile: () => false, isDirectory: () => true },
             { name: 'Antigravity', isFile: () => false, isDirectory: () => true },
+            { name: 'Google', isFile: () => false, isDirectory: () => true },
           ];
         }
         if (dir === fakeAgySubDir) {
           return [{ name: 'Antigravity IDE.lnk', isFile: () => true, isDirectory: () => false }];
+        }
+        if (dir === fakeGoogleSubDir) {
+          return [{ name: 'Antigravity-Google.lnk', isFile: () => true, isDirectory: () => false }];
         }
         return [];
       },
@@ -5029,6 +5070,9 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     },
   });
   assert.equal(fastProbeRes.allConfigured, true);
+  assert.equal(fastProbeRes.configuredPaths.length, 3);
+  assert.ok(fastProbeRes.configuredPaths.some((p) => p.includes('Antigravity-Redir.lnk')));
+  assert.ok(fastProbeRes.configuredPaths.some((p) => p.includes('Antigravity-Google.lnk')));
   assert.equal(
     visitedDirs.some((d) => d.includes('huge-repo') || d.includes('Visual Studio')),
     false,
@@ -5073,6 +5117,13 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
       enabled: true,
     }).matched,
     false
+  );
+  const linuxGoogleDashRaw = 'Exec=env -u BAD_VAR /usr/bin/google-antigravity -- %U';
+  const linuxGoogleDashPatched = patchLinuxDesktopEntryText(linuxGoogleDashRaw, { enabled: true });
+  assert.equal(linuxGoogleDashPatched.matched, true);
+  assert.equal(
+    linuxGoogleDashPatched.text,
+    'Exec=env -u BAD_VAR /usr/bin/google-antigravity --remote-debugging-port=0 -- %U'
   );
 
   const resolvedLinuxAppImage = resolveDesktopHostExecutable({
@@ -5121,7 +5172,8 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
   assert.equal(resolvedMacHost.appBundlePath, '/Applications/Antigravity.app');
 
   const sanitizedEnv = buildSanitizedDesktopRelaunchEnv({
-    PATH: 'C:\\Windows\\System32',
+    PATH: '/tmp/.mount_Antigr123/usr/bin:/usr/local/bin:/usr/bin',
+    LD_LIBRARY_PATH: '/tmp/.mount_Antigr123/usr/lib:/usr/lib/x86_64-linux-gnu',
     USERPROFILE: 'C:\\Users\\Administrator',
     ANTIGRAVITY_LS_ADDRESS: 'localhost:13088',
     ANTIGRAVITY_CSRF_TOKEN: 'secret',
@@ -5129,11 +5181,22 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     USAGE_MONITOR_HOST_PPID: '123',
     ELECTRON_RUN_AS_NODE: '1',
     NODE_OPTIONS: '--inspect',
+    APPIMAGE: '/home/alice/Antigravity.AppImage',
+    APPDIR: '/tmp/.mount_Antigr123',
+    OWD: '/home/alice',
+    ARGV0: '/home/alice/Antigravity.AppImage',
+    APPIMAGE_EXTRACT_AND_RUN: '1',
   });
   assert.deepEqual(sanitizedEnv, {
-    PATH: 'C:\\Windows\\System32',
+    PATH: '/usr/local/bin:/usr/bin',
+    LD_LIBRARY_PATH: '/usr/lib/x86_64-linux-gnu',
     USERPROFILE: 'C:\\Users\\Administrator',
   });
+  assert.equal(
+    buildSanitizedDesktopRelaunchEnv({ LD_LIBRARY_PATH: '/tmp/.mount_Only/lib' }).LD_LIBRARY_PATH,
+    undefined,
+    'Omits LD_LIBRARY_PATH completely when only AppImage mount entries were present'
+  );
 
   // 4. Linux .desktop provisioning on real temp dir + Windows shortcut provisioning + stale DevToolsActivePort (cdp_unreachable) + relaunch dispatch
   const simTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-233-auto-'));
@@ -5200,6 +5263,105 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
       fs.readFileSync(path.join(linuxDataHome, 'applications', 'antigravity.desktop'), 'utf8'),
       /--remote-debugging-port=0 %U/
     );
+
+    // Dynamic Linux .desktop discovery: vendor/AppImageLauncher/capitalized filenames across user, system, XDG_DATA_DIRS, and autostart
+    const linuxDynData = path.join(simTmp, 'xdg-data-dyn');
+    const linuxDynCfg = path.join(simTmp, 'xdg-cfg-dyn');
+    const linuxSysVendor = path.join(simTmp, 'sys-vendor-share');
+    const appImageDesktop = path.join(
+      linuxDynData,
+      'applications',
+      'appimagekit_1a2b3c-Antigravity.desktop'
+    );
+    const vendorSysDesktop = path.join(linuxSysVendor, 'applications', 'google-antigravity.desktop');
+    const unrelatedSysDesktop = path.join(linuxSysVendor, 'applications', 'firefox.desktop');
+    const capAutostart = path.join(linuxDynCfg, 'autostart', 'Antigravity.desktop');
+    fs.mkdirSync(path.dirname(appImageDesktop), { recursive: true });
+    fs.mkdirSync(path.dirname(vendorSysDesktop), { recursive: true });
+    fs.mkdirSync(path.dirname(capAutostart), { recursive: true });
+    fs.writeFileSync(appImageDesktop, linuxAppImageRaw, 'utf8');
+    fs.writeFileSync(
+      vendorSysDesktop,
+      '[Desktop Entry]\nName=Antigravity\nExec=/usr/bin/google-antigravity %U\nType=Application\n',
+      'utf8'
+    );
+    fs.writeFileSync(unrelatedSysDesktop, '[Desktop Entry]\nName=Firefox\nExec=firefox %u\n', 'utf8');
+    fs.writeFileSync(capAutostart, linuxDesktopRaw, 'utf8');
+    const linuxDynProv = await ensureDesktopLaunchEntriesConfigured({
+      enabled: true,
+      env: {
+        XDG_DATA_HOME: linuxDynData,
+        XDG_CONFIG_HOME: linuxDynCfg,
+        XDG_DATA_DIRS: linuxSysVendor,
+      },
+      platform: 'linux',
+      homeDir,
+      allowInTest: true,
+      fsOps: {
+        existsFn: fs.existsSync,
+        readFn: fs.readFileSync,
+        writeFn: fs.writeFileSync,
+        mkdirFn: fs.mkdirSync,
+        renameFn: fs.renameSync,
+        unlinkFn: fs.unlinkSync,
+        readdirFn: fs.readdirSync,
+        statFn: fs.statSync,
+      },
+    });
+    assert.equal(linuxDynProv.updated, true);
+    assert.equal(linuxDynProv.updatedPaths.length, 3);
+    assert.match(fs.readFileSync(appImageDesktop, 'utf8'), /--remote-debugging-port=0 %U/);
+    assert.match(
+      fs.readFileSync(path.join(linuxDynData, 'applications', 'google-antigravity.desktop'), 'utf8'),
+      /google-antigravity --remote-debugging-port=0 %U/
+    );
+    assert.match(fs.readFileSync(capAutostart, 'utf8'), /--remote-debugging-port=0 %U/);
+    assert.equal(fs.existsSync(path.join(linuxDynData, 'applications', 'firefox.desktop')), false);
+
+    // Verify Windows PowerShell provisioning covers HKLM Run/WOW6432Node/Classes + caches discoveredDirs for subsequent fastCheckIfActive
+    let capturedWinProvPs = '';
+    const redirHome = 'C:\\Users\\RedirUser';
+    const redirDesktop = 'D:\\RedirectedDesktop';
+    await ensureDesktopLaunchEntriesConfigured({
+      enabled: true,
+      env: { USERPROFILE: redirHome },
+      platform: 'win32',
+      homeDir: redirHome,
+      allowInTest: true,
+      execFileFn: async (_f, args) => {
+        capturedWinProvPs = args[args.length - 1];
+        return JSON.stringify({
+          ok: true,
+          updatedPaths: [`${redirDesktop}\\Antigravity.lnk`],
+          configuredPaths: [`${redirDesktop}\\Antigravity.lnk`],
+          readOnlyPaths: [],
+          discoveredDirs: [redirDesktop],
+        });
+      },
+    });
+    assert.match(capturedWinProvPs, /LocalMachine/);
+    assert.match(capturedWinProvPs, /WOW6432Node/);
+    assert.match(capturedWinProvPs, /HKLM:Run:/);
+    assert.match(capturedWinProvPs, /HKLM:Class:/);
+    const fastCachedRes = await ensureDesktopLaunchEntriesConfigured({
+      enabled: true,
+      fastCheckIfActive: true,
+      env: { USERPROFILE: redirHome, APPDATA: '', PUBLIC: '', ProgramData: '' },
+      platform: 'win32',
+      homeDir: redirHome,
+      allowInTest: true,
+      fsOps: {
+        readdirFn: (dir) =>
+          dir === redirDesktop
+            ? [{ name: 'Antigravity.lnk', isFile: () => true, isDirectory: () => false }]
+            : [],
+        statFn: () => ({ size: 512 }),
+        readFn: () => makeFakeLnkBuf('C:\\App\\Antigravity.exe', '--remote-debugging-port=0'),
+      },
+    });
+    assert.equal(fastCachedRes.fastPath, true);
+    assert.equal(fastCachedRes.allConfigured ?? fastCachedRes.configured, true);
+    assert.ok(fastCachedRes.configuredPaths.some((p) => p.includes('RedirectedDesktop')));
 
     // Verify Windows shortcut auto-provisioning + read-only public shortcut tracking + periodic recheck + clean rollback
     const winPsCalls = [];
@@ -5291,10 +5453,16 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     assert.equal(relaunchWinRes.ok, true);
     assert.equal(relaunchWinRes.relaunching, true);
     assert.equal(capturedRelaunchArgs.includes('-Sta'), true, 'Forces STA for Shell.Application COM');
+    assert.match(
+      capturedRelaunchArgs[capturedRelaunchArgs.length - 1],
+      /-HostElevated /,
+      'Passes -HostElevated via CLI arg so WMI/Shell.Application preserve elevation state'
+    );
     assert.equal(capturedRelaunchEnv.ANTIGRAVITY_LS_ADDRESS, undefined, 'Strips host LS env');
     assert.equal(fs.existsSync(capturedRelaunchEnv.AGY_RELAUNCH_PS1), true);
     const writtenPs1 = fs.readFileSync(capturedRelaunchEnv.AGY_RELAUNCH_PS1, 'utf8');
     assert.equal(writtenPs1.startsWith('\uFEFF'), true, 'Writes UTF-8 BOM for Windows PowerShell 5.1');
+    assert.match(writtenPs1, /^[\uFEFF]?param\(\[string\]\$HostElevated = '0'\)/);
     assert.match(writtenPs1, /--remote-debugging-port=0/);
     assert.ok(writtenPs1.includes(stalePortFile));
 
@@ -5335,12 +5503,44 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     });
     assert.equal(relaunchMacRes.ok, true);
     assert.equal(macSpawnArgs.env.AGY_RELAUNCH_APP, '/Applications/Antigravity.app');
+    assert.equal(macSpawnArgs.env.AGY_APP_NAME, 'Antigravity');
+    assert.match(macSpawnArgs.args[1], /if osascript .* then .* fi/);
+    assert.match(macSpawnArgs.args[1], /pkill -TERM -x "\$AGY_APP_NAME"/);
+    assert.match(macSpawnArgs.args[1], /pkill -KILL -x "\$AGY_APP_NAME"/);
     assert.match(macSpawnArgs.args[1], /open -a "\$AGY_RELAUNCH_APP" --args --remote-debugging-port=0/);
 
-    // Verify Linux /proc dynamic AppImage discovery & multi-comm pkill handling
+    // macOS TCC-blocked osascript falls back to ps -axo comm= and derives custom .app name
+    let macPsFallbackSpawn = null;
+    const relaunchMacPsRes = await triggerDesktopHostRelaunch({
+      env: { PATH: '/usr/bin:/bin' },
+      platform: 'darwin',
+      homeDir: '/Users/dev',
+      allowInTest: true,
+      existsFn: () => false,
+      execFileFn: async (file) => {
+        if (file === 'osascript') throw new Error('Not authorized to send Apple events (-1743)');
+        if (file === 'ps') {
+          return '/Users/dev/Apps/Antigravity Beta.app/Contents/MacOS/Antigravity Beta\n';
+        }
+        return '';
+      },
+      spawnFn: async (file, args, opts) => {
+        macPsFallbackSpawn = { file, args, env: opts?.env };
+        return { pid: 4322 };
+      },
+    });
+    assert.equal(relaunchMacPsRes.ok, true);
+    assert.equal(macPsFallbackSpawn.env.AGY_RELAUNCH_APP, '/Users/dev/Apps/Antigravity Beta.app');
+    assert.equal(macPsFallbackSpawn.env.AGY_APP_NAME, 'Antigravity Beta');
+
+    // Verify Linux /proc dynamic AppImage discovery, 15-char comm truncation, and SIGKILL fallback
     let linuxSpawnArgs = null;
     const relaunchLinuxRes = await triggerDesktopHostRelaunch({
-      env: { PATH: '/usr/bin:/bin' },
+      env: {
+        PATH: '/tmp/.mount_Ag/bin:/usr/bin:/bin',
+        APPIMAGE: '/home/alice/Apps/Antigravity-2.33.0.AppImage',
+        LD_LIBRARY_PATH: '/tmp/.mount_Ag/lib',
+      },
       platform: 'linux',
       homeDir: '/home/alice',
       stalePortFiles: ['/home/alice/.config/Antigravity/DevToolsActivePort'],
@@ -5354,17 +5554,30 @@ test('Issue #26: Antigravity Desktop 2.33.0+ automatic shortcut/launcher provisi
     });
     assert.equal(relaunchLinuxRes.ok, true);
     assert.equal(linuxSpawnArgs.env.AGY_RELAUNCH_EXE, '/home/alice/Apps/Antigravity-2.33.0.AppImage');
-    assert.match(linuxSpawnArgs.args[1], /for pn in "\$AGY_PROC_NAME" antigravity Antigravity/);
+    assert.equal(linuxSpawnArgs.env.AGY_PROC_COMM, 'Antigravity-2.3');
+    assert.equal(linuxSpawnArgs.env.APPIMAGE, undefined, 'Strips APPIMAGE from relaunch env');
+    assert.equal(linuxSpawnArgs.env.LD_LIBRARY_PATH, undefined, 'Strips mount LD_LIBRARY_PATH');
+    assert.match(linuxSpawnArgs.args[1], /for pn in "\$AGY_PROC_NAME" antigravity Antigravity "\$AGY_PROC_COMM"/);
+    assert.match(linuxSpawnArgs.args[1], /pkill -KILL -u "\$uid" -x "\$pn"/);
 
-    // Explicit ANTIGRAVITY_DEVTOOLS_PORT fallback & UAC read-only shortcut + de-elevation script generation
+    // Explicit ANTIGRAVITY_DEVTOOLS_PORT fallback, HKLM UAC patching, single-quoted UAC script safety & de-elevation
     const innerScriptCheck = buildWindowsRelaunchInnerScript(fakeExe, [stalePortFile], 'desktop', {
-      readOnlyShortcutPaths: ['C:\\Users\\Public\\Desktop\\Antigravity.lnk'],
+      readOnlyShortcutPaths: [
+        'C:\\Users\\Public\\Desktop\\Antigravity.lnk',
+        'HKLM:Run:Software\\Microsoft\\Windows\\CurrentVersion\\Run|Antigravity',
+        'HKLM:Class:Software\\Classes\\antigravity\\shell\\open\\command',
+      ],
       psExePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
     });
     assert.match(innerScriptCheck, /CloseMainWindow/);
     assert.match(innerScriptCheck, /Stop-Process/);
     assert.match(innerScriptCheck, /-Verb RunAs/);
     assert.match(innerScriptCheck, /C:\\Users\\Public\\Desktop\\Antigravity\.lnk/);
+    assert.match(innerScriptCheck, /HKLM:Run:/);
+    assert.match(innerScriptCheck, /HKLM:Class:/);
+    assert.match(innerScriptCheck, /'\$ws = \$null'/);
+    assert.match(innerScriptCheck, /'\$mySid = \(Get-Process -Id \$PID\)\.SessionId'/);
+    assert.match(innerScriptCheck, /'Remove-Item -LiteralPath \$PSCommandPath -Force -ErrorAction SilentlyContinue'/);
     assert.match(innerScriptCheck, /\$isSelfElevated -and -not \$wasHostElevated/);
   } finally {
     fs.rmSync(simTmp, { recursive: true, force: true });

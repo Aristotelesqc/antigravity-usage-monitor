@@ -10,7 +10,15 @@
  * 3. 完全不触碰宿主 `app.asar` 文件，客户端升级或无调试端口时静默回退至右侧辅助栏。
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -54,46 +62,110 @@ const ALLOWED_BRIDGE_PATHS = new Set(BRIDGE_API_PATHS);
 
 /**
  * 解析各操作系统下 Antigravity 2.0 与 Antigravity IDE 写入 `DevToolsActivePort` 的候选路径列表。
+ * Linux 额外兼容全小写目录名、自定义 `XDG_CONFIG_HOME` 回退以及 Flatpak / Snap 一级容器配置目录。
  *
  * @param {Record<string, string|undefined>} [env=process.env]
  * @param {string} [platform=process.platform]
  * @param {string} [homeDir=homedir()]
+ * @param {{ readdirFn?: typeof readdirSync }|null} [fsOps=null]
  * @returns {string[]}
  */
 export function resolveDevToolsPortCandidates(
   env = process.env,
   platform = process.platform,
-  homeDir = homedir()
+  homeDir = homedir(),
+  fsOps = null
 ) {
   const explicitFile = String(env?.ANTIGRAVITY_DEVTOOLS_PORT_FILE || '').trim();
   if (explicitFile) {
     return [explicitFile];
   }
+  const out = [];
+  const seen = new Set();
+  const pushUnique = (p) => {
+    const clean = String(p || '').trim();
+    if (clean && !seen.has(clean)) {
+      seen.add(clean);
+      out.push(clean);
+    }
+  };
+  const portableRoot = String(env?.VSCODE_PORTABLE || '').trim();
+
   if (platform === 'win32') {
     const appData = env?.APPDATA || join(homeDir, 'AppData', 'Roaming');
     const localAppData = env?.LOCALAPPDATA || join(homeDir, 'AppData', 'Local');
-    return [
-      join(appData, 'Antigravity', 'DevToolsActivePort'),
-      join(localAppData, 'Antigravity', 'DevToolsActivePort'),
-      join(appData, 'Antigravity IDE', 'DevToolsActivePort'),
-      join(localAppData, 'Antigravity IDE', 'DevToolsActivePort'),
-    ];
+    pushUnique(join(appData, 'Antigravity', 'DevToolsActivePort'));
+    pushUnique(join(localAppData, 'Antigravity', 'DevToolsActivePort'));
+    pushUnique(join(appData, 'Antigravity IDE', 'DevToolsActivePort'));
+    pushUnique(join(localAppData, 'Antigravity IDE', 'DevToolsActivePort'));
+    if (portableRoot) {
+      pushUnique(join(portableRoot, 'user-data', 'DevToolsActivePort'));
+    }
+    return out;
   }
   if (platform === 'darwin') {
-    return [
-      join(homeDir, 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort'),
-      join(homeDir, 'Library', 'Application Support', 'Antigravity IDE', 'DevToolsActivePort'),
-      join(homeDir, 'Library', 'Application Support', 'antigravity', 'DevToolsActivePort'),
-      join(homeDir, 'Library', 'Application Support', 'antigravity-ide', 'DevToolsActivePort'),
-      join(homeDir, '.config', 'Antigravity', 'DevToolsActivePort'),
-      join(homeDir, '.config', 'Antigravity IDE', 'DevToolsActivePort'),
-    ];
+    pushUnique(join(homeDir, 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort'));
+    pushUnique(
+      join(homeDir, 'Library', 'Application Support', 'Antigravity IDE', 'DevToolsActivePort')
+    );
+    pushUnique(join(homeDir, 'Library', 'Application Support', 'antigravity', 'DevToolsActivePort'));
+    pushUnique(
+      join(homeDir, 'Library', 'Application Support', 'antigravity-ide', 'DevToolsActivePort')
+    );
+    pushUnique(join(homeDir, '.config', 'Antigravity', 'DevToolsActivePort'));
+    pushUnique(join(homeDir, '.config', 'Antigravity IDE', 'DevToolsActivePort'));
+    if (portableRoot) {
+      pushUnique(join(portableRoot, 'user-data', 'DevToolsActivePort'));
+    }
+    return out;
   }
-  const configHome = env?.XDG_CONFIG_HOME || join(homeDir, '.config');
-  return [
-    join(configHome, 'Antigravity', 'DevToolsActivePort'),
-    join(configHome, 'Antigravity IDE', 'DevToolsActivePort'),
-  ];
+
+  const defaultConfigHome = join(homeDir, '.config');
+  const configHome = env?.XDG_CONFIG_HOME || defaultConfigHome;
+  pushUnique(join(configHome, 'Antigravity', 'DevToolsActivePort'));
+  pushUnique(join(configHome, 'Antigravity IDE', 'DevToolsActivePort'));
+  pushUnique(join(configHome, 'antigravity', 'DevToolsActivePort'));
+  pushUnique(join(configHome, 'antigravity-ide', 'DevToolsActivePort'));
+  if (configHome !== defaultConfigHome) {
+    pushUnique(join(defaultConfigHome, 'Antigravity', 'DevToolsActivePort'));
+    pushUnique(join(defaultConfigHome, 'Antigravity IDE', 'DevToolsActivePort'));
+    pushUnique(join(defaultConfigHome, 'antigravity', 'DevToolsActivePort'));
+    pushUnique(join(defaultConfigHome, 'antigravity-ide', 'DevToolsActivePort'));
+  }
+  if (portableRoot) {
+    pushUnique(join(portableRoot, 'user-data', 'DevToolsActivePort'));
+  }
+
+  const readdirFn = fsOps?.readdirFn || readdirSync;
+  const flatpakRoot = join(homeDir, '.var', 'app');
+  try {
+    for (const rawEntry of readdirFn(flatpakRoot) || []) {
+      const appId = typeof rawEntry === 'string' ? rawEntry : String(rawEntry?.name || '');
+      if (!appId || !/antigravity/i.test(appId)) continue;
+      pushUnique(join(flatpakRoot, appId, 'config', 'Antigravity', 'DevToolsActivePort'));
+      pushUnique(join(flatpakRoot, appId, 'config', 'antigravity', 'DevToolsActivePort'));
+      pushUnique(join(flatpakRoot, appId, 'config', 'Antigravity IDE', 'DevToolsActivePort'));
+    }
+  } catch {
+    // 宿主机未安装 Flatpak 或目录不可读时静默忽略
+  }
+
+  const snapRoot = join(homeDir, 'snap');
+  try {
+    for (const rawEntry of readdirFn(snapRoot) || []) {
+      const snapName = typeof rawEntry === 'string' ? rawEntry : String(rawEntry?.name || '');
+      if (!snapName || !/antigravity/i.test(snapName)) continue;
+      pushUnique(join(snapRoot, snapName, 'current', '.config', 'Antigravity', 'DevToolsActivePort'));
+      pushUnique(join(snapRoot, snapName, 'current', '.config', 'antigravity', 'DevToolsActivePort'));
+      pushUnique(
+        join(snapRoot, snapName, 'current', '.config', 'Antigravity IDE', 'DevToolsActivePort')
+      );
+    }
+  } catch {
+    // 宿主机未安装 Snap 或目录不可读时静默忽略
+  }
+
+  return out;
 }
 
 /**
