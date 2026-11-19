@@ -117,25 +117,7 @@ English · [简体中文](README.zh-CN.md)
 
 Keep the folder name as `usage-monitor`. **No `npm install` is needed.**
 
-### Option 1: Git Clone
-
-```powershell
-# Windows (PowerShell)
-git clone https://github.com/yuhuan-dev/antigravity-usage-monitor.git "$env:USERPROFILE\.gemini\config\plugins\usage-monitor"
-```
-
-```bash
-# macOS / Linux
-git clone https://github.com/yuhuan-dev/antigravity-usage-monitor.git ~/.gemini/config/plugins/usage-monitor
-```
-
-Or ask Antigravity directly:
-
-```text
-Clone https://github.com/yuhuan-dev/antigravity-usage-monitor to ~/.gemini/config/plugins/usage-monitor and enable the plugin
-```
-
-### Option 2: Release ZIP
+### Option 1: Release ZIP
 
 Download [`usage-monitor.zip`](https://github.com/yuhuan-dev/antigravity-usage-monitor/releases/latest/download/usage-monitor.zip) and extract it into `~/.gemini/config/plugins/` so the directory path is `~/.gemini/config/plugins/usage-monitor`.
 
@@ -150,6 +132,24 @@ Expand-Archive -Path "$env:TEMP\usage-monitor.zip" -DestinationPath $pluginsDir 
 ```
 
 </details>
+
+### Option 2: Git Clone
+
+```powershell
+# Windows (PowerShell)
+git clone --filter=blob:none --single-branch https://github.com/yuhuan-dev/antigravity-usage-monitor.git "$env:USERPROFILE\.gemini\config\plugins\usage-monitor"
+```
+
+```bash
+# macOS / Linux
+git clone --filter=blob:none --single-branch https://github.com/yuhuan-dev/antigravity-usage-monitor.git ~/.gemini/config/plugins/usage-monitor
+```
+
+Or ask Antigravity directly:
+
+```text
+Clone https://github.com/yuhuan-dev/antigravity-usage-monitor with --filter=blob:none --single-branch to ~/.gemini/config/plugins/usage-monitor and enable the plugin
+```
 
 ---
 

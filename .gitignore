@@ -1,6 +1,8 @@
 .data/
 node_modules/
 plan/
+dist/
+usage-monitor.zip
 *.log
 *.dpapi
 .account-test-*
