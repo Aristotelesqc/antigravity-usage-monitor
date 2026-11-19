@@ -4411,7 +4411,7 @@ return { formatMetric, formatSpeedMetric, formatCachePct, getSpeedToneClass, get
 })();
 
 // --- src/core/httpClient.js ---
-const { getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi } = (() => {
+const { abortSidecarApiKey, getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi } = (() => {
 /**
  * @fileoverview Async HTTP client with AbortController cancellation for stale
  * polling requests, concurrent GET deduplication, and dual-mode transport
@@ -4421,6 +4421,15 @@ const { getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, c
 
 const inFlightGets = new Map();
 const activeControllers = new Map();
+
+function abortSidecarApiKey(abortKey) {
+  if (!abortKey) return;
+  const prev = activeControllers.get(abortKey);
+  if (prev) {
+    activeControllers.delete(abortKey);
+    prev.abort();
+  }
+}
 
 /**
  * 读取主窗口双栖模式下注入的本地桥接配置（`port`、`token`、`bundleVersion`、`stylesCss`）。
@@ -4655,7 +4664,7 @@ async function callSidecarApi(path, { method = 'GET', body, abortKey = '', cdpTi
   }
   return promise;
 }
-return { getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi };
+return { abortSidecarApiKey, getWindowBridgeConfig, isWindowOverlayMode, deliverCdpBridgeResponses, callSidecarApi };
 })();
 
 // --- src/store/uiStore.js ---
@@ -4691,7 +4700,7 @@ return { getViewTabs, uiStore, getVisibleMonitorView };
 })();
 
 // --- src/store/telemetryStore.js ---
-const { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform } = (() => {
+const { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, clearConversationViewCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, selectConversation, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -4787,9 +4796,11 @@ const telemetryStore = createReactiveStore({
 
 let pollTimer = null;
 let feedbackTimer = null;
+let deferredConvSyncTimer = null;
 let activeBundleVersion = 0;
 let latestRequestSeq = 0;
 let latestConsumptionReqSeq = 0;
+let latestConversationSwitchSeq = 0;
 let activeForceCount = 0;
 let consecutivePollFailures = 0;
 let inFlightTelemetryPoll = null;
@@ -4797,8 +4808,10 @@ let inFlightPresetsPrefetch = null;
 let lastPrefetchedUsageRevision = 0;
 let consumptionCacheScopeSig = '';
 const MAX_CONSUMPTION_RANGE_CACHE = 12;
+const MAX_CONVERSATION_VIEW_CACHE = 12;
 const CONSUMPTION_PRESET_KEYS = ['cycle', 'today', '24h', '7d', '14d', '30d', 'all'];
 const consumptionRangeCache = new Map();
+const conversationViewCache = new Map();
 let lastReceivedSteps = null;
 let loopActive = false;
 let loopIntervalMs = 2000;
@@ -4830,6 +4843,14 @@ function clearConsumptionRangeCache() {
   inFlightPresetsPrefetch = null;
 }
 
+function clearConversationViewCache() {
+  conversationViewCache.clear();
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
+}
+
 function buildConsumptionScopeSig(payload) {
   if (!payload || typeof payload !== 'object') return '';
   const acct = payload.account || {};
@@ -4843,8 +4864,110 @@ function syncConsumptionCacheScope(payload) {
   if (!nextSig) return;
   if (consumptionCacheScopeSig && consumptionCacheScopeSig !== nextSig) {
     clearConsumptionRangeCache();
+    clearConversationViewCache();
   }
   consumptionCacheScopeSig = nextSig;
+}
+
+function recordConversationViewToCache(payload) {
+  const active = payload?.activeConversation;
+  const cidLower = String(active?.cascadeId || '').trim().toLowerCase();
+  if (!cidLower || !Array.isArray(active?.recentSteps)) return;
+  const entry = {
+    cascadeId: active.cascadeId,
+    activeConversation: active,
+    activePool: payload.quotas?.activePool || null,
+    weekly: payload.quotas?.weekly || null,
+    sessionConsumption: payload.consumption?.session || null,
+    sessionPresets:
+      payload.consumption?.sessionPresets ||
+      (payload.consumption?.presets
+        ? Object.fromEntries(
+            Object.entries(payload.consumption.presets).map(([k, v]) => [k, v?.session || null])
+          )
+        : null),
+    stepRevision: String(payload.stepRevision || ''),
+    cachedAtMs: Date.now(),
+  };
+  conversationViewCache.delete(cidLower);
+  conversationViewCache.set(cidLower, entry);
+  while (conversationViewCache.size > MAX_CONVERSATION_VIEW_CACHE) {
+    conversationViewCache.delete(conversationViewCache.keys().next().value);
+  }
+}
+
+function resolveCachedConversationRootId(telemetry, effectiveConvId) {
+  const target = String(effectiveConvId || '').trim();
+  const convs = Array.isArray(telemetry?.conversations) ? telemetry.conversations : [];
+  if (!target) {
+    return String(convs[0]?.cascadeId || '').trim().toLowerCase();
+  }
+  const lower = target.toLowerCase();
+  if (conversationViewCache.has(lower)) return lower;
+  const matchedRoot = convs.find(
+    (c) =>
+      String(c?.cascadeId || '').toLowerCase() === lower ||
+      (Array.isArray(c?.memberCascadeIds) &&
+        c.memberCascadeIds.some((m) => String(m || '').toLowerCase() === lower))
+  );
+  return String(matchedRoot?.cascadeId || lower).trim().toLowerCase();
+}
+
+function applyConversationSliceToTelemetry(baseTelemetry, slice) {
+  if (!baseTelemetry || !slice?.activeConversation) return baseTelemetry;
+  const activeCidLower = String(slice.activeConversation.cascadeId || '').toLowerCase();
+  const prevQuotas = baseTelemetry.quotas || {};
+  const nextQuotas =
+    slice.activePool || slice.weekly
+      ? {
+          ...prevQuotas,
+          ...(slice.activePool ? { activePool: slice.activePool } : {}),
+          ...(slice.weekly ? { weekly: slice.weekly } : {}),
+        }
+      : prevQuotas;
+
+  const prevCons = baseTelemetry.consumption || {};
+  let nextPresets = prevCons.presets;
+  if (slice.sessionPresets && prevCons.presets && typeof prevCons.presets === 'object') {
+    nextPresets = { ...prevCons.presets };
+    for (const [k, sBucket] of Object.entries(slice.sessionPresets)) {
+      if (sBucket && nextPresets[k]) {
+        nextPresets[k] = { ...nextPresets[k], session: sBucket };
+      }
+    }
+  }
+  const nextCons =
+    slice.sessionConsumption || nextPresets !== prevCons.presets
+      ? {
+          ...prevCons,
+          ...(slice.sessionConsumption ? { session: slice.sessionConsumption } : {}),
+          ...(nextPresets !== prevCons.presets ? { presets: nextPresets } : {}),
+        }
+      : prevCons;
+
+  const prevRunning = Array.isArray(baseTelemetry.runningConversations)
+    ? baseTelemetry.runningConversations
+    : null;
+  let nextRunning = prevRunning;
+  if (prevRunning && prevRunning.length > 0 && activeCidLower) {
+    let anyChanged = false;
+    const mapped = prevRunning.map((item) => {
+      const shouldSelect = String(item?.cascadeId || '').toLowerCase() === activeCidLower;
+      if (Boolean(item?.isCurrentSelected) === shouldSelect) return item;
+      anyChanged = true;
+      return { ...item, isCurrentSelected: shouldSelect };
+    });
+    if (anyChanged) nextRunning = mapped;
+  }
+
+  return {
+    ...baseTelemetry,
+    ...(slice.stepRevision ? { stepRevision: slice.stepRevision } : {}),
+    activeConversation: slice.activeConversation,
+    quotas: nextQuotas,
+    consumption: nextCons,
+    ...(nextRunning ? { runningConversations: nextRunning } : {}),
+  };
 }
 
 function putConsumptionRangeCacheEntry(cacheKey, entry) {
@@ -5660,6 +5783,7 @@ async function requestTelemetry(params, force) {
 
     let resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
     syncConsumptionCacheScope(resolvedPayload);
+    recordConversationViewToCache(resolvedPayload);
     if (resolvedPayload?.consumption) {
       recordConsumptionSliceToCache(resolvedPayload.consumption, resolvedPayload.modelBreakdown, {
         customStartMs: reqStartMs,
@@ -5842,6 +5966,162 @@ async function fetchConsumptionRangeSlice({
     return payload;
   } catch (err) {
     if (err?.name === 'AbortError') return null;
+    return null;
+  }
+}
+
+/**
+ * 快速切换当前查看的会话：
+ * - 命中前端 `conversationViewCache` 时，0ms 原子切换当前会话快照，并静默走轻量 `scope=conversation` 校准；
+ * - 未命中缓存时直接走零 LS RPC、零全盘扫描的 `scope=conversation` 通道；
+ * - 若后端提示该会话需要补读最新运行态或懒迁移字段（`needsBackgroundSync`），展示后再在后台静默补齐。
+ */
+async function selectConversation(
+  nextConvId,
+  { hostRouteConversationId = undefined } = {}
+) {
+  const switchSeq = ++latestConversationSwitchSeq;
+  latestRequestSeq += 1;
+  inFlightTelemetryPoll = null;
+  abortSidecarApiKey('telemetry-poll');
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
+  }
+
+  const targetSelectedId = String(nextConvId || '').trim();
+  const prevSt = telemetryStore.getState();
+  const nextHostRouteId =
+    hostRouteConversationId !== undefined
+      ? String(hostRouteConversationId || '').trim()
+      : prevSt.hostRouteConversationId;
+  const effectiveConvId = targetSelectedId || nextHostRouteId || '';
+  const statePatch = {
+    selectedConversationId: targetSelectedId,
+    ...(hostRouteConversationId !== undefined ? { hostRouteConversationId: nextHostRouteId } : {}),
+  };
+
+  const prevTelemetry = prevSt.telemetry;
+  const lookupRootId = resolveCachedConversationRootId(prevTelemetry, effectiveConvId);
+  const cachedEntry = lookupRootId ? conversationViewCache.get(lookupRootId) : null;
+  const cachedSteps =
+    cachedEntry && cachedEntry.stepRevision
+      ? readDisplaySteps({
+          stepRevision: cachedEntry.stepRevision,
+          activeConversation: cachedEntry.activeConversation,
+        })
+      : null;
+
+  if (cachedEntry && prevTelemetry) {
+    const optimisticTelemetry = applyConversationSliceToTelemetry(prevTelemetry, cachedEntry);
+    if (cachedSteps) {
+      lastReceivedSteps = cachedSteps;
+    }
+    telemetryStore.setState({
+      ...statePatch,
+      telemetry: optimisticTelemetry,
+    });
+  } else {
+    telemetryStore.setState(statePatch);
+  }
+
+  const current = telemetryStore.getState();
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  if (current.selectedTimeRange) params.set('range', current.selectedTimeRange);
+  if (current.selectedTimeRange === 'custom') {
+    if (current.customStartMs > 0) params.set('startMs', String(current.customStartMs));
+    if (current.customEndMs > 0) params.set('endMs', String(current.customEndMs));
+  }
+  params.set('stepDetails', 'display');
+  params.set('stepRevision', cachedSteps?.revision || '');
+  params.set('scope', 'conversation');
+
+  const reqSettingsRev = settingsRevision;
+  try {
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
+      method: 'GET',
+      abortKey: 'conversation-switch',
+    });
+    if (!payload || typeof payload !== 'object') return null;
+    if (switchSeq !== latestConversationSwitchSeq) return payload;
+
+    const latestSt = telemetryStore.getState();
+    const latestEffectiveId =
+      String(latestSt.selectedConversationId || latestSt.hostRouteConversationId || '').trim();
+    if (latestEffectiveId !== effectiveConvId) return payload;
+
+    const active = payload.activeConversation;
+    if (payload.stepsUnchanged) {
+      const stepsSource =
+        (cachedSteps && payload.stepRevision === cachedSteps.revision ? cachedSteps : null) ||
+        (lastReceivedSteps && payload.stepRevision === lastReceivedSteps.revision
+          ? lastReceivedSteps
+          : null);
+      if (!active || !stepsSource) {
+        return fetchTelemetry({ force: false });
+      }
+      active.recentSteps = stepsSource.recentSteps;
+      active.agents.forEach((agent, index) => {
+        const steps = stepsSource.agentSteps[index];
+        if (steps) agent.recentSteps = steps;
+      });
+    }
+
+    if (payload.scope === 'conversation' && active) {
+      lastReceivedSteps = readDisplaySteps(payload) || lastReceivedSteps;
+      recordConversationViewToCache(payload);
+      const baseTelemetry = latestSt.telemetry;
+      if (baseTelemetry) {
+        const mergedTelemetry = applyConversationSliceToTelemetry(baseTelemetry, {
+          activeConversation: active,
+          activePool: payload.quotas?.activePool || null,
+          weekly: payload.quotas?.weekly || null,
+          sessionConsumption: payload.consumption?.session || null,
+          sessionPresets: payload.consumption?.sessionPresets || null,
+          stepRevision: payload.stepRevision || '',
+        });
+        if (!isEquivalentTelemetry(baseTelemetry, mergedTelemetry)) {
+          telemetryStore.setState({
+            telemetry: mergedTelemetry,
+            minuteTick: Math.floor(Date.now() / 30000),
+          });
+        }
+      } else {
+        return fetchTelemetry({ force: false });
+      }
+      if (payload.needsBackgroundSync && loopActive && typeof setTimeout === 'function') {
+        deferredConvSyncTimer = setTimeout(() => {
+          deferredConvSyncTimer = null;
+          if (switchSeq === latestConversationSwitchSeq && loopActive) {
+            void fetchTelemetry({ force: false });
+          }
+        }, 35);
+      }
+      return payload;
+    }
+
+    // 冷启动或全新未入缓存会话回退至完整载荷
+    const resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+    syncConsumptionCacheScope(resolvedPayload);
+    lastReceivedSteps = readDisplaySteps(resolvedPayload) || lastReceivedSteps;
+    recordConversationViewToCache(resolvedPayload);
+    if (resolvedPayload?.consumption) {
+      recordConsumptionSliceToCache(resolvedPayload.consumption, resolvedPayload.modelBreakdown, {
+        customStartMs: Number(current.customStartMs || 0),
+        customEndMs: Number(current.customEndMs || 0),
+      });
+    }
+    if (!isEquivalentTelemetry(latestSt.telemetry, resolvedPayload)) {
+      telemetryStore.setState({
+        telemetry: resolvedPayload,
+        minuteTick: Math.floor(Date.now() / 30000),
+        syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
+      });
+    }
+    return resolvedPayload;
+  } catch (err) {
+    if (err?.name === 'AbortError' || switchSeq !== latestConversationSwitchSeq) return null;
     return null;
   }
 }
@@ -6130,8 +6410,13 @@ async function saveSettingsPatch(patch) {
   }
 
   const needsTelemetryRecompute = patchKeys.some((k) => TELEMETRY_RECOMPUTE_SETTING_KEYS.has(k));
-  if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
+  if (
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode') ||
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyTokenBudget') ||
+    Object.prototype.hasOwnProperty.call(safePatch, 'weeklyCostBudget')
+  ) {
     clearConsumptionRangeCache();
+    clearConversationViewCache();
   }
   if (needsTelemetryRecompute) {
     inFlightTelemetryPoll = null;
@@ -6197,6 +6482,7 @@ async function resetAllSettings() {
   }
   inFlightTelemetryPoll = null;
   clearConsumptionRangeCache();
+  clearConversationViewCache();
   void fetchTelemetry({ force: false });
   return res;
 }
@@ -6204,6 +6490,7 @@ async function resetAllSettings() {
 async function rebuildTrajectoryCache() {
   const res = await callSidecarApi('/api/cache/rebuild', { method: 'POST', body: {} });
   clearConsumptionRangeCache();
+  clearConversationViewCache();
   await fetchTelemetry({ force: true });
   return res;
 }
@@ -6211,6 +6498,7 @@ async function rebuildTrajectoryCache() {
 async function triggerCloudSync() {
   const res = await callSidecarApi('/api/cloud-sync', { method: 'POST', body: {} });
   clearConsumptionRangeCache();
+  clearConversationViewCache();
   await fetchTelemetry({ force: true });
   return res;
 }
@@ -6283,6 +6571,10 @@ function stopAsyncTelemetryLoop() {
   if (feedbackTimer) {
     clearTimeout(feedbackTimer);
     feedbackTimer = null;
+  }
+  if (deferredConvSyncTimer) {
+    clearTimeout(deferredConvSyncTimer);
+    deferredConvSyncTimer = null;
   }
 }
 
@@ -6480,7 +6772,7 @@ function isMacHostPlatform(telemetry) {
   }
   return false;
 }
-return { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform };
+return { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, clearConversationViewCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, selectConversation, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform };
 })();
 
 // --- src/components/ui/TopLongPillNav.js ---
@@ -13685,8 +13977,7 @@ const LiveActivityWidget = defineComponent({
                 onSelectSession(item.cascadeId);
               } else if (item.cascadeId && item.cascadeId !== 'current') {
                 uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-                telemetryStore.setState({ selectedConversationId: item.cascadeId });
-                fetchTelemetry({ force: false });
+                void selectConversation(item.cascadeId);
               }
             };
           }
@@ -20620,8 +20911,7 @@ const TopSessionHeader = defineComponent({
       options: [{ value: '', label: t('header.followLatest') }],
       onUpdateModelValue: (nextConvId) => {
         uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-        telemetryStore.setState({ selectedConversationId: nextConvId });
-        fetchTelemetry({ force: false });
+        void selectConversation(nextConvId);
       },
     });
 
@@ -21795,8 +22085,23 @@ const ConsumptionView = defineComponent({
       return { el: segEl, refs: { segEl } };
     }
 
+    function createSourceTopModelItem() {
+      const dotEl = h('span', { className: 'dot-swatch cons-model-dot cons-source-top-dot' });
+      const nameEl = h('span', { className: 'cons-source-top-name' });
+      const pctEl = h('strong', { className: 'cons-source-top-pct text-mono' });
+      const itemEl = h('span', { className: 'cons-source-top-item' }, [dotEl, nameEl, pctEl]);
+      return { el: itemEl, refs: { itemEl, dotEl, nameEl, pctEl } };
+    }
+
+    function formatCompactSourceSharePct(pct) {
+      const num = Number(pct || 0);
+      if (!Number.isFinite(num) || num <= 0) return '0%';
+      if (num >= 10) return `${Math.round(num)}%`;
+      return `${num.toFixed(1)}%`;
+    }
+
     /**
-     * 创建客户端来源单行 DOM 结构（保留长尾合并分段配色进度条与右侧总调用数，悬停进度条弹出各模型明细浮层）。
+     * 创建客户端来源单行 DOM 结构（保留长尾合并分段配色进度条、单行不换行的 Top 2-3 模型速览和右侧总调用数，悬停进度条或速览区弹出完整明细浮层）。
      */
     function createSourceBreakdownRow() {
       const nameTextEl = h('span', { className: 'cons-row-title-text' });
@@ -21806,26 +22111,39 @@ const ConsumptionView = defineComponent({
       const costEl = h('strong', { className: 'cons-row-cost text-mono' });
       const trackEl = h('div', { className: 'progress-track cons-seg-bar cons-source-model-bar' });
       const rowState = { hoverPayload: null };
+      const bindPopoverHover = (targetEl) => ({
+        onMouseEnter: (e) => {
+          if (rowState.hoverPayload) {
+            showBreakdownPopover(targetEl, rowState.hoverPayload, e?.clientX ?? null);
+          }
+        },
+        onMouseMove: (e) => {
+          if (rowState.hoverPayload && activeHoverTargetEl === targetEl) {
+            positionBreakdownPopover(targetEl, e?.clientX ?? null);
+          }
+        },
+        onMouseLeave: () => {
+          if (activeHoverTargetEl === targetEl) hideBreakdownPopover();
+        },
+      });
       const barHitEl = h(
         'div',
         {
           className: 'cons-source-bar-hit',
-          onMouseEnter: (e) => {
-            if (rowState.hoverPayload) {
-              showBreakdownPopover(barHitEl, rowState.hoverPayload, e?.clientX ?? null);
-            }
-          },
-          onMouseMove: (e) => {
-            if (rowState.hoverPayload && activeHoverTargetEl === barHitEl) {
-              positionBreakdownPopover(barHitEl, e?.clientX ?? null);
-            }
-          },
-          onMouseLeave: () => {
-            if (activeHoverTargetEl === barHitEl) hideBreakdownPopover();
-          },
         },
         [trackEl]
       );
+      const barHandlers = bindPopoverHover(barHitEl);
+      barHitEl.addEventListener('mouseenter', barHandlers.onMouseEnter);
+      barHitEl.addEventListener('mousemove', barHandlers.onMouseMove);
+      barHitEl.addEventListener('mouseleave', barHandlers.onMouseLeave);
+
+      const topModelsEl = h('div', { className: 'cons-source-top-models', hidden: true });
+      const topHandlers = bindPopoverHover(topModelsEl);
+      topModelsEl.addEventListener('mouseenter', topHandlers.onMouseEnter);
+      topModelsEl.addEventListener('mousemove', topHandlers.onMouseMove);
+      topModelsEl.addEventListener('mouseleave', topHandlers.onMouseLeave);
+
       const callsLbl = h('span', { text: t('cons.footCalls') });
       const callsVal = h('strong', { className: 'text-mono' });
 
@@ -21840,6 +22158,7 @@ const ConsumptionView = defineComponent({
         ]),
         barHitEl,
         h('div', { className: 'cons-item-foot cons-source-foot' }, [
+          topModelsEl,
           h('span', { className: 'legend-left cons-calls-stat' }, [
             callsLbl,
             callsVal,
@@ -21857,6 +22176,7 @@ const ConsumptionView = defineComponent({
           costEl,
           barHitEl,
           trackEl,
+          topModelsEl,
           callsLbl,
           callsVal,
           rowState,
@@ -21917,6 +22237,28 @@ const ConsumptionView = defineComponent({
         updateRow: (segRefs, seg) => {
           patchStyleVar(segRefs.segEl, '--seg-w', `${seg.segPct.toFixed(2)}%`);
           patchStyleVar(segRefs.segEl, '--seg-color', seg.color);
+        },
+      });
+
+      const topModels = partitioned
+        .filter((seg) => !seg.isOther)
+        .slice(0, 3)
+        .map((seg) => ({
+          key: seg.key,
+          label: seg.label,
+          pctText: formatCompactSourceSharePct(seg.pct),
+          color: seg.color,
+        }));
+      patchAttr(refs.topModelsEl, 'hidden', topModels.length === 0);
+      patchKeyedList(refs.topModelsEl, topModels, {
+        keyFn: (m) => m.key,
+        sigFn: (m) => `${m.key}:${m.label}:${m.pctText}:${m.color}`,
+        createRow: createSourceTopModelItem,
+        updateRow: (mRefs, m) => {
+          patchStyleVar(mRefs.dotEl, '--dot-color', m.color);
+          patchText(mRefs.nameEl, m.label);
+          patchText(mRefs.pctEl, m.pctText);
+          patchAttr(mRefs.itemEl, 'title', `${m.label} (${m.pctText})`);
         },
       });
 
@@ -25251,8 +25593,7 @@ function mountWindowOverlay() {
       selectedAgentScope: 'all',
       ctxInspectorAgentId: 'auto',
     });
-    telemetryStore.setState({ selectedConversationId: cascadeId });
-    void fetchTelemetry({ force: false });
+    void selectConversation(cascadeId);
     setMultiOpen(false);
     setPopoverOpen(true);
   }
@@ -26732,13 +27073,12 @@ function mountWindowOverlay() {
     if (currentRouteId === lastObservedRouteId) return;
     lastObservedRouteId = currentRouteId;
     const st = telemetryStore.getState();
-    const patch = { hostRouteConversationId: currentRouteId };
-    if (currentRouteId && st.selectedConversationId && st.selectedConversationId !== currentRouteId) {
-      patch.selectedConversationId = '';
-    }
+    const nextSelectedId =
+      currentRouteId && st.selectedConversationId && st.selectedConversationId !== currentRouteId
+        ? ''
+        : st.selectedConversationId;
     uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-    telemetryStore.setState(patch);
-    void fetchTelemetry({ force: false });
+    void selectConversation(nextSelectedId, { hostRouteConversationId: currentRouteId });
   }
 
   const onDocMouseDown = (e) => {

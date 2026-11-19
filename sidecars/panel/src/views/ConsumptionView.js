@@ -730,8 +730,23 @@ export const ConsumptionView = defineComponent({
       return { el: segEl, refs: { segEl } };
     }
 
+    function createSourceTopModelItem() {
+      const dotEl = h('span', { className: 'dot-swatch cons-model-dot cons-source-top-dot' });
+      const nameEl = h('span', { className: 'cons-source-top-name' });
+      const pctEl = h('strong', { className: 'cons-source-top-pct text-mono' });
+      const itemEl = h('span', { className: 'cons-source-top-item' }, [dotEl, nameEl, pctEl]);
+      return { el: itemEl, refs: { itemEl, dotEl, nameEl, pctEl } };
+    }
+
+    function formatCompactSourceSharePct(pct) {
+      const num = Number(pct || 0);
+      if (!Number.isFinite(num) || num <= 0) return '0%';
+      if (num >= 10) return `${Math.round(num)}%`;
+      return `${num.toFixed(1)}%`;
+    }
+
     /**
-     * 创建客户端来源单行 DOM 结构（保留长尾合并分段配色进度条与右侧总调用数，悬停进度条弹出各模型明细浮层）。
+     * 创建客户端来源单行 DOM 结构（保留长尾合并分段配色进度条、单行不换行的 Top 2-3 模型速览和右侧总调用数，悬停进度条或速览区弹出完整明细浮层）。
      */
     function createSourceBreakdownRow() {
       const nameTextEl = h('span', { className: 'cons-row-title-text' });
@@ -741,26 +756,39 @@ export const ConsumptionView = defineComponent({
       const costEl = h('strong', { className: 'cons-row-cost text-mono' });
       const trackEl = h('div', { className: 'progress-track cons-seg-bar cons-source-model-bar' });
       const rowState = { hoverPayload: null };
+      const bindPopoverHover = (targetEl) => ({
+        onMouseEnter: (e) => {
+          if (rowState.hoverPayload) {
+            showBreakdownPopover(targetEl, rowState.hoverPayload, e?.clientX ?? null);
+          }
+        },
+        onMouseMove: (e) => {
+          if (rowState.hoverPayload && activeHoverTargetEl === targetEl) {
+            positionBreakdownPopover(targetEl, e?.clientX ?? null);
+          }
+        },
+        onMouseLeave: () => {
+          if (activeHoverTargetEl === targetEl) hideBreakdownPopover();
+        },
+      });
       const barHitEl = h(
         'div',
         {
           className: 'cons-source-bar-hit',
-          onMouseEnter: (e) => {
-            if (rowState.hoverPayload) {
-              showBreakdownPopover(barHitEl, rowState.hoverPayload, e?.clientX ?? null);
-            }
-          },
-          onMouseMove: (e) => {
-            if (rowState.hoverPayload && activeHoverTargetEl === barHitEl) {
-              positionBreakdownPopover(barHitEl, e?.clientX ?? null);
-            }
-          },
-          onMouseLeave: () => {
-            if (activeHoverTargetEl === barHitEl) hideBreakdownPopover();
-          },
         },
         [trackEl]
       );
+      const barHandlers = bindPopoverHover(barHitEl);
+      barHitEl.addEventListener('mouseenter', barHandlers.onMouseEnter);
+      barHitEl.addEventListener('mousemove', barHandlers.onMouseMove);
+      barHitEl.addEventListener('mouseleave', barHandlers.onMouseLeave);
+
+      const topModelsEl = h('div', { className: 'cons-source-top-models', hidden: true });
+      const topHandlers = bindPopoverHover(topModelsEl);
+      topModelsEl.addEventListener('mouseenter', topHandlers.onMouseEnter);
+      topModelsEl.addEventListener('mousemove', topHandlers.onMouseMove);
+      topModelsEl.addEventListener('mouseleave', topHandlers.onMouseLeave);
+
       const callsLbl = h('span', { text: t('cons.footCalls') });
       const callsVal = h('strong', { className: 'text-mono' });
 
@@ -775,6 +803,7 @@ export const ConsumptionView = defineComponent({
         ]),
         barHitEl,
         h('div', { className: 'cons-item-foot cons-source-foot' }, [
+          topModelsEl,
           h('span', { className: 'legend-left cons-calls-stat' }, [
             callsLbl,
             callsVal,
@@ -792,6 +821,7 @@ export const ConsumptionView = defineComponent({
           costEl,
           barHitEl,
           trackEl,
+          topModelsEl,
           callsLbl,
           callsVal,
           rowState,
@@ -852,6 +882,28 @@ export const ConsumptionView = defineComponent({
         updateRow: (segRefs, seg) => {
           patchStyleVar(segRefs.segEl, '--seg-w', `${seg.segPct.toFixed(2)}%`);
           patchStyleVar(segRefs.segEl, '--seg-color', seg.color);
+        },
+      });
+
+      const topModels = partitioned
+        .filter((seg) => !seg.isOther)
+        .slice(0, 3)
+        .map((seg) => ({
+          key: seg.key,
+          label: seg.label,
+          pctText: formatCompactSourceSharePct(seg.pct),
+          color: seg.color,
+        }));
+      patchAttr(refs.topModelsEl, 'hidden', topModels.length === 0);
+      patchKeyedList(refs.topModelsEl, topModels, {
+        keyFn: (m) => m.key,
+        sigFn: (m) => `${m.key}:${m.label}:${m.pctText}:${m.color}`,
+        createRow: createSourceTopModelItem,
+        updateRow: (mRefs, m) => {
+          patchStyleVar(mRefs.dotEl, '--dot-color', m.color);
+          patchText(mRefs.nameEl, m.label);
+          patchText(mRefs.pctEl, m.pctText);
+          patchAttr(mRefs.itemEl, 'title', `${m.label} (${m.pctText})`);
         },
       });
 

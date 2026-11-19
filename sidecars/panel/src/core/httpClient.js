@@ -9,6 +9,15 @@ import { readInjectedWindowBridge } from '../../shared/window-bridge-protocol.mj
 const inFlightGets = new Map();
 const activeControllers = new Map();
 
+export function abortSidecarApiKey(abortKey) {
+  if (!abortKey) return;
+  const prev = activeControllers.get(abortKey);
+  if (prev) {
+    activeControllers.delete(abortKey);
+    prev.abort();
+  }
+}
+
 /**
  * 读取主窗口双栖模式下注入的本地桥接配置（`port`、`token`、`bundleVersion`、`stylesCss`）。
  *

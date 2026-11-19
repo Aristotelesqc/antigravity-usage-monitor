@@ -99,13 +99,20 @@ function discoverLocalConversationFiles() {
 
   const annotationDirs = Array.isArray(ANNOTATION_DIRS) ? ANNOTATION_DIRS : [];
   if (annotationDirs.length > 0 && map.size > 0) {
-    for (const [cascadeId, fileList] of map.entries()) {
-      for (const annDir of annotationDirs) {
-        if (!annDir) continue;
-        const pbtxtPath = join(annDir, `${cascadeId}.pbtxt`);
-        if (existsSync(pbtxtPath)) {
-          fileList.push(pbtxtPath);
+    for (const annDir of annotationDirs) {
+      if (!annDir || !existsSync(annDir)) continue;
+      try {
+        for (const rawName of readdirSync(annDir)) {
+          const name = String(rawName || '');
+          if (!name.toLowerCase().endsWith('.pbtxt')) continue;
+          const cascadeId = name.slice(0, -6).toLowerCase();
+          const fileList = map.get(cascadeId);
+          if (fileList) {
+            fileList.push(join(annDir, name));
+          }
         }
+      } catch {
+        // 忽略注释目录读取异常
       }
     }
   }

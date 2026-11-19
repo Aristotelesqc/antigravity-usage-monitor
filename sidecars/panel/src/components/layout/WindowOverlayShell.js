@@ -52,6 +52,7 @@ import {
   normalizeClientUpdateMode,
   normalizeClientWindowMountMode,
   resolveScopedConversation,
+  selectConversation,
   startAsyncTelemetryLoop,
   stopAsyncTelemetryLoop,
   telemetryStore,
@@ -1086,8 +1087,7 @@ export function mountWindowOverlay() {
       selectedAgentScope: 'all',
       ctxInspectorAgentId: 'auto',
     });
-    telemetryStore.setState({ selectedConversationId: cascadeId });
-    void fetchTelemetry({ force: false });
+    void selectConversation(cascadeId);
     setMultiOpen(false);
     setPopoverOpen(true);
   }
@@ -2567,13 +2567,12 @@ export function mountWindowOverlay() {
     if (currentRouteId === lastObservedRouteId) return;
     lastObservedRouteId = currentRouteId;
     const st = telemetryStore.getState();
-    const patch = { hostRouteConversationId: currentRouteId };
-    if (currentRouteId && st.selectedConversationId && st.selectedConversationId !== currentRouteId) {
-      patch.selectedConversationId = '';
-    }
+    const nextSelectedId =
+      currentRouteId && st.selectedConversationId && st.selectedConversationId !== currentRouteId
+        ? ''
+        : st.selectedConversationId;
     uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-    telemetryStore.setState(patch);
-    void fetchTelemetry({ force: false });
+    void selectConversation(nextSelectedId, { hostRouteConversationId: currentRouteId });
   }
 
   const onDocMouseDown = (e) => {

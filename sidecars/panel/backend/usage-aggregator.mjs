@@ -840,9 +840,156 @@ function sameUsageEntries(previous, current) {
   return previous.length === current.length && current.every((entry, index) => {
     const before = previous[index];
     return entry.steps === before.steps && entry.cascadeId === before.cascadeId &&
-      entry.appSource === before.appSource && entry.accountName === before.accountName &&
-      entry.isCurrentConv === before.isCurrentConv;
+      entry.appSource === before.appSource && entry.accountName === before.accountName;
   });
+}
+
+function buildFamilySig(familySet) {
+  if (!(familySet instanceof Set) || familySet.size === 0) return '';
+  return Array.from(familySet).sort().join(',');
+}
+
+function computeFamilySessionBuckets({
+  entries,
+  familySet,
+  presetKeys = [],
+  presetWindows = {},
+  selectedWindow,
+  isCustomWeeklyMode = false,
+  poolCycleBuckets = new Map(),
+  normalizedQuotaAccount = '',
+  nowMs = Date.now(),
+  resolveStepModel,
+  weekStartMs = 0,
+}) {
+  const sessionBuckets = {};
+  for (const k of presetKeys) {
+    sessionBuckets[k] = createUsageBucket();
+  }
+  const selectedSessionBucket =
+    (selectedWindow?.key && sessionBuckets[selectedWindow.key]) || createUsageBucket();
+  if (!(familySet instanceof Set) || familySet.size === 0) {
+    const sessionPresets = {};
+    for (const k of presetKeys) {
+      sessionPresets[k] = finalizeUsageBucket(sessionBuckets[k]);
+    }
+    return {
+      finalizedSelectedSession: finalizeUsageBucket(selectedSessionBucket),
+      sessionPresets,
+    };
+  }
+
+  const hasDedicatedCarbonPool = poolCycleBuckets.has('Carbon');
+  const hasDedicatedArgonPool = poolCycleBuckets.has('Argon');
+  const poolByModel = new Map();
+  const effectiveWeekStartMs = weekStartMs || presetWindows.week?.startMs || 0;
+  const cycleStartFallbackMs =
+    presetWindows.cycle?.startMs ??
+    (selectedWindow?.key === 'cycle' ? selectedWindow.startMs : 0);
+
+  for (const entry of entries || []) {
+    const cidLower = String(entry?.cascadeId || '').toLowerCase();
+    if (!cidLower || !familySet.has(cidLower)) continue;
+    const entryOwner = normalizeOwnerAccount(entry.accountName);
+    for (const st of entry.steps || []) {
+      if (!st || typeof st !== 'object') continue;
+      const stepOwner = normalizeOwnerAccount(st.accountName) || entryOwner;
+      const includeInQuotaPools =
+        normalizedQuotaAccount === null
+          ? false
+          : normalizedQuotaAccount === ''
+            ? true
+            : stepOwner === normalizedQuotaAccount;
+      const mInfo = resolveStepModel(st);
+      const inTok = safeTok(st.inputTokens);
+      const cacheTok = safeTok(st.cacheReadTokens);
+      const outTok = safeTok(st.outputTokens);
+      const thinkTok = safeTok(st.thinkingTokens);
+      const respTok =
+        st.responseTokens !== undefined && st.responseTokens !== null
+          ? safeTok(st.responseTokens)
+          : Math.max(0, outTok - thinkTok);
+      const stepTotalTokens = inTok + cacheTok + outTok;
+      const stepCost = computeStepCost(st, mInfo.pricing);
+      const resolvedCost = Number.isFinite(stepCost) ? stepCost : 0;
+      const unpriced = stepCost === null ? 1 : 0;
+      const tMs = Number(st.createdAtMs) > 0 ? Number(st.createdAtMs) : 0;
+      const savedCost = mInfo.pricing
+        ? (cacheTok / 1_000_000) * Math.max(0, mInfo.pricing.input - mInfo.pricing.cache)
+        : 0;
+      const stepUsage = {
+        inTok,
+        cacheTok,
+        outTok,
+        thinkTok,
+        respTok,
+        stepTotalTokens,
+        resolvedCost,
+        savedCost,
+        unpriced,
+      };
+
+      const poolBucketEntry =
+        poolCycleBuckets.size > 0
+          ? resolvePoolBucketForStep(
+              st,
+              mInfo,
+              poolCycleBuckets,
+              poolByModel,
+              hasDedicatedCarbonPool,
+              hasDedicatedArgonPool
+            )
+          : null;
+
+      let inCurrentCycle = false;
+      if (tMs > 0 && tMs <= nowMs) {
+        if (isCustomWeeklyMode) {
+          inCurrentCycle = tMs >= effectiveWeekStartMs;
+        } else if (poolCycleBuckets.size > 0) {
+          const effCycleStartMs = poolBucketEntry
+            ? poolBucketEntry.startWkMs
+            : cycleStartFallbackMs;
+          inCurrentCycle = includeInQuotaPools && tMs >= effCycleStartMs;
+        } else {
+          inCurrentCycle = includeInQuotaPools && tMs >= cycleStartFallbackMs;
+        }
+      }
+
+      for (const k of presetKeys) {
+        const w = presetWindows[k];
+        const matchesPreset =
+          k === 'all'
+            ? true
+            : k === 'cycle'
+              ? inCurrentCycle
+              : tMs > 0 && tMs >= w.startMs && tMs <= w.endMs;
+        if (matchesPreset) {
+          accumulateStepIntoBucket(sessionBuckets[k], stepUsage, entry.cascadeId);
+        }
+      }
+
+      if (selectedWindow && (!sessionBuckets[selectedWindow.key] || selectedWindow.key === 'custom')) {
+        const inSelectedWindow =
+          selectedWindow.key === 'all'
+            ? true
+            : selectedWindow.key === 'cycle'
+              ? inCurrentCycle
+              : tMs > 0 && tMs >= selectedWindow.startMs && tMs <= selectedWindow.endMs;
+        if (inSelectedWindow) {
+          accumulateStepIntoBucket(selectedSessionBucket, stepUsage, entry.cascadeId);
+        }
+      }
+    }
+  }
+
+  const sessionPresets = {};
+  for (const k of presetKeys) {
+    sessionPresets[k] = finalizeUsageBucket(sessionBuckets[k]);
+  }
+  return {
+    finalizedSelectedSession: finalizeUsageBucket(selectedSessionBucket),
+    sessionPresets,
+  };
 }
 
 function sortedUsageTimestamps(entries) {
@@ -971,6 +1118,7 @@ export function aggregateMultiWindowUsage({
 
   const perSourceStats = new Map();
   const allEntriesToAggregate = collectUsageEntriesToAggregate(familySet);
+  const familySig = buildFamilySig(familySet);
 
   const timeZone = modelInputs ? new Intl.DateTimeFormat().resolvedOptions().timeZone : '';
   const quotaWindows = Array.from(poolCycleBuckets, ([key, { start5hMs, startWkMs }]) => [
@@ -1002,12 +1150,44 @@ export function aggregateMultiWindowUsage({
     ) {
       snapshot.ranges.delete(selectedWindow.key);
       snapshot.ranges.set(selectedWindow.key, previous);
+      if (previous.familySig === familySig) {
+        return {
+          ...previous.result,
+          usageRevision: snapshot.revision,
+          selectedWindow: effectivePrevWin,
+          trendStartMs: trend.start,
+          trendEndMs: trend.end,
+        };
+      }
+      const { finalizedSelectedSession: nextSelSession, sessionPresets } =
+        computeFamilySessionBuckets({
+          entries: allEntriesToAggregate,
+          familySet,
+          presetKeys,
+          presetWindows,
+          selectedWindow,
+          isCustomWeeklyMode,
+          poolCycleBuckets,
+          normalizedQuotaAccount,
+          nowMs,
+          resolveStepModel,
+        });
+      const prevPresets = previous.result.finalizedPresets || {};
+      const nextFinalizedPresets = {};
+      for (const k of presetKeys) {
+        nextFinalizedPresets[k] = {
+          ...(prevPresets[k] || { label: presetWindows[k].label }),
+          session: sessionPresets[k],
+        };
+      }
       return {
         ...previous.result,
         usageRevision: snapshot.revision,
         selectedWindow: effectivePrevWin,
         trendStartMs: trend.start,
         trendEndMs: trend.end,
+        finalizedSelectedSession: nextSelSession,
+        finalizedPresets: nextFinalizedPresets,
       };
     }
   }
@@ -1324,6 +1504,7 @@ export function aggregateMultiWindowUsage({
     const { ranges } = lastUsageSnapshot;
     ranges.delete(selectedWindow.key);
     ranges.set(selectedWindow.key, {
+      familySig,
       windows,
       selectedWindow,
       effectiveSelectedWindow,
@@ -1387,6 +1568,7 @@ export function aggregateSelectedWindowUsage({
   const allEntriesToAggregate = Array.isArray(precollectedEntries)
     ? precollectedEntries
     : collectUsageEntriesToAggregate(familySet);
+  const familySig = buildFamilySig(familySet);
   const currentYear = new Date(nowMs).getFullYear();
   const timeZone = modelInputs ? new Intl.DateTimeFormat().resolvedOptions().timeZone : '';
 
@@ -1426,12 +1608,28 @@ export function aggregateSelectedWindowUsage({
         )
       ) {
         const res = candidate.result;
+        const resolvedSelectedSession =
+          candidate.familySig === familySig
+            ? res.finalizedSelectedSession
+            : computeFamilySessionBuckets({
+                entries: allEntriesToAggregate,
+                familySet,
+                presetKeys: [],
+                presetWindows: {},
+                selectedWindow,
+                isCustomWeeklyMode,
+                poolCycleBuckets,
+                normalizedQuotaAccount,
+                nowMs,
+                resolveStepModel,
+                weekStartMs,
+              }).finalizedSelectedSession;
         return {
           usageRevision: snapshot.revision,
           selectedWindow: effectivePrevWin,
           trendStartMs: trend.start,
           trendEndMs: trend.end,
-          finalizedSelectedSession: res.finalizedSelectedSession,
+          finalizedSelectedSession: resolvedSelectedSession,
           finalizedSelectedAccount: res.finalizedSelectedAccount,
           trendSeries: res.trendSeries,
           sourcesBreakdown: res.sourcesBreakdown,
@@ -1658,6 +1856,7 @@ export function aggregateSelectedWindowUsage({
     snapshot.selectedRanges ??= new Map();
     snapshot.selectedRanges.delete(selectedWindow.key);
     snapshot.selectedRanges.set(selectedWindow.key, {
+      familySig,
       selectedWindow,
       effectiveSelectedWindow,
       trend,
@@ -1671,6 +1870,73 @@ export function aggregateSelectedWindowUsage({
   }
 
   return sliceResult;
+}
+
+/**
+ * 轻量级单会话家族用量汇总（专为 `scope=conversation` 瞬切服务）：
+ * 仅遍历当前选中根会话及其子代理步骤，不触碰其余历史会话与全局账户聚合缓存。
+ */
+export function aggregateSessionUsageForFamily({
+  filterOpts = {},
+  cycleAnchors = {},
+  isCustomWeeklyMode = false,
+  currentAccountName = '',
+  activeCascadeId = null,
+  activeFamilyCascadeIds = null,
+  resolveStepModel,
+  quotaPoolsMap = null,
+}) {
+  const rawFamilyIds =
+    activeFamilyCascadeIds instanceof Set
+      ? Array.from(activeFamilyCascadeIds)
+      : activeCascadeId
+        ? [activeCascadeId]
+        : [];
+  const familySet = new Set(rawFamilyIds.map((id) => String(id || '').toLowerCase()).filter(Boolean));
+  const nowMs = Date.now();
+  const selectedWindow = resolveTimeWindow(
+    filterOpts.range || 'all',
+    filterOpts.startMs,
+    filterOpts.endMs,
+    nowMs,
+    cycleAnchors,
+    isCustomWeeklyMode
+  );
+  const presetKeys = ['all', 'cycle', '5h', 'today', '24h', 'week', '7d', '14d', '30d'];
+  const presetWindows = {};
+  for (const k of presetKeys) {
+    presetWindows[k] = resolveTimeWindow(k, 0, 0, nowMs, cycleAnchors, isCustomWeeklyMode);
+  }
+  const poolCycleBuckets = buildQuotaPoolCycleMap(quotaPoolsMap, nowMs);
+  const normalizedQuotaAccount =
+    currentAccountName === null ? null : normalizeOwnerAccount(currentAccountName);
+
+  const familyEntries = [];
+  for (const [cid, entry] of listCachedTrajectoryEntries()) {
+    if (!entry || !Array.isArray(entry.steps) || entry.steps.length === 0) continue;
+    const cidLower = String(cid || '').toLowerCase();
+    if (!familySet.has(cidLower)) continue;
+    familyEntries.push({
+      cascadeId: cid,
+      appSource: entry.appSource || 'standalone',
+      accountName: entry.accountName || '',
+      steps: entry.steps,
+      isCurrentConv: true,
+    });
+  }
+
+  return computeFamilySessionBuckets({
+    entries: familyEntries,
+    familySet,
+    presetKeys,
+    presetWindows,
+    selectedWindow,
+    isCustomWeeklyMode,
+    poolCycleBuckets,
+    normalizedQuotaAccount,
+    nowMs,
+    resolveStepModel,
+  });
 }
 
 /**

@@ -2586,3 +2586,231 @@ test('scope=consumption and scope=consumption-presets bypass matchesConv, >30s i
   assert.doesNotMatch(requestedUrls[0], /force=1/);
   assert.doesNotMatch(requestedUrls[0], /fastRange=1/);
 });
+
+test('scope=conversation switches sessions with zero LS RPCs, preserves usageRevision, reuses stepRevision/multi-agent cache, and powers 0ms client cache switching', async (t) => {
+  const clockMs = Date.parse('2026-11-19T14:00:00.000Z');
+  const mkStep = (idx, offsetMs, model, tok) => ({
+    type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+    status: 'CORTEX_STEP_STATUS_DONE',
+    metadata: {
+      createdAt: new Date(clockMs - offsetMs).toISOString(),
+      completedAt: new Date(clockMs - offsetMs + 1000).toISOString(),
+      sourceTrajectoryStepInfo: { stepIndex: idx },
+      modelUsage: {
+        model,
+        inputTokens: String(tok),
+        cacheReadTokens: '0',
+        outputTokens: '120',
+      },
+    },
+    plannerResponse: { response: `step-${idx}` },
+  });
+
+  const h = backendHarness({
+    clock: () => clockMs,
+    quotaSummary: {
+      groups: [
+        {
+          displayName: 'Gemini',
+          remainingFraction: 0.85,
+          resetTime: new Date(clockMs + 3 * 3600_000).toISOString(),
+        },
+        {
+          displayName: 'Claude & GPT',
+          remainingFraction: 0.42,
+          resetTime: new Date(clockMs + 4 * 3600_000).toISOString(),
+        },
+      ],
+    },
+    trajectories: {
+      'conv-claude': {
+        trajectory: {
+          steps: [
+            mkStep(1, 30 * 60_000, 'MODEL_CLAUDE_4_5_SONNET', 1200),
+            mkStep(2, 20 * 60_000, 'MODEL_CLAUDE_4_5_SONNET', 1800),
+          ],
+        },
+      },
+      'conv-gemini': {
+        trajectory: {
+          steps: [
+            mkStep(1, 10 * 60_000, 'MODEL_PLACEHOLDER_M37', 4000),
+          ],
+        },
+      },
+      'conv-gemini-sub': {
+        trajectory: {
+          metadata: {
+            parentConversationId: 'conv-gemini',
+            rootConversationId: 'conv-gemini',
+            subagentSpec: { typeName: 'research', role: 'Helper' },
+          },
+          steps: [
+            mkStep(1, 9 * 60_000, 'MODEL_PLACEHOLDER_M37', 900),
+          ],
+        },
+      },
+    },
+    summaries: {
+      'conv-claude': {
+        annotations: { title: 'Claude Session' },
+        stepCount: 2,
+        lastModifiedTime: new Date(clockMs - 20 * 60_000).toISOString(),
+        status: 'CASCADE_RUN_STATUS_IDLE',
+      },
+      'conv-gemini': {
+        annotations: { title: 'Gemini Swarm' },
+        stepCount: 1,
+        lastModifiedTime: new Date(clockMs - 10 * 60_000).toISOString(),
+        status: 'CASCADE_RUN_STATUS_IDLE',
+      },
+      'conv-gemini-sub': {
+        stepCount: 1,
+        lastModifiedTime: new Date(clockMs - 9 * 60_000).toISOString(),
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        trajectoryMetadata: {
+          parentConversationId: 'conv-gemini',
+          rootConversationId: 'conv-gemini',
+          subagentSpec: { typeName: 'research', role: 'Helper' },
+        },
+      },
+    },
+  });
+
+  // 1. Initial full telemetry load on conv-gemini (multi-agent root)
+  const initRes = JSON.parse(
+    (
+      await h.executeTelemetryAction({
+        conversationId: 'conv-gemini',
+        range: 'today',
+        stepDetails: 'display',
+        stepRevision: '',
+      })
+    ).body
+  );
+  assert.equal(initRes.activeConversation.cascadeId, 'conv-gemini');
+  assert.equal(initRes.activeConversation.subagentCount, 1);
+  assert.equal(initRes.quotas.activePool.family, 'Gemini');
+  const initialUsageRev = Number(initRes.consumption.revision);
+  const rpcAfterInit = h.state.calls.length;
+
+  // 2. Fast switch to conv-claude via scope=conversation: ZERO LS RPCs!
+  const switchClaude = JSON.parse(
+    (
+      await h.executeTelemetryAction({
+        conversationId: 'conv-claude',
+        range: 'today',
+        stepDetails: 'display',
+        stepRevision: '',
+        scope: 'conversation',
+      })
+    ).body
+  );
+  assert.equal(h.state.calls.length, rpcAfterInit, 'scope=conversation must make 0 LS RPC calls');
+  assert.equal(switchClaude.scope, 'conversation');
+  assert.equal(switchClaude.activeConversation.cascadeId, 'conv-claude');
+  assert.equal(switchClaude.activeConversation.stepCount, 2);
+  assert.equal(switchClaude.activeConversation.recentSteps.length, 2);
+  assert.equal(switchClaude.quotas.activePool.family, 'Claude & GPT');
+  assert.equal(switchClaude.consumption.session.calls, 2);
+  assert.equal(switchClaude.needsBackgroundSync, false);
+  assert.ok(switchClaude.stepRevision);
+
+  // 3. Fast switch back to conv-gemini with cached stepRevision -> stepsUnchanged=true & 0 RPCs
+  const switchBackGemini = JSON.parse(
+    (
+      await h.executeTelemetryAction({
+        conversationId: 'conv-gemini',
+        range: 'today',
+        stepDetails: 'display',
+        stepRevision: initRes.stepRevision,
+        scope: 'conversation',
+      })
+    ).body
+  );
+  assert.equal(h.state.calls.length, rpcAfterInit);
+  assert.equal(switchBackGemini.scope, 'conversation');
+  assert.equal(switchBackGemini.stepsUnchanged, true);
+  assert.equal(switchBackGemini.activeConversation.recentSteps, undefined);
+  assert.equal(switchBackGemini.quotas.activePool.family, 'Gemini');
+
+  // 4. Subsequent full poll on conv-claude keeps usageRevision identical (decoupled from isCurrentConv!)
+  const fullClaude = JSON.parse(
+    (
+      await h.executeTelemetryAction({
+        conversationId: 'conv-claude',
+        range: 'today',
+        stepDetails: 'display',
+        stepRevision: switchClaude.stepRevision,
+      })
+    ).body
+  );
+  assert.equal(fullClaude.consumption.revision, initialUsageRev);
+  assert.equal(fullClaude.stepsUnchanged, true);
+  assert.equal(fullClaude.consumption.session.calls, 2);
+
+  // 5. Frontend selectConversation: first switch hits scope=conversation; repeat switch hits 0ms client cache + rehydrates stepsUnchanged
+  const {
+    clearConsumptionRangeCache,
+    clearConversationViewCache,
+    selectConversation,
+    stopAsyncTelemetryLoop,
+    telemetryStore,
+  } = await import('../src/store/telemetryStore.js');
+  const prevTel = telemetryStore.getState().telemetry;
+  const prevSel = telemetryStore.getState().selectedConversationId;
+  t.after(() => {
+    stopAsyncTelemetryLoop();
+    clearConsumptionRangeCache();
+    clearConversationViewCache();
+    telemetryStore.setState({ selectedConversationId: prevSel, telemetry: prevTel });
+  });
+  clearConversationViewCache();
+  telemetryStore.setState({ selectedConversationId: 'conv-gemini', telemetry: initRes }, { sync: true });
+
+  const fetchedUrls = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const u = String(url);
+    fetchedUrls.push(u);
+    const parsed = new URL(u, 'http://127.0.0.1');
+    const q = Object.fromEntries(parsed.searchParams.entries());
+    const out = await h.executeTelemetryAction(q);
+    return { ok: true, json: async () => JSON.parse(out.body) };
+  });
+
+  // Seed cache by visiting conv-claude first
+  await selectConversation('conv-claude');
+  assert.equal(fetchedUrls.length, 1);
+  assert.match(fetchedUrls[0], /scope=conversation/);
+  assert.match(fetchedUrls[0], /conversationId=conv-claude/);
+  assert.equal(telemetryStore.getState().telemetry.activeConversation.cascadeId, 'conv-claude');
+  assert.equal(telemetryStore.getState().telemetry.quotas.activePool.family, 'Claude & GPT');
+
+  // Visit conv-gemini (cached from initRes? Let's visit once to cache, then toggle back to conv-claude for 0ms hit!)
+  await selectConversation('conv-gemini');
+  assert.equal(telemetryStore.getState().telemetry.activeConversation.cascadeId, 'conv-gemini');
+
+  // Toggle back to conv-claude: store MUST update synchronously BEFORE fetch resolves!
+  let releaseSecondFetch;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    fetchedUrls.push(String(url));
+    await new Promise((resolve) => {
+      releaseSecondFetch = resolve;
+    });
+    const parsed = new URL(String(url), 'http://127.0.0.1');
+    const out = await h.executeTelemetryAction(Object.fromEntries(parsed.searchParams.entries()));
+    return { ok: true, json: async () => JSON.parse(out.body) };
+  });
+
+  const pendingSwitch = selectConversation('conv-claude');
+  assert.equal(
+    telemetryStore.getState().telemetry.activeConversation.cascadeId,
+    'conv-claude',
+    'Repeat conversation switch must update activeConversation synchronously in 0ms from client LRU cache'
+  );
+  assert.equal(telemetryStore.getState().telemetry.activeConversation.recentSteps.length, 2);
+  assert.match(fetchedUrls[fetchedUrls.length - 1], new RegExp(`stepRevision=${switchClaude.stepRevision}`));
+  releaseSecondFetch();
+  await pendingSwitch;
+  assert.equal(telemetryStore.getState().telemetry.activeConversation.recentSteps.length, 2);
+});

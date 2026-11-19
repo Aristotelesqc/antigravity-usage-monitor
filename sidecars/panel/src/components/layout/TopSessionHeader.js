@@ -14,6 +14,7 @@ import {
   formatConversationMeta,
   normalizeClientUpdateMode,
   resolveHostRouteMatch,
+  selectConversation,
   telemetryStore,
   triggerPluginUpdate,
 } from '../../store/telemetryStore.js';
@@ -33,8 +34,7 @@ export const TopSessionHeader = defineComponent({
       options: [{ value: '', label: t('header.followLatest') }],
       onUpdateModelValue: (nextConvId) => {
         uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-        telemetryStore.setState({ selectedConversationId: nextConvId });
-        fetchTelemetry({ force: false });
+        void selectConversation(nextConvId);
       },
     });
 

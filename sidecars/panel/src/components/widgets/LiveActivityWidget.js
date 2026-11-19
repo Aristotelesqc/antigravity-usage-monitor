@@ -25,8 +25,8 @@ import { createSvgIcon } from '../../icons/SvgIcon.js';
 import { getEffectiveLocale, t } from '../../i18n/index.js';
 import {
   extractHostRouteCascadeId,
-  fetchTelemetry,
   resolveScopedConversation,
+  selectConversation,
   telemetryStore,
 } from '../../store/telemetryStore.js';
 import { uiStore } from '../../store/uiStore.js';
@@ -499,8 +499,7 @@ export const LiveActivityWidget = defineComponent({
                 onSelectSession(item.cascadeId);
               } else if (item.cascadeId && item.cascadeId !== 'current') {
                 uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
-                telemetryStore.setState({ selectedConversationId: item.cascadeId });
-                fetchTelemetry({ force: false });
+                void selectConversation(item.cascadeId);
               }
             };
           }

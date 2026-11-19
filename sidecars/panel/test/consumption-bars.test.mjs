@@ -423,8 +423,18 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
     .reduce((s, el) => s + parsePctVar(el, '--seg-w'), 0);
   assert.ok(Math.abs(argonSegSum - 50) < 0.1, `Expected 50% width for 4-argon row, got ${argonSegSum}`);
 
-  // 2. Client Sources: NO bottom model list text dump; 3 tail models (<1.5%) fold into 1 neutral '__other__' segment!
+  // 2. Client Sources: NO multi-line .cons-source-model-chip dump; renders single-line Top 2-3 models + 1 merged '__other__' segment on the bar!
   assert.equal(sourceRows[0].querySelectorAll('.cons-source-model-chip').length, 0);
+  const appTopItems = sourceRows[0].querySelectorAll('.cons-source-top-item');
+  assert.equal(appTopItems.length, 3, 'Should show top 3 non-other models in single-line footer');
+  assert.equal(appTopItems[0].querySelector('.cons-source-top-name')?.textContent, '4-argon');
+  assert.equal(appTopItems[0].querySelector('.cons-source-top-pct')?.textContent, '50%');
+  assert.equal(appTopItems[0].querySelector('.cons-source-top-dot')?.style.getPropertyValue('--dot-color'), argonDotColor);
+  assert.equal(appTopItems[1].querySelector('.cons-source-top-name')?.textContent, '4-carbon');
+  assert.equal(appTopItems[1].querySelector('.cons-source-top-pct')?.textContent, '31%');
+  assert.equal(appTopItems[2].querySelector('.cons-source-top-name')?.textContent, '3.8-flash-n');
+  assert.equal(appTopItems[2].querySelector('.cons-source-top-pct')?.textContent, '16%');
+
   const appSegs = sourceRows[0].querySelectorAll('.cons-model-seg');
   assert.equal(appSegs.length, 4, '3 main models + 1 merged other segment');
   assert.equal(appSegs[0].style.getPropertyValue('--seg-color'), argonDotColor);
@@ -432,7 +442,7 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
   const appBarSum = appSegs.reduce((s, el) => s + parsePctVar(el, '--seg-w'), 0);
   assert.ok(Math.abs(appBarSum - 80) < 0.1);
 
-  // Hovering Client Source bar hit area opens shared popover with model details + '其他 (3)'
+  // Hovering Client Source bar hit area OR top-models summary opens shared popover with model details + '其他 (3)'
   const popover = view.refs.breakdownPopoverEl;
   assert.equal(popover.hasAttribute('hidden'), true);
   const appBarHit = sourceRows[0].querySelector('.cons-source-bar-hit');
@@ -447,6 +457,20 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
 
   appBarHit.dispatchEvent({ type: 'mouseleave' });
   assert.equal(popover.hasAttribute('hidden'), true);
+
+  const appTopModelsEl = sourceRows[0].querySelector('.cons-source-top-models');
+  appTopModelsEl.dispatchEvent({ type: 'mouseenter', clientX: 90 });
+  assert.equal(popover.hasAttribute('hidden'), false);
+  assert.equal(popover.querySelector('.trend-tip-time')?.textContent, 'Antigravity App');
+  appTopModelsEl.dispatchEvent({ type: 'mouseleave' });
+  assert.equal(popover.hasAttribute('hidden'), true);
+
+  // Verify single-line non-wrapping CSS rules exist for client source top models
+  const { readFileSync } = await import('node:fs');
+  const consCss = readFileSync(new URL('../src/styles/views-consumption.css', import.meta.url), 'utf8');
+  assert.match(consCss, /\.cons-source-foot\s*\{[\s\S]*flex-wrap:\s*nowrap/);
+  assert.match(consCss, /\.cons-source-top-models\s*\{[\s\S]*flex-wrap:\s*nowrap/);
+  assert.match(consCss, /@container\s*\(max-width:\s*340px\)\s*\{\s*\.cons-source-top-item:nth-child\(n\s*\+\s*3\)/);
 
   // 3. Monthly Breakdown: old 4-channel legend removed; Nov column renders model-colored vertical segments & hover popover
   assert.equal(view.el.querySelectorAll('.monthly-legend').length, 0);

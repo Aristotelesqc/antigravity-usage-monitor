@@ -198,7 +198,11 @@ export async function executeTelemetryAction(data, { onRestart = null } = {}) {
   }
   const rawScope = String(data?.scope || '').trim();
   const scope =
-    rawScope === 'consumption' || rawScope === 'consumption-presets' ? rawScope : '';
+    rawScope === 'consumption' ||
+    rawScope === 'consumption-presets' ||
+    rawScope === 'conversation'
+      ? rawScope
+      : '';
   const filterOpts = {
     range: data?.range || 'all',
     startMs: sanitizePositiveFiniteMs(data?.startMs),
