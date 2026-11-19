@@ -15,7 +15,12 @@ import {
 } from '../src/core/appearance.js';
 import { createTrendAreaChart } from '../src/components/charts/TrendAreaChart.js';
 import { computePublicationFit } from '../src/components/charts/SessionStepCharts.js';
+import { CustomSelect } from '../src/components/ui/CustomSelect.js';
 import { SegmentedControl } from '../src/components/ui/SegmentedControl.js';
+import {
+  patchCapsuleOdometerText,
+  tokenizeCapsuleOdometerText,
+} from '../src/components/widgets/CapsuleBarWidget.js';
 import { ContextWindowWidget } from '../src/components/widgets/ContextWindowWidget.js';
 import { LiveActivityWidget } from '../src/components/widgets/LiveActivityWidget.js';
 import { StepTableWidget } from '../src/components/widgets/StepTableWidget.js';
@@ -987,4 +992,174 @@ test('StepTableWidget virtualizes large sessions (>80 rows) with exact turn-rail
   assert.ok(loessMs < 80, `Interpolated 1722-sample LOESS should stay fast (was ${loessMs.toFixed(1)}ms)`);
 
   stepTable.destroy();
+});
+
+test('CustomSelect collision detection clamps left/right overflow and flips upward near bottom boundary', (t) => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { document } = createMockDom();
+  globalThis.document = document;
+  globalThis.window = {
+    innerWidth: 1200,
+    innerHeight: 800,
+    getComputedStyle: () => ({ overflow: 'visible', overflowX: 'visible', overflowY: 'visible' }),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  let selectComp = null;
+  t.after(() => {
+    selectComp?.destroy?.();
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  });
+
+  const shell = document.createElement('div');
+  shell.className = 'wm-popover-panel';
+  shell.getBoundingClientRect = () => ({ left: 20, top: 40, right: 560, bottom: 620, width: 540, height: 580 });
+  document.body.appendChild(shell);
+
+  selectComp = CustomSelect({
+    className: 'steps-inline-scope-select',
+    modelValue: 'all',
+    options: [
+      { value: 'all', label: '全部汇总', meta: '1994步' },
+      { value: 'main', label: '主代理', meta: '1759步' },
+      { value: 'w1', label: '蜂群 #1 · @entry-runtime', meta: '17步' },
+    ],
+  });
+  shell.appendChild(selectComp.el);
+
+  const menuEl = selectComp.refs.menuEl;
+  const triggerBtn = selectComp.refs.triggerBtn;
+
+  // 1. Trigger near left edge with a wide 260px menu whose raw layout overflows left (-50 < 26)
+  selectComp.el.getBoundingClientRect = () => ({ left: 90, top: 100, right: 190, bottom: 124, width: 100, height: 24 });
+  triggerBtn.getBoundingClientRect = () => ({ left: 90, top: 100, right: 190, bottom: 124, width: 100, height: 24 });
+  menuEl.offsetWidth = 260;
+  menuEl.offsetHeight = 180;
+  menuEl.scrollHeight = 180;
+  menuEl.getBoundingClientRect = () => ({ left: -50, top: 128, right: 210, bottom: 308, width: 260, height: 180 });
+
+  triggerBtn.dispatchEvent({ type: 'click', stopPropagation() {} });
+  assert.equal(menuEl.style.left, '0px');
+  assert.equal(menuEl.style.right, 'auto');
+  assert.equal(menuEl.classList.contains('is-above'), false);
+
+  // 2. Trigger near right edge (460..540) overflows right (460+260 > 554) -> right-aligns cleanly inside shell
+  triggerBtn.dispatchEvent({ type: 'click', stopPropagation() {} }); // close
+  selectComp.el.getBoundingClientRect = () => ({ left: 460, top: 100, right: 540, bottom: 124, width: 80, height: 24 });
+  triggerBtn.getBoundingClientRect = () => ({ left: 460, top: 100, right: 540, bottom: 124, width: 80, height: 24 });
+  menuEl.getBoundingClientRect = () => ({ left: 460, top: 128, right: 720, bottom: 308, width: 260, height: 180 });
+
+  triggerBtn.dispatchEvent({ type: 'click', stopPropagation() {} }); // reopen
+  assert.equal(menuEl.style.left, '-180px', 'Right-edge menu shifts left to align with trigger right edge (540-260=280, offset=-180)');
+  assert.equal(menuEl.style.right, 'auto');
+
+  // 3. Trigger near bottom edge (580..604) flips upward (.is-above)
+  triggerBtn.dispatchEvent({ type: 'click', stopPropagation() {} }); // close
+  selectComp.el.getBoundingClientRect = () => ({ left: 90, top: 580, right: 190, bottom: 604, width: 100, height: 24 });
+  triggerBtn.getBoundingClientRect = () => ({ left: 90, top: 580, right: 190, bottom: 604, width: 100, height: 24 });
+  menuEl.getBoundingClientRect = () => ({ left: 90, top: 608, right: 350, bottom: 788, width: 260, height: 180 });
+
+  triggerBtn.dispatchEvent({ type: 'click', stopPropagation() {} }); // reopen
+  assert.equal(menuEl.classList.contains('is-above'), true);
+  assert.equal(menuEl.style.bottom, 'calc(100% + 4px)');
+  assert.equal(menuEl.style.top, 'auto');
+});
+
+test('Capsule odometer digit rolling (0.15s) and color transition (0.1s) stay strictly isolated to Modern UI', (t) => {
+  const prevDoc = globalThis.document;
+  const { document } = createMockDom();
+  globalThis.document = document;
+  t.after(() => {
+    globalThis.document = prevDoc;
+  });
+
+  // Tokenizer keys integer digits right-to-left by place value and fraction digits left-to-right
+  const toks = tokenizeCapsuleOdometerText('37.2 t/s');
+  assert.deepEqual(
+    toks.map((x) => `${x.key}=${x.kind === 'digit' ? x.digit : x.text}`),
+    ['n:0:i:1=3', 'n:0:i:0=7', 'n:0:dot=.', 'n:0:f:0=2', 's:0= t/s']
+  );
+
+  const host = document.createElement('div');
+  const slotText = document.createElement('span');
+  slotText.className = 'wm-slot-text wm-speed-text';
+  host.appendChild(slotText);
+  document.body.appendChild(host);
+
+  // 1. Classic UI (no data-modern-ui): strictly plain text, zero odometer reels
+  patchCapsuleOdometerText(slotText, '37.2 t/s', { resetKey: 'tps' });
+  assert.equal(slotText.textContent, '37.2 t/s');
+  assert.equal(slotText.querySelectorAll('.wm-od-digit').length, 0);
+  assert.equal(slotText.hasAttribute('data-od-active'), false);
+
+  // 2. Enable Modern UI: builds 3 digit reels in place and preserves reel identity across digit updates
+  host.setAttribute('data-modern-ui', 'true');
+  patchCapsuleOdometerText(slotText, '37.2 t/s', { resetKey: 'tps' });
+  assert.equal(slotText.getAttribute('data-od-active'), '1');
+  assert.equal(slotText.getAttribute('data-od-value'), '37.2 t/s');
+  assert.equal(slotText.getAttribute('aria-label'), '37.2 t/s');
+  const reels1 = slotText.querySelectorAll('.wm-od-digit');
+  assert.equal(reels1.length, 3);
+  const tensTrack = reels1[0].querySelector('.wm-od-track');
+  const onesTrack = reels1[1].querySelector('.wm-od-track');
+  const fracTrack = reels1[2].querySelector('.wm-od-track');
+  assert.equal(tensTrack.style.getPropertyValue('--od-val'), '3');
+  assert.equal(onesTrack.style.getPropertyValue('--od-val'), '7');
+  assert.equal(fracTrack.style.getPropertyValue('--od-val'), '2');
+
+  // Update 37.2 -> 38.5: same DOM reel nodes reused, only changed digits update --od-val
+  patchCapsuleOdometerText(slotText, '38.5 t/s', { resetKey: 'tps' });
+  const reels2 = slotText.querySelectorAll('.wm-od-digit');
+  assert.equal(reels2[0], reels1[0]);
+  assert.equal(reels2[1], reels1[1]);
+  assert.equal(reels2[2], reels1[2]);
+  assert.equal(tensTrack.style.getPropertyValue('--od-val'), '3');
+  assert.equal(onesTrack.style.getPropertyValue('--od-val'), '8');
+  assert.equal(fracTrack.style.getPropertyValue('--od-val'), '5');
+
+  // Digit count change 38.5 -> 9.4 -> 12.6 preserves ones & tenths place reels cleanly
+  patchCapsuleOdometerText(slotText, '9.4 t/s', { resetKey: 'tps' });
+  const reels3 = slotText.querySelectorAll('.wm-od-digit');
+  assert.equal(reels3.length, 2);
+  assert.equal(reels3[0], reels1[1], 'Ones-place reel stays mounted across 2-digit -> 1-digit shrink');
+  assert.equal(reels3[1], reels1[2], 'Tenths-place reel stays mounted');
+  assert.equal(onesTrack.style.getPropertyValue('--od-val'), '9');
+  assert.equal(fracTrack.style.getPropertyValue('--od-val'), '4');
+
+  patchCapsuleOdometerText(slotText, '12.6 t/s', { resetKey: 'tps' });
+  const reels4 = slotText.querySelectorAll('.wm-od-digit');
+  assert.equal(reels4.length, 3);
+  assert.equal(reels4[1], reels1[1], 'Ones-place reel stays mounted across 1-digit -> 2-digit grow');
+  assert.equal(reels4[2], reels1[2], 'Tenths-place reel stays mounted');
+  assert.equal(reels4[0].querySelector('.wm-od-track').style.getPropertyValue('--od-val'), '1');
+  assert.equal(onesTrack.style.getPropertyValue('--od-val'), '2');
+  assert.equal(fracTrack.style.getPropertyValue('--od-val'), '6');
+
+  // 3. Disable Modern UI: restores clean plain text with zero leftover odometer DOM
+  host.removeAttribute('data-modern-ui');
+  patchCapsuleOdometerText(slotText, '12.6 t/s', { resetKey: 'tps' });
+  assert.equal(slotText.textContent, '12.6 t/s');
+  assert.equal(slotText.querySelectorAll('.wm-od-digit').length, 0);
+  assert.equal(slotText.hasAttribute('data-od-active'), false);
+
+  // 4. Compiled CSS strictly scopes 150ms roll & 100ms color transition under [data-modern-ui="true"]
+  const builtStyles = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(builtStyles, /\.steps-inline-scope-select\s+\.select-menu[\s\S]*?left:\s*0;\s*right:\s*auto;/);
+  assert.match(builtStyles, /\[data-modern-ui="true"\]\s+\.select-menu\.is-above/);
+  assert.match(
+    builtStyles,
+    /\[data-modern-ui="true"\]\s+\.wm-od-track\s*\{[^}]*transition:\s*transform\s+150ms/
+  );
+  assert.match(
+    builtStyles,
+    /\[data-modern-ui="true"\]\s+\.wm-multi-label\s*\{[^}]*transition:\s*color\s+100ms/
+  );
+  assert.doesNotMatch(
+    builtStyles,
+    /(?:^|\n)\.wm-od-track\s*\{/,
+    'Odometer roll CSS must ONLY exist under [data-modern-ui="true"]'
+  );
 });

@@ -12,6 +12,7 @@ import {
   patchClasses,
   patchKeyedList,
   patchText,
+  positionAnchoredPopup,
 } from '../../core/domPatch.js';
 import { isEnglishLocale, t } from '../../i18n/index.js';
 import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
@@ -102,6 +103,37 @@ export const CustomSelect = defineComponent({
       return new Set(normalizeMultiSelection(modelValue, options, allValue));
     }
 
+    function positionMenu() {
+      if (!isOpen) return;
+      positionAnchoredPopup(rootEl, triggerBtn, menuEl, {
+        margin: 6,
+        gap: 4,
+        maxHeight: 220,
+        minFlipSpace: 140,
+      });
+    }
+
+    let boundReposition = false;
+    function handleViewportChange(e) {
+      if (!isOpen) return;
+      if (e?.type === 'scroll' && e.target === menuEl) return;
+      positionMenu();
+    }
+
+    function setRepositionListeners(active) {
+      if (active === boundReposition) return;
+      boundReposition = active;
+      if (typeof window !== 'undefined' && window.addEventListener) {
+        if (active) {
+          window.addEventListener('resize', handleViewportChange, { passive: true });
+          window.addEventListener('scroll', handleViewportChange, true);
+        } else {
+          window.removeEventListener('resize', handleViewportChange);
+          window.removeEventListener('scroll', handleViewportChange, true);
+        }
+      }
+    }
+
     function toggleOpen(nextOpen) {
       isOpen = Boolean(nextOpen);
       if (isOpen) {
@@ -117,6 +149,10 @@ export const CustomSelect = defineComponent({
       patchAttr(triggerBtn, 'aria-expanded', isOpen ? 'true' : 'false');
       patchAttr(menuEl, 'hidden', !isOpen);
       patchSvgIcon(chevronIcon, isOpen ? 'chevron-up' : 'chevron-down');
+      setRepositionListeners(isOpen);
+      if (isOpen) {
+        positionMenu();
+      }
     }
 
     function chooseOption(option) {
@@ -307,6 +343,7 @@ export const CustomSelect = defineComponent({
       patchAttr(triggerBtn, 'title', titleText);
       if (isOpen) {
         renderMenuOptions();
+        positionMenu();
       }
     }
 
@@ -318,7 +355,12 @@ export const CustomSelect = defineComponent({
 
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('click', handleDocClick, true);
-      onCleanup(() => document.removeEventListener('click', handleDocClick, true));
+      onCleanup(() => {
+        setRepositionListeners(false);
+        document.removeEventListener('click', handleDocClick, true);
+      });
+    } else {
+      onCleanup(() => setRepositionListeners(false));
     }
 
     syncTriggerAndMenu();

@@ -2872,7 +2872,7 @@ return { THEME_ACCENT_PRESETS, FONT_SCALE_FACTORS, PANEL_SCALE_FACTORS, normaliz
 })();
 
 // --- src/core/domPatch.js ---
-const { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList } = (() => {
+const { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList, positionAnchoredPopup } = (() => {
 /**
  * @fileoverview Incremental DOM patching utilities and keyed list reconciler.
  * Prevents full innerHTML replacements and preserves active DOM element state.
@@ -3077,7 +3077,198 @@ function patchKeyedList(
     }
   }
 }
-return { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList };
+
+const CLIPPING_OVERFLOW_RE = /(?:hidden|clip|auto|scroll)/i;
+
+/**
+ * 解析浮层所在的可视裁剪边界（兼容 Shadow DOM 悬浮窗 `.wm-popover-panel`、
+ * 侧栏 `.app-shell`、自定义滚动容器 `.custom-scroll-content` 与窗口视口）。
+ *
+ * @param {HTMLElement} anchorRootEl
+ * @returns {{ left: number, top: number, right: number, bottom: number, width: number, height: number } | null}
+ */
+function resolvePopupBoundaryRect(anchorRootEl) {
+  if (!anchorRootEl) return null;
+  const winW = typeof window !== 'undefined' ? Number(window.innerWidth || 0) : 0;
+  const winH = typeof window !== 'undefined' ? Number(window.innerHeight || 0) : 0;
+  let boundLeft = 0;
+  let boundTop = 0;
+  let boundRight = winW > 0 ? winW : Infinity;
+  let boundBottom = winH > 0 ? winH : Infinity;
+  let hasBoundary = winW > 0 && winH > 0;
+
+  const getStyle =
+    typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+      ? window.getComputedStyle
+      : null;
+
+  let cur = anchorRootEl.parentNode || null;
+  while (cur) {
+    if (cur.nodeType === 1 || typeof cur.getBoundingClientRect === 'function') {
+      const cls = cur.classList;
+      const isShell = Boolean(
+        cls?.contains?.('wm-popover-panel') ||
+          cls?.contains?.('wm-multi-panel') ||
+          cls?.contains?.('app-shell') ||
+          cls?.contains?.('custom-scroll-host') ||
+          cls?.contains?.('custom-scroll-content')
+      );
+      let clipsX = isShell;
+      let clipsY = isShell;
+      if (!isShell && getStyle) {
+        try {
+          const cs = getStyle(cur);
+          if (cs) {
+            clipsX = CLIPPING_OVERFLOW_RE.test(cs.overflowX || cs.overflow || '');
+            clipsY = CLIPPING_OVERFLOW_RE.test(cs.overflowY || cs.overflow || '');
+          }
+        } catch {
+          // 忽略 Mock DOM 样式查询异常
+        }
+      }
+      if (clipsX || clipsY) {
+        const r = cur.getBoundingClientRect?.();
+        if (r && r.width > 0 && r.height > 0) {
+          hasBoundary = true;
+          if (clipsX) {
+            boundLeft = Math.max(boundLeft, r.left);
+            boundRight = Math.min(boundRight, r.right);
+          }
+          if (clipsY) {
+            boundTop = Math.max(boundTop, r.top);
+            boundBottom = Math.min(boundBottom, r.bottom);
+          }
+        }
+      }
+    }
+    // 到达 ShadowRoot 或文档顶层后停止，避免误受宿主页面外层容器干扰
+    if (!cur.parentNode) break;
+    cur = cur.parentNode;
+  }
+
+  if (!hasBoundary || !Number.isFinite(boundRight) || !Number.isFinite(boundBottom)) {
+    return null;
+  }
+  const width = Math.max(0, boundRight - boundLeft);
+  const height = Math.max(0, boundBottom - boundTop);
+  if (width <= 0 || height <= 0) return null;
+  return { left: boundLeft, top: boundTop, right: boundRight, bottom: boundBottom, width, height };
+}
+
+/**
+ * 为锚定在触发器上的绝对定位下拉浮层执行水平/垂直碰撞检测与边界夹紧：
+ * - 水平方向优先左对齐，右侧溢出时切右对齐，仍越界则直接夹紧在容器可视安全区内；
+ * - 垂直方向底部空间不足且上方更宽裕时自动向上翻转（追加 `.is-above`），并按可用空间收紧 `max-height`。
+ *
+ * @param {HTMLElement} rootEl 定位基准容器 (`position: relative`)
+ * @param {HTMLElement} triggerEl 触发按钮
+ * @param {HTMLElement} popupEl 下拉浮层 (`position: absolute`)
+ * @param {{ margin?: number, gap?: number, maxHeight?: number, minFlipSpace?: number }} [opts]
+ */
+function positionAnchoredPopup(
+  rootEl,
+  triggerEl,
+  popupEl,
+  { margin = 6, gap = 4, maxHeight = 220, minFlipSpace = 140 } = {}
+) {
+  if (!rootEl || !triggerEl || !popupEl || !popupEl.style) return;
+  if (popupEl.hasAttribute?.('hidden')) return;
+
+  const rootRect = rootEl.getBoundingClientRect?.();
+  const triggerRect = triggerEl.getBoundingClientRect?.();
+  if (
+    !rootRect ||
+    !triggerRect ||
+    !(triggerRect.width > 0 && triggerRect.height > 0)
+  ) {
+    return;
+  }
+
+  const bound = resolvePopupBoundaryRect(rootEl);
+  if (!bound) return;
+
+  // 清除旧的动态夹紧值以便读取自然布局宽度
+  popupEl.style.left = '';
+  popupEl.style.right = '';
+  popupEl.style.top = '';
+  popupEl.style.bottom = '';
+  popupEl.style.minWidth = '';
+  popupEl.style.maxWidth = '';
+  popupEl.style.maxHeight = '';
+
+  const availWidth = Math.max(120, Math.floor(bound.width - margin * 2));
+  popupEl.style.maxWidth = `${availWidth}px`;
+
+  const rawRect = popupEl.getBoundingClientRect?.();
+  // 优先读取 offsetWidth，避免入场动画 scale(0.975) 导致测宽偏小
+  const naturalW = Math.max(
+    Number(popupEl.offsetWidth || 0),
+    Math.ceil(Number(rawRect?.width || 0))
+  );
+  if (naturalW > availWidth) {
+    popupEl.style.minWidth = '0px';
+  }
+  const popupW = Math.min(availWidth, naturalW > 0 ? naturalW : Math.max(triggerRect.width, 210));
+
+  const safeLeft = bound.left + margin;
+  const safeRight = bound.right - margin;
+  const rawLeft = Number(rawRect?.left);
+  const rawRight = Number(rawRect?.right);
+  const hasRawBox = Number.isFinite(rawLeft) && Number.isFinite(rawRight) && rawRight > rawLeft;
+  // 若入场缩放动画（如 scale(0.975)）正在首帧生效，按对称补偿还原终态边界再判断是否越界
+  const scalePadX = hasRawBox ? Math.max(0, (popupW - (rawRight - rawLeft)) / 2) : 0;
+  const naturalLeft = hasRawBox ? rawLeft - scalePadX : triggerRect.left;
+  const naturalRight = hasRawBox
+    ? Math.max(rawRight + scalePadX, naturalLeft + popupW)
+    : naturalLeft + popupW;
+  const fitsAsDefault = hasRawBox && naturalLeft >= safeLeft && naturalRight <= safeRight;
+
+  if (!fitsAsDefault) {
+    let targetLeft = triggerRect.left;
+    if (targetLeft + popupW > safeRight) {
+      const rightAlignedLeft = triggerRect.right - popupW;
+      if (rightAlignedLeft >= safeLeft) {
+        targetLeft = rightAlignedLeft;
+      } else {
+        targetLeft = Math.max(safeLeft, safeRight - popupW);
+      }
+    }
+    if (targetLeft < safeLeft) {
+      targetLeft = safeLeft;
+    }
+
+    const offsetLeft = Math.round(targetLeft - rootRect.left);
+    popupEl.style.left = `${offsetLeft}px`;
+    popupEl.style.right = 'auto';
+  }
+
+  const spaceBelow = Math.max(0, bound.bottom - triggerRect.bottom - gap - margin);
+  const spaceAbove = Math.max(0, triggerRect.top - bound.top - gap - margin);
+  const naturalH = Math.max(
+    Number(popupEl.scrollHeight || 0),
+    Number(popupEl.offsetHeight || 0),
+    Math.ceil(Number(rawRect?.height || 0))
+  );
+  const desiredH = maxHeight > 0 ? Math.min(maxHeight, naturalH || maxHeight) : naturalH || 240;
+  const shouldOpenAbove =
+    spaceBelow < Math.min(desiredH, minFlipSpace) && spaceAbove > spaceBelow;
+
+  patchClasses(popupEl, { 'is-above': shouldOpenAbove });
+  if (shouldOpenAbove) {
+    popupEl.style.top = 'auto';
+    popupEl.style.bottom = `calc(100% + ${gap}px)`;
+    if (maxHeight > 0) {
+      popupEl.style.maxHeight = `${Math.max(88, Math.floor(Math.min(maxHeight, spaceAbove)))}px`;
+    }
+  } else {
+    popupEl.style.top = `calc(100% + ${gap}px)`;
+    popupEl.style.bottom = 'auto';
+    if (maxHeight > 0) {
+      popupEl.style.maxHeight = `${Math.max(88, Math.floor(Math.min(maxHeight, spaceBelow)))}px`;
+    }
+  }
+}
+return { h, patchText, patchAttr, patchClasses, patchStyleVar, isEventInside, patchKeyedList, positionAnchoredPopup };
 })();
 
 // --- src/core/component.js ---
@@ -6271,6 +6462,37 @@ const CustomSelect = defineComponent({
       return new Set(normalizeMultiSelection(modelValue, options, allValue));
     }
 
+    function positionMenu() {
+      if (!isOpen) return;
+      positionAnchoredPopup(rootEl, triggerBtn, menuEl, {
+        margin: 6,
+        gap: 4,
+        maxHeight: 220,
+        minFlipSpace: 140,
+      });
+    }
+
+    let boundReposition = false;
+    function handleViewportChange(e) {
+      if (!isOpen) return;
+      if (e?.type === 'scroll' && e.target === menuEl) return;
+      positionMenu();
+    }
+
+    function setRepositionListeners(active) {
+      if (active === boundReposition) return;
+      boundReposition = active;
+      if (typeof window !== 'undefined' && window.addEventListener) {
+        if (active) {
+          window.addEventListener('resize', handleViewportChange, { passive: true });
+          window.addEventListener('scroll', handleViewportChange, true);
+        } else {
+          window.removeEventListener('resize', handleViewportChange);
+          window.removeEventListener('scroll', handleViewportChange, true);
+        }
+      }
+    }
+
     function toggleOpen(nextOpen) {
       isOpen = Boolean(nextOpen);
       if (isOpen) {
@@ -6286,6 +6508,10 @@ const CustomSelect = defineComponent({
       patchAttr(triggerBtn, 'aria-expanded', isOpen ? 'true' : 'false');
       patchAttr(menuEl, 'hidden', !isOpen);
       patchSvgIcon(chevronIcon, isOpen ? 'chevron-up' : 'chevron-down');
+      setRepositionListeners(isOpen);
+      if (isOpen) {
+        positionMenu();
+      }
     }
 
     function chooseOption(option) {
@@ -6476,6 +6702,7 @@ const CustomSelect = defineComponent({
       patchAttr(triggerBtn, 'title', titleText);
       if (isOpen) {
         renderMenuOptions();
+        positionMenu();
       }
     }
 
@@ -6487,7 +6714,12 @@ const CustomSelect = defineComponent({
 
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('click', handleDocClick, true);
-      onCleanup(() => document.removeEventListener('click', handleDocClick, true));
+      onCleanup(() => {
+        setRepositionListeners(false);
+        document.removeEventListener('click', handleDocClick, true);
+      });
+    } else {
+      onCleanup(() => setRepositionListeners(false));
     }
 
     syncTriggerAndMenu();
@@ -6824,15 +7056,47 @@ const CustomDateTimePicker = defineComponent({
 
     const rootEl = h('div', { className: 'datetime-picker' }, [triggerBtn, popoverEl]);
 
+    function positionPopover() {
+      if (!isOpen) return;
+      positionAnchoredPopup(rootEl, triggerBtn, popoverEl, {
+        margin: 6,
+        gap: 4,
+        maxHeight: 0,
+        minFlipSpace: 260,
+      });
+    }
+
+    let boundReposition = false;
+    function handleViewportChange() {
+      if (!isOpen) return;
+      positionPopover();
+    }
+
+    function setRepositionListeners(active) {
+      if (active === boundReposition) return;
+      boundReposition = active;
+      if (typeof window !== 'undefined' && window.addEventListener) {
+        if (active) {
+          window.addEventListener('resize', handleViewportChange, { passive: true });
+          window.addEventListener('scroll', handleViewportChange, true);
+        } else {
+          window.removeEventListener('resize', handleViewportChange);
+          window.removeEventListener('scroll', handleViewportChange, true);
+        }
+      }
+    }
+
     function togglePopover(nextOpen) {
       isOpen = Boolean(nextOpen);
       patchAttr(popoverEl, 'hidden', !isOpen);
       patchAttr(triggerBtn, 'aria-expanded', isOpen ? 'true' : 'false');
+      setRepositionListeners(isOpen);
       if (isOpen) {
         const cur = new Date(getProps().modelValue || Date.now());
         viewYear = cur.getFullYear();
         viewMonth = cur.getMonth();
         renderCalendar();
+        positionPopover();
       }
     }
 
@@ -6894,7 +7158,12 @@ const CustomDateTimePicker = defineComponent({
 
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('click', handleDocClick, true);
-      onCleanup(() => document.removeEventListener('click', handleDocClick, true));
+      onCleanup(() => {
+        setRepositionListeners(false);
+        document.removeEventListener('click', handleDocClick, true);
+      });
+    } else {
+      onCleanup(() => setRepositionListeners(false));
     }
 
     syncDisplay();
@@ -14073,7 +14342,7 @@ return { STEP_COLUMN_KEYS, DEFAULT_STEP_COLUMN_KEYS, formatCustomTokenComboHeade
 })();
 
 // --- src/components/widgets/CapsuleBarWidget.js ---
-const { RING_RADIUS, RING_CIRCUMFERENCE, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget } = (() => {
+const { RING_RADIUS, RING_CIRCUMFERENCE, tokenizeCapsuleOdometerText, patchCapsuleOdometerText, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget } = (() => {
 /**
  * @fileoverview Shared Decoupled Capsule Bar Primitives & Widget (`CapsuleBarWidget.js`).
  * Powers both the live host window capsule (`WindowOverlayShell.js`) and the
@@ -14083,6 +14352,165 @@ const { RING_RADIUS, RING_CIRCUMFERENCE, buildCapsuleSlotContext, resolveMultiSe
 
 const RING_RADIUS = 5.2;
 const RING_CIRCUMFERENCE = +(2 * Math.PI * RING_RADIUS).toFixed(2);
+
+const ODOMETER_DIGITS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const capsuleOdometerState = new WeakMap();
+
+/**
+ * 将胶囊指标文本拆分为「按数位对齐的数字滚轮 + 静态字符片段」：
+ * - 整数部分从右向左按位次键控（个位 `i:0`、十位 `i:1`...），小数部分从左向右键控（`f:0`...）；
+ * - 位数增减时既有数位节点原地复用，仅发生变化的数字位执行 0.15s 老虎机垂直滚动，未变位与单位纹丝不动。
+ *
+ * @param {string} rawText
+ * @returns {Array<{ key: string, kind: 'digit' | 'static', digit?: number, text?: string }>}
+ */
+function tokenizeCapsuleOdometerText(rawText) {
+  const str = String(rawText ?? '');
+  if (!str) return [];
+  const parts = str.split(/(\d+(?:\.\d+)?)/g);
+  const tokens = [];
+  let numIdx = 0;
+  let staticIdx = 0;
+
+  for (let p = 0; p < parts.length; p += 1) {
+    const seg = parts[p];
+    if (!seg) continue;
+    if (/^\d+(?:\.\d+)?$/.test(seg)) {
+      const dotPos = seg.indexOf('.');
+      const intPart = dotPos >= 0 ? seg.slice(0, dotPos) : seg;
+      const fracPart = dotPos >= 0 ? seg.slice(dotPos + 1) : '';
+      const intLen = intPart.length;
+      for (let i = 0; i < intLen; i += 1) {
+        const place = intLen - 1 - i;
+        tokens.push({
+          key: `n:${numIdx}:i:${place}`,
+          kind: 'digit',
+          digit: Number(intPart[i]),
+        });
+      }
+      if (dotPos >= 0) {
+        tokens.push({ key: `n:${numIdx}:dot`, kind: 'static', text: '.' });
+        for (let j = 0; j < fracPart.length; j += 1) {
+          tokens.push({
+            key: `n:${numIdx}:f:${j}`,
+            kind: 'digit',
+            digit: Number(fracPart[j]),
+          });
+        }
+      }
+      numIdx += 1;
+    } else {
+      tokens.push({ key: `s:${staticIdx}`, kind: 'static', text: seg });
+      staticIdx += 1;
+    }
+  }
+  return tokens;
+}
+
+function createOdometerDigitReel(initialDigit) {
+  const cells = ODOMETER_DIGITS.map((d) => h('span', { className: 'wm-od-cell', text: d }));
+  const trackEl = h('span', { className: 'wm-od-track' }, cells);
+  patchStyleVar(trackEl, '--od-val', String(initialDigit));
+  const digitEl = h('span', { className: 'wm-od-digit', 'aria-hidden': 'true' }, [trackEl]);
+  return { el: digitEl, trackEl, kind: 'digit', digit: initialDigit };
+}
+
+/**
+ * 在实验性新 UI (`[data-modern-ui="true"]`) 下将胶囊数字渲染为 0.15s 老虎机垂直滚轮；
+ * 经典 UI 或无数字占位文本（如 `-- t/s`）严格退回原生纯文本 `patchText`，零多余 DOM 与动画。
+ */
+function patchCapsuleOdometerText(
+  el,
+  nextValue,
+  { resetKey = '', modernUi = undefined } = {}
+) {
+  if (!el) return false;
+  const nextStr = String(nextValue ?? '');
+  const isModern = typeof modernUi === 'boolean' ? modernUi : isModernUiActiveForElement(el);
+  const prev = capsuleOdometerState.get(el);
+
+  if (!isModern || !/\d/.test(nextStr)) {
+    if (prev?.active) {
+      while (el.firstChild) el.removeChild(el.firstChild);
+      patchAttr(el, 'data-od-active', null);
+      patchAttr(el, 'data-od-value', null);
+      patchAttr(el, 'aria-label', null);
+    }
+    const changed = patchText(el, nextStr);
+    capsuleOdometerState.set(el, { active: false, text: nextStr, resetKey, nodes: null });
+    return changed;
+  }
+
+  if (prev?.active && prev.text === nextStr && prev.resetKey === resetKey) {
+    return false;
+  }
+
+  let nodes;
+  if (!prev?.active || prev.resetKey !== resetKey || !(prev.nodes instanceof Map)) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    nodes = new Map();
+  } else {
+    nodes = prev.nodes;
+  }
+
+  const tokens = tokenizeCapsuleOdometerText(nextStr);
+  const nextKeys = new Set();
+  const orderedEls = [];
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i];
+    nextKeys.add(tok.key);
+    let rec = nodes.get(tok.key);
+    if (!rec || rec.kind !== tok.kind) {
+      if (rec?.el?.parentNode === el) {
+        el.removeChild(rec.el);
+      }
+      if (tok.kind === 'digit') {
+        rec = createOdometerDigitReel(tok.digit);
+      } else {
+        rec = {
+          el: h('span', { className: 'wm-od-static', 'aria-hidden': 'true', text: tok.text }),
+          trackEl: null,
+          kind: 'static',
+          text: tok.text,
+        };
+      }
+      nodes.set(tok.key, rec);
+    } else if (tok.kind === 'digit') {
+      if (rec.digit !== tok.digit) {
+        patchStyleVar(rec.trackEl, '--od-val', String(tok.digit));
+        rec.digit = tok.digit;
+      }
+    } else if (rec.text !== tok.text) {
+      patchText(rec.el, tok.text);
+      rec.text = tok.text;
+    }
+    orderedEls.push(rec.el);
+  }
+
+  for (const [oldKey, rec] of nodes.entries()) {
+    if (!nextKeys.has(oldKey)) {
+      if (rec.el?.parentNode === el) {
+        el.removeChild(rec.el);
+      }
+      nodes.delete(oldKey);
+    }
+  }
+
+  for (let i = 0; i < orderedEls.length; i += 1) {
+    const targetNode = orderedEls[i];
+    const currentNode = el.children[i] || null;
+    if (currentNode !== targetNode) {
+      el.insertBefore(targetNode, currentNode);
+    }
+  }
+
+  patchAttr(el, 'data-od-active', '1');
+  patchAttr(el, 'data-od-value', nextStr);
+  patchAttr(el, 'aria-label', nextStr);
+  capsuleOdometerState.set(el, { active: true, text: nextStr, resetKey, nodes });
+  return true;
+}
 
 /**
  * Compute shared context ring + 1..5 capsule slot metric payload from telemetry & scoped conversation.
@@ -14289,7 +14717,7 @@ function syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx) {
     patchAttr(slot.el, 'class', fullSegClass);
     const fullTextClass = `${pres.textClass}${toneCls ? ` ${toneCls}` : ''}`;
     patchAttr(slot.textSpan, 'class', fullTextClass);
-    patchText(slot.textSpan, pres.text);
+    patchCapsuleOdometerText(slot.textSpan, pres.text, { resetKey: pres.metric });
 
     if (pres.showRing) {
       slot.ringFill.setAttribute('stroke-dashoffset', String(pres.dashOffset));
@@ -14435,7 +14863,7 @@ const CapsuleBarWidget = defineComponent({
 
       if (!data) {
         patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
-        patchText(multiLabel, t('capsule.multiZero'));
+        patchCapsuleOdometerText(multiLabel, t('capsule.multiZero'), { resetKey: 'multi' });
         syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, { hasTelemetry: false });
         return;
       }
@@ -14456,7 +14884,7 @@ const CapsuleBarWidget = defineComponent({
         'is-running': runningCount > 0 && !hasWaiting,
         'is-waiting': runningCount > 0 && hasWaiting,
       });
-      patchText(multiLabel, multiBtnText);
+      patchCapsuleOdometerText(multiLabel, multiBtnText, { resetKey: 'multi' });
 
       patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
       syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
@@ -14475,7 +14903,7 @@ const CapsuleBarWidget = defineComponent({
     };
   },
 });
-return { RING_RADIUS, RING_CIRCUMFERENCE, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget };
+return { RING_RADIUS, RING_CIRCUMFERENCE, tokenizeCapsuleOdometerText, patchCapsuleOdometerText, buildCapsuleSlotContext, resolveMultiSessionCapsuleState, createCapsuleSlotNode, syncCapsuleSlotNodes, CapsuleBarWidget };
 })();
 
 // --- src/components/widgets/StepTableWidget.js ---
@@ -25414,7 +25842,7 @@ function mountWindowOverlay() {
 
     if (!telemetry) {
       patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
-      patchText(multiLabel, t('capsule.multiZero'));
+      patchCapsuleOdometerText(multiLabel, t('capsule.multiZero'), { resetKey: 'multi' });
       patchText(multiRunningMetaEl, t('multi.loading'));
       multiRunningWidget.refs.stopLiveTicker();
 
@@ -25454,7 +25882,7 @@ function mountWindowOverlay() {
       'is-running': runningCount > 0 && !hasWaiting,
       'is-waiting': runningCount > 0 && hasWaiting,
     });
-    patchText(multiLabel, multiBtnText);
+    patchCapsuleOdometerText(multiLabel, multiBtnText, { resetKey: 'multi' });
 
     renderMultiRunningPanel(
       rawRunningList,

@@ -34,6 +34,7 @@ import { createSvgIcon, patchSvgIcon } from '../../icons/SvgIcon.js';
 import {
   buildCapsuleSlotContext,
   createCapsuleSlotNode,
+  patchCapsuleOdometerText,
   resolveMultiSessionCapsuleState,
   syncCapsuleSlotNodes,
 } from '../widgets/CapsuleBarWidget.js';
@@ -2383,7 +2384,7 @@ export function mountWindowOverlay() {
 
     if (!telemetry) {
       patchClasses(multiBtn, { 'is-running': false, 'is-waiting': false });
-      patchText(multiLabel, t('capsule.multiZero'));
+      patchCapsuleOdometerText(multiLabel, t('capsule.multiZero'), { resetKey: 'multi' });
       patchText(multiRunningMetaEl, t('multi.loading'));
       multiRunningWidget.refs.stopLiveTicker();
 
@@ -2423,7 +2424,7 @@ export function mountWindowOverlay() {
       'is-running': runningCount > 0 && !hasWaiting,
       'is-waiting': runningCount > 0 && hasWaiting,
     });
-    patchText(multiLabel, multiBtnText);
+    patchCapsuleOdometerText(multiLabel, multiBtnText, { resetKey: 'multi' });
 
     renderMultiRunningPanel(
       rawRunningList,

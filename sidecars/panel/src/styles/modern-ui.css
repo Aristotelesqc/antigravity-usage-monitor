@@ -623,6 +623,11 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
   animation: anim-modern-pop-in 150ms var(--ease-modern);
 }
 
+[data-modern-ui="true"] .select-menu.is-above,
+[data-modern-ui="true"] .dt-popover.is-above {
+  animation-name: anim-modern-pop-in-up;
+}
+
 [data-modern-ui="true"] .trend-tooltip,
 [data-modern-ui="true"] .cons-breakdown-popover,
 [data-modern-ui="true"] .turn-prompt-tip {
@@ -705,4 +710,92 @@ html[data-standalone="true"][data-modern-ui="true"] .app-shell {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+/* --- 8. 顶栏胶囊老虎机滚动数字 (0.15s) 与语义色平滑渐变 (0.1s)，严格限定实验性新 UI --- */
+:host([data-modern-ui="true"]) .wm-cap-slot,
+:host([data-modern-ui="true"]) .wm-cap-slot .wm-slot-text,
+:host([data-modern-ui="true"]) .wm-multi-label,
+[data-modern-ui="true"] .wm-cap-slot,
+[data-modern-ui="true"] .wm-cap-slot .wm-slot-text,
+[data-modern-ui="true"] .wm-multi-label {
+  transition: color 100ms ease-out;
+}
+
+:host([data-modern-ui="true"]) .wm-ring-fill,
+[data-modern-ui="true"] .wm-ring-fill {
+  transition:
+    stroke-dashoffset var(--dur-normal) var(--ease-modern),
+    stroke 100ms ease-out;
+}
+
+:host([data-modern-ui="true"]) .wm-multi-dot,
+[data-modern-ui="true"] .wm-multi-dot {
+  transition: background-color 100ms ease-out;
+}
+
+:host([data-modern-ui="true"]) .wm-slot-text[data-od-active="1"],
+:host([data-modern-ui="true"]) .wm-multi-label[data-od-active="1"],
+[data-modern-ui="true"] .wm-slot-text[data-od-active="1"],
+[data-modern-ui="true"] .wm-multi-label[data-od-active="1"] {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  line-height: 18px;
+}
+
+:host([data-modern-ui="true"]) .wm-od-digit,
+[data-modern-ui="true"] .wm-od-digit {
+  display: inline-block;
+  position: relative;
+  height: 18px;
+  line-height: 18px;
+  overflow: hidden;
+  vertical-align: top;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+:host([data-modern-ui="true"]) .wm-od-track,
+[data-modern-ui="true"] .wm-od-track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translate3d(0, calc(var(--od-val, 0) * -18px), 0);
+  transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+:host([data-modern-ui="true"]) .wm-od-cell,
+[data-modern-ui="true"] .wm-od-cell {
+  display: block;
+  height: 18px;
+  line-height: 18px;
+  flex-shrink: 0;
+}
+
+:host([data-modern-ui="true"]) .wm-od-static,
+[data-modern-ui="true"] .wm-od-static {
+  display: inline-block;
+  height: 18px;
+  line-height: 18px;
+  vertical-align: top;
+  white-space: pre;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :host([data-modern-ui="true"]) .wm-od-track,
+  [data-modern-ui="true"] .wm-od-track,
+  :host([data-modern-ui="true"]) .wm-cap-slot,
+  :host([data-modern-ui="true"]) .wm-cap-slot .wm-slot-text,
+  :host([data-modern-ui="true"]) .wm-multi-label,
+  :host([data-modern-ui="true"]) .wm-ring-fill,
+  :host([data-modern-ui="true"]) .wm-multi-dot,
+  [data-modern-ui="true"] .wm-cap-slot,
+  [data-modern-ui="true"] .wm-cap-slot .wm-slot-text,
+  [data-modern-ui="true"] .wm-multi-label,
+  [data-modern-ui="true"] .wm-ring-fill,
+  [data-modern-ui="true"] .wm-multi-dot {
+    transition: none !important;
+  }
 }
