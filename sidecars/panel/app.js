@@ -4269,7 +4269,7 @@ return { getViewTabs, uiStore, getVisibleMonitorView };
 })();
 
 // --- src/store/telemetryStore.js ---
-const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform } = (() => {
+const { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -4367,9 +4367,16 @@ let pollTimer = null;
 let feedbackTimer = null;
 let activeBundleVersion = 0;
 let latestRequestSeq = 0;
+let latestConsumptionReqSeq = 0;
 let activeForceCount = 0;
 let consecutivePollFailures = 0;
 let inFlightTelemetryPoll = null;
+let inFlightPresetsPrefetch = null;
+let lastPrefetchedUsageRevision = 0;
+let consumptionCacheScopeSig = '';
+const MAX_CONSUMPTION_RANGE_CACHE = 12;
+const CONSUMPTION_PRESET_KEYS = ['cycle', 'today', '24h', '7d', '14d', '30d', 'all'];
+const consumptionRangeCache = new Map();
 let lastReceivedSteps = null;
 let loopActive = false;
 let loopIntervalMs = 2000;
@@ -4386,6 +4393,96 @@ const TELEMETRY_RECOMPUTE_SETTING_KEYS = new Set([
   'windowMountMode',
   'enableWindowOverlay',
 ]);
+
+function makeConsumptionRangeCacheKey(range, customStartMs = 0, customEndMs = 0) {
+  const key = String(range || 'all');
+  if (key === 'custom') {
+    return `custom:${Number(customStartMs || 0)}:${Number(customEndMs || 0)}`;
+  }
+  return key;
+}
+
+function clearConsumptionRangeCache() {
+  consumptionRangeCache.clear();
+  lastPrefetchedUsageRevision = 0;
+  inFlightPresetsPrefetch = null;
+}
+
+function buildConsumptionScopeSig(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  const acct = payload.account || {};
+  const set = payload.settings || {};
+  const cloud = payload.cloudStatus || {};
+  return `${String(acct.status || '')}|${String(acct.email || acct.name || '').toLowerCase()}|${String(set.weeklyLimitMode || '')}|${String(cloud.catalogVersion || '')}`;
+}
+
+function syncConsumptionCacheScope(payload) {
+  const nextSig = buildConsumptionScopeSig(payload);
+  if (!nextSig) return;
+  if (consumptionCacheScopeSig && consumptionCacheScopeSig !== nextSig) {
+    clearConsumptionRangeCache();
+  }
+  consumptionCacheScopeSig = nextSig;
+}
+
+function putConsumptionRangeCacheEntry(cacheKey, entry) {
+  if (!cacheKey || !entry) return;
+  consumptionRangeCache.delete(cacheKey);
+  consumptionRangeCache.set(cacheKey, entry);
+  while (consumptionRangeCache.size > MAX_CONSUMPTION_RANGE_CACHE) {
+    consumptionRangeCache.delete(consumptionRangeCache.keys().next().value);
+  }
+}
+
+function recordConsumptionSliceToCache(
+  cons,
+  modelBreakdown,
+  { customStartMs = 0, customEndMs = 0, usageRevision = 0 } = {}
+) {
+  const rangeKey = String(cons?.selectedRange?.key || '');
+  if (!rangeKey) return;
+  const cacheKey = makeConsumptionRangeCacheKey(
+    rangeKey,
+    rangeKey === 'custom' ? customStartMs || cons.selectedRange?.startMs || 0 : 0,
+    rangeKey === 'custom' ? customEndMs || cons.selectedRange?.endMs || 0 : 0
+  );
+  putConsumptionRangeCacheEntry(cacheKey, {
+    revision: Number(cons.revision ?? usageRevision ?? 0),
+    selectedRange: cons.selectedRange,
+    session: cons.session,
+    account: cons.account,
+    trendSeries: Array.isArray(cons.trendSeries) ? cons.trendSeries : [],
+    sourcesBreakdown: Array.isArray(cons.sourcesBreakdown) ? cons.sourcesBreakdown : [],
+    modelBreakdown: Array.isArray(modelBreakdown) ? modelBreakdown : [],
+  });
+}
+
+function applyCachedConsumptionSlice(baseTelemetry, cachedEntry, targetRevision = 0) {
+  if (!baseTelemetry || !cachedEntry) return baseTelemetry;
+  const prevCons = baseTelemetry.consumption || {};
+  return {
+    ...baseTelemetry,
+    consumption: {
+      ...prevCons,
+      ...(targetRevision > 0 ? { revision: targetRevision } : {}),
+      selectedRange: cachedEntry.selectedRange,
+      session: cachedEntry.session ?? prevCons.session,
+      account: cachedEntry.account ?? prevCons.account,
+      trendSeries: cachedEntry.trendSeries,
+      sourcesBreakdown: cachedEntry.sourcesBreakdown,
+    },
+    modelBreakdown: cachedEntry.modelBreakdown,
+  };
+}
+
+function hasAllPresetRangesCached(expectedRevision) {
+  for (const key of CONSUMPTION_PRESET_KEYS) {
+    const entry = consumptionRangeCache.get(key);
+    if (!entry) return false;
+    if (expectedRevision > 0 && entry.revision !== expectedRevision) return false;
+  }
+  return true;
+}
 
 function enqueueSettingsWrite(task) {
   const run = settingsWriteChain.then(task, task);
@@ -5079,6 +5176,9 @@ function readDisplaySteps(payload) {
 async function requestTelemetry(params, force) {
   const reqSeq = ++latestRequestSeq;
   const reqSettingsRev = settingsRevision;
+  const reqRange = String(params.get('range') || '');
+  const reqStartMs = Number(params.get('startMs') || 0);
+  const reqEndMs = Number(params.get('endMs') || 0);
   const startMs = Date.now();
 
   if (force) {
@@ -5129,8 +5229,57 @@ async function requestTelemetry(params, force) {
     }
     consecutivePollFailures = 0;
 
-    const resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+    let resolvedPayload = reconcileIncomingTelemetrySettings(payload, reqSettingsRev);
+    syncConsumptionCacheScope(resolvedPayload);
+    if (resolvedPayload?.consumption) {
+      recordConsumptionSliceToCache(resolvedPayload.consumption, resolvedPayload.modelBreakdown, {
+        customStartMs: reqStartMs,
+        customEndMs: reqEndMs,
+      });
+    }
+
     const latestSt = telemetryStore.getState();
+    const incomingRev = Number(resolvedPayload?.consumption?.revision || 0);
+    const matchesCurrentRange =
+      !reqRange ||
+      (reqRange === latestSt.selectedTimeRange &&
+        (reqRange !== 'custom' ||
+          (reqStartMs === Number(latestSt.customStartMs || 0) &&
+            reqEndMs === Number(latestSt.customEndMs || 0))));
+
+    // 常规 2 秒轮询在途期间若用户已通过前端缓存瞬切到其他时间段，保留用户当前选中的范围不回跳，
+    // 若后端 usageRevision 已推进则静默补发一次轻量范围校准。
+    let needsSilentRangeRevalidate = false;
+    if (!force && !matchesCurrentRange && resolvedPayload?.consumption) {
+      const activeKey = makeConsumptionRangeCacheKey(
+        latestSt.selectedTimeRange,
+        latestSt.customStartMs,
+        latestSt.customEndMs
+      );
+      const cachedActive = consumptionRangeCache.get(activeKey);
+      if (cachedActive) {
+        resolvedPayload = applyCachedConsumptionSlice(resolvedPayload, cachedActive, incomingRev);
+        if (incomingRev > 0 && cachedActive.revision !== incomingRev) {
+          needsSilentRangeRevalidate = true;
+        }
+      } else if (
+        latestSt.telemetry?.consumption?.selectedRange?.key === latestSt.selectedTimeRange
+      ) {
+        resolvedPayload = {
+          ...resolvedPayload,
+          consumption: {
+            ...resolvedPayload.consumption,
+            selectedRange: latestSt.telemetry.consumption.selectedRange,
+            session: latestSt.telemetry.consumption.session,
+            account: latestSt.telemetry.consumption.account,
+            trendSeries: latestSt.telemetry.consumption.trendSeries,
+            sourcesBreakdown: latestSt.telemetry.consumption.sourcesBreakdown,
+          },
+          modelBreakdown: latestSt.telemetry.modelBreakdown,
+        };
+      }
+    }
+
     if (force) {
       const elapsed = Date.now() - startMs;
       if (elapsed < 220) {
@@ -5159,6 +5308,13 @@ async function requestTelemetry(params, force) {
         minuteTick: Math.floor(Date.now() / 30000),
         syncState: latestSt.syncState === 'synced' ? 'synced' : 'idle',
       });
+      if (needsSilentRangeRevalidate) {
+        void fetchConsumptionRangeSlice({
+          range: latestSt.selectedTimeRange,
+          customStartMs: latestSt.customStartMs,
+          customEndMs: latestSt.customEndMs,
+        });
+      }
       return resolvedPayload;
     }
   } catch (err) {
@@ -5176,6 +5332,198 @@ async function requestTelemetry(params, force) {
       }
     }
   }
+}
+
+async function fetchConsumptionRangeSlice({
+  range,
+  customStartMs = 0,
+  customEndMs = 0,
+} = {}) {
+  const reqSeq = ++latestConsumptionReqSeq;
+  const targetRange = String(range || 'today');
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  params.set('range', targetRange);
+  if (targetRange === 'custom') {
+    if (customStartMs > 0) params.set('startMs', String(customStartMs));
+    if (customEndMs > 0) params.set('endMs', String(customEndMs));
+  }
+  params.set('scope', 'consumption');
+
+  try {
+    const payload = await callSidecarApi(`/api/telemetry?${params}`, {
+      method: 'GET',
+      abortKey: 'consumption-range',
+    });
+    if (!payload || typeof payload !== 'object') return null;
+
+    if (payload.scope === 'consumption' && payload.consumption) {
+      const usageRev = Number(payload.usageRevision ?? payload.consumption.revision ?? 0);
+      recordConsumptionSliceToCache(payload.consumption, payload.modelBreakdown, {
+        customStartMs,
+        customEndMs,
+        usageRevision: usageRev,
+      });
+      if (reqSeq !== latestConsumptionReqSeq) return payload;
+
+      const latestSt = telemetryStore.getState();
+      const stillMatches =
+        latestSt.selectedTimeRange === targetRange &&
+        (targetRange !== 'custom' ||
+          (Number(latestSt.customStartMs || 0) === Number(customStartMs || 0) &&
+            Number(latestSt.customEndMs || 0) === Number(customEndMs || 0)));
+      if (!stillMatches) return payload;
+
+      const prevTelemetry = latestSt.telemetry;
+      if (prevTelemetry) {
+        const nextTelemetry = {
+          ...prevTelemetry,
+          consumption: {
+            ...(prevTelemetry.consumption || {}),
+            ...payload.consumption,
+            ...(usageRev > 0 ? { revision: usageRev } : {}),
+          },
+          modelBreakdown: Array.isArray(payload.modelBreakdown)
+            ? payload.modelBreakdown
+            : prevTelemetry.modelBreakdown,
+        };
+        if (!isEquivalentTelemetry(prevTelemetry, nextTelemetry)) {
+          telemetryStore.setState({ telemetry: nextTelemetry });
+        }
+      }
+      return payload;
+    }
+
+    // 冷启动阶段后端尚无基础快照时会回退返回完整 telemetry，直接平滑复用现有状态合并
+    if (payload.consumption) {
+      syncConsumptionCacheScope(payload);
+      recordConsumptionSliceToCache(payload.consumption, payload.modelBreakdown, {
+        customStartMs,
+        customEndMs,
+      });
+      if (reqSeq === latestConsumptionReqSeq) {
+        const latestSt = telemetryStore.getState();
+        if (!isEquivalentTelemetry(latestSt.telemetry, payload)) {
+          telemetryStore.setState({ telemetry: payload });
+        }
+      }
+    }
+    return payload;
+  } catch (err) {
+    if (err?.name === 'AbortError') return null;
+    return null;
+  }
+}
+
+/**
+ * 切换「用量统计」时间范围：
+ * - 命中前端 rangeCache 时，在单次 setState 内 0ms 原子更新概览/趋势/模型/来源（若 usageRevision 一致则 0 次 HTTP 请求）；
+ * - 若后台数据已更新则先 0ms 展示缓存，再静默发起轻量 `scope=consumption` 校准；
+ * - 未命中缓存（如自定义时段或进页首 20ms 抢点）则直接走 `<5ms` 的 `scope=consumption` 通道。
+ */
+function selectConsumptionTimeRange(
+  nextRange,
+  { customStartMs = undefined, customEndMs = undefined } = {}
+) {
+  const targetRange = String(nextRange || 'today');
+  const prevSt = telemetryStore.getState();
+  const nextStartMs =
+    targetRange === 'custom'
+      ? Number(customStartMs !== undefined ? customStartMs : prevSt.customStartMs || 0)
+      : prevSt.customStartMs;
+  const nextEndMs =
+    targetRange === 'custom'
+      ? Number(customEndMs !== undefined ? customEndMs : prevSt.customEndMs || 0)
+      : prevSt.customEndMs;
+
+  const statePatch = { selectedTimeRange: targetRange };
+  if (targetRange === 'custom') {
+    statePatch.customStartMs = nextStartMs;
+    statePatch.customEndMs = nextEndMs;
+  }
+
+  const cacheKey = makeConsumptionRangeCacheKey(targetRange, nextStartMs, nextEndMs);
+  const cached = consumptionRangeCache.get(cacheKey);
+  const prevTelemetry = prevSt.telemetry;
+
+  if (cached && prevTelemetry) {
+    const currentRev = Number(prevTelemetry.consumption?.revision || 0);
+    const nextTelemetry = applyCachedConsumptionSlice(
+      prevTelemetry,
+      cached,
+      currentRev > 0 ? currentRev : cached.revision
+    );
+    telemetryStore.setState({ ...statePatch, telemetry: nextTelemetry });
+    if (currentRev > 0 && cached.revision === currentRev) {
+      return Promise.resolve(nextTelemetry);
+    }
+    return fetchConsumptionRangeSlice({
+      range: targetRange,
+      customStartMs: nextStartMs,
+      customEndMs: nextEndMs,
+    });
+  }
+
+  telemetryStore.setState(statePatch);
+  return fetchConsumptionRangeSlice({
+    range: targetRange,
+    customStartMs: nextStartMs,
+    customEndMs: nextEndMs,
+  });
+}
+
+/**
+ * 仅在进入「用量统计」视图时触发一次静默后台预取，拉齐全部 7 个预设区间到前端缓存以实现 0ms 瞬切。
+ */
+function prefetchConsumptionPresets() {
+  const prevTelemetry = telemetryStore.getState().telemetry;
+  const currentRev = Number(prevTelemetry?.consumption?.revision || 0);
+  if (currentRev > 0 && lastPrefetchedUsageRevision === currentRev && hasAllPresetRangesCached(currentRev)) {
+    return Promise.resolve(true);
+  }
+  if (inFlightPresetsPrefetch) {
+    return inFlightPresetsPrefetch;
+  }
+
+  const current = telemetryStore.getState();
+  const effectiveConvId = current.selectedConversationId || current.hostRouteConversationId || '';
+  const params = new URLSearchParams();
+  if (effectiveConvId) params.set('conversationId', effectiveConvId);
+  params.set('scope', 'consumption-presets');
+
+  const task = callSidecarApi(`/api/telemetry?${params}`, {
+    method: 'GET',
+    abortKey: 'consumption-presets',
+  })
+    .then((payload) => {
+      if (payload?.scope === 'consumption-presets' && payload.ranges && typeof payload.ranges === 'object') {
+        const rev = Number(payload.usageRevision || currentRev || 0);
+        for (const [rangeKey, entry] of Object.entries(payload.ranges)) {
+          if (!entry || typeof entry !== 'object') continue;
+          recordConsumptionSliceToCache(
+            { ...entry, revision: rev },
+            entry.modelBreakdown,
+            { usageRevision: rev }
+          );
+        }
+        if (rev > 0) {
+          lastPrefetchedUsageRevision = rev;
+        }
+        return true;
+      }
+      return false;
+    })
+    .catch(() => false)
+    .finally(() => {
+      if (inFlightPresetsPrefetch === task) {
+        inFlightPresetsPrefetch = null;
+      }
+    });
+
+  inFlightPresetsPrefetch = task;
+  return task;
 }
 
 async function saveSettingsPatch(patch) {
@@ -5353,6 +5701,9 @@ async function saveSettingsPatch(patch) {
   }
 
   const needsTelemetryRecompute = patchKeys.some((k) => TELEMETRY_RECOMPUTE_SETTING_KEYS.has(k));
+  if (Object.prototype.hasOwnProperty.call(safePatch, 'weeklyLimitMode')) {
+    clearConsumptionRangeCache();
+  }
   if (needsTelemetryRecompute) {
     inFlightTelemetryPoll = null;
     void fetchTelemetry({ force: false });
@@ -5416,18 +5767,21 @@ async function resetAllSettings() {
     });
   }
   inFlightTelemetryPoll = null;
+  clearConsumptionRangeCache();
   void fetchTelemetry({ force: false });
   return res;
 }
 
 async function rebuildTrajectoryCache() {
   const res = await callSidecarApi('/api/cache/rebuild', { method: 'POST', body: {} });
+  clearConsumptionRangeCache();
   await fetchTelemetry({ force: true });
   return res;
 }
 
 async function triggerCloudSync() {
   const res = await callSidecarApi('/api/cloud-sync', { method: 'POST', body: {} });
+  clearConsumptionRangeCache();
   await fetchTelemetry({ force: true });
   return res;
 }
@@ -5697,7 +6051,7 @@ function isMacHostPlatform(telemetry) {
   }
   return false;
 }
-return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform };
+return { extractHostRouteCascadeId, telemetryStore, clearConsumptionRangeCache, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, selectConsumptionTimeRange, prefetchConsumptionPresets, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform };
 })();
 
 // --- src/components/ui/TopLongPillNav.js ---
@@ -8026,13 +8380,18 @@ function createTrendAreaChart() {
           hmMonthsEl.appendChild(mEl);
         }
 
-        // 重建 7 行 × N 周列的每日小格子（一格一天）
+        // 重建 7 行 × N 周列的每日小格子（一格一天），使用 DocumentFragment 一次性批量挂载减少重排
         while (hmGridEl.firstChild) hmGridEl.removeChild(hmGridEl.firstChild);
         hoveredCellEl = null;
         currentCellEls = new Array(slots.length);
+        const gridFrag =
+          typeof document !== 'undefined' && typeof document.createDocumentFragment === 'function'
+            ? document.createDocumentFragment()
+            : null;
+        const gridTarget = gridFrag || hmGridEl;
 
         for (let pad = 0; pad < firstDow; pad++) {
-          hmGridEl.appendChild(
+          gridTarget.appendChild(
             h('span', { className: 'trend-hm-cell is-pad', 'aria-hidden': 'true' })
           );
         }
@@ -8051,8 +8410,11 @@ function createTrendAreaChart() {
             'data-hm-row': String(row),
             role: 'gridcell',
           });
-          hmGridEl.appendChild(cellEl);
+          gridTarget.appendChild(cellEl);
           currentCellEls[i] = cellEl;
+        }
+        if (gridFrag) {
+          hmGridEl.appendChild(gridFrag);
         }
 
         if (typeof requestAnimationFrame === 'function') {
@@ -19902,8 +20264,7 @@ const ConsumptionView = defineComponent({
         } else {
           hasUncommittedCustomDraft = false;
         }
-        telemetryStore.setState({ selectedTimeRange: nextRange });
-        fetchTelemetry({ force: false });
+        selectConsumptionTimeRange(nextRange);
       },
     });
 
@@ -19942,12 +20303,10 @@ const ConsumptionView = defineComponent({
           hasUncommittedCustomDraft = false;
           startPicker.setValue(minMs);
           endPicker.setValue(maxMs);
-          telemetryStore.setState({
-            selectedTimeRange: 'custom',
+          selectConsumptionTimeRange('custom', {
             customStartMs: minMs,
             customEndMs: maxMs,
           });
-          fetchTelemetry({ force: true });
         },
       },
       [createSvgIcon('check', { size: 12 }), applyCustomBtnLabel]
@@ -20689,8 +21048,21 @@ const ConsumptionView = defineComponent({
 
     let latestSlice = null;
     let isDirty = false;
+    let prefetchedOnCurrentVisit = false;
 
-    let lastRenderedUsage = '';
+    let lastRenderedTuple = null;
+    let cachedMonthlySeriesRef = null;
+    let cachedMonthlyDisplayKey = '';
+    let cachedMonthsMergedModels = null;
+    let cachedAllMonthMergedModels = null;
+
+    function isSameRenderTuple(prev, next) {
+      if (!prev || prev.length !== next.length) return false;
+      for (let i = 0; i < prev.length; i++) {
+        if (!Object.is(prev[i], next[i])) return false;
+      }
+      return true;
+    }
 
     /**
      * 将遥测状态切片同步渲染至消费统计视图的 5 个子面板。
@@ -20698,31 +21070,9 @@ const ConsumptionView = defineComponent({
     function renderConsumptionData(slice) {
       if (!slice) return;
       const cons = slice.consumption || {};
-      const preset =
-        slice.range !== 'custom' && cons.presets?.[slice.range]
-          ? cons.presets[slice.range]
-          : null;
-      const acct = preset?.account || cons.account || {};
       const rangeInfo = cons.selectedRange || {};
-      const dateSpan = formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs);
-      const now = new Date();
-      const currentMonthIdx = now.getMonth();
-      const monthlyYear = cons.monthlyYear || now.getFullYear();
-      const locale = i18nStore.getState().locale;
-      // 额度与会话状态也会发布遥测更新，只对用量页实际展示的数据重绘。
-      const signature = JSON.stringify([
-        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.modelDisplayMode,
-        slice.showUpstreamModel, slice.orchestratorIdMode, dateSpan,
-        preset?.label || rangeInfo.label, acct,
-        cons.trendSeries, slice.modelBreakdown, cons.sourcesBreakdown,
-        monthlyYear, currentMonthIdx, cons.monthlySeries,
-      ]);
-      if (signature === lastRenderedUsage) return;
-      drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear });
-      lastRenderedUsage = signature;
-    }
 
-    function drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear }) {
+      // 始终在 0ms 同步顶部时间段滑块与自定义日期条显隐，给予即刻交互反馈
       timeFilterSwitch.setValue(slice.range);
       patchAttr(customRangeBar, 'hidden', slice.range !== 'custom');
       if (!hasUncommittedCustomDraft) {
@@ -20732,6 +21082,45 @@ const ConsumptionView = defineComponent({
         endPicker.setValue(draftEndMs);
       }
 
+      // 极少数缓存未命中时（如自定义新区间或进页瞬间抢点），跳过用旧趋势/模型跑无效半更新重绘，待几毫秒后单帧原子绘制
+      if (rangeInfo.key && slice.range && rangeInfo.key !== slice.range) {
+        return;
+      }
+
+      const preset =
+        slice.range !== 'custom' && cons.presets?.[slice.range]
+          ? cons.presets[slice.range]
+          : null;
+      const acct = cons.account || preset?.account || {};
+      const dateSpan = formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs);
+      const now = new Date();
+      const currentMonthIdx = now.getMonth();
+      const monthlyYear = cons.monthlyYear || now.getFullYear();
+      const locale = i18nStore.getState().locale;
+      const renderTuple = [
+        locale,
+        slice.range,
+        slice.customStartMs,
+        slice.customEndMs,
+        slice.modelDisplayMode,
+        slice.showUpstreamModel,
+        slice.orchestratorIdMode,
+        dateSpan,
+        preset?.label || rangeInfo.label,
+        acct,
+        cons.trendSeries,
+        slice.modelBreakdown,
+        cons.sourcesBreakdown,
+        monthlyYear,
+        currentMonthIdx,
+        cons.monthlySeries,
+      ];
+      if (isSameRenderTuple(lastRenderedTuple, renderTuple)) return;
+      drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear });
+      lastRenderedTuple = renderTuple;
+    }
+
+    function drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear }) {
       // 1. 同步用量概览矩阵与顶部 4 段比例条
       patchText(dateSpanBadge, dateSpan);
       const totalTokens = Number(acct.totalTokens || 0);
@@ -20832,14 +21221,31 @@ const ConsumptionView = defineComponent({
       });
 
       const monthlySeries = cons.monthlySeries || [];
-      const allMonthMergedModels = [];
-      const monthsMergedModels = Array.from({ length: 12 }, (_, idx) => {
-        const merged = mergeAndSortBucketModels(monthlySeries[idx]?.models);
-        for (const m of merged) {
-          allMonthMergedModels.push(m);
-        }
-        return merged;
-      });
+      const monthlyDisplayKey = `${displaySettings.modelDisplayMode}|${displaySettings.showUpstreamModel ? 1 : 0}|${displaySettings.orchestratorIdMode}`;
+      let monthsMergedModels;
+      let allMonthMergedModels;
+      if (
+        cachedMonthlySeriesRef === monthlySeries &&
+        cachedMonthlyDisplayKey === monthlyDisplayKey &&
+        cachedMonthsMergedModels &&
+        cachedAllMonthMergedModels
+      ) {
+        monthsMergedModels = cachedMonthsMergedModels;
+        allMonthMergedModels = cachedAllMonthMergedModels;
+      } else {
+        allMonthMergedModels = [];
+        monthsMergedModels = Array.from({ length: 12 }, (_, idx) => {
+          const merged = mergeAndSortBucketModels(monthlySeries[idx]?.models);
+          for (const m of merged) {
+            allMonthMergedModels.push(m);
+          }
+          return merged;
+        });
+        cachedMonthlySeriesRef = monthlySeries;
+        cachedMonthlyDisplayKey = monthlyDisplayKey;
+        cachedMonthsMergedModels = monthsMergedModels;
+        cachedAllMonthMergedModels = allMonthMergedModels;
+      }
 
       const rawTrendSeries = cons.trendSeries || [];
       const allTrendMergedModels = [];
@@ -21034,6 +21440,10 @@ const ConsumptionView = defineComponent({
         }
         isDirty = false;
         renderConsumptionData(slice);
+        if (!prefetchedOnCurrentVisit && Number(slice?.consumption?.revision || 0) > 0) {
+          prefetchedOnCurrentVisit = true;
+          void prefetchConsumptionPresets();
+        }
       }
     );
 
@@ -21041,6 +21451,7 @@ const ConsumptionView = defineComponent({
       getVisibleMonitorView,
       (activeView) => {
         if (activeView !== 'consumption') {
+          prefetchedOnCurrentVisit = false;
           hideBreakdownPopover();
           return;
         }
@@ -21049,6 +21460,10 @@ const ConsumptionView = defineComponent({
           if (latestSlice) {
             renderConsumptionData(latestSlice);
           }
+        }
+        if (!prefetchedOnCurrentVisit && Number(latestSlice?.consumption?.revision || 0) > 0) {
+          prefetchedOnCurrentVisit = true;
+          void prefetchConsumptionPresets();
         }
       }
     );

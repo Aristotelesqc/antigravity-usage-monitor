@@ -2423,3 +2423,166 @@ test('v1.5 feedback settings schema: custom token combo DSL, 3-way model display
     rmSync(workerTemp, { recursive: true, force: true });
   }
 });
+
+test('scope=consumption and scope=consumption-presets bypass matchesConv, >30s idle, and visual settings, match full aggregation, and invalidate on weeklyLimitMode/cache rebuild', async (t) => {
+  let clockMs = Date.parse('2026-11-19T12:00:00.000Z');
+  const mkStep = (idx, offsetMs, tok) => ({
+    type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+    status: 'CORTEX_STEP_STATUS_DONE',
+    metadata: {
+      ...(offsetMs !== null
+        ? {
+            createdAt: new Date(clockMs - offsetMs).toISOString(),
+            completedAt: new Date(clockMs - offsetMs + 1200).toISOString(),
+          }
+        : {}),
+      sourceTrajectoryStepInfo: { stepIndex: idx },
+      modelUsage: {
+        model: 'MODEL_CLAUDE_4_5_SONNET',
+        inputTokens: String(tok),
+        cacheReadTokens: '0',
+        outputTokens: '0',
+      },
+    },
+    plannerResponse: { response: `step-${idx}` },
+  });
+
+  const h = backendHarness({
+    clock: () => clockMs,
+    trajectories: {
+      'conv-old': {
+        trajectory: {
+          steps: [
+            mkStep(1, 20 * 86400_000, 1000),
+            mkStep(2, null, 250),
+          ],
+        },
+      },
+      'conv-recent': {
+        trajectory: {
+          steps: [
+            mkStep(1, 4 * 86400_000, 3000),
+            mkStep(2, 2 * 3600_000, 500),
+          ],
+        },
+      },
+    },
+    summaries: {
+      'conv-old': {
+        stepCount: 2,
+        lastModifiedTime: new Date(clockMs - 20 * 86400_000).toISOString(),
+        status: 'CASCADE_RUN_STATUS_IDLE',
+      },
+      'conv-recent': {
+        stepCount: 2,
+        lastModifiedTime: new Date(clockMs - 2 * 3600_000).toISOString(),
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+      },
+    },
+  });
+
+  const initBody = JSON.parse(
+    (
+      await h.executeTelemetryAction({
+        conversationId: 'conv-recent',
+        range: 'today',
+        stepDetails: 'display',
+        stepRevision: '',
+      })
+    ).body
+  );
+  assert.ok(Number(initBody.consumption?.revision || 0) > 0);
+  const rpcCallsAfterInit = h.state.calls.length;
+
+  // Advance clock by 2 minutes and toggle visual-only settings
+  clockMs += 120_000;
+  h.executeSettingsAction({ themeAccent: 'emerald', fontScale: 'lg' });
+
+  // Query from a DIFFERENT conversationId (simulating sidebar vs overlay mismatch)
+  const presetsRes = JSON.parse(
+    (
+      await h.executeTelemetryAction({
+        conversationId: 'conv-different-pane',
+        scope: 'consumption-presets',
+      })
+    ).body
+  );
+  assert.equal(presetsRes.scope, 'consumption-presets');
+  assert.equal(presetsRes.activeConversation, undefined);
+  assert.equal(presetsRes.quotas, undefined);
+  assert.equal(presetsRes.ranges.today.account.totalTokens, 500);
+  assert.equal(presetsRes.ranges['7d'].account.totalTokens, 3500);
+  assert.equal(presetsRes.ranges['30d'].account.totalTokens, 4500);
+  assert.equal(presetsRes.ranges.all.account.totalTokens, 4750);
+
+  const liteCustom = JSON.parse(
+    (
+      await h.executeTelemetryAction({
+        conversationId: 'conv-different-pane',
+        range: 'custom',
+        startMs: String(clockMs - 6 * 86400_000),
+        endMs: String(clockMs - 2 * 86400_000),
+        scope: 'consumption',
+      })
+    ).body
+  );
+  assert.equal(liteCustom.scope, 'consumption');
+  assert.equal(liteCustom.activeConversation, undefined);
+  assert.equal(liteCustom.consumption.account.totalTokens, 3000);
+  assert.equal(
+    h.state.calls.length,
+    rpcCallsAfterInit,
+    'scope=consumption / presets must skip LS RPCs across pane mismatch, >30s idle, and visual settings changes'
+  );
+
+  // Changing weeklyLimitMode DOES invalidate snapshot and trigger fresh full build
+  h.executeSettingsAction({ weeklyLimitMode: 'custom_tokens' });
+  await h.executeTelemetryAction({
+    conversationId: 'conv-recent',
+    range: '7d',
+    scope: 'consumption',
+  });
+  const rpcCallsAfterWeeklyChange = h.state.calls.length;
+  assert.ok(
+    rpcCallsAfterWeeklyChange > rpcCallsAfterInit,
+    'Changing weeklyLimitMode must invalidate cached fast consumption snapshot'
+  );
+
+  // Cache rebuild also invalidates snapshot and falls back to full RPC sync
+  h.executeRebuildCacheAction();
+  await h.executeTelemetryAction({
+    conversationId: 'conv-recent',
+    range: 'all',
+    scope: 'consumption',
+  });
+  assert.ok(
+    h.state.calls.length > rpcCallsAfterWeeklyChange,
+    'Cache rebuild must invalidate cached fast consumption snapshot'
+  );
+
+  // Verify frontend selectConsumptionTimeRange sends scope=consumption without force=1
+  const {
+    clearConsumptionRangeCache,
+    selectConsumptionTimeRange,
+    stopAsyncTelemetryLoop,
+    telemetryStore,
+  } = await import('../src/store/telemetryStore.js');
+  const prevRange = telemetryStore.getState().selectedTimeRange;
+  const requestedUrls = [];
+  t.after(() => {
+    stopAsyncTelemetryLoop();
+    clearConsumptionRangeCache();
+    telemetryStore.setState({ selectedTimeRange: prevRange });
+  });
+  clearConsumptionRangeCache();
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    requestedUrls.push(String(url));
+    return { ok: true, json: async () => liteCustom };
+  });
+  await selectConsumptionTimeRange('30d');
+  assert.equal(requestedUrls.length, 1);
+  assert.match(requestedUrls[0], /range=30d/);
+  assert.match(requestedUrls[0], /scope=consumption/);
+  assert.doesNotMatch(requestedUrls[0], /force=1/);
+  assert.doesNotMatch(requestedUrls[0], /fastRange=1/);
+});

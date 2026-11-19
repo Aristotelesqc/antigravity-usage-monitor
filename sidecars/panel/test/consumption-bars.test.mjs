@@ -8,7 +8,16 @@ import {
   mergeModelsByDisplayName,
   resolveDeterministicModelColor,
 } from '../src/core/formatters.js';
-import { isEquivalentTelemetry, telemetryStore } from '../src/store/telemetryStore.js';
+import {
+  clearConsumptionRangeCache,
+  fetchTelemetry,
+  isEquivalentTelemetry,
+  prefetchConsumptionPresets,
+  selectConsumptionTimeRange,
+  stopAsyncTelemetryLoop,
+  telemetryStore,
+} from '../src/store/telemetryStore.js';
+import { createTrendAreaChart } from '../src/components/charts/TrendAreaChart.js';
 import { uiStore } from '../src/store/uiStore.js';
 import { i18nStore, setI18nLanguage } from '../src/i18n/index.js';
 import { createFourSegmentBar } from '../src/components/ui/FourSegmentBar.js';
@@ -471,4 +480,166 @@ test('ConsumptionView: Top Models color dot + % bar, clutter-free Client Sources
     argonDotColor
   );
   assert.equal(trendTipModelRows[3].querySelector('.cons-pop-model-name')?.textContent, '其他 (3)');
+});
+
+test('selectConsumptionTimeRange serves prefetched presets with 0 network calls, blocks stale 2s poll overwrites, and TrendAreaChart heatmap batches via DocumentFragment', async (t) => {
+  const prevTelState = { ...telemetryStore.getState() };
+  const prevDoc = globalThis.document;
+  t.after(() => {
+    stopAsyncTelemetryLoop();
+    clearConsumptionRangeCache();
+    telemetryStore.setState(prevTelState, { sync: true });
+    globalThis.document = prevDoc;
+  });
+
+  clearConsumptionRangeCache();
+  const mkSlice = (key, label, totalTokens, rev = 7) => ({
+    revision: rev,
+    selectedRange: { key, label, startMs: 1_700_000_000_000, endMs: 1_700_086_400_000 },
+    session: { totalTokens },
+    account: { totalTokens, calls: 2, inputTokens: totalTokens, cacheReadTokens: 0, outputTokens: 0, costUsd: 0.1, savedCostUsd: 0, cacheHitPct: 0 },
+    trendSeries: [{ index: 0, label: '11/19', fullLabel: '11月19日', tokens: totalTokens, calls: 2, costUsd: 0.1 }],
+    sourcesBreakdown: [{ name: 'Antigravity App', calls: 2, totalTokens, costUsd: 0.1, models: [] }],
+    modelBreakdown: [{ label: 'Claude 4.5 Sonnet', shortName: 'Sonnet 4.5', calls: 2, totalTokens, costUsd: 0.1 }],
+  });
+
+  const baseTelemetry = {
+    account: { email: 'u@example.com', status: 'signedIn' },
+    settings: { language: 'zh-CN', weeklyLimitMode: 'official' },
+    cloudStatus: { catalogVersion: 'v1' },
+    activeConversation: { cascadeId: 'c1', recentSteps: [], agents: [] },
+    consumption: {
+      ...mkSlice('today', '今日', 1000, 7),
+      presets: { today: { label: '今日', account: { totalTokens: 1000 } } },
+      monthlyYear: 2026,
+      monthlySeries: [],
+    },
+    modelBreakdown: mkSlice('today', '今日', 1000, 7).modelBreakdown,
+  };
+  telemetryStore.setState({ selectedTimeRange: 'today', telemetry: baseTelemetry }, { sync: true });
+
+  const requestedUrls = [];
+  let resolveStalePoll = null;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    const u = String(url);
+    requestedUrls.push(u);
+    if (u.includes('scope=consumption-presets')) {
+      return {
+        ok: true,
+        json: async () => ({
+          scope: 'consumption-presets',
+          usageRevision: 7,
+          ranges: {
+            cycle: mkSlice('cycle', '当前周期', 4000, 7),
+            today: mkSlice('today', '今日', 1000, 7),
+            '24h': mkSlice('24h', '近 24 小时', 1500, 7),
+            '7d': mkSlice('7d', '近 7 天', 7000, 7),
+            '14d': mkSlice('14d', '近 14 天', 14000, 7),
+            '30d': mkSlice('30d', '近 30 天', 30000, 7),
+            all: mkSlice('all', '全部时间', 90000, 7),
+          },
+        }),
+      };
+    }
+    if (u.includes('scope=consumption') && u.includes('range=30d')) {
+      return {
+        ok: true,
+        json: async () => ({
+          scope: 'consumption',
+          usageRevision: 8,
+          consumption: mkSlice('30d', '近 30 天', 31000, 8),
+          modelBreakdown: mkSlice('30d', '近 30 天', 31000, 8).modelBreakdown,
+        }),
+      };
+    }
+    // Simulated slow 2s background poll started on 'today' that resolves later with rev=8
+    return {
+      ok: true,
+      json: async () =>
+        new Promise((resolve) => {
+          resolveStalePoll = () =>
+            resolve({
+              ...baseTelemetry,
+              consumption: {
+                ...baseTelemetry.consumption,
+                ...mkSlice('today', '今日', 1200, 8),
+              },
+              modelBreakdown: mkSlice('today', '今日', 1200, 8).modelBreakdown,
+            });
+        }),
+    };
+  });
+
+  // 1. Entering ConsumptionView prefetches all 7 presets once
+  assert.equal(await prefetchConsumptionPresets(), true);
+  assert.equal(requestedUrls.length, 1);
+  assert.match(requestedUrls[0], /scope=consumption-presets/);
+
+  // 2. Switching across presets hits rangeCache with ZERO network requests and atomic state swap
+  await selectConsumptionTimeRange('7d');
+  assert.equal(requestedUrls.length, 1, 'Cached preset switch must issue 0 HTTP requests');
+  assert.equal(telemetryStore.getState().selectedTimeRange, '7d');
+  assert.equal(telemetryStore.getState().telemetry.consumption.selectedRange.key, '7d');
+  assert.equal(telemetryStore.getState().telemetry.consumption.account.totalTokens, 7000);
+
+  await selectConsumptionTimeRange('today');
+  assert.equal(requestedUrls.length, 1);
+
+  // 3. Stale in-flight 2s background poll ('today', rev=8) finishes AFTER user switched to '30d' locally:
+  // must NOT overwrite view back to 'today', and should trigger silent background revalidation for '30d'
+  const stalePollPromise = fetchTelemetry({ force: false });
+  await Promise.resolve();
+  await selectConsumptionTimeRange('30d');
+  assert.equal(telemetryStore.getState().telemetry.consumption.selectedRange.key, '30d');
+  assert.equal(telemetryStore.getState().telemetry.consumption.account.totalTokens, 30000);
+
+  assert.equal(typeof resolveStalePoll, 'function');
+  resolveStalePoll();
+  await stalePollPromise;
+  // Wait microtasks for silent background scope=consumption revalidation of 30d
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(telemetryStore.getState().selectedTimeRange, '30d');
+  assert.equal(telemetryStore.getState().telemetry.consumption.selectedRange.key, '30d');
+  assert.equal(telemetryStore.getState().telemetry.consumption.account.totalTokens, 31000);
+
+  // 4. TrendAreaChart >90d heatmap builds all cells cleanly via DocumentFragment when available
+  const { document } = createMockDom();
+  let fragUsed = false;
+  document.createDocumentFragment = () => {
+    fragUsed = true;
+    const holder = document.createElement('div');
+    holder.isFragment = true;
+    return holder;
+  };
+  const origAppend = Object.getPrototypeOf(document.createElement('div')).appendChild;
+  globalThis.document = document;
+  const chart = createTrendAreaChart();
+  const hmGrid = chart.el.querySelector('.trend-hm-grid');
+  hmGrid.appendChild = function (node) {
+    if (node?.isFragment) {
+      for (const child of [...(node.children || [])]) {
+        origAppend.call(this, child);
+      }
+      return node;
+    }
+    return origAppend.call(this, node);
+  };
+  const startDay = Date.parse('2026-06-01T00:00:00.000Z');
+  const slots = Array.from({ length: 100 }, (_, i) => ({
+    index: i,
+    granularity: 'day',
+    startMs: startDay + i * 86400_000,
+    label: `D${i}`,
+    fullLabel: `Day ${i}`,
+    tokens: (i % 5) * 1000,
+    calls: i % 5,
+    costUsd: 0.05,
+  }));
+  chart.update(slots);
+  assert.equal(fragUsed, true);
+  assert.equal(
+    chart.el.querySelectorAll('.trend-hm-cell').filter((c) => !c.classList.contains('is-pad')).length,
+    100
+  );
+  chart.destroy();
 });

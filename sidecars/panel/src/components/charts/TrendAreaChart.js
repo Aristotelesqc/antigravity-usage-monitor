@@ -920,13 +920,18 @@ export function createTrendAreaChart() {
           hmMonthsEl.appendChild(mEl);
         }
 
-        // 重建 7 行 × N 周列的每日小格子（一格一天）
+        // 重建 7 行 × N 周列的每日小格子（一格一天），使用 DocumentFragment 一次性批量挂载减少重排
         while (hmGridEl.firstChild) hmGridEl.removeChild(hmGridEl.firstChild);
         hoveredCellEl = null;
         currentCellEls = new Array(slots.length);
+        const gridFrag =
+          typeof document !== 'undefined' && typeof document.createDocumentFragment === 'function'
+            ? document.createDocumentFragment()
+            : null;
+        const gridTarget = gridFrag || hmGridEl;
 
         for (let pad = 0; pad < firstDow; pad++) {
-          hmGridEl.appendChild(
+          gridTarget.appendChild(
             h('span', { className: 'trend-hm-cell is-pad', 'aria-hidden': 'true' })
           );
         }
@@ -945,8 +950,11 @@ export function createTrendAreaChart() {
             'data-hm-row': String(row),
             role: 'gridcell',
           });
-          hmGridEl.appendChild(cellEl);
+          gridTarget.appendChild(cellEl);
           currentCellEls[i] = cellEl;
+        }
+        if (gridFrag) {
+          hmGridEl.appendChild(gridFrag);
         }
 
         if (typeof requestAnimationFrame === 'function') {

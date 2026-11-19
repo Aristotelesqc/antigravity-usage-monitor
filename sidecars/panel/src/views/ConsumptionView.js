@@ -33,7 +33,11 @@ import {
 import { scaleBucketsExact } from '../../shared/telemetry-display-rules.mjs';
 import { i18nStore, isEnglishLocale, t } from '../i18n/index.js';
 import { createSvgIcon } from '../icons/SvgIcon.js';
-import { fetchTelemetry, telemetryStore } from '../store/telemetryStore.js';
+import {
+  prefetchConsumptionPresets,
+  selectConsumptionTimeRange,
+  telemetryStore,
+} from '../store/telemetryStore.js';
 import { getVisibleMonitorView, uiStore } from '../store/uiStore.js';
 import {
   createTrendAreaChart,
@@ -81,8 +85,7 @@ export const ConsumptionView = defineComponent({
         } else {
           hasUncommittedCustomDraft = false;
         }
-        telemetryStore.setState({ selectedTimeRange: nextRange });
-        fetchTelemetry({ force: false });
+        selectConsumptionTimeRange(nextRange);
       },
     });
 
@@ -121,12 +124,10 @@ export const ConsumptionView = defineComponent({
           hasUncommittedCustomDraft = false;
           startPicker.setValue(minMs);
           endPicker.setValue(maxMs);
-          telemetryStore.setState({
-            selectedTimeRange: 'custom',
+          selectConsumptionTimeRange('custom', {
             customStartMs: minMs,
             customEndMs: maxMs,
           });
-          fetchTelemetry({ force: true });
         },
       },
       [createSvgIcon('check', { size: 12 }), applyCustomBtnLabel]
@@ -868,8 +869,21 @@ export const ConsumptionView = defineComponent({
 
     let latestSlice = null;
     let isDirty = false;
+    let prefetchedOnCurrentVisit = false;
 
-    let lastRenderedUsage = '';
+    let lastRenderedTuple = null;
+    let cachedMonthlySeriesRef = null;
+    let cachedMonthlyDisplayKey = '';
+    let cachedMonthsMergedModels = null;
+    let cachedAllMonthMergedModels = null;
+
+    function isSameRenderTuple(prev, next) {
+      if (!prev || prev.length !== next.length) return false;
+      for (let i = 0; i < prev.length; i++) {
+        if (!Object.is(prev[i], next[i])) return false;
+      }
+      return true;
+    }
 
     /**
      * 将遥测状态切片同步渲染至消费统计视图的 5 个子面板。
@@ -877,31 +891,9 @@ export const ConsumptionView = defineComponent({
     function renderConsumptionData(slice) {
       if (!slice) return;
       const cons = slice.consumption || {};
-      const preset =
-        slice.range !== 'custom' && cons.presets?.[slice.range]
-          ? cons.presets[slice.range]
-          : null;
-      const acct = preset?.account || cons.account || {};
       const rangeInfo = cons.selectedRange || {};
-      const dateSpan = formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs);
-      const now = new Date();
-      const currentMonthIdx = now.getMonth();
-      const monthlyYear = cons.monthlyYear || now.getFullYear();
-      const locale = i18nStore.getState().locale;
-      // 额度与会话状态也会发布遥测更新，只对用量页实际展示的数据重绘。
-      const signature = JSON.stringify([
-        locale, slice.range, slice.customStartMs, slice.customEndMs, slice.modelDisplayMode,
-        slice.showUpstreamModel, slice.orchestratorIdMode, dateSpan,
-        preset?.label || rangeInfo.label, acct,
-        cons.trendSeries, slice.modelBreakdown, cons.sourcesBreakdown,
-        monthlyYear, currentMonthIdx, cons.monthlySeries,
-      ]);
-      if (signature === lastRenderedUsage) return;
-      drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear });
-      lastRenderedUsage = signature;
-    }
 
-    function drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear }) {
+      // 始终在 0ms 同步顶部时间段滑块与自定义日期条显隐，给予即刻交互反馈
       timeFilterSwitch.setValue(slice.range);
       patchAttr(customRangeBar, 'hidden', slice.range !== 'custom');
       if (!hasUncommittedCustomDraft) {
@@ -911,6 +903,45 @@ export const ConsumptionView = defineComponent({
         endPicker.setValue(draftEndMs);
       }
 
+      // 极少数缓存未命中时（如自定义新区间或进页瞬间抢点），跳过用旧趋势/模型跑无效半更新重绘，待几毫秒后单帧原子绘制
+      if (rangeInfo.key && slice.range && rangeInfo.key !== slice.range) {
+        return;
+      }
+
+      const preset =
+        slice.range !== 'custom' && cons.presets?.[slice.range]
+          ? cons.presets[slice.range]
+          : null;
+      const acct = cons.account || preset?.account || {};
+      const dateSpan = formatDateSpanBadge(rangeInfo.startMs, rangeInfo.endMs);
+      const now = new Date();
+      const currentMonthIdx = now.getMonth();
+      const monthlyYear = cons.monthlyYear || now.getFullYear();
+      const locale = i18nStore.getState().locale;
+      const renderTuple = [
+        locale,
+        slice.range,
+        slice.customStartMs,
+        slice.customEndMs,
+        slice.modelDisplayMode,
+        slice.showUpstreamModel,
+        slice.orchestratorIdMode,
+        dateSpan,
+        preset?.label || rangeInfo.label,
+        acct,
+        cons.trendSeries,
+        slice.modelBreakdown,
+        cons.sourcesBreakdown,
+        monthlyYear,
+        currentMonthIdx,
+        cons.monthlySeries,
+      ];
+      if (isSameRenderTuple(lastRenderedTuple, renderTuple)) return;
+      drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear });
+      lastRenderedTuple = renderTuple;
+    }
+
+    function drawConsumptionData(slice, { cons, preset, acct, rangeInfo, dateSpan, currentMonthIdx, monthlyYear }) {
       // 1. 同步用量概览矩阵与顶部 4 段比例条
       patchText(dateSpanBadge, dateSpan);
       const totalTokens = Number(acct.totalTokens || 0);
@@ -1011,14 +1042,31 @@ export const ConsumptionView = defineComponent({
       });
 
       const monthlySeries = cons.monthlySeries || [];
-      const allMonthMergedModels = [];
-      const monthsMergedModels = Array.from({ length: 12 }, (_, idx) => {
-        const merged = mergeAndSortBucketModels(monthlySeries[idx]?.models);
-        for (const m of merged) {
-          allMonthMergedModels.push(m);
-        }
-        return merged;
-      });
+      const monthlyDisplayKey = `${displaySettings.modelDisplayMode}|${displaySettings.showUpstreamModel ? 1 : 0}|${displaySettings.orchestratorIdMode}`;
+      let monthsMergedModels;
+      let allMonthMergedModels;
+      if (
+        cachedMonthlySeriesRef === monthlySeries &&
+        cachedMonthlyDisplayKey === monthlyDisplayKey &&
+        cachedMonthsMergedModels &&
+        cachedAllMonthMergedModels
+      ) {
+        monthsMergedModels = cachedMonthsMergedModels;
+        allMonthMergedModels = cachedAllMonthMergedModels;
+      } else {
+        allMonthMergedModels = [];
+        monthsMergedModels = Array.from({ length: 12 }, (_, idx) => {
+          const merged = mergeAndSortBucketModels(monthlySeries[idx]?.models);
+          for (const m of merged) {
+            allMonthMergedModels.push(m);
+          }
+          return merged;
+        });
+        cachedMonthlySeriesRef = monthlySeries;
+        cachedMonthlyDisplayKey = monthlyDisplayKey;
+        cachedMonthsMergedModels = monthsMergedModels;
+        cachedAllMonthMergedModels = allMonthMergedModels;
+      }
 
       const rawTrendSeries = cons.trendSeries || [];
       const allTrendMergedModels = [];
@@ -1213,6 +1261,10 @@ export const ConsumptionView = defineComponent({
         }
         isDirty = false;
         renderConsumptionData(slice);
+        if (!prefetchedOnCurrentVisit && Number(slice?.consumption?.revision || 0) > 0) {
+          prefetchedOnCurrentVisit = true;
+          void prefetchConsumptionPresets();
+        }
       }
     );
 
@@ -1220,6 +1272,7 @@ export const ConsumptionView = defineComponent({
       getVisibleMonitorView,
       (activeView) => {
         if (activeView !== 'consumption') {
+          prefetchedOnCurrentVisit = false;
           hideBreakdownPopover();
           return;
         }
@@ -1228,6 +1281,10 @@ export const ConsumptionView = defineComponent({
           if (latestSlice) {
             renderConsumptionData(latestSlice);
           }
+        }
+        if (!prefetchedOnCurrentVisit && Number(latestSlice?.consumption?.revision || 0) > 0) {
+          prefetchedOnCurrentVisit = true;
+          void prefetchConsumptionPresets();
         }
       }
     );

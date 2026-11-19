@@ -44,7 +44,7 @@ import {
   syncCloudCatalog,
 } from './plugin-updater.mjs';
 import { getCloudStatus } from './pricing-catalog.mjs';
-import { buildTelemetryPayload } from './telemetry-builder.mjs';
+import { buildTelemetryPayload, clearTelemetryBuilderMemo } from './telemetry-builder.mjs';
 import {
   ensureDesktopLaunchEntriesConfigured,
   triggerDesktopHostRelaunch,
@@ -192,10 +192,14 @@ export async function executeTelemetryAction(data, { onRestart = null } = {}) {
       }
     }
   }
+  const rawScope = String(data?.scope || '').trim();
+  const scope =
+    rawScope === 'consumption' || rawScope === 'consumption-presets' ? rawScope : '';
   const filterOpts = {
     range: data?.range || 'all',
     startMs: sanitizePositiveFiniteMs(data?.startMs),
     endMs: sanitizePositiveFiniteMs(data?.endMs),
+    ...(scope ? { scope } : {}),
   };
   let payload;
   try {
@@ -216,7 +220,7 @@ export async function executeTelemetryAction(data, { onRestart = null } = {}) {
   }
   if (
     bootBundleVersion &&
-    payload.uiBundleVersion &&
+    payload?.uiBundleVersion &&
     String(payload.uiBundleVersion) !== String(bootBundleVersion)
   ) {
     if (typeof onRestart === 'function') {
@@ -225,9 +229,12 @@ export async function executeTelemetryAction(data, { onRestart = null } = {}) {
       scheduleSidecarRestart(150);
     }
   }
-  const responsePayload = data?.stepDetails === 'display'
-    ? projectDisplayTelemetry(payload, data.stepRevision)
-    : payload;
+  const isScopedConsumptionPayload =
+    payload?.scope === 'consumption' || payload?.scope === 'consumption-presets';
+  const responsePayload =
+    !isScopedConsumptionPayload && data?.stepDetails === 'display'
+      ? projectDisplayTelemetry(payload, data.stepRevision)
+      : payload;
   return {
     status: 200,
     contentType: 'application/json',
@@ -295,11 +302,20 @@ export function executeSettingsAction(data) {
       body: JSON.stringify({ ok: false, error: 'Failed to persist settings' }),
     };
   }
-  inFlightRequests.clear();
   const prevMountMode = normalizeWindowMountMode(
     current.windowMountMode,
     current.enableWindowOverlay
   );
+  const affectsBackendTelemetry =
+    updated.weeklyLimitMode !== current.weeklyLimitMode ||
+    updated.weeklyTokenBudget !== current.weeklyTokenBudget ||
+    updated.weeklyCostBudget !== current.weeklyCostBudget ||
+    updated.enableWindowOverlay !== (current.enableWindowOverlay !== false) ||
+    updated.windowMountMode !== prevMountMode;
+  inFlightRequests.clear();
+  if (affectsBackendTelemetry) {
+    clearTelemetryBuilderMemo();
+  }
   if (
     updated.enableWindowOverlay !== (current.enableWindowOverlay !== false) ||
     updated.windowMountMode !== prevMountMode
@@ -364,6 +380,7 @@ export async function executeModelContextWindowAction(data) {
     return respond(500, { error: 'Failed to persist model context window' });
   }
   inFlightRequests.clear();
+  clearTelemetryBuilderMemo();
   void notifyModelContextWindowsChanged();
   return respond(200, { modelContextWindows: current.modelContextWindows });
 }
@@ -381,6 +398,7 @@ export function executeResetSettingsAction() {
     };
   }
   inFlightRequests.clear();
+  clearTelemetryBuilderMemo();
   const prevMountMode = normalizeWindowMountMode(
     current.windowMountMode,
     current.enableWindowOverlay
@@ -429,6 +447,7 @@ export function executeRebuildCacheAction() {
   }
   displayStepsCache.clear();
   clearScannerRuntimeMemos();
+  clearTelemetryBuilderMemo();
   return {
     ok: true,
     status: 200,
@@ -440,6 +459,7 @@ export function executeRebuildCacheAction() {
 
 export async function executeCloudSyncAction() {
   const cloudStatus = await syncCloudCatalog({ force: true });
+  clearTelemetryBuilderMemo();
   return {
     status: 200,
     contentType: 'application/json',
@@ -460,6 +480,9 @@ export async function executePluginUpdateAction() {
 
 export async function executeAccountCredentialAction(data) {
   const result = await handleAccountCredentialAction(data);
+  if (data?.action === 'switch') {
+    clearTelemetryBuilderMemo();
+  }
   return {
     status: 200,
     contentType: 'application/json',

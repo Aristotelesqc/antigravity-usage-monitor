@@ -46,8 +46,11 @@ import { getCloudStatus, getPricingPhaseEpoch, pricingCatalogRevision } from './
 import { buildOfficialQuotaPools } from './quota-pools.mjs';
 import { getDefaultWindowBridgeStatus } from './window-bridge.mjs';
 import {
+  aggregateConsumptionPresetBundle,
   aggregateMultiWindowUsage,
+  aggregateSelectedWindowUsage,
   buildScopedModelBreakdown,
+  clearUsageAggregatorMemo,
   getNextMondayResetIso,
 } from './usage-aggregator.mjs';
 
@@ -56,6 +59,13 @@ const POOL_PRIORITY_ORDER = ['Gemini', 'Argon', 'Carbon', 'Claude & GPT'];
 const inFlightTelemetrySources = new Map();
 const trajectoryModelFacts = new WeakMap();
 let lastMainPreparation = null;
+let lastCompletedTelemetrySnapshot = null;
+
+export function clearTelemetryBuilderMemo() {
+  lastMainPreparation = null;
+  lastCompletedTelemetrySnapshot = null;
+  clearUsageAggregatorMemo();
+}
 
 function roundSessionCost(val) {
   if (!Number.isFinite(val) || val <= 0) return 0;
@@ -1237,6 +1247,7 @@ export async function buildTelemetryPayloadInternal(
 
   // 5. 多时间窗口聚合（预设窗口 + 当前选定窗口 + 趋势 + 月序列 + 来源与模型拆解 + 各配额池独立周期统计）
   const {
+    usageRevision,
     selectedWindow,
     trendStartMs,
     trendEndMs,
@@ -1816,6 +1827,7 @@ export async function buildTelemetryPayloadInternal(
       aggregated: aggregatedTelemetry,
     },
     consumption: {
+      revision: usageRevision,
       selectedRange: {
         key: selectedWindow.key,
         label: selectedWindow.label,
@@ -1883,6 +1895,24 @@ export async function buildTelemetryPayloadInternal(
     modelBreakdown,
   };
 
+  lastCompletedTelemetrySnapshot = {
+    lsAddr: String(lsRuntimeEndpoint.addr || ''),
+    weeklyLimitMode: settings.weeklyLimitMode,
+    catalogRevision: modelInputs.catalogRevision,
+    phaseEpoch: modelInputs.phaseEpoch,
+    basePayload: finalPayload,
+    aggContext: {
+      cycleAnchors,
+      isCustomWeeklyMode,
+      currentAccountName: accountScope,
+      activeCascadeId,
+      activeFamilyCascadeIds,
+      resolveStepModel,
+      quotaPoolsMap,
+      modelInputs,
+    },
+  };
+
   if (lsRuntimeEndpoint.addr !== 'test.invalid') {
     try {
       saveJson(CLI_STATUS_SNAPSHOT_FILE, buildCliStatusSnapshot(finalPayload, Date.now()));
@@ -1892,6 +1922,65 @@ export async function buildTelemetryPayloadInternal(
   }
 
   return finalPayload;
+}
+
+function resolveValidFastSnapshot() {
+  const snap = lastCompletedTelemetrySnapshot;
+  if (!snap || !snap.basePayload || !snap.aggContext) return null;
+  if (snap.lsAddr !== String(lsRuntimeEndpoint.addr || '')) return null;
+  if (
+    snap.catalogRevision !== pricingCatalogRevision ||
+    snap.phaseEpoch !== getPricingPhaseEpoch()
+  ) {
+    return null;
+  }
+  const latestSettings = loadSettings();
+  if (latestSettings.weeklyLimitMode !== snap.weeklyLimitMode) {
+    return null;
+  }
+  return snap;
+}
+
+function tryBuildFastConsumptionPayload(filterOpts = {}) {
+  const snap = resolveValidFastSnapshot();
+  if (!snap) return null;
+  const agg = aggregateSelectedWindowUsage({
+    filterOpts,
+    ...snap.aggContext,
+  });
+  return {
+    scope: 'consumption',
+    timestamp: new Date().toISOString(),
+    uiBundleVersion: snap.basePayload.uiBundleVersion || computeRuntimeCodeVersion(),
+    usageRevision: agg.usageRevision,
+    consumption: {
+      revision: agg.usageRevision,
+      selectedRange: {
+        key: agg.selectedWindow.key,
+        label: agg.selectedWindow.label,
+        startMs: agg.trendStartMs,
+        endMs: agg.trendEndMs,
+      },
+      session: agg.finalizedSelectedSession,
+      account: agg.finalizedSelectedAccount,
+      trendSeries: agg.trendSeries,
+      sourcesBreakdown: agg.sourcesBreakdown,
+    },
+    modelBreakdown: agg.modelBreakdown,
+  };
+}
+
+function tryBuildConsumptionPresetsPayload() {
+  const snap = resolveValidFastSnapshot();
+  if (!snap) return null;
+  const bundle = aggregateConsumptionPresetBundle(snap.aggContext);
+  return {
+    scope: 'consumption-presets',
+    timestamp: new Date().toISOString(),
+    uiBundleVersion: snap.basePayload.uiBundleVersion || computeRuntimeCodeVersion(),
+    usageRevision: bundle.usageRevision,
+    ranges: bundle.ranges,
+  };
 }
 
 export function buildCliStatusSnapshot(finalPayload, updatedAtMs = Date.now()) {
@@ -1938,7 +2027,7 @@ export function buildCliStatusSnapshot(finalPayload, updatedAtMs = Date.now()) {
  *
  * @param {string} requestedConvId
  * @param {boolean} [forceQuotaRefresh=false]
- * @param {{ range?: string, startMs?: number, endMs?: number }} [filterOpts={}]
+ * @param {{ range?: string, startMs?: number, endMs?: number, scope?: string }} [filterOpts={}]
  * @returns {Promise<object>}
  */
 export function buildTelemetryPayload(
@@ -1946,6 +2035,31 @@ export function buildTelemetryPayload(
   forceQuotaRefresh = false,
   filterOpts = {}
 ) {
+  if (!forceQuotaRefresh) {
+    if (filterOpts?.scope === 'consumption-presets') {
+      const presetsPayload = tryBuildConsumptionPresetsPayload();
+      if (presetsPayload) {
+        return Promise.resolve(presetsPayload);
+      }
+      const key = `${requestedConvId || '__auto__'}::presets-cold`;
+      if (inFlightRequests.has(key)) {
+        return inFlightRequests.get(key);
+      }
+      const p = buildTelemetryPayloadInternal(requestedConvId, false, { range: 'today' })
+        .then(() => tryBuildConsumptionPresetsPayload())
+        .finally(() => {
+          inFlightRequests.delete(key);
+        });
+      inFlightRequests.set(key, p);
+      return p;
+    }
+    if (filterOpts?.scope === 'consumption') {
+      const litePayload = tryBuildFastConsumptionPayload(filterOpts);
+      if (litePayload) {
+        return Promise.resolve(litePayload);
+      }
+    }
+  }
   const rangeSig = `${filterOpts.range || 'all'}:${filterOpts.startMs || 0}:${filterOpts.endMs || 0}`;
   const key = `${requestedConvId || '__auto__'}::${forceQuotaRefresh ? 'force' : 'normal'}::${rangeSig}`;
   if (inFlightRequests.has(key)) {
