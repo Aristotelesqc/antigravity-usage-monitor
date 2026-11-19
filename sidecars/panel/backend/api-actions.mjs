@@ -80,18 +80,24 @@ function projectDisplayStep(st) {
     modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
     streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
     outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, inCostUsd,
-    cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentLabel, agentBadge,
-    agentRole, agentIndex, isSubagent, turnIndex, isTurnStart, isLatestTurn,
-    turnPrompt, rootTurnIndex, isRootTurnStart, isRootLatestTurn, rootTurnPrompt,
+    cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentKind, agentOrdinal,
+    agentCustomRole, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
+    isSideQuestion, sideIndex, turnIndex, isTurnStart, isLatestTurn, turnPrompt,
+    turnPromptClean, turnHasMedia, turnMediaOnly, rootTurnIndex, isRootTurnStart,
+    isRootLatestTurn, rootTurnPrompt, rootTurnPromptClean, rootTurnHasMedia,
+    rootTurnMediaOnly,
   } = st;
   return {
     stepIndex, createdAtMs, isCompactionStep, modelKey, modelShort, modelLabel,
     modelUpstream, responseModel, modelSource, tokPerSec, ttftSec, totalDurationSec,
     streamDurationSec, selectedSpeedReason, contextTokens, inputTokens, cacheReadTokens,
     outputTokens, thinkingTokens, responseTokens, cacheHitPct, costUsd, inCostUsd,
-    cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentLabel, agentBadge,
-    agentRole, agentIndex, isSubagent, turnIndex, isTurnStart, isLatestTurn,
-    turnPrompt, rootTurnIndex, isRootTurnStart, isRootLatestTurn, rootTurnPrompt,
+    cacheCostUsd, outCostUsd, agentId, agentCascadeId, agentKind, agentOrdinal,
+    agentCustomRole, agentLabel, agentBadge, agentRole, agentIndex, isSubagent,
+    isSideQuestion, sideIndex, turnIndex, isTurnStart, isLatestTurn, turnPrompt,
+    turnPromptClean, turnHasMedia, turnMediaOnly, rootTurnIndex, isRootTurnStart,
+    isRootLatestTurn, rootTurnPrompt, rootTurnPromptClean, rootTurnHasMedia,
+    rootTurnMediaOnly,
   };
 }
 

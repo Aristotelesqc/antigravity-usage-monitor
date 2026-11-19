@@ -94,14 +94,29 @@ export function resolveMultiSessionCapsuleState(
     (acc, item) => acc + Number(item.runningSubagentCount || 0),
     0
   );
+  const runningSwarmCount = rawRunningList.reduce(
+    (acc, item) => acc + Number(item.runningSwarmCount || 0),
+    0
+  );
+  const isPureSwarmSubs = runningSubCount > 0 && runningSwarmCount === runningSubCount;
   const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
   const multiBtnText =
     runningCount > 0
       ? runningSubCount > 0
-        ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+        ? t(isPureSwarmSubs ? 'capsule.multiRunningWithSwarm' : 'capsule.multiRunningWithSubs', {
+            count: runningCount,
+            subs: runningSubCount,
+          })
         : t('capsule.multiRunning', { count: runningCount })
       : t('capsule.multiZero');
-  return { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText };
+  return {
+    rawRunningList,
+    runningCount,
+    runningSubCount,
+    runningSwarmCount,
+    hasWaiting,
+    multiBtnText,
+  };
 }
 
 /**

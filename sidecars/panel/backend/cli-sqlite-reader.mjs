@@ -678,6 +678,16 @@ export function readLocalSummarySnapshot(productRoots = PRODUCT_DATA_ROOTS, { fo
           const sqLower = String(pRow?.conversation_id || '').trim().toLowerCase();
           const parentLower = String(pRow?.parent_id || '').trim().toLowerCase();
           if (!sqLower || !parentLower) continue;
+          const childSummary = nextSummariesObj[sqLower];
+          if (
+            childSummary &&
+            !childSummary.isSideQuestion &&
+            (childSummary.trajectoryMetadata?.subagentSpec ||
+              (Number(childSummary.trajectoryType) > 0 && Number(childSummary.trajectoryType) !== 22))
+          ) {
+            // 排除通过 fork 创建的蜂群工蜂或常规子代理，避免误归入旁路提问
+            continue;
+          }
           const parentSummary = nextSummariesObj[parentLower];
           const titleFromParent = String(
             parentSummary?.annotations?.sideQuestionTitles?.[sqLower] ||
@@ -1451,7 +1461,26 @@ function decodeProtoGenericStepInvokeSubagentSlice(buf, state, end) {
   return invokeSubagent;
 }
 
-function decodeProtoSelectiveStepPayload(rawBlob, { stepTypeNum, isInvokeSubagent, keepFullText }) {
+function decodeProtoSystemMessageSlice(buf, state, end) {
+  let message = '';
+  while (state.off < end) {
+    const tag = Number(BigInt.asUintN(32, readProtoVarint(buf, state, end)));
+    const fn = tag >>> 3;
+    const wt = tag & 7;
+    if (fn === 1 && wt === 2) {
+      message = readProtoString(buf, state, end);
+    } else {
+      skipProtoField(buf, state, wt, end);
+    }
+  }
+  state.off = end;
+  return message;
+}
+
+function decodeProtoSelectiveStepPayload(
+  rawBlob,
+  { stepTypeNum, isInvokeSubagent, includeSystemMessage = false, keepFullText }
+) {
   const buf = toUint8Array(rawBlob);
   if (!buf || buf.length === 0) return {};
   const state = { off: 0 };
@@ -1472,6 +1501,9 @@ function decodeProtoSelectiveStepPayload(rawBlob, { stepTypeNum, isInvokeSubagen
         readSubEnd(buf, state, end),
         keepFullText
       );
+    } else if (fn === 114 && wt === 2 && stepTypeNum === 101 && includeSystemMessage) {
+      const sysMsg = decodeProtoSystemMessageSlice(buf, state, readSubEnd(buf, state, end));
+      if (sysMsg) out.systemMessage = { message: sysMsg };
     } else if (fn === 140 && wt === 2 && isInvokeSubagent) {
       const inv = decodeProtoGenericStepInvokeSubagentSlice(buf, state, readSubEnd(buf, state, end));
       if (inv) out.invokeSubagent = inv;
@@ -1728,6 +1760,17 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
         ownStepRecords.push({ idx, stepTypeNum, statusNum, metadata });
       }
 
+      const isChildTrajectory =
+        !isSideQuestion &&
+        Boolean(
+          trajectoryMetadata.parentConversationId ||
+            parentConversationId ||
+            (trajectoryMetadata.rootConversationId &&
+              trajectoryMetadata.rootConversationId !== normCid) ||
+            (rootConversationId && rootConversationId !== normCid) ||
+            trajectoryMetadata.subagentSpec
+        );
+
       const runningTailStart = isRunning
         ? Math.max(0, ownStepRecords.length - 16)
         : ownStepRecords.length;
@@ -1743,6 +1786,7 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
           if (
             rec.stepTypeNum === 14 ||
             rec.stepTypeNum === 15 ||
+            (isChildTrajectory && rec.stepTypeNum === 101) ||
             isInvSub ||
             (inRunningTail && (rec.stepTypeNum !== 132 || !rec.metadata?.toolCall?.argumentsJson))
           ) {
@@ -1805,6 +1849,7 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
             const decodedPayload = decodeProtoSelectiveStepPayload(rawPayload, {
               stepTypeNum: rec.stepTypeNum,
               isInvokeSubagent: isInvSub,
+              includeSystemMessage: isChildTrajectory && rec.stepTypeNum === 101,
               keepFullText: inRunningTail,
             });
             if (decodedPayload.userInput) {
@@ -1815,6 +1860,10 @@ export function readLocalSqliteTrajectory(dbFilePath, options = {}) {
                   80
                 );
               }
+            }
+            if (decodedPayload.systemMessage) {
+              stepObj.systemMessage = decodedPayload.systemMessage;
+              stepObj.content = decodedPayload.systemMessage.message;
             }
             if (decodedPayload.plannerResponse) {
               stepObj.plannerResponse = decodedPayload.plannerResponse;

@@ -1043,6 +1043,8 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'header.lockedSession': '已锁定会话 ({id})',
   'header.lockedMeta': '已锁定',
   'header.convMetaWithSubs': '主{main} · {subs}子 (共{total}步)',
+  'header.convMetaWithSwarm': '主{main} · {swarm}蜂 (共{total}步)',
+  'header.convMetaWithSwarmAndSubs': '主{main} · {swarm}蜂 · {subs}子 (共{total}步)',
   'header.convMetaSteps': '{count}步',
   'header.hasUpdate': '有新版本',
   'header.upgradeToVer': '升级 v{ver}',
@@ -1081,6 +1083,11 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'fmt.subAgent': '子代理',
   'fmt.subBadge': '子{index}',
   'fmt.subBadgeShort': '子',
+  'fmt.swarmAgent': '蜂群',
+  'fmt.swarmBadge': '蜂{index}',
+  'fmt.swarmBadgeShort': '蜂',
+  'fmt.swarmMonitorHint': '巡检',
+  'fmt.swarmNarratorHint': '旁白',
   'fmt.sideQuestion': '旁路提问',
   'fmt.sideBadge': '旁{index}',
   'fmt.sideBadgeShort': '旁',
@@ -1094,6 +1101,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'capsule.multiZero': '0 运行中',
   'capsule.multiRunning': '{count} 运行中',
   'capsule.multiRunningWithSubs': '{count} 运行 · {subs} 子',
+  'capsule.multiRunningWithSwarm': '{count} 运行 · {subs} 蜂',
   'capsule.tpsRunning': '生成中',
   'capsule.tpsIdle': '待命',
   'capsule.quotaLeft': '余 {pct}%',
@@ -1114,6 +1122,7 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'multi.empty': '当前暂无在线运行的会话',
   'multi.allIdle': '全部待命',
   'multi.metaWithSubs': '{main} 主会话 · {subs} 子代理运行中',
+  'multi.metaWithSwarm': '{main} 主会话 · {subs} 蜂群运行中',
   'multi.metaMainOnly': '{main} 个会话运行中',
   'multi.hereTag': '本窗',
   'multi.inspectSessionTitle': '点击在监控面板中检视会话：{title}',
@@ -1210,10 +1219,16 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'live.thinking': '推理中',
   'live.generating': '生成中',
   'live.running': '运行中',
+  'live.waiting': '待命中',
+  'live.killed': '已终止',
   'live.done': '已完成',
   'live.doneWithSteps': '已完成 ({steps} 步)',
+  'live.waitingWithSteps': '待命中 ({steps} 步)',
+  'live.killedWithSteps': '已终止 ({steps} 步)',
   'live.subToggleRunning': '子代理 {run}/{total} {arrow}',
   'live.subToggleIdle': '子代理 ({total}) {arrow}',
+  'live.swarmToggleRunning': '蜂群 {run}/{total} {arrow}',
+  'live.swarmToggleIdle': '蜂群 ({total}) {arrow}',
   'live.subCollapseTitle': '点击收起子代理列表',
   'live.subExpandTitle': '点击展开查看子代理缩略状态',
 
@@ -1584,6 +1599,15 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'live.act.invoke_subagent': '调用子代理',
   'live.act.send_message': '通信子代理',
   'live.act.manage_subagents': '管理子代理',
+  'live.act.swarm_add': '派生工蜂',
+  'live.act.swarm_title': '命名蜂群',
+  'live.act.swarm_kill': '终止工蜂',
+  'live.act.swarm_model': '切换工蜂模型',
+  'live.act.swarm_channel': '蜂群频道',
+  'live.act.swarm_status': '巡检蜂群',
+  'live.act.post_message': '发布看板',
+  'live.act.read_board': '读取看板',
+  'live.act.swarm_wait': '看板待命',
   'live.act.manage_task': '后台任务',
   'live.act.schedule': '定时任务',
   'live.act.ask_question': '等待用户选择',
@@ -1594,6 +1618,9 @@ const I18N_MESSAGES_ZH_CN = Object.freeze({
   'live.act.compacting': '上下文压缩',
   'live.act.responding': '正在输出回复',
   'live.act.waiting_subagent': '等待子代理',
+  'live.act.waiting_swarm': '等待工蜂',
+  'live.act.swarm_waiting': '待命中',
+  'live.act.swarm_killed': '已终止',
   'live.act.starting': '启动中',
   'live.act.done': '已完成',
   'live.act.awaitingApproval': '等待确认 · {label}',
@@ -1679,6 +1706,8 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'header.lockedSession': 'Pinned Session ({id})',
   'header.lockedMeta': 'Pinned',
   'header.convMetaWithSubs': 'Main {main} · {subs} sub ({total} steps)',
+  'header.convMetaWithSwarm': 'Main {main} · {swarm} swarm ({total} steps)',
+  'header.convMetaWithSwarmAndSubs': 'Main {main} · {swarm} swarm · {subs} sub ({total} steps)',
   'header.convMetaSteps': '{count} steps',
   'header.hasUpdate': 'Update',
   'header.upgradeToVer': 'Update v{ver}',
@@ -1717,6 +1746,11 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'fmt.subAgent': 'Subagent',
   'fmt.subBadge': 'S{index}',
   'fmt.subBadgeShort': 'Sub',
+  'fmt.swarmAgent': 'Swarm',
+  'fmt.swarmBadge': 'W{index}',
+  'fmt.swarmBadgeShort': 'Swarm',
+  'fmt.swarmMonitorHint': 'Monitor',
+  'fmt.swarmNarratorHint': 'Narrator',
   'fmt.sideQuestion': 'Side Question',
   'fmt.sideBadge': 'Q{index}',
   'fmt.sideBadgeShort': 'Q',
@@ -1730,6 +1764,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'capsule.multiZero': '0 active',
   'capsule.multiRunning': '{count} active',
   'capsule.multiRunningWithSubs': '{count} active · {subs} sub',
+  'capsule.multiRunningWithSwarm': '{count} active · {subs} swarm',
   'capsule.tpsRunning': 'Running',
   'capsule.tpsIdle': 'Idle',
   'capsule.quotaLeft': '{pct}% left',
@@ -1750,6 +1785,7 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'multi.empty': 'No active running sessions',
   'multi.allIdle': 'All idle',
   'multi.metaWithSubs': '{main} main · {subs} subagents active',
+  'multi.metaWithSwarm': '{main} main · {subs} swarm active',
   'multi.metaMainOnly': '{main} sessions active',
   'multi.hereTag': 'Here',
   'multi.inspectSessionTitle': 'Inspect session in monitor: {title}',
@@ -1846,10 +1882,16 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'live.thinking': 'Thinking',
   'live.generating': 'Generating',
   'live.running': 'Running',
+  'live.waiting': 'Waiting',
+  'live.killed': 'Killed',
   'live.done': 'Done',
   'live.doneWithSteps': 'Done ({steps} steps)',
+  'live.waitingWithSteps': 'Waiting ({steps} steps)',
+  'live.killedWithSteps': 'Killed ({steps} steps)',
   'live.subToggleRunning': 'Subagents {run}/{total} {arrow}',
   'live.subToggleIdle': 'Subagents ({total}) {arrow}',
+  'live.swarmToggleRunning': 'Swarm {run}/{total} {arrow}',
+  'live.swarmToggleIdle': 'Swarm ({total}) {arrow}',
   'live.subCollapseTitle': 'Collapse subagent list',
   'live.subExpandTitle': 'Expand subagent activity list',
 
@@ -2220,6 +2262,15 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'live.act.invoke_subagent': 'Invoke Subagent',
   'live.act.send_message': 'Message Subagent',
   'live.act.manage_subagents': 'Manage Subagents',
+  'live.act.swarm_add': 'Spawn Worker',
+  'live.act.swarm_title': 'Name Swarm',
+  'live.act.swarm_kill': 'Kill Worker',
+  'live.act.swarm_model': 'Switch Worker Model',
+  'live.act.swarm_channel': 'Swarm Channel',
+  'live.act.swarm_status': 'Check Swarm',
+  'live.act.post_message': 'Post to Board',
+  'live.act.read_board': 'Read Board',
+  'live.act.swarm_wait': 'Parked on Board',
   'live.act.manage_task': 'Manage Task',
   'live.act.schedule': 'Schedule Task',
   'live.act.ask_question': 'Waiting for User Choice',
@@ -2230,6 +2281,9 @@ const I18N_MESSAGES_EN_US = Object.freeze({
   'live.act.compacting': 'Compacting Context',
   'live.act.responding': 'Responding',
   'live.act.waiting_subagent': 'Waiting for Subagent',
+  'live.act.waiting_swarm': 'Waiting for Swarm',
+  'live.act.swarm_waiting': 'Waiting',
+  'live.act.swarm_killed': 'Killed',
   'live.act.starting': 'Starting',
   'live.act.done': 'Completed',
   'live.act.awaitingApproval': 'Awaiting Approval · {label}',
@@ -2744,7 +2798,7 @@ return { defineComponent };
 })();
 
 // --- src/core/formatters.js ---
-const { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatLiveActivityLabel, formatLiveActivityDetail } = (() => {
+const { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail } = (() => {
 /**
  * @fileoverview Pure formatting utilities for speed metrics, token counts,
  * USD estimates, countdown timers, and custom datetime displays.
@@ -3230,21 +3284,48 @@ function getAgentBadgeClass(index = 0, isMain = false) {
   return `badge-sub-${slot}`;
 }
 
+function resolveStructuredAgentKind(agent) {
+  if (!agent) return 'main';
+  if (agent.agentKind) return agent.agentKind;
+  if (agent.isMain) return 'main';
+  if (agent.isSideQuestion || agent.typeName === 'side_question') return 'side_question';
+  if (
+    agent.typeName === 'worker' ||
+    agent.typeName === 'swarm_worker' ||
+    /^Swarm\s+Worker\s*\(/i.test(String(agent.role || ''))
+  ) {
+    return 'swarm_worker';
+  }
+  return 'subagent';
+}
+
+function normalizeSwarmMemberHandle(rawText) {
+  const trimmed = String(rawText || '').trim();
+  if (!trimmed) return '';
+  const wrapper = trimmed.match(/^Swarm\s+Worker\s*\(([^)]+)\)\s*$/i);
+  const inner = (wrapper ? wrapper[1] : trimmed).replace(/^@+/, '').trim();
+  if (
+    !inner ||
+    inner === '蜂群' ||
+    inner === '工蜂' ||
+    inner.toLowerCase() === 'swarm' ||
+    inner.toLowerCase() === 'worker' ||
+    inner.toLowerCase() === 'swarm worker'
+  ) {
+    return '';
+  }
+  return `@${inner}`;
+}
+
 /**
- * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理或旁路提问的紧凑徽章文本（零正则反拆中文）。
+ * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理、蜂群节点或旁路提问的紧凑徽章文本（零正则反拆中文）。
  *
  * @param {object|null|undefined} agent
  * @returns {string}
  */
 function formatAgentBadgeText(agent) {
   if (!agent) return t('fmt.mainBadge');
-  const kind =
-    agent.agentKind ||
-    (agent.isMain
-      ? 'main'
-      : agent.isSideQuestion || agent.typeName === 'side_question'
-        ? 'side_question'
-        : 'subagent');
+  const kind = resolveStructuredAgentKind(agent);
   if (kind === 'all') return t('header.scopeAllShort');
   if (kind === 'main') return t('fmt.mainBadge');
   if (kind === 'side_question') {
@@ -3252,6 +3333,12 @@ function formatAgentBadgeText(agent) {
     if (ord > 0) return t('fmt.sideBadge', { index: ord });
     if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
     return t('fmt.sideBadgeShort');
+  }
+  if (kind === 'swarm_worker') {
+    const ord = Number(agent.agentOrdinal || agent.index || 0);
+    if (ord > 0) return t('fmt.swarmBadge', { index: ord });
+    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    return t('fmt.swarmBadgeShort');
   }
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   if (ord > 0) return t('fmt.subBadge', { index: ord });
@@ -3267,13 +3354,7 @@ function formatAgentBadgeText(agent) {
  */
 function formatAgentLabel(agent) {
   if (!agent) return t('fmt.mainAgent');
-  const kind =
-    agent.agentKind ||
-    (agent.isMain
-      ? 'main'
-      : agent.isSideQuestion || agent.typeName === 'side_question'
-        ? 'side_question'
-        : 'subagent');
+  const kind = resolveStructuredAgentKind(agent);
   if (kind === 'all') return t('header.scopeAll');
   if (kind === 'main') return t('fmt.mainAgent');
 
@@ -3294,6 +3375,20 @@ function formatAgentLabel(agent) {
     return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
   }
 
+  if (kind === 'swarm_worker') {
+    const ord = Number(agent.agentOrdinal || agent.index || 0);
+    const baseLabel = ord > 0 ? `${t('fmt.swarmAgent')} #${ord}` : t('fmt.swarmAgent');
+    const handle = normalizeSwarmMemberHandle(rawCustom || agent.role || '');
+    if (!handle) return baseLabel;
+    let auxSuffix = '';
+    if (/^@monitor(?:-\d+)?$/i.test(handle)) {
+      auxSuffix = ` (${t('fmt.swarmMonitorHint')})`;
+    } else if (/^@narrator(?:-\d+)?$/i.test(handle)) {
+      auxSuffix = ` (${t('fmt.swarmNarratorHint')})`;
+    }
+    return `${baseLabel} · ${handle}${auxSuffix}`;
+  }
+
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   const baseLabel = ord > 0 ? `${t('fmt.subAgent')} #${ord}` : t('fmt.subAgent');
   const isGeneric =
@@ -3303,6 +3398,31 @@ function formatAgentLabel(agent) {
     rawCustom === t('fmt.subAgent') ||
     rawCustom === 'Subagent';
   return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+}
+
+/**
+ * 格式化会话选项右侧元信息（自适应区分纯蜂群、蜂群+子代理混合、常规子代理与单会话步数）。
+ *
+ * @param {object|null|undefined} conv
+ * @returns {string}
+ */
+function formatConversationMeta(conv) {
+  if (!conv) return '';
+  const main = Number(conv.stepCount || 0);
+  const totalSubs = Number(conv.subagentCount || 0);
+  const swarm = Number(conv.swarmCount || 0);
+  const otherSubs = Math.max(0, totalSubs - swarm);
+  const total = Number(conv.totalStepCount ?? conv.totalStepsAllAgents ?? main);
+  if (swarm > 0 && otherSubs > 0) {
+    return t('header.convMetaWithSwarmAndSubs', { main, swarm, subs: otherSubs, total });
+  }
+  if (swarm > 0) {
+    return t('header.convMetaWithSwarm', { main, swarm, total });
+  }
+  if (totalSubs > 0) {
+    return t('header.convMetaWithSubs', { main, subs: totalSubs, total });
+  }
+  return t('header.convMetaSteps', { count: main });
 }
 
 /**
@@ -3344,7 +3464,7 @@ function formatLiveActivityDetail(act) {
   }
   return String(act.detail || '');
 }
-return { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatLiveActivityLabel, formatLiveActivityDetail };
+return { formatMetric, formatCachePct, getSpeedToneClass, getCacheToneClass, getStepCostToneClass, getTtftToneClass, formatTokens, formatTokensPrecise, formatCnyApprox, formatDateSpanBadge, formatUsd, speedReasonText, sampleSummary, formatCountdown, formatCompactDateTime, formatElapsedSec, stripVendorModelPrefix, normalizeOrchestratorIdDisplayMode, resolveModelDisplayInfo, mergeModelsByDisplayName, getAgentBadgeClass, formatAgentBadgeText, formatAgentLabel, formatConversationMeta, formatLiveActivityLabel, formatLiveActivityDetail };
 })();
 
 // --- src/core/httpClient.js ---
@@ -3628,7 +3748,7 @@ return { getViewTabs, uiStore, getVisibleMonitorView };
 })();
 
 // --- src/store/telemetryStore.js ---
-const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform } = (() => {
+const { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform } = (() => {
 /**
  * @fileoverview Reactive telemetry store with async non-overlapping poll scheduler
  * and granular slice updates.
@@ -3889,6 +4009,8 @@ function isEquivalentTelemetry(prev, next) {
   if (pAct?.cascadeId !== nAct?.cascadeId) return false;
   if (pAct?.stepCount !== nAct?.stepCount) return false;
   if (pAct?.subagentCount !== nAct?.subagentCount) return false;
+  if ((pAct?.swarmCount || 0) !== (nAct?.swarmCount || 0)) return false;
+  if ((pAct?.swarmTitle || '') !== (nAct?.swarmTitle || '')) return false;
   if (pAct?.totalStepsAllAgents !== nAct?.totalStepsAllAgents) return false;
   if (pAct?.isRunning !== nAct?.isRunning) return false;
   if (
@@ -3965,6 +4087,9 @@ function isEquivalentTelemetry(prev, next) {
     const na = nAgents[i];
     if (
       pa?.agentId !== na?.agentId ||
+      pa?.agentKind !== na?.agentKind ||
+      pa?.agentOrdinal !== na?.agentOrdinal ||
+      (pa?.swarmState || '') !== (na?.swarmState || '') ||
       pa?.role !== na?.role ||
       pa?.stepCount !== na?.stepCount ||
       pa?.isRunning !== na?.isRunning ||
@@ -4250,6 +4375,8 @@ function isEquivalentTelemetry(prev, next) {
       pConvs[i]?.status !== nConvs[i]?.status ||
       pConvs[i]?.stepCount !== nConvs[i]?.stepCount ||
       pConvs[i]?.subagentCount !== nConvs[i]?.subagentCount ||
+      (pConvs[i]?.swarmCount || 0) !== (nConvs[i]?.swarmCount || 0) ||
+      (pConvs[i]?.swarmTitle || '') !== (nConvs[i]?.swarmTitle || '') ||
       pConvs[i]?.totalStepCount !== nConvs[i]?.totalStepCount
     ) {
       return false;
@@ -4268,7 +4395,9 @@ function isEquivalentTelemetry(prev, next) {
       pr?.isCurrentSelected !== nr?.isCurrentSelected ||
       pr?.isMainRunning !== nr?.isMainRunning ||
       pr?.subagentCount !== nr?.subagentCount ||
+      (pr?.swarmCount || 0) !== (nr?.swarmCount || 0) ||
       pr?.runningSubagentCount !== nr?.runningSubagentCount ||
+      (pr?.runningSwarmCount || 0) !== (nr?.runningSwarmCount || 0) ||
       pr?.mainActivity?.signature !== nr?.mainActivity?.signature ||
       pr?.mainActivity?.startedAtMs !== nr?.mainActivity?.startedAtMs
     ) {
@@ -4280,6 +4409,8 @@ function isEquivalentTelemetry(prev, next) {
     for (let j = 0; j < pSubs.length; j++) {
       if (
         pSubs[j]?.cascadeId !== nSubs[j]?.cascadeId ||
+        pSubs[j]?.agentKind !== nSubs[j]?.agentKind ||
+        (pSubs[j]?.swarmState || '') !== (nSubs[j]?.swarmState || '') ||
         pSubs[j]?.role !== nSubs[j]?.role ||
         pSubs[j]?.isRunning !== nSubs[j]?.isRunning ||
         pSubs[j]?.stepCount !== nSubs[j]?.stepCount ||
@@ -4676,6 +4807,54 @@ function stopAsyncTelemetryLoop() {
 
 
 /**
+ * 在遥测快照中解析宿主当前路由会话 ID（兼容顶层主会话 ID 与子代理/蜂群工蜂 ID）。
+ *
+ * @param {object|null|undefined} telemetry
+ * @param {string} rawRouteId
+ * @returns {{ rootConv: object|null, childAgent: object|null, isChildRoute: boolean } | null}
+ */
+function resolveHostRouteMatch(telemetry, rawRouteId) {
+  const routeLower = String(rawRouteId || '').trim().toLowerCase();
+  if (!routeLower || !telemetry) return null;
+  const convs = Array.isArray(telemetry.conversations) ? telemetry.conversations : [];
+  const actConv = telemetry.activeConversation || null;
+
+  const directRoot =
+    convs.find((c) => String(c?.cascadeId || '').toLowerCase() === routeLower) ||
+    (String(actConv?.cascadeId || '').toLowerCase() === routeLower ? actConv : null);
+  if (directRoot) {
+    return { rootConv: directRoot, childAgent: null, isChildRoute: false };
+  }
+
+  const activeChild = (actConv?.agents || []).find(
+    (a) =>
+      !a?.isMain &&
+      (String(a?.cascadeId || '').toLowerCase() === routeLower ||
+        String(a?.agentId || '').toLowerCase() === routeLower)
+  );
+  if (activeChild) {
+    const parentInList = convs.find(
+      (c) => String(c?.cascadeId || '').toLowerCase() === String(actConv?.cascadeId || '').toLowerCase()
+    );
+    return {
+      rootConv: parentInList || actConv,
+      childAgent: activeChild,
+      isChildRoute: true,
+    };
+  }
+
+  const memberParent = convs.find(
+    (c) =>
+      Array.isArray(c?.memberCascadeIds) &&
+      c.memberCascadeIds.some((id) => String(id || '').toLowerCase() === routeLower)
+  );
+  if (memberParent) {
+    return { rootConv: memberParent, childAgent: null, isChildRoute: true };
+  }
+  return null;
+}
+
+/**
  * 解析当前选中的主/子代理作用域视图数据与独立上下文窗口检视目标。
  * 同时在客户端按需组装主代理与全部汇总的 `recentSteps`，避免后端 JSON 载荷重复序列化 2-3 倍步骤列表。
  *
@@ -4820,7 +4999,7 @@ function isMacHostPlatform(telemetry) {
   }
   return false;
 }
-return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveScopedConversation, isMacHostPlatform };
+return { extractHostRouteCascadeId, telemetryStore, CLIENT_TOPBAR_SLOT_KEYS, DEFAULT_CLIENT_TOPBAR_SLOTS, CLIENT_OVERVIEW_MODULE_KEYS, DEFAULT_CLIENT_OVERVIEW_MODULES, DEFAULT_CLIENT_HOVER_MODULES, CLIENT_OVERVIEW_METRIC_KEYS, DEFAULT_CLIENT_OVERVIEW_METRICS, CLIENT_STEP_COLUMN_KEYS, DEFAULT_CLIENT_STEP_COLUMNS, DEFAULT_CLIENT_STEP_TOKEN_COMBO_FORMAT, MIN_CLIENT_POPOVER_WIDTH, MAX_CLIENT_POPOVER_WIDTH, DEFAULT_CLIENT_POPOVER_WIDTH, parseClientStepTokenComboSegments, normalizeClientStepTokenComboFormat, normalizeClientPopoverWidthMode, normalizeClientPopoverWidth, normalizeClientModelDisplayMode, normalizeClientTopbarSlots, normalizeClientHoverModules, normalizeClientOverviewModules, normalizeClientOverviewMetrics, normalizeClientStepColumns, normalizeClientUpdateMode, normalizeClientOrchestratorIdMode, normalizeClientWindowMountMode, isEquivalentTelemetry, fetchTelemetry, saveSettingsPatch, saveModelContextWindow, resetAllSettings, rebuildTrajectoryCache, triggerCloudSync, triggerBridgeHostRelaunch, triggerPluginUpdate, startAsyncTelemetryLoop, stopAsyncTelemetryLoop, resolveHostRouteMatch, resolveScopedConversation, isMacHostPlatform };
 })();
 
 // --- src/components/ui/TopLongPillNav.js ---
@@ -10868,43 +11047,68 @@ function buildFallbackRunningConversations(
   }
   const activeConv = data.activeConversation || {};
   if (!activeConv.isRunning && !aggregated?.isRunning) return [];
+  const childAgents = (agents || []).filter((a) => !a.isMain);
+  const swarmChildren = childAgents.filter((a) => a.agentKind === 'swarm_worker');
   return [
     {
       cascadeId: activeConv.cascadeId || 'current',
       title: activeConv.title || t('live.currentSession'),
+      ...(activeConv.swarmTitle ? { swarmTitle: activeConv.swarmTitle } : {}),
       isCurrentSelected: true,
       isMainRunning: Boolean(activeConv.isRunning),
       isRunning: true,
       mainActivity: activeConv.liveActivity || aggregated?.liveActivity || null,
-      subagentCount: Math.max(0, (agents?.length || 1) - 1),
-      runningSubagentCount: (agents || []).filter((a) => !a.isMain && a.isRunning).length,
+      subagentCount: childAgents.length,
+      swarmCount: swarmChildren.length,
+      runningSubagentCount: childAgents.filter((a) => a.isRunning).length,
+      runningSwarmCount: swarmChildren.filter((a) => a.isRunning).length,
       ...(latestTokPerSec !== undefined ? { latestTokPerSec } : {}),
       ...(contextUsedPct !== undefined ? { contextUsedPct } : {}),
-      subagents: (agents || [])
-        .filter((a) => !a.isMain)
-        .map((s, idx) => ({
+      subagents: childAgents.map((s, idx) => {
+        const isSwarmW = s.agentKind === 'swarm_worker';
+        const isKilled = Boolean(s.swarmState === 'killed');
+        return {
           cascadeId: s.cascadeId || s.agentId,
           index: s.index || idx + 1,
           agentKind: s.agentKind || (s.isSideQuestion ? 'side_question' : 'subagent'),
-          agentOrdinal: s.agentOrdinal || (s.isSideQuestion ? s.sideIndex || 0 : s.index || idx + 1),
+          agentOrdinal:
+            s.agentOrdinal || (s.isSideQuestion ? s.sideIndex || 0 : s.index || idx + 1),
           customRole: s.customRole,
+          ...(s.swarmState ? { swarmState: s.swarmState } : {}),
           ...(s.isSideQuestion ? { isSideQuestion: true, sideIndex: s.sideIndex || 0 } : {}),
           badgeText: formatAgentBadgeText({ ...s, index: s.index || idx + 1 }),
-          shortLabel: s.shortLabel || `${t('fmt.subAgent')} #${idx + 1}`,
-          role: s.role || `${t('fmt.subAgent')} #${idx + 1}`,
+          shortLabel:
+            s.shortLabel ||
+            `${isSwarmW ? t('fmt.swarmAgent') : t('fmt.subAgent')} #${s.agentOrdinal || idx + 1}`,
+          role:
+            s.role ||
+            `${isSwarmW ? t('fmt.swarmAgent') : t('fmt.subAgent')} #${s.agentOrdinal || idx + 1}`,
           isRunning: Boolean(s.isRunning),
           stepCount: Number(s.stepCount || 0),
           lastModifiedMs: s.lastModifiedMs || 0,
           liveActivity: s.liveActivity || {
-            phase: s.isRunning ? 'thinking' : 'done',
-            actionKey: s.isRunning ? 'thinking' : 'done',
-            label: s.isRunning ? t('live.thinking') : t('live.done'),
+            phase: s.isRunning ? 'thinking' : isSwarmW && !isKilled ? 'waiting' : 'done',
+            actionKey: s.isRunning
+              ? 'thinking'
+              : isSwarmW
+                ? isKilled
+                  ? 'swarm_killed'
+                  : 'swarm_waiting'
+                : 'done',
+            label: s.isRunning
+              ? t('live.thinking')
+              : isSwarmW
+                ? isKilled
+                  ? t('live.killed')
+                  : t('live.waiting')
+                : t('live.done'),
             detail: '',
             stepProgress: '',
             startedAtMs: s.lastModifiedMs || 0,
-            signature: `${s.agentId}:${s.stepCount || 0}`,
+            signature: `${s.agentId}:${s.swarmState || ''}:${s.stepCount || 0}`,
           },
-        })),
+        };
+      }),
     },
   ];
 }
@@ -11190,14 +11394,17 @@ const LiveActivityWidget = defineComponent({
           const isHere =
             showSessionExtras &&
             Boolean(hostRouteLower) &&
-            String(item.cascadeId || '').toLowerCase() === hostRouteLower;
+            (String(item.cascadeId || '').toLowerCase() === hostRouteLower ||
+              (item.subagents || []).some(
+                (s) => String(s?.cascadeId || '').toLowerCase() === hostRouteLower
+              ));
           const subSig = (item.subagents || [])
             .map(
               (s) =>
-                `${s.cascadeId}:${s.isRunning}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
+                `${s.cascadeId}:${s.isRunning}:${s.swarmState || ''}:${s.stepCount}:${s.liveActivity?.signature || ''}:${s.liveActivity?.startedAtMs || 0}`
             )
             .join('|');
-          return `${locale}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${item.runningSubagentCount}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
+          return `${locale}:${item.cascadeId}:${item.title}:${isHere}:${item.isMainRunning}:${item.subagentCount}:${item.swarmCount || 0}:${item.runningSubagentCount}:${isExp}:${item.latestTokPerSec ?? ''}:${item.contextUsedPct ?? ''}:${item.mainActivity?.signature || ''}:${item.mainActivity?.startedAtMs || 0}:${subSig}`;
         },
         createRow: createLiveTaskCard,
         updateRow: (refs, item) => {
@@ -11244,7 +11451,10 @@ const LiveActivityWidget = defineComponent({
           if (showSessionExtras && refs.hereTagEl && refs.metricsEl) {
             const isHere =
               Boolean(hostRouteLower) &&
-              String(item.cascadeId || '').toLowerCase() === hostRouteLower;
+              (String(item.cascadeId || '').toLowerCase() === hostRouteLower ||
+                (item.subagents || []).some(
+                  (s) => String(s?.cascadeId || '').toLowerCase() === hostRouteLower
+                ));
             patchText(refs.hereTagEl, t('multi.hereTag'));
             patchAttr(refs.hereTagEl, 'hidden', !isHere);
 
@@ -11265,6 +11475,11 @@ const LiveActivityWidget = defineComponent({
           }
 
           const subCount = Number(item.subagentCount || item.subagents?.length || 0);
+          const swarmCount = Number(
+            item.swarmCount ??
+              (item.subagents || []).filter((s) => s?.agentKind === 'swarm_worker').length
+          );
+          const isPureSwarm = subCount > 0 && swarmCount === subCount;
           const runSubCount = Number(item.runningSubagentCount || 0);
           const isExpanded = resolveIsExpanded(item);
           patchText(refs.mainBadge, t('fmt.mainBadge'));
@@ -11274,8 +11489,15 @@ const LiveActivityWidget = defineComponent({
             const arrow = isExpanded ? '▾' : '▸';
             const toggleText =
               runSubCount > 0
-                ? t('live.subToggleRunning', { run: runSubCount, total: subCount, arrow })
-                : t('live.subToggleIdle', { total: subCount, arrow });
+                ? t(isPureSwarm ? 'live.swarmToggleRunning' : 'live.subToggleRunning', {
+                    run: runSubCount,
+                    total: subCount,
+                    arrow,
+                  })
+                : t(isPureSwarm ? 'live.swarmToggleIdle' : 'live.subToggleIdle', {
+                    total: subCount,
+                    arrow,
+                  });
             patchText(refs.subToggleBtn, toggleText);
             patchClasses(refs.subToggleBtn, { 'is-expanded': isExpanded });
             if (interactive) {
@@ -11323,11 +11545,28 @@ const LiveActivityWidget = defineComponent({
           const showSubs = subCount > 0 && isExpanded;
           patchAttr(refs.subListEl, 'hidden', !showSubs);
           if (showSubs) {
-            const subItems = item.subagents || [];
+            const rawSubItems = item.subagents || [];
+            const getSubSortRank = (s) => {
+              if (s?.isRunning) return 0;
+              if (s?.swarmState === 'waiting' || s?.liveActivity?.actionKey === 'swarm_waiting') {
+                return 1;
+              }
+              return 2;
+            };
+            const subItems =
+              rawSubItems.length > 1
+                ? rawSubItems
+                    .slice()
+                    .sort(
+                      (a, b) =>
+                        getSubSortRank(a) - getSubSortRank(b) ||
+                        Number(a?.index || 0) - Number(b?.index || 0)
+                    )
+                : rawSubItems;
             patchKeyedList(refs.subListEl, subItems, {
               keyFn: (sub) => sub.cascadeId,
               sigFn: (sub) =>
-                `${locale}:${sub.cascadeId}:${sub.role}:${sub.isRunning}:${sub.stepCount}:${sub.liveActivity?.signature || ''}:${sub.isRunning ? activityTimersMap.has(`sub:${sub.cascadeId}`) : true}`,
+                `${locale}:${sub.cascadeId}:${sub.agentKind || ''}:${sub.swarmState || ''}:${sub.role}:${sub.isRunning}:${sub.stepCount}:${sub.liveActivity?.signature || ''}:${sub.isRunning ? activityTimersMap.has(`sub:${sub.cascadeId}`) : true}`,
               createRow: createLiveSubRow,
               updateRow: (subRefs, sub) => {
                 const subAct = sub.liveActivity || {
@@ -11338,7 +11577,17 @@ const LiveActivityWidget = defineComponent({
                   stepProgress: '',
                   startedAtMs: sub.lastModifiedMs || 0,
                 };
-                patchClasses(subRefs.rowEl, { 'is-done': !sub.isRunning });
+                const isWaitingSub =
+                  !sub.isRunning &&
+                  (sub.swarmState === 'waiting' || subAct.actionKey === 'swarm_waiting');
+                const isKilledSub =
+                  !sub.isRunning &&
+                  (sub.swarmState === 'killed' || subAct.actionKey === 'swarm_killed');
+                patchClasses(subRefs.rowEl, {
+                  'is-done': !sub.isRunning && !isWaitingSub,
+                  'is-waiting-sub': isWaitingSub,
+                  'is-killed-sub': isKilledSub,
+                });
 
                 const badgeCls = getAgentBadgeClass(sub.index || 1, false);
                 const subBadgeText = formatAgentBadgeText({
@@ -11352,22 +11601,33 @@ const LiveActivityWidget = defineComponent({
                 const fallbackRole =
                   sub.agentKind === 'side_question' || sub.isSideQuestion
                     ? `${t('fmt.sideQuestion')}${sub.agentOrdinal || sub.sideIndex ? ` #${sub.agentOrdinal || sub.sideIndex}` : ''}`
-                    : `${t('fmt.subAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`;
+                    : sub.agentKind === 'swarm_worker'
+                      ? `${t('fmt.swarmAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`
+                      : `${t('fmt.subAgent')}${sub.agentOrdinal || sub.index ? ` #${sub.agentOrdinal || sub.index}` : ''}`;
                 const roleText =
                   sub.customRole !== undefined
                     ? sub.customRole || fallbackRole
                     : sub.role || sub.shortLabel || fallbackRole;
                 patchText(subRefs.subRole, roleText);
 
+                const idleFallbackKey = isKilledSub
+                  ? 'live.killed'
+                  : isWaitingSub
+                    ? 'live.waiting'
+                    : 'live.done';
                 const subLabel = sub.isRunning
                   ? formatLiveActivityLabel(subAct, 'live.running')
-                  : formatLiveActivityLabel(subAct, 'live.done');
+                  : formatLiveActivityLabel(subAct, idleFallbackKey);
                 const subDetail = formatLiveActivityDetail(subAct);
                 const subProg = subAct.stepProgress ? ` [${subAct.stepProgress}]` : '';
                 const summaryStr = showSessionExtras
                   ? sub.isRunning
                     ? `${subLabel}${subProg}${subDetail ? ` · ${subDetail}` : ''}`
-                    : t('live.doneWithSteps', { steps: sub.stepCount || 0 })
+                    : isKilledSub
+                      ? t('live.killedWithSteps', { steps: sub.stepCount || 0 })
+                      : isWaitingSub
+                        ? t('live.waitingWithSteps', { steps: sub.stepCount || 0 })
+                        : t('live.doneWithSteps', { steps: sub.stepCount || 0 })
                   : [`${subLabel}${subProg}`.trim(), subDetail].filter(Boolean).join(' ');
                 patchAttr(subRefs.subSummary, 'hidden', !summaryStr);
                 patchText(subRefs.subSummary, summaryStr);
@@ -12146,14 +12406,29 @@ function resolveMultiSessionCapsuleState(
     (acc, item) => acc + Number(item.runningSubagentCount || 0),
     0
   );
+  const runningSwarmCount = rawRunningList.reduce(
+    (acc, item) => acc + Number(item.runningSwarmCount || 0),
+    0
+  );
+  const isPureSwarmSubs = runningSubCount > 0 && runningSwarmCount === runningSubCount;
   const hasWaiting = rawRunningList.some((item) => item.mainActivity?.phase === 'waiting');
   const multiBtnText =
     runningCount > 0
       ? runningSubCount > 0
-        ? t('capsule.multiRunningWithSubs', { count: runningCount, subs: runningSubCount })
+        ? t(isPureSwarmSubs ? 'capsule.multiRunningWithSwarm' : 'capsule.multiRunningWithSubs', {
+            count: runningCount,
+            subs: runningSubCount,
+          })
         : t('capsule.multiRunning', { count: runningCount })
       : t('capsule.multiZero');
-  return { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText };
+  return {
+    rawRunningList,
+    runningCount,
+    runningSubCount,
+    runningSwarmCount,
+    hasWaiting,
+    multiBtnText,
+  };
 }
 
 /**
@@ -16572,16 +16847,7 @@ const { TopSessionHeader } = (() => {
 
 
 function formatConvOptionMeta(c) {
-  if (!c) return '';
-  const subs = Number(c.subagentCount || 0);
-  if (subs > 0) {
-    return t('header.convMetaWithSubs', {
-      main: c.stepCount || 0,
-      subs,
-      total: c.totalStepCount || c.stepCount || 0,
-    });
-  }
-  return t('header.convMetaSteps', { count: c.stepCount || 0 });
+  return formatConversationMeta(c);
 }
 
 const TopSessionHeader = defineComponent({
@@ -16659,10 +16925,49 @@ const TopSessionHeader = defineComponent({
     const headerEl = h('header', { className: 'top-session-stack' }, [headerRowEl]);
 
     let lastActiveCascadeId = '';
+    let lastAppliedHostChildRouteId = '';
 
-    function syncSessionScopeOnCascadeChange(telemetry) {
+    function syncSessionScopeOnCascadeChange(telemetry, telSlice = telemetryStore.getState()) {
       const currentCascadeId = telemetry?.activeConversation?.cascadeId || '';
       if (!currentCascadeId) return;
+
+      const selectedId = String(telSlice?.selectedConversationId || '').trim();
+      const hostRouteId = String(telSlice?.hostRouteConversationId || '').trim();
+      const hostRouteLower = hostRouteId.toLowerCase();
+
+      if (!selectedId && hostRouteLower) {
+        const routeMatch = resolveHostRouteMatch(telemetry, hostRouteId);
+        if (routeMatch?.isChildRoute && routeMatch.childAgent?.agentId) {
+          lastActiveCascadeId = currentCascadeId;
+          if (lastAppliedHostChildRouteId !== hostRouteLower) {
+            lastAppliedHostChildRouteId = hostRouteLower;
+            const targetAgentId = routeMatch.childAgent.agentId;
+            const uiSt = uiStore.getState();
+            if (
+              uiSt.selectedAgentScope !== targetAgentId ||
+              uiSt.ctxInspectorAgentId !== targetAgentId
+            ) {
+              uiStore.setState({
+                selectedAgentScope: targetAgentId,
+                ctxInspectorAgentId: targetAgentId,
+              });
+            }
+          }
+          return;
+        }
+        if (lastAppliedHostChildRouteId && !routeMatch?.isChildRoute) {
+          lastAppliedHostChildRouteId = '';
+          const uiSt = uiStore.getState();
+          if (uiSt.selectedAgentScope !== 'all' || uiSt.ctxInspectorAgentId !== 'auto') {
+            uiStore.setState({ selectedAgentScope: 'all', ctxInspectorAgentId: 'auto' });
+          }
+          lastActiveCascadeId = currentCascadeId;
+          return;
+        }
+      } else if (lastAppliedHostChildRouteId) {
+        lastAppliedHostChildRouteId = '';
+      }
+
       if (lastActiveCascadeId && currentCascadeId !== lastActiveCascadeId) {
         lastActiveCascadeId = currentCascadeId;
         const uiSt = uiStore.getState();
@@ -16686,34 +16991,44 @@ const TopSessionHeader = defineComponent({
       const actConv = telemetry?.activeConversation;
       const convs = telemetry?.conversations || [];
       const hostRouteId = telSt.hostRouteConversationId || '';
-      const hostMatchedConv = hostRouteId
-        ? convs.find((c) => c.cascadeId === hostRouteId) ||
-          (actConv?.cascadeId === hostRouteId ? actConv : null)
-        : null;
+      const routeMatch = hostRouteId ? resolveHostRouteMatch(telemetry, hostRouteId) : null;
+      const hostMatchedConv = routeMatch?.rootConv || null;
+      const childRouteBadge =
+        routeMatch?.isChildRoute && routeMatch.childAgent
+          ? formatAgentBadgeText(routeMatch.childAgent)
+          : '';
+      const hostBaseTitle = hostMatchedConv?.title || hostRouteId.slice(0, 8);
+      const hostDisplayTitle = childRouteBadge
+        ? `${hostBaseTitle} · ${childRouteBadge}`
+        : hostBaseTitle;
       const defaultOptLabel = hostRouteId
         ? t('header.currentWindowNamed', {
-            title: hostMatchedConv?.title || hostRouteId.slice(0, 8),
+            title: hostDisplayTitle,
           })
         : convs[0]?.title
           ? t('header.latestNamed', { title: convs[0].title })
           : t('header.followLatest');
       const defaultOptMeta = hostRouteId
         ? hostMatchedConv
-          ? formatConvOptionMeta({
-              stepCount: hostMatchedConv.stepCount,
-              subagentCount: hostMatchedConv.subagentCount,
-              totalStepCount: hostMatchedConv.totalStepCount ?? hostMatchedConv.totalStepsAllAgents,
-            })
+          ? formatConvOptionMeta(hostMatchedConv)
           : ''
         : convs[0]
           ? formatConvOptionMeta(convs[0])
           : '';
       const options = [
-        { value: '', label: defaultOptLabel, meta: defaultOptMeta },
+        {
+          value: '',
+          label: defaultOptLabel,
+          meta: defaultOptMeta,
+          ...(hostMatchedConv?.swarmTitle ? { title: hostMatchedConv.swarmTitle } : {}),
+        },
         ...convs.map((c) => ({
           value: c.cascadeId,
           label: c.title || c.cascadeId.slice(0, 8),
           meta: formatConvOptionMeta(c),
+          ...(c.swarmTitle && c.swarmTitle !== c.title
+            ? { title: `${c.title || c.cascadeId.slice(0, 8)} · ${c.swarmTitle}` }
+            : {}),
         })),
       ];
       const lockedId = telSt.selectedConversationId;
@@ -16723,13 +17038,7 @@ const TopSessionHeader = defineComponent({
           isLoadedLocked && actConv?.title
             ? actConv.title
             : t('header.lockedSession', { id: String(lockedId).slice(0, 8) });
-        const lockedMeta = isLoadedLocked
-          ? formatConvOptionMeta({
-              stepCount: actConv.stepCount,
-              subagentCount: actConv.subagentCount,
-              totalStepCount: actConv.totalStepsAllAgents,
-            })
-          : t('header.lockedMeta');
+        const lockedMeta = isLoadedLocked ? formatConvOptionMeta(actConv) : t('header.lockedMeta');
         options.splice(1, 0, {
           value: lockedId,
           label: lockedTitle,
@@ -16836,7 +17145,7 @@ const TopSessionHeader = defineComponent({
         telemetry: st.telemetry,
       }),
       (slice) => {
-        syncSessionScopeOnCascadeChange(slice.telemetry);
+        syncSessionScopeOnCascadeChange(slice.telemetry, slice);
         renderHeaderState();
       }
     );
@@ -21583,16 +21892,26 @@ function mountWindowOverlay() {
     syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
   }
 
-  function renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, hostRouteConversationId) {
+  function renderMultiRunningPanel(
+    rawRunningList,
+    runningCount,
+    runningSubCount,
+    hostRouteConversationId,
+    runningSwarmCount = 0
+  ) {
     if (!multiOpen || document.hidden) {
       multiRunningWidget.refs.pauseTicker();
       return;
     }
+    const isPureSwarm = runningSubCount > 0 && runningSwarmCount === runningSubCount;
     patchText(
       multiRunningMetaEl,
       runningCount > 0
         ? runningSubCount > 0
-          ? t('multi.metaWithSubs', { main: runningCount, subs: runningSubCount })
+          ? t(isPureSwarm ? 'multi.metaWithSwarm' : 'multi.metaWithSubs', {
+              main: runningCount,
+              subs: runningSubCount,
+            })
           : t('multi.metaMainOnly', { main: runningCount })
         : t('multi.allIdle')
     );
@@ -21663,13 +21982,19 @@ function mountWindowOverlay() {
       ctxAgent,
       aggregated,
     });
-    const { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText } =
-      resolveMultiSessionCapsuleState(telemetry, {
-        agents,
-        aggregated,
-        latestTokPerSec: overviewActive.latestTokPerSec ?? null,
-        contextUsedPct: slotCtx.usedPct,
-      });
+    const {
+      rawRunningList,
+      runningCount,
+      runningSubCount,
+      runningSwarmCount,
+      hasWaiting,
+      multiBtnText,
+    } = resolveMultiSessionCapsuleState(telemetry, {
+      agents,
+      aggregated,
+      latestTokPerSec: overviewActive.latestTokPerSec ?? null,
+      contextUsedPct: slotCtx.usedPct,
+    });
 
     patchClasses(multiBtn, {
       'is-running': runningCount > 0 && !hasWaiting,
@@ -21681,7 +22006,8 @@ function mountWindowOverlay() {
       rawRunningList,
       runningCount,
       runningSubCount,
-      telSt.hostRouteConversationId
+      telSt.hostRouteConversationId,
+      runningSwarmCount
     );
 
     patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });

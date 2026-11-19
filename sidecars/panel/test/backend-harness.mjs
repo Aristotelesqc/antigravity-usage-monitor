@@ -59,6 +59,7 @@ export function backendHarness({
   cache={},
   deepStats=null,
   transcripts={},
+  swarmMembers={},
   diskDirs={},
   settings={},
   trajectories={},
@@ -82,7 +83,7 @@ export function backendHarness({
   const mainUrl = pluginRootPath ? `file://${pluginRootPath}/sidecars/panel/main.mjs` : 'file:///test/sidecars/panel/main.mjs';
   const mainPath = pluginRootPath ? `${pluginRootPath}/sidecars/panel/main.mjs` : '/test/sidecars/panel/main.mjs';
   const source = stripEsmSyntax(sourceText ?? loadCombinedBackendSource(), mainUrl);
-  const state={calls:[],errors:[],saves:[],settings,trajectories,summaries,transcripts,transcriptMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,gitConfigText,deepStats,deepStatsMtimeMs:1};
+  const state={calls:[],errors:[],saves:[],settings,trajectories,summaries,transcripts,transcriptMtimeMs:1,swarmMembers,swarmMembersMtimeMs:1,userStatus,quotaSummary,localCatalog,remoteCatalog,pluginManifest,hasGitDir,gitConfigText,deepStats,deepStatsMtimeMs:1};
   const ctx={
     ...metricsImplementation, URL, AbortSignal, Buffer, TextDecoder, ...timerApi, isDeepStrictEqual, randomUUID,
     ...(clock ? { Date: class extends Date {
@@ -110,6 +111,10 @@ export function backendHarness({
         const m = norm.match(/\/brain\/([^/]+)\/\.system_generated\/logs\/transcript\.jsonl$/i);
         return Boolean(m && state.transcripts?.[m[1]]);
       }
+      if (norm.endsWith('/.system_generated/swarm/members.json')) {
+        const m = norm.match(/\/brain\/([^/]+)\/\.system_generated\/swarm\/members\.json$/i);
+        return Boolean(m && state.swarmMembers?.[m[1]]);
+      }
       if (norm.endsWith('/.git')) return Boolean(state.hasGitDir || state.gitConfigText);
       if (norm.endsWith('/.git/config')) return Boolean(state.gitConfigText);
       if (diskDirs && Object.prototype.hasOwnProperty.call(diskDirs, norm)) return true;
@@ -131,6 +136,14 @@ export function backendHarness({
           return {mtimeMs:state.transcriptMtimeMs,size:Buffer.byteLength(text,'utf8')};
         }
       }
+      if (norm.endsWith('/.system_generated/swarm/members.json')) {
+        const m = norm.match(/\/brain\/([^/]+)\/\.system_generated\/swarm\/members\.json$/i);
+        const obj = m && state.swarmMembers?.[m[1]];
+        if (obj) {
+          const text = typeof obj === 'string' ? obj : JSON.stringify(obj);
+          return {mtimeMs:state.swarmMembersMtimeMs,size:Buffer.byteLength(text,'utf8')};
+        }
+      }
       if (norm.endsWith('/antigravity/brain/.deep_stats_cache.json') && state.deepStats) {
         return {mtimeMs:state.deepStatsMtimeMs,size:JSON.stringify(state.deepStats).length};
       }
@@ -142,6 +155,11 @@ export function backendHarness({
         const m = norm.match(/\/brain\/([^/]+)\/\.system_generated\/logs\/transcript\.jsonl$/i);
         const lines = m && state.transcripts?.[m[1]];
         return Array.isArray(lines) ? lines.map(x => JSON.stringify(x)).join('\n') : String(lines || '');
+      }
+      if (norm.endsWith('/.system_generated/swarm/members.json')) {
+        const m = norm.match(/\/brain\/([^/]+)\/\.system_generated\/swarm\/members\.json$/i);
+        const obj = m && state.swarmMembers?.[m[1]];
+        return typeof obj === 'string' ? obj : JSON.stringify(obj || {});
       }
       if (norm.endsWith('settings.json')) return JSON.stringify(state.settings);
       if (norm.endsWith('/antigravity/brain/.deep_stats_cache.json')) return JSON.stringify(state.deepStats);

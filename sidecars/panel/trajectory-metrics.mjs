@@ -679,6 +679,78 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
     return Boolean(step.userInput && typeof step.userInput === 'object');
   };
 
+  const hasHumanUserTurn = rawSteps.some(isUserTurnBoundary);
+
+  const isSystemWakeupBoundary = (step) => {
+    if (hasHumanUserTurn || !step || typeof step !== 'object') return false;
+    if (isCheckpointStep(step)) return false;
+    const t = String(step.type || '').trim().toUpperCase();
+    if (t !== 'CORTEX_STEP_TYPE_SYSTEM_MESSAGE' && t !== 'SYSTEM_MESSAGE') {
+      return false;
+    }
+    const rawMsg = String(step?.systemMessage?.message || step?.content || '').trim();
+    const withoutSummary = rawMsg
+      .replace(/<CONTEXT_SUMMARY>[\s\S]*?<\/CONTEXT_SUMMARY>/gi, '')
+      .trim();
+    if (!withoutSummary || /BROWSER_HOST_FACTS/i.test(withoutSummary)) return false;
+    return true;
+  };
+
+  const extractSystemWakeupInfo = (step) => {
+    let raw = String(step?.systemMessage?.message || step?.content || '').trim();
+    const sysMatches = [...raw.matchAll(/<SYSTEM_MESSAGE>([\s\S]*?)<\/SYSTEM_MESSAGE>/gi)];
+    if (sysMatches.length > 0) {
+      raw = sysMatches[sysMatches.length - 1][1].trim();
+    } else {
+      raw = raw.replace(/^The following is a <SYSTEM_MESSAGE>[\s\S]*?<SYSTEM_MESSAGE>/i, '').replace(/<\/SYSTEM_MESSAGE>\s*$/i, '').trim();
+    }
+    raw = raw.replace(/^\[Message\]\s+timestamp=\S+\s+sender=\S+\s+priority=\S+\s+content=/i, '').trim();
+
+    const doorbellMatch = raw.match(/^\[swarm\]\s+new board message\s+#(\d+)\s*$/i);
+    if (doorbellMatch) {
+      const tag = `[swarm] #${doorbellMatch[1]}`;
+      return { cleanText: tag, legacyPrompt: tag, hasMedia: false, isDoorbellOnly: true };
+    }
+
+    const assignMatch = raw.match(
+      /^You have just started\.\s*Your assignment\s*\(recorded on the board as #(\d+)\s+for\s+@?([^\s):]+)\)\s*:\s*([\s\S]*)$/i
+    );
+    if (assignMatch) {
+      const seq = assignMatch[1];
+      const member = assignMatch[2];
+      const bodyLines = String(assignMatch[3] || '')
+        .split(/\r?\n/)
+        .map((l) => l.replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+      const bodyPreview = bodyLines.join(' ');
+      const full = bodyPreview ? `#${seq} @${member} · ${bodyPreview}` : `#${seq} @${member}`;
+      const cleanText = full.length > 180 ? `${full.slice(0, 179)}…` : full;
+      return { cleanText, legacyPrompt: cleanText, hasMedia: false, isDoorbellOnly: false };
+    }
+
+    const boardDeltaMatch = raw.match(
+      /^\[board\]\s+the latest message is #(\d+)\s*\(you have read up to #(\d+)\)/i
+    );
+    if (boardDeltaMatch) {
+      const tag = `[board] #${boardDeltaMatch[2]} -> #${boardDeltaMatch[1]}`;
+      return { cleanText: tag, legacyPrompt: tag, hasMedia: false, isDoorbellOnly: true };
+    }
+
+    const monitorTickMatch = raw.match(/^\[monitor\]\s+tick:[^(]*\(iteration\s+(\d+)\)\s*$/i);
+    if (monitorTickMatch) {
+      const tag = `[monitor] tick #${monitorTickMatch[1]}`;
+      return { cleanText: tag, legacyPrompt: tag, hasMedia: false, isDoorbellOnly: false };
+    }
+
+    const cleaned = raw
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .join('\n');
+    const cleanText = cleaned.length > 180 ? `${cleaned.slice(0, 179)}…` : cleaned;
+    return { cleanText, legacyPrompt: cleanText, hasMedia: false, isDoorbellOnly: false };
+  };
+
   const extractUserTurnInfo = (step) => {
     const ui = step?.userInput;
     let raw = '';
@@ -717,15 +789,26 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
   };
 
   let pendingTurnCleanPrompts = [];
+  let pendingTurnDoorbellOnly = false;
   rawSteps.forEach((s, index) => {
-    if (isUserTurnBoundary(s)) {
-      const { cleanText, legacyPrompt, hasMedia } = extractUserTurnInfo(s);
+    const isHumanBoundary = isUserTurnBoundary(s);
+    const isWakeupBoundary = !isHumanBoundary && isSystemWakeupBoundary(s);
+    if (isHumanBoundary || isWakeupBoundary) {
+      const { cleanText, legacyPrompt, hasMedia, isDoorbellOnly = false } = isHumanBoundary
+        ? extractUserTurnInfo(s)
+        : extractSystemWakeupInfo(s);
       if (!hasUnconsumedTurn) {
         hasUnconsumedTurn = true;
         pendingTurnPrompts = legacyPrompt ? [legacyPrompt] : [];
         pendingTurnCleanPrompts = cleanText ? [cleanText] : [];
         pendingTurnHasMedia = hasMedia;
-      } else {
+        pendingTurnDoorbellOnly = Boolean(isWakeupBoundary && isDoorbellOnly);
+      } else if (isWakeupBoundary && pendingTurnDoorbellOnly && !isDoorbellOnly && cleanText) {
+        // 合并连续唤醒步时，用紧随其后的真实简报/任务正文覆盖前置的纯 #seq 门铃提示
+        pendingTurnPrompts = legacyPrompt ? [legacyPrompt] : [];
+        pendingTurnCleanPrompts = [cleanText];
+        pendingTurnDoorbellOnly = false;
+      } else if (!(isWakeupBoundary && isDoorbellOnly && !pendingTurnDoorbellOnly)) {
         if (
           legacyPrompt &&
           pendingTurnPrompts[pendingTurnPrompts.length - 1] !== legacyPrompt
@@ -769,6 +852,7 @@ export function extractModelSteps(rawSteps = [], generatorMetadata = []) {
       pendingTurnPrompts = [];
       pendingTurnCleanPrompts = [];
       pendingTurnHasMedia = false;
+      pendingTurnDoorbellOnly = false;
     }
 
     const stepIndex = m.sourceTrajectoryStepInfo?.stepIndex ?? index;
@@ -1845,6 +1929,144 @@ export function summarizeToolCall(rawToolCall, fallbackStep = null) {
     };
   }
 
+  if (nameLower === 'swarm') {
+    const action = pickField(['action', 'Action']).toLowerCase();
+    const memberName = pickField(['name', 'Name']).replace(/^@+/, '').trim();
+    if (action === 'add') {
+      const rawTasks = unwrapArgValue(args?.tasks);
+      const rawCount = Number(unwrapArgValue(args?.n) || 0);
+      const shardCount = Array.isArray(rawTasks) && rawTasks.length > 1
+        ? rawTasks.length
+        : rawCount > 1
+          ? Math.floor(rawCount)
+          : 0;
+      const detail = memberName
+        ? shardCount > 1
+          ? `@${memberName}-1..${shardCount}`
+          : `@${memberName}`
+        : '';
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_add',
+        isAskUser: false,
+        label: '派生工蜂',
+        detail,
+      };
+    }
+    if (action === 'title') {
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_title',
+        isAskUser: false,
+        label: '命名蜂群',
+        detail: cleanSingleLineSnippet(pickField(['title', 'Title']), 44) || '',
+      };
+    }
+    if (action === 'kill') {
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_kill',
+        isAskUser: false,
+        label: '终止工蜂',
+        detail: memberName ? `@${memberName}` : '',
+      };
+    }
+    if (action === 'model') {
+      const target = memberName ? `@${memberName}` : '@coordinator';
+      const nextModel = pickField(['model', 'Model']);
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_model',
+        isAskUser: false,
+        label: '切换工蜂模型',
+        detail: nextModel ? `${target} -> ${nextModel}` : target,
+      };
+    }
+    if (action === 'channel') {
+      const op = pickField(['op', 'Op']);
+      const ch = pickField(['channel', 'Channel']).replace(/^#+/, '').trim();
+      return {
+        toolName: nameLower,
+        actionKey: 'swarm_channel',
+        isAskUser: false,
+        label: '蜂群频道',
+        detail: ch ? `${op ? `${op} ` : ''}#${ch}` : op || '',
+      };
+    }
+    return {
+      toolName: nameLower,
+      actionKey: 'swarm_status',
+      isAskUser: false,
+      label: '巡检蜂群',
+      detail: action || 'status',
+    };
+  }
+
+  if (nameLower === 'post_message') {
+    const channel = pickField(['channel', 'Channel']).replace(/^#+/, '').trim();
+    const textSnippet = cleanSingleLineSnippet(pickField(['text', 'Text']), 48);
+    const detail =
+      channel && channel !== 'main'
+        ? `[#${channel}]${textSnippet ? ` ${textSnippet}` : ''}`
+        : textSnippet || '';
+    return {
+      toolName: nameLower,
+      actionKey: 'post_message',
+      isAskUser: false,
+      label: '发布看板',
+      detail,
+    };
+  }
+
+  if (nameLower === 'read_board') {
+    const rawStatus = unwrapArgValue(args?.status) ?? pickField(['status']);
+    const isStatus = String(rawStatus).trim().toLowerCase() === 'true';
+    const rawSeqs = unwrapArgValue(args?.seqs);
+    const seqsLabel =
+      Array.isArray(rawSeqs) && rawSeqs.length > 0
+        ? `${rawSeqs
+            .slice(0, 4)
+            .map((n) => `#${String(unwrapArgValue(n) ?? n).trim()}`)
+            .join(', ')}${rawSeqs.length > 4 ? '…' : ''}`
+        : '';
+    const sinceVal = unwrapArgValue(args?.since) ?? pickField(['since']);
+    const channel = pickField(['channel', 'Channel']).replace(/^#+/, '').trim();
+    const detail = isStatus
+      ? 'status'
+      : [
+          channel && channel !== 'main' ? `#${channel}` : '',
+          seqsLabel ||
+            (sinceVal !== undefined && sinceVal !== null && String(sinceVal).trim() !== ''
+              ? `#${String(sinceVal).trim()}+`
+              : ''),
+        ]
+          .filter(Boolean)
+          .join(' ');
+    return {
+      toolName: nameLower,
+      actionKey: 'read_board',
+      isAskUser: false,
+      label: '读取看板',
+      detail,
+    };
+  }
+
+  if (nameLower === 'swarm_wait') {
+    const sinceVal = unwrapArgValue(args?.since) ?? pickField(['since']);
+    const detail =
+      sinceVal !== undefined && sinceVal !== null && String(sinceVal).trim() !== ''
+        ? `#${String(sinceVal).trim()}+`
+        : '';
+    return {
+      toolName: nameLower,
+      actionKey: 'swarm_wait',
+      isAskUser: false,
+      isSwarmWait: true,
+      label: '看板待命',
+      detail,
+    };
+  }
+
   if (nameLower === 'manage_task') {
     const action = pickField(['Action', 'action']);
     const taskId = pickField(['TaskId', 'taskId']);
@@ -2032,7 +2254,7 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         const info = summarizeToolCall(activeTool, lastStep);
         const stepProgress =
           tools.length > 1 && !hasBracketPrefix(info.detail) ? `${tools.length}/${tools.length}` : '';
-        const phase = info.isAskUser ? 'waiting' : 'tool';
+        const phase = info.isAskUser || info.isSwarmWait ? 'waiting' : 'tool';
         return {
           phase,
           toolName: info.toolName,
@@ -2115,8 +2337,8 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
     if (hasBracketPrefix(info.detail)) {
       stepProgress = '';
     }
-    const waiting = isWaitingStepStatus(lastStep?.status) || info.isAskUser;
-    const waitingApproval = Boolean(waiting && !info.isAskUser);
+    const waiting = isWaitingStepStatus(lastStep?.status) || info.isAskUser || Boolean(info.isSwarmWait);
+    const waitingApproval = Boolean(waiting && !info.isAskUser && !info.isSwarmWait);
     const resolvedStartMs = startMs || prevStepEndMs || 0;
     const label = waitingApproval ? `等待确认 · ${info.label}` : info.label;
 
@@ -2207,7 +2429,7 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
         getRawStepEndMs(lastStep) ||
         getRawStepEndMs(plannerStep) ||
         0;
-      const phase = info.isAskUser ? 'waiting' : 'tool';
+      const phase = info.isAskUser || info.isSwarmWait ? 'waiting' : 'tool';
 
       return {
         phase,
@@ -2228,6 +2450,22 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
       const infos = pTools.map((t, idx) =>
         summarizeToolCall(t, toolStepsAfterPlanner[idx] || lastStep)
       );
+      const swarmWaitInfo = infos.find((x) => x.isSwarmWait);
+      if (swarmWaitInfo) {
+        const startMs = getRawStepFinishMs(lastStep) || getRawStepEndMs(lastStep) || 0;
+        return {
+          phase: 'waiting',
+          toolName: swarmWaitInfo.toolName,
+          actionKey: swarmWaitInfo.actionKey,
+          waitingApproval: false,
+          detailKey: '',
+          label: swarmWaitInfo.label,
+          detail: swarmWaitInfo.detail,
+          stepProgress: '',
+          startedAtMs: startMs,
+          signature: `swarm-wait:${lastStepId}:${swarmWaitInfo.detail}`,
+        };
+      }
       const lastToolInfo = infos[infos.length - 1];
       const allSameLabel = infos.every((x) => x.actionKey === lastToolInfo.actionKey);
       const detailsList = infos.map((x) => x.detail).filter(Boolean);
@@ -2254,13 +2492,28 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
       };
     }
 
-    // B2.5：Connect RPC 轨迹中工具作为独立步骤存在（plannerResponse.toolCalls 为空）时，直接提取最后一个工具步骤的目标文件/命令
+    // B2.5：Connect RPC / SQLite 轨迹中工具作为独立步骤存在（plannerResponse.toolCalls 为空）时，直接提取最后一个工具步骤的目标文件/命令
     if (lastIdx > lastPlannerIdx) {
       const stepTypeUpper = String(lastStep?.type || '').toUpperCase();
-      if (!stepTypeUpper.includes('USER_INPUT') && !stepTypeUpper.includes('GENERIC')) {
+      const hasStepToolMeta = Boolean(lastStep?.metadata?.toolCall?.name);
+      if (!stepTypeUpper.includes('USER_INPUT') && (!stepTypeUpper.includes('GENERIC') || hasStepToolMeta)) {
         const lastInfo = summarizeToolCall(null, lastStep);
         if (lastInfo.toolName !== 'tool' || lastInfo.detail) {
           const startMs = getRawStepFinishMs(lastStep) || getRawStepEndMs(lastStep) || 0;
+          if (lastInfo.isSwarmWait) {
+            return {
+              phase: 'waiting',
+              toolName: lastInfo.toolName,
+              actionKey: lastInfo.actionKey,
+              waitingApproval: false,
+              detailKey: '',
+              label: lastInfo.label,
+              detail: lastInfo.detail,
+              stepProgress: '',
+              startedAtMs: startMs,
+              signature: `swarm-wait:${lastStepId}:${lastInfo.detail}`,
+            };
+          }
           return {
             phase: 'thinking',
             toolName: lastInfo.toolName,
@@ -2331,4 +2584,102 @@ export function extractLiveActivity(rawSteps = [], isRunning = false, fallbackSt
     signature: `post-step-think:${lastStepId}`,
   };
 }
+
+/**
+ * 识别并规范化蜂群（Native Swarm）工蜂节点的身份信息，剥离冗余的 `Swarm Worker (<name>)` 包裹。
+ *
+ * @param {{ role?: string, typeName?: string, agentScriptName?: string, memberName?: string }} [input={}]
+ * @returns {{ isSwarmWorker: boolean, memberName: string, isMonitor: boolean, isNarrator: boolean, isAuxiliary: boolean }}
+ */
+export function parseSwarmWorkerRole(input = {}) {
+  const rawRole = String(input?.role || '').trim();
+  const rawType = String(input?.typeName || '').trim().toLowerCase();
+  const rawScript = String(input?.agentScriptName || '').trim();
+  const explicitMember = String(input?.memberName || '').trim();
+
+  const wrapperMatch = rawRole.match(/^Swarm\s+Worker\s*\(([^)]+)\)\s*$/i);
+  const isSwarmWorker = Boolean(
+    explicitMember || wrapperMatch || rawType === 'worker' || rawType === 'swarm_worker'
+  );
+  if (!isSwarmWorker) {
+    return {
+      isSwarmWorker: false,
+      memberName: '',
+      isMonitor: false,
+      isNarrator: false,
+      isAuxiliary: false,
+    };
+  }
+
+  const candidate =
+    explicitMember ||
+    (wrapperMatch ? wrapperMatch[1] : '') ||
+    rawScript ||
+    (rawRole.toLowerCase() !== 'worker' && rawRole.toLowerCase() !== 'swarm worker' ? rawRole : '');
+  const memberName = String(candidate || '').replace(/^@+/, '').trim();
+  const isMonitor = /^monitor(?:-\d+)?$/i.test(memberName);
+  const isNarrator = /^narrator(?:-\d+)?$/i.test(memberName);
+  return {
+    isSwarmWorker: true,
+    memberName,
+    isMonitor,
+    isNarrator,
+    isAuxiliary: isMonitor || isNarrator,
+  };
+}
+
+/**
+ * 判断原始轨迹步骤是否已调用 `swarm_wait` 进入留言板待命状态（且后续尚未收到新的用户提问或系统唤醒消息）。
+ *
+ * @param {Array<object>} [rawSteps=[]]
+ * @returns {boolean}
+ */
+export function isParkedOnSwarmWait(rawSteps = []) {
+  if (!Array.isArray(rawSteps) || rawSteps.length === 0) return false;
+  let lastIdx = rawSteps.length - 1;
+  while (lastIdx > 0 && isAuxiliaryMetaStep(rawSteps[lastIdx]) && isRawStepComplete(rawSteps[lastIdx])) {
+    lastIdx--;
+  }
+  let lastPlannerIdx = -1;
+  for (let i = lastIdx; i >= 0; i--) {
+    const st = rawSteps[i];
+    const t = String(st?.type || '').trim().toUpperCase();
+    if (t.includes('USER_INPUT') || t.includes('SYSTEM_MESSAGE') || isCheckpointStep(st)) {
+      return false;
+    }
+    if (isPlannerStep(st)) {
+      lastPlannerIdx = i;
+      break;
+    }
+  }
+  if (lastPlannerIdx < 0) return false;
+
+  const pTools = getStepPlannerToolCalls(rawSteps[lastPlannerIdx]);
+  if (
+    pTools.some((tc) => {
+      const n = String(tc?.name || tc?.toolName || tc?.function?.name || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^default_api:/, '');
+      return n === 'swarm_wait';
+    })
+  ) {
+    return true;
+  }
+
+  for (let k = lastPlannerIdx + 1; k <= lastIdx; k++) {
+    const st = rawSteps[k];
+    const toolName = String(st?.metadata?.toolCall?.name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^default_api:/, '');
+    if (toolName === 'swarm_wait') return true;
+    const rawContent = String(st?.content || '').trim();
+    if (/Waiting for a message that calls on you|Waiting for any message posted after/i.test(rawContent)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 

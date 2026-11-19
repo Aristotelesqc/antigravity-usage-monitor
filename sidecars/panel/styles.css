@@ -1512,10 +1512,29 @@ html[data-standalone="true"] .app-shell {
   flex-direction: column;
   gap: 8px;
   padding-top: 9px;
+  padding-right: 4px;
   margin-top: 3px;
   margin-left: 18px;
   border-top: 1px dashed var(--border-hairline);
   min-width: 0;
+  max-height: 196px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+.live-sub-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.live-sub-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.live-sub-list::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 999px;
 }
 
 .live-sub-row {
@@ -1531,6 +1550,14 @@ html[data-standalone="true"] .app-shell {
 
 .live-sub-row.is-done {
   opacity: 0.72;
+}
+
+.live-sub-row.is-waiting-sub {
+  opacity: 0.86;
+}
+
+.live-sub-row.is-killed-sub {
+  opacity: 0.56;
 }
 
 .live-sub-left {

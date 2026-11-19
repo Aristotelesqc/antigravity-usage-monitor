@@ -496,21 +496,48 @@ export function getAgentBadgeClass(index = 0, isMain = false) {
   return `badge-sub-${slot}`;
 }
 
+function resolveStructuredAgentKind(agent) {
+  if (!agent) return 'main';
+  if (agent.agentKind) return agent.agentKind;
+  if (agent.isMain) return 'main';
+  if (agent.isSideQuestion || agent.typeName === 'side_question') return 'side_question';
+  if (
+    agent.typeName === 'worker' ||
+    agent.typeName === 'swarm_worker' ||
+    /^Swarm\s+Worker\s*\(/i.test(String(agent.role || ''))
+  ) {
+    return 'swarm_worker';
+  }
+  return 'subagent';
+}
+
+function normalizeSwarmMemberHandle(rawText) {
+  const trimmed = String(rawText || '').trim();
+  if (!trimmed) return '';
+  const wrapper = trimmed.match(/^Swarm\s+Worker\s*\(([^)]+)\)\s*$/i);
+  const inner = (wrapper ? wrapper[1] : trimmed).replace(/^@+/, '').trim();
+  if (
+    !inner ||
+    inner === '蜂群' ||
+    inner === '工蜂' ||
+    inner.toLowerCase() === 'swarm' ||
+    inner.toLowerCase() === 'worker' ||
+    inner.toLowerCase() === 'swarm worker'
+  ) {
+    return '';
+  }
+  return `@${inner}`;
+}
+
 /**
- * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理或旁路提问的紧凑徽章文本（零正则反拆中文）。
+ * 基于结构化 `agentKind` / `agentOrdinal` 格式化主/子代理、蜂群节点或旁路提问的紧凑徽章文本（零正则反拆中文）。
  *
  * @param {object|null|undefined} agent
  * @returns {string}
  */
 export function formatAgentBadgeText(agent) {
   if (!agent) return t('fmt.mainBadge');
-  const kind =
-    agent.agentKind ||
-    (agent.isMain
-      ? 'main'
-      : agent.isSideQuestion || agent.typeName === 'side_question'
-        ? 'side_question'
-        : 'subagent');
+  const kind = resolveStructuredAgentKind(agent);
   if (kind === 'all') return t('header.scopeAllShort');
   if (kind === 'main') return t('fmt.mainBadge');
   if (kind === 'side_question') {
@@ -518,6 +545,12 @@ export function formatAgentBadgeText(agent) {
     if (ord > 0) return t('fmt.sideBadge', { index: ord });
     if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
     return t('fmt.sideBadgeShort');
+  }
+  if (kind === 'swarm_worker') {
+    const ord = Number(agent.agentOrdinal || agent.index || 0);
+    if (ord > 0) return t('fmt.swarmBadge', { index: ord });
+    if (!isEnglishLocale() && agent.badgeText) return String(agent.badgeText);
+    return t('fmt.swarmBadgeShort');
   }
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   if (ord > 0) return t('fmt.subBadge', { index: ord });
@@ -533,13 +566,7 @@ export function formatAgentBadgeText(agent) {
  */
 export function formatAgentLabel(agent) {
   if (!agent) return t('fmt.mainAgent');
-  const kind =
-    agent.agentKind ||
-    (agent.isMain
-      ? 'main'
-      : agent.isSideQuestion || agent.typeName === 'side_question'
-        ? 'side_question'
-        : 'subagent');
+  const kind = resolveStructuredAgentKind(agent);
   if (kind === 'all') return t('header.scopeAll');
   if (kind === 'main') return t('fmt.mainAgent');
 
@@ -560,6 +587,20 @@ export function formatAgentLabel(agent) {
     return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
   }
 
+  if (kind === 'swarm_worker') {
+    const ord = Number(agent.agentOrdinal || agent.index || 0);
+    const baseLabel = ord > 0 ? `${t('fmt.swarmAgent')} #${ord}` : t('fmt.swarmAgent');
+    const handle = normalizeSwarmMemberHandle(rawCustom || agent.role || '');
+    if (!handle) return baseLabel;
+    let auxSuffix = '';
+    if (/^@monitor(?:-\d+)?$/i.test(handle)) {
+      auxSuffix = ` (${t('fmt.swarmMonitorHint')})`;
+    } else if (/^@narrator(?:-\d+)?$/i.test(handle)) {
+      auxSuffix = ` (${t('fmt.swarmNarratorHint')})`;
+    }
+    return `${baseLabel} · ${handle}${auxSuffix}`;
+  }
+
   const ord = Number(agent.agentOrdinal || agent.index || 0);
   const baseLabel = ord > 0 ? `${t('fmt.subAgent')} #${ord}` : t('fmt.subAgent');
   const isGeneric =
@@ -569,6 +610,31 @@ export function formatAgentLabel(agent) {
     rawCustom === t('fmt.subAgent') ||
     rawCustom === 'Subagent';
   return isGeneric ? baseLabel : `${baseLabel} · ${rawCustom}`;
+}
+
+/**
+ * 格式化会话选项右侧元信息（自适应区分纯蜂群、蜂群+子代理混合、常规子代理与单会话步数）。
+ *
+ * @param {object|null|undefined} conv
+ * @returns {string}
+ */
+export function formatConversationMeta(conv) {
+  if (!conv) return '';
+  const main = Number(conv.stepCount || 0);
+  const totalSubs = Number(conv.subagentCount || 0);
+  const swarm = Number(conv.swarmCount || 0);
+  const otherSubs = Math.max(0, totalSubs - swarm);
+  const total = Number(conv.totalStepCount ?? conv.totalStepsAllAgents ?? main);
+  if (swarm > 0 && otherSubs > 0) {
+    return t('header.convMetaWithSwarmAndSubs', { main, swarm, subs: otherSubs, total });
+  }
+  if (swarm > 0) {
+    return t('header.convMetaWithSwarm', { main, swarm, total });
+  }
+  if (totalSubs > 0) {
+    return t('header.convMetaWithSubs', { main, subs: totalSubs, total });
+  }
+  return t('header.convMetaSteps', { count: main });
 }
 
 /**

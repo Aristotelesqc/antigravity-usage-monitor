@@ -8,6 +8,7 @@ import { callSidecarApi, getWindowBridgeConfig, isWindowOverlayMode } from '../c
 import {
   formatAgentBadgeText,
   formatAgentLabel,
+  formatConversationMeta,
   formatLiveActivityDetail,
   formatLiveActivityLabel,
   getAgentBadgeClass,
@@ -299,6 +300,8 @@ export function isEquivalentTelemetry(prev, next) {
   if (pAct?.cascadeId !== nAct?.cascadeId) return false;
   if (pAct?.stepCount !== nAct?.stepCount) return false;
   if (pAct?.subagentCount !== nAct?.subagentCount) return false;
+  if ((pAct?.swarmCount || 0) !== (nAct?.swarmCount || 0)) return false;
+  if ((pAct?.swarmTitle || '') !== (nAct?.swarmTitle || '')) return false;
   if (pAct?.totalStepsAllAgents !== nAct?.totalStepsAllAgents) return false;
   if (pAct?.isRunning !== nAct?.isRunning) return false;
   if (
@@ -375,6 +378,9 @@ export function isEquivalentTelemetry(prev, next) {
     const na = nAgents[i];
     if (
       pa?.agentId !== na?.agentId ||
+      pa?.agentKind !== na?.agentKind ||
+      pa?.agentOrdinal !== na?.agentOrdinal ||
+      (pa?.swarmState || '') !== (na?.swarmState || '') ||
       pa?.role !== na?.role ||
       pa?.stepCount !== na?.stepCount ||
       pa?.isRunning !== na?.isRunning ||
@@ -660,6 +666,8 @@ export function isEquivalentTelemetry(prev, next) {
       pConvs[i]?.status !== nConvs[i]?.status ||
       pConvs[i]?.stepCount !== nConvs[i]?.stepCount ||
       pConvs[i]?.subagentCount !== nConvs[i]?.subagentCount ||
+      (pConvs[i]?.swarmCount || 0) !== (nConvs[i]?.swarmCount || 0) ||
+      (pConvs[i]?.swarmTitle || '') !== (nConvs[i]?.swarmTitle || '') ||
       pConvs[i]?.totalStepCount !== nConvs[i]?.totalStepCount
     ) {
       return false;
@@ -678,7 +686,9 @@ export function isEquivalentTelemetry(prev, next) {
       pr?.isCurrentSelected !== nr?.isCurrentSelected ||
       pr?.isMainRunning !== nr?.isMainRunning ||
       pr?.subagentCount !== nr?.subagentCount ||
+      (pr?.swarmCount || 0) !== (nr?.swarmCount || 0) ||
       pr?.runningSubagentCount !== nr?.runningSubagentCount ||
+      (pr?.runningSwarmCount || 0) !== (nr?.runningSwarmCount || 0) ||
       pr?.mainActivity?.signature !== nr?.mainActivity?.signature ||
       pr?.mainActivity?.startedAtMs !== nr?.mainActivity?.startedAtMs
     ) {
@@ -690,6 +700,8 @@ export function isEquivalentTelemetry(prev, next) {
     for (let j = 0; j < pSubs.length; j++) {
       if (
         pSubs[j]?.cascadeId !== nSubs[j]?.cascadeId ||
+        pSubs[j]?.agentKind !== nSubs[j]?.agentKind ||
+        (pSubs[j]?.swarmState || '') !== (nSubs[j]?.swarmState || '') ||
         pSubs[j]?.role !== nSubs[j]?.role ||
         pSubs[j]?.isRunning !== nSubs[j]?.isRunning ||
         pSubs[j]?.stepCount !== nSubs[j]?.stepCount ||
@@ -1087,10 +1099,59 @@ export function stopAsyncTelemetryLoop() {
 export {
   formatAgentBadgeText,
   formatAgentLabel,
+  formatConversationMeta,
   formatLiveActivityDetail,
   formatLiveActivityLabel,
   getAgentBadgeClass,
 };
+
+/**
+ * 在遥测快照中解析宿主当前路由会话 ID（兼容顶层主会话 ID 与子代理/蜂群工蜂 ID）。
+ *
+ * @param {object|null|undefined} telemetry
+ * @param {string} rawRouteId
+ * @returns {{ rootConv: object|null, childAgent: object|null, isChildRoute: boolean } | null}
+ */
+export function resolveHostRouteMatch(telemetry, rawRouteId) {
+  const routeLower = String(rawRouteId || '').trim().toLowerCase();
+  if (!routeLower || !telemetry) return null;
+  const convs = Array.isArray(telemetry.conversations) ? telemetry.conversations : [];
+  const actConv = telemetry.activeConversation || null;
+
+  const directRoot =
+    convs.find((c) => String(c?.cascadeId || '').toLowerCase() === routeLower) ||
+    (String(actConv?.cascadeId || '').toLowerCase() === routeLower ? actConv : null);
+  if (directRoot) {
+    return { rootConv: directRoot, childAgent: null, isChildRoute: false };
+  }
+
+  const activeChild = (actConv?.agents || []).find(
+    (a) =>
+      !a?.isMain &&
+      (String(a?.cascadeId || '').toLowerCase() === routeLower ||
+        String(a?.agentId || '').toLowerCase() === routeLower)
+  );
+  if (activeChild) {
+    const parentInList = convs.find(
+      (c) => String(c?.cascadeId || '').toLowerCase() === String(actConv?.cascadeId || '').toLowerCase()
+    );
+    return {
+      rootConv: parentInList || actConv,
+      childAgent: activeChild,
+      isChildRoute: true,
+    };
+  }
+
+  const memberParent = convs.find(
+    (c) =>
+      Array.isArray(c?.memberCascadeIds) &&
+      c.memberCascadeIds.some((id) => String(id || '').toLowerCase() === routeLower)
+  );
+  if (memberParent) {
+    return { rootConv: memberParent, childAgent: null, isChildRoute: true };
+  }
+  return null;
+}
 
 /**
  * 解析当前选中的主/子代理作用域视图数据与独立上下文窗口检视目标。

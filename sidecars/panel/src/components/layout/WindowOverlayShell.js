@@ -2297,16 +2297,26 @@ export function mountWindowOverlay() {
     syncCapsuleSlotNodes(capsuleSlots, capsuleSeps, slotKeys, slotCtx);
   }
 
-  function renderMultiRunningPanel(rawRunningList, runningCount, runningSubCount, hostRouteConversationId) {
+  function renderMultiRunningPanel(
+    rawRunningList,
+    runningCount,
+    runningSubCount,
+    hostRouteConversationId,
+    runningSwarmCount = 0
+  ) {
     if (!multiOpen || document.hidden) {
       multiRunningWidget.refs.pauseTicker();
       return;
     }
+    const isPureSwarm = runningSubCount > 0 && runningSwarmCount === runningSubCount;
     patchText(
       multiRunningMetaEl,
       runningCount > 0
         ? runningSubCount > 0
-          ? t('multi.metaWithSubs', { main: runningCount, subs: runningSubCount })
+          ? t(isPureSwarm ? 'multi.metaWithSwarm' : 'multi.metaWithSubs', {
+              main: runningCount,
+              subs: runningSubCount,
+            })
           : t('multi.metaMainOnly', { main: runningCount })
         : t('multi.allIdle')
     );
@@ -2377,13 +2387,19 @@ export function mountWindowOverlay() {
       ctxAgent,
       aggregated,
     });
-    const { rawRunningList, runningCount, runningSubCount, hasWaiting, multiBtnText } =
-      resolveMultiSessionCapsuleState(telemetry, {
-        agents,
-        aggregated,
-        latestTokPerSec: overviewActive.latestTokPerSec ?? null,
-        contextUsedPct: slotCtx.usedPct,
-      });
+    const {
+      rawRunningList,
+      runningCount,
+      runningSubCount,
+      runningSwarmCount,
+      hasWaiting,
+      multiBtnText,
+    } = resolveMultiSessionCapsuleState(telemetry, {
+      agents,
+      aggregated,
+      latestTokPerSec: overviewActive.latestTokPerSec ?? null,
+      contextUsedPct: slotCtx.usedPct,
+    });
 
     patchClasses(multiBtn, {
       'is-running': runningCount > 0 && !hasWaiting,
@@ -2395,7 +2411,8 @@ export function mountWindowOverlay() {
       rawRunningList,
       runningCount,
       runningSubCount,
-      telSt.hostRouteConversationId
+      telSt.hostRouteConversationId,
+      runningSwarmCount
     );
 
     patchClasses(capsuleBtn, { 'is-running': slotCtx.isRunning });
